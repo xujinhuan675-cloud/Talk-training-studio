@@ -33,6 +33,12 @@ export interface Message {
   timestamp: string | null
   emotion_score: number | null
   emotion_label: string | null
+  metadata?: Record<string, unknown>
+  attachments?: unknown[]
+  video_url?: string
+  videoUrl?: string
+  mediaUrl?: string
+  media_url?: string
 }
 
 export interface ChatRoomDetail {

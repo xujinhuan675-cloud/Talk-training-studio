@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Callable, Optional
+import re
+from typing import Any, Callable, Optional
 
 from application.ports.llm import LLMMessage, LLMPort
 from application.services.stakeholder.prompt_builder import build_org_context
@@ -83,6 +84,189 @@ _ANALYSIS_SYSTEM_PROMPT = """\
 - 基于对话中的情绪变化（emotion_score）和实际发言内容做判断
 - message_indices 必须引用对话记录中 [#N] 的序号，列出支撑该结论的关键消息（通常 1-3 条最相关的）
 """
+
+_ANALYSIS_ENHANCEMENT_PROMPT = """
+
+Additional report requirements:
+- Keep the legacy fields resistance_ranking, effective_arguments, and
+  communication_suggestions exactly as JSON arrays.
+- Every conclusion must cite conversation message_indices using the [#N]
+  numbers shown above. Prefer 1-3 precise indices per item.
+- Also output these arrays:
+  - evidence_reviews: evidence-based debrief items with claim, evidence,
+    insight, and message_indices.
+  - alternative_phrasings: situation, original, alternative, rationale,
+    and message_indices.
+  - rewrite_demos: original, rewritten, principle, and message_indices.
+  - micro_drills: title, goal, prompt, practice_steps, success_criteria,
+    target_persona, and message_indices.
+  - high_signal_moments: title, moment_type, why_it_matters,
+    recommendation, and message_indices.
+- Do not invent message IDs. Use message_indices only; the system resolves IDs.
+"""
+
+_LIST_FIELDS = {
+    "resistance_ranking",
+    "effective_arguments",
+    "communication_suggestions",
+    "evidence_reviews",
+    "alternative_phrasings",
+    "rewrite_demos",
+    "micro_drills",
+    "high_signal_moments",
+}
+
+_ANCHOR_SECTION_FIELDS = {
+    "resistance_ranking",
+    "effective_arguments",
+    "evidence_reviews",
+    "alternative_phrasings",
+    "rewrite_demos",
+    "micro_drills",
+    "high_signal_moments",
+}
+
+
+def _extract_json_object(raw_text: str) -> dict[str, Any]:
+    """Extract a JSON object from a lenient LLM response."""
+    text = raw_text.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    elif not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("analysis JSON root must be an object", text, 0)
+    return parsed
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
+def _coerce_message_indices(value: Any) -> list[int]:
+    values = value if isinstance(value, list) else [value]
+    indices: list[int] = []
+    for item in values:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int):
+            idx = item
+        elif isinstance(item, str):
+            match = re.search(r"\d+", item)
+            if not match:
+                continue
+            idx = int(match.group(0))
+        else:
+            continue
+        if idx > 0 and idx not in indices:
+            indices.append(idx)
+    return indices
+
+
+def _text(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _coerce_score(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(-5, min(5, score))
+
+
+def _sanitize_analysis_item(field: str, item: dict[str, Any]) -> dict[str, Any]:
+    if field == "resistance_ranking":
+        item["persona_id"] = _text(item.get("persona_id"))
+        item["persona_name"] = _text(item.get("persona_name"))
+        item["score"] = _coerce_score(item.get("score"))
+        item["reason"] = _text(item.get("reason"))
+    elif field == "effective_arguments":
+        item["argument"] = _text(item.get("argument"))
+        item["target_persona"] = _text(item.get("target_persona"))
+        item["effectiveness"] = _text(item.get("effectiveness"))
+    elif field == "communication_suggestions":
+        item["persona_id"] = _text(item.get("persona_id"))
+        item["persona_name"] = _text(item.get("persona_name"))
+        item["suggestion"] = _text(item.get("suggestion"))
+        if item.get("priority") not in {"high", "medium", "low"}:
+            item["priority"] = "medium"
+    return item
+
+
+def _build_message_anchors(history: list[dict], persona_loader) -> dict[int, dict[str, Any]]:
+    anchors: dict[int, dict[str, Any]] = {}
+    seq = 0
+    for msg in history:
+        sender_type = msg["sender_type"]
+        if sender_type == "system":
+            continue
+        seq += 1
+        sender_id = msg["sender_id"]
+        speaker = "user"
+        if sender_type == "persona":
+            p = persona_loader.get_persona(sender_id) if persona_loader else None
+            speaker = p.name if p else sender_id
+        anchors[seq] = {
+            "message_index": seq,
+            "message_id": msg.get("id"),
+            "sender_type": sender_type,
+            "sender_id": sender_id,
+            "speaker": speaker,
+            "quote": msg.get("content", ""),
+            "emotion_score": msg.get("emotion_score"),
+            "emotion_label": msg.get("emotion_label"),
+        }
+    return anchors
+
+
+def _normalize_analysis_payload(
+    parsed: dict[str, Any],
+    message_id_map: dict[int, int],
+    anchor_map: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    normalized: dict[str, Any] = {"summary": str(parsed.get("summary") or "分析完成")}
+    for field in _LIST_FIELDS:
+        normalized[field] = _as_list(parsed.get(field))
+
+    normalized["message_id_map"] = {str(k): v for k, v in message_id_map.items()}
+    normalized["message_anchors"] = list(anchor_map.values())
+
+    for field in _ANCHOR_SECTION_FIELDS:
+        items: list[dict[str, Any]] = []
+        for raw_item in normalized[field]:
+            if not isinstance(raw_item, dict):
+                continue
+            item = dict(raw_item)
+            item = _sanitize_analysis_item(field, item)
+            indices = _coerce_message_indices(item.get("message_indices"))
+            item["message_indices"] = indices
+            item["message_ids"] = [message_id_map[i] for i in indices if i in message_id_map]
+            item["message_anchors"] = [anchor_map[i] for i in indices if i in anchor_map]
+            items.append(item)
+        normalized[field] = items
+
+    normalized["communication_suggestions"] = [
+        _sanitize_analysis_item("communication_suggestions", dict(item))
+        for item in normalized["communication_suggestions"]
+        if isinstance(item, dict)
+    ]
+
+    return normalized
 
 
 def _build_conversation_text(history: list[dict], persona_loader) -> tuple[str, dict[int, int]]:
@@ -185,6 +369,7 @@ class AnalysisService:
         ]
 
         conversation_text, message_id_map = _build_conversation_text(history, self._persona_loader)
+        anchor_map = _build_message_anchors(history, self._persona_loader)
 
         # Build org context for analysis if any persona belongs to an org
         org_ctx = ""
@@ -221,7 +406,7 @@ class AnalysisService:
         system_prompt = _ANALYSIS_SYSTEM_PROMPT.format(
             persona_profiles=persona_profiles,
             conversation=conversation_text,
-        )
+        ) + _ANALYSIS_ENHANCEMENT_PROMPT
 
         # 3. Call LLM
         llm_messages = [LLMMessage(role="user", content=system_prompt)]
@@ -237,9 +422,9 @@ class AnalysisService:
             raw_text = "\n".join(lines)
 
         try:
-            parsed = json.loads(raw_text)
+            parsed = _extract_json_object(response.content)
         except json.JSONDecodeError:
-            logger.error("LLM returned invalid JSON for analysis: %s", raw_text[:500])
+            logger.error("LLM returned invalid JSON for analysis: %s", response.content[:500])
             raise BusinessException(
                 code=BusinessCode.ANALYSIS_PARSE_ERROR,
                 message="Failed to parse analysis report from LLM",
@@ -254,6 +439,10 @@ class AnalysisService:
             "communication_suggestions": parsed.get("communication_suggestions", []),
             "message_id_map": {str(k): v for k, v in message_id_map.items()},
         }
+
+        normalized = _normalize_analysis_payload(parsed, message_id_map, anchor_map)
+        summary = normalized.pop("summary")
+        content_data = normalized
 
         # 5. Validate with Pydantic (lenient: drop invalid items)
         try:

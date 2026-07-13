@@ -1,28 +1,27 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Zap, ArrowLeft } from 'lucide-react'
+import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { generateBattlePrep, startBattle, type BattlePrepResult } from '../services/api'
+import {
+  DEFAULT_TRAINING_STUDIO_CONFIG,
+  buildTrainingStudioPrompt,
+  toBattleDifficulty,
+  type TrainingStudioConfig,
+} from '../services/trainingStudio'
 import './BattlePrepPage.css'
-
-type Difficulty = 'easy' | 'normal' | 'hard'
-
-const DIFFICULTY_OPTIONS: { value: Difficulty; label: string; desc: string }[] = [
-  { value: 'easy', label: '轻松', desc: '温和沟通' },
-  { value: 'normal', label: '普通', desc: '正常压力' },
-  { value: 'hard', label: '困难', desc: '强硬对抗' },
-]
 
 function initialState() {
   return {
     step: 1 as 1 | 2 | 3,
     description: '',
+    studioConfig: DEFAULT_TRAINING_STUDIO_CONFIG as TrainingStudioConfig,
     loading: false,
     error: null as string | null,
     prepResult: null as BattlePrepResult | null,
     personaName: '',
     personaRole: '',
     personaStyle: '',
-    difficulty: 'normal' as Difficulty,
     selectedPoints: [] as string[],
     submitting: false,
   }
@@ -35,13 +34,13 @@ export default function BattlePrepPage() {
   const {
     step,
     description,
+    studioConfig,
     loading,
     error,
     prepResult,
     personaName,
     personaRole,
     personaStyle,
-    difficulty,
     selectedPoints,
     submitting,
   } = state
@@ -51,7 +50,7 @@ export default function BattlePrepPage() {
     if (description.trim().length < 10) return
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
-      const result = await generateBattlePrep(description.trim())
+      const result = await generateBattlePrep(buildTrainingStudioPrompt(studioConfig, description))
       setState((s) => ({
         ...s,
         loading: false,
@@ -76,9 +75,9 @@ export default function BattlePrepPage() {
         persona_name: personaName,
         persona_role: personaRole,
         persona_style: personaStyle,
-        scenario_context: prepResult.scenario_context,
+        scenario_context: buildTrainingStudioPrompt(studioConfig, prepResult.scenario_context),
         selected_training_points: selectedPoints,
-        difficulty,
+        difficulty: toBattleDifficulty(studioConfig.difficulty),
       })
       navigate(`/chat/${room.id}`)
     } catch (e: any) {
@@ -143,23 +142,11 @@ export default function BattlePrepPage() {
               disabled={loading}
             />
 
-            {/* Difficulty selector */}
-            <div className="bpp-difficulty-section">
-              <div className="bpp-section-label">对手难度</div>
-              <div className="bpp-difficulty-cards">
-                {DIFFICULTY_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className={`bpp-difficulty-card ${difficulty === opt.value ? 'selected' : ''}`}
-                    onClick={() => setState((s) => ({ ...s, difficulty: opt.value }))}
-                    type="button"
-                  >
-                    <span className="bpp-diff-label">{opt.label}</span>
-                    <span className="bpp-diff-desc">{opt.desc}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            <TrainingStudioLauncher
+              value={studioConfig}
+              onChange={(next) => setState((s) => ({ ...s, studioConfig: next }))}
+              disabled={loading}
+            />
 
             {error && <div className="bpp-error">{error}</div>}
 

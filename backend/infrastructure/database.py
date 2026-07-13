@@ -4,14 +4,13 @@
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from typing import AsyncGenerator
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from alembic import command
-from alembic.config import Config
 from core.config import settings
 from infrastructure.models import Base
 
@@ -84,6 +83,16 @@ async def drop_tables():
 def _run_alembic_upgrade_to_head() -> None:
     """同步执行 Alembic 迁移到最新版本。"""
     project_root = Path(__file__).resolve().parent.parent
+    repo_root = project_root.parent
+    original_path = list(sys.path)
+    try:
+        sys.path = [item for item in sys.path if Path(item or ".").resolve() != project_root]
+        sys.path.insert(0, str(repo_root))
+        from alembic import command
+        from alembic.config import Config
+    finally:
+        sys.path = original_path
+
     alembic_ini_path = project_root / "alembic.ini"
     alembic_script_path = project_root / "alembic"
 

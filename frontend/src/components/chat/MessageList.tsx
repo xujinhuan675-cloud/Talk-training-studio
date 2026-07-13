@@ -1,6 +1,6 @@
 import React from 'react'
 import Markdown from 'react-markdown'
-import { MessageCircle, ClipboardList, Volume2 } from 'lucide-react'
+import { MessageCircle, ClipboardList, Volume2, Video } from 'lucide-react'
 import Avatar from '../Avatar'
 import type { Message, DispatchPhase, PersonaSummary } from '../../services/api'
 import './MessageList.css'
@@ -53,6 +53,139 @@ function renderContent(text: string) {
     >
       {text}
     </Markdown>
+  )
+}
+
+type MessageWithMedia = Message & {
+  metadata?: unknown
+  attachments?: unknown
+  video_url?: unknown
+  videoUrl?: unknown
+  mediaUrl?: unknown
+  media_url?: unknown
+}
+
+interface VideoAttachment {
+  url: string
+  mimeType?: string
+  title?: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function normalizeVideoCandidate(value: unknown): VideoAttachment | null {
+  if (typeof value === 'string' && value.trim()) {
+    return { url: value }
+  }
+
+  if (!isRecord(value)) return null
+
+  const type = stringValue(value.type) || stringValue(value.kind) || stringValue(value.mediaType)
+  const mimeType = stringValue(value.mime_type) || stringValue(value.mimeType) || stringValue(value.contentType)
+  const url =
+    stringValue(value.video_url) ||
+    stringValue(value.videoUrl) ||
+    stringValue(value.mediaUrl) ||
+    stringValue(value.media_url) ||
+    stringValue(value.url) ||
+    stringValue(value.href)
+
+  if (!url) return null
+  if (type && type !== 'video' && !type.startsWith('video/')) return null
+  if (mimeType && !mimeType.startsWith('video/')) return null
+
+  return {
+    url,
+    mimeType,
+    title: stringValue(value.title) || stringValue(value.name) || stringValue(value.filename),
+  }
+}
+
+function findVideoAttachment(message: Message): VideoAttachment | null {
+  const marker = '[video-answer]'
+  if (message.content.includes(marker)) {
+    const raw = message.content.slice(message.content.indexOf(marker) + marker.length).trim()
+    try {
+      const parsed = JSON.parse(raw)
+      const attachment = normalizeVideoCandidate({ ...parsed, type: 'video' })
+      if (attachment) return attachment
+    } catch {
+      // Ignore malformed local marker and render the text normally.
+    }
+  }
+
+  const msg = message as MessageWithMedia
+  const direct = normalizeVideoCandidate({
+    video_url: msg.video_url,
+    videoUrl: msg.videoUrl,
+    mediaUrl: msg.mediaUrl,
+    media_url: msg.media_url,
+  })
+  if (direct) return direct
+
+  const containers = [msg.metadata, msg.attachments]
+  for (const container of containers) {
+    const directContainer = normalizeVideoCandidate(container)
+    if (directContainer) return directContainer
+
+    if (Array.isArray(container)) {
+      for (const item of container) {
+        const attachment = normalizeVideoCandidate(item)
+        if (attachment) return attachment
+      }
+    }
+
+    if (isRecord(container)) {
+      const nestedDirect = normalizeVideoCandidate({
+        video_url: container.video_url,
+        videoUrl: container.videoUrl,
+        mediaUrl: container.mediaUrl,
+        media_url: container.media_url,
+        url: container.url,
+        mimeType: container.mimeType,
+        mime_type: container.mime_type,
+        type: container.type,
+        title: container.title,
+      })
+      if (nestedDirect) return nestedDirect
+
+      const nested = container.attachments || container.media || container.video
+      if (Array.isArray(nested)) {
+        for (const item of nested) {
+          const attachment = normalizeVideoCandidate(item)
+          if (attachment) return attachment
+        }
+      } else {
+        const attachment = normalizeVideoCandidate(nested)
+        if (attachment) return attachment
+      }
+    }
+  }
+
+  return null
+}
+
+function renderVideoAttachment(attachment: VideoAttachment | null) {
+  if (!attachment) return null
+
+  return (
+    <div className="message-video-attachment">
+      {attachment.title && (
+        <div className="message-video-title">
+          <Video size={14} />
+          <span>{attachment.title}</span>
+        </div>
+      )}
+      <video className="message-video" controls preload="metadata" src={attachment.url}>
+        {attachment.mimeType && <source src={attachment.url} type={attachment.mimeType} />}
+      </video>
+    </div>
   )
 }
 
@@ -109,6 +242,7 @@ export default function MessageList({
           {messages.map((msg) => {
             const persona = msg.sender_type === 'persona' ? personaMap[msg.sender_id] : null
             const borderColor = persona?.avatar_color || undefined
+            const videoAttachment = findVideoAttachment(msg)
             return (
               <div
                 key={msg.id}
@@ -133,6 +267,7 @@ export default function MessageList({
                         style={borderColor ? { borderLeft: `2px solid ${borderColor}` } : undefined}
                       >
                         {renderContent(msg.content)}
+                        {renderVideoAttachment(videoAttachment)}
                       </div>
                       <div className="message-time">{formatTime(msg.timestamp)}</div>
                     </div>
@@ -142,6 +277,7 @@ export default function MessageList({
                   <>
                     <div className="message-bubble">
                       {renderContent(msg.content)}
+                      {renderVideoAttachment(videoAttachment)}
                     </div>
                     <div className="message-time">{formatTime(msg.timestamp)}</div>
                   </>
@@ -149,6 +285,7 @@ export default function MessageList({
                 {msg.sender_type === 'system' && (
                   <div className="message-bubble">
                     {renderContent(msg.content)}
+                    {renderVideoAttachment(videoAttachment)}
                   </div>
                 )}
               </div>

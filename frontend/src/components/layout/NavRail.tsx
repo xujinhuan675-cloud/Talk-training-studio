@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { MessageSquare, Swords, TrendingUp, Settings } from 'lucide-react'
+import { Dumbbell, MessageSquare, Swords, TrendingUp, Settings } from 'lucide-react'
 import './NavRail.css'
 
 const LogoMark: React.FC = () => (
@@ -18,6 +18,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { to: '/training-studio', icon: <Dumbbell size={18} />, label: 'Training Studio' },
   { to: '/chat', icon: <MessageSquare size={18} />, label: 'Chat' },
   { to: '/battle-prep', icon: <Swords size={18} />, label: 'Battle Prep' },
   { to: '/growth', icon: <TrendingUp size={18} />, label: 'Growth' },

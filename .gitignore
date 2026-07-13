@@ -155,3 +155,12 @@ node_modules/
 .agents/
 CLAUDE.md
 AGENTS.md
+
+# Local workspace artifacts
+chat-session/
+graphify-out/
+**/graphify-out/
+
+# Local dev runtime artifacts
+.codex-*.err
+backend/data/training_studio/video_answers/

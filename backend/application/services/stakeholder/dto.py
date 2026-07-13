@@ -127,6 +127,19 @@ class UpdateScenarioDTO(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class MessageAnchorDTO(BaseModel):
+    """A resolved message reference used by analysis report sections."""
+
+    message_index: int = Field(..., ge=1)
+    message_id: Optional[int] = None
+    sender_type: str = ""
+    sender_id: str = ""
+    speaker: str = ""
+    quote: str = ""
+    emotion_score: Optional[int] = None
+    emotion_label: Optional[str] = None
+
+
 class ResistanceItem(BaseModel):
     """A single persona's resistance assessment."""
 
@@ -135,6 +148,10 @@ class ResistanceItem(BaseModel):
     score: int = Field(..., ge=-5, le=5, description="阻力分数 -5(强烈反对) 到 +5(强烈支持)")
     reason: str = Field(..., description="阻力原因分析")
     message_indices: list[int] = Field(default_factory=list, description="关联的对话消息序号")
+
+
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
 
 
 class ArgumentItem(BaseModel):
@@ -146,6 +163,10 @@ class ArgumentItem(BaseModel):
     message_indices: list[int] = Field(default_factory=list, description="关联的对话消息序号")
 
 
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+
+
 class SuggestionItem(BaseModel):
     """A communication suggestion for a specific persona."""
 
@@ -155,6 +176,66 @@ class SuggestionItem(BaseModel):
     priority: str = Field(..., pattern=r"^(high|medium|low)$", description="优先级")
 
 
+class EvidenceReviewItem(BaseModel):
+    """Evidence-based review of a concrete conversation moment."""
+
+    claim: str = ""
+    evidence: str = ""
+    insight: str = ""
+    message_indices: list[int] = Field(default_factory=list)
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+
+
+class AlternativePhrasingItem(BaseModel):
+    """A safer or stronger alternative phrasing for a moment."""
+
+    situation: str = ""
+    original: str = ""
+    alternative: str = ""
+    rationale: str = ""
+    message_indices: list[int] = Field(default_factory=list)
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+
+
+class RewriteDemoItem(BaseModel):
+    """Before/after rewrite demonstration for a user message."""
+
+    original: str = ""
+    rewritten: str = ""
+    principle: str = ""
+    message_indices: list[int] = Field(default_factory=list)
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+
+
+class MicroDrillItem(BaseModel):
+    """A short practice drill generated from the analysis."""
+
+    title: str = ""
+    goal: str = ""
+    prompt: str = ""
+    practice_steps: list[str] = Field(default_factory=list)
+    success_criteria: list[str] = Field(default_factory=list)
+    target_persona: str = ""
+    message_indices: list[int] = Field(default_factory=list)
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+
+
+class HighSignalMomentItem(BaseModel):
+    """A high-signal moment worth revisiting during debrief."""
+
+    title: str = ""
+    moment_type: str = ""
+    why_it_matters: str = ""
+    recommendation: str = ""
+    message_indices: list[int] = Field(default_factory=list)
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+
+
 class AnalysisContentDTO(BaseModel):
     """Structured content of an analysis report."""
 
@@ -162,6 +243,14 @@ class AnalysisContentDTO(BaseModel):
     effective_arguments: list[ArgumentItem] = Field(default_factory=list)
     communication_suggestions: list[SuggestionItem] = Field(default_factory=list)
     message_id_map: dict[str, int] = Field(default_factory=dict, description="消息序号→消息ID映射")
+
+
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+    evidence_reviews: list[EvidenceReviewItem] = Field(default_factory=list)
+    alternative_phrasings: list[AlternativePhrasingItem] = Field(default_factory=list)
+    rewrite_demos: list[RewriteDemoItem] = Field(default_factory=list)
+    micro_drills: list[MicroDrillItem] = Field(default_factory=list)
+    high_signal_moments: list[HighSignalMomentItem] = Field(default_factory=list)
 
 
 class AnalysisReportDTO(BaseModel):

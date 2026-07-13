@@ -10,6 +10,16 @@ import {
 } from '../services/api'
 
 const API_BASE = '/api/v1/stakeholder'
+const LOCAL_VIDEO_PREFIX = '[video-answer]'
+
+export interface LocalVideoAttachment {
+  url: string
+  mimeType: string
+  title?: string
+  durationMs?: number
+  size?: number
+  recordedAt?: string
+}
 
 export interface UseChatReturn {
   selectedRoom: ChatRoomDetail | null
@@ -40,6 +50,52 @@ export interface UseChatReturn {
   insertMention: (persona: PersonaSummary) => void
   scrollToBottom: () => void
   loadRoomDetail: (roomId: number) => Promise<ChatRoomDetail | null>
+  sendVideoAnswer: (attachment: LocalVideoAttachment, caption?: string) => Promise<boolean>
+}
+
+function serializeVideoMessage(attachment: LocalVideoAttachment, caption?: string): string {
+  return `${caption?.trim() || 'Video answer'}\n\n${LOCAL_VIDEO_PREFIX}${JSON.stringify(attachment)}`
+}
+
+function hydrateLocalVideoMessage(message: Message): Message {
+  if (!message.content.includes(LOCAL_VIDEO_PREFIX)) return message
+  const markerIndex = message.content.indexOf(LOCAL_VIDEO_PREFIX)
+  const caption = message.content.slice(0, markerIndex).trim()
+  const raw = message.content.slice(markerIndex + LOCAL_VIDEO_PREFIX.length).trim()
+  try {
+    const attachment = JSON.parse(raw) as LocalVideoAttachment
+    return {
+      ...message,
+      content: caption || 'Video answer',
+      metadata: {
+        ...(message.metadata || {}),
+        videoUrl: attachment.url,
+        mimeType: attachment.mimeType,
+        title: attachment.title || 'Video answer',
+      },
+      attachments: [
+        ...(message.attachments || []),
+        {
+          type: 'video',
+          url: attachment.url,
+          mimeType: attachment.mimeType,
+          title: attachment.title || 'Video answer',
+          durationMs: attachment.durationMs,
+          size: attachment.size,
+          recordedAt: attachment.recordedAt,
+        },
+      ],
+    }
+  } catch {
+    return message
+  }
+}
+
+function hydrateLocalVideoMessages(detail: ChatRoomDetail): ChatRoomDetail {
+  return {
+    ...detail,
+    messages: detail.messages.map(hydrateLocalVideoMessage),
+  }
 }
 
 export function useChat(
@@ -88,7 +144,7 @@ export function useChat(
 
     es.addEventListener('message', (e) => {
       if (!isCurrentStream()) return
-      const msg: Message = JSON.parse(e.data)
+      const msg: Message = hydrateLocalVideoMessage(JSON.parse(e.data))
       // Clear streaming content for this persona -- the final message replaces it
       if (msg.sender_type === 'persona') {
         setStreamingContent((prev) => {
@@ -181,9 +237,10 @@ export function useChat(
   const loadRoomDetail = useCallback(async (id: number): Promise<ChatRoomDetail | null> => {
     try {
       const detail = await fetchRoomDetail(id)
-      setSelectedRoom(detail)
+      const hydrated = hydrateLocalVideoMessages(detail)
+      setSelectedRoom(hydrated)
       setTimeout(scrollToBottom, 50)
-      return detail
+      return hydrated
     } catch {
       setSelectedRoom(null)
       return null
@@ -212,7 +269,7 @@ export function useChat(
       // Fallback: refresh room detail
       if (roomId) {
         const detail = await fetchRoomDetail(roomId)
-        setSelectedRoom(detail)
+        setSelectedRoom(hydrateLocalVideoMessages(detail))
         setTimeout(scrollToBottom, 50)
       }
       return false
@@ -221,6 +278,31 @@ export function useChat(
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputValue, roomId, sending, scrollToBottom])
+
+  const sendVideoAnswer = useCallback(async (
+    attachment: LocalVideoAttachment,
+    caption = inputValue,
+  ): Promise<boolean> => {
+    if (!roomId || sending) return false
+    options?.audioPlayerRef?.current?.stop()
+    setSending(true)
+    setInputValue('')
+    setMentionQuery(null)
+    setMentionResults([])
+    setDispatchSummary(null)
+    try {
+      await apiSendMessage(roomId, serializeVideoMessage(attachment, caption))
+      const detail = await fetchRoomDetail(roomId)
+      setSelectedRoom(hydrateLocalVideoMessages(detail))
+      setTimeout(scrollToBottom, 100)
+      return true
+    } catch (e) {
+      console.error('Video send failed:', e)
+      return false
+    } finally {
+      setSending(false)
+    }
+  }, [inputValue, options?.audioPlayerRef, roomId, scrollToBottom, sending])
 
   const insertMention = useCallback((persona: PersonaSummary) => {
     setInputValue((prev) =>
@@ -296,5 +378,6 @@ export function useChat(
     insertMention,
     scrollToBottom,
     loadRoomDetail,
+    sendVideoAnswer,
   }
 }

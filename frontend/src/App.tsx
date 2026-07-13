@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/layout/Layout'
 import HomePage from './pages/HomePage'
 import ChatPage from './pages/ChatPage'
+import TrainingStudioPage from './pages/TrainingStudioPage'
 import BattlePrepPage from './pages/BattlePrepPage'
 import DefensePrepPage from './pages/DefensePrepPage'
 import GrowthPage from './pages/GrowthPage'
@@ -16,6 +17,7 @@ function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
+          <Route path="training-studio" element={<TrainingStudioPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="chat/:roomId" element={<ChatPage />} />
           <Route path="battle-prep" element={<BattlePrepPage />} />

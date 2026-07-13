@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Home, MessageSquare, Swords, TrendingUp, User } from 'lucide-react'
+import { Dumbbell, Home, MessageSquare, TrendingUp, User } from 'lucide-react'
 import './BottomTabBar.css'
 
 interface TabItem {
@@ -12,11 +12,17 @@ interface TabItem {
 }
 
 const tabs: TabItem[] = [
-  { to: '/', icon: <Home size={20} />, label: '首页' },
-  { to: '/chat', icon: <MessageSquare size={20} />, label: '对话', matchPrefix: '/chat' },
-  { to: '/battle-prep', icon: <Swords size={20} />, label: '备战', elevated: true, matchPrefix: '/battle-prep' },
-  { to: '/growth', icon: <TrendingUp size={20} />, label: '成长', matchPrefix: '/growth' },
-  { to: '/growth', icon: <User size={20} />, label: '我的', matchPrefix: '__profile__' },
+  { to: '/', icon: <Home size={20} />, label: 'Home' },
+  { to: '/chat', icon: <MessageSquare size={20} />, label: 'Chat', matchPrefix: '/chat' },
+  {
+    to: '/training-studio',
+    icon: <Dumbbell size={20} />,
+    label: 'Train',
+    elevated: true,
+    matchPrefix: '/training-studio',
+  },
+  { to: '/growth', icon: <TrendingUp size={20} />, label: 'Growth', matchPrefix: '/growth' },
+  { to: '/settings', icon: <User size={20} />, label: 'Me', matchPrefix: '/settings' },
 ]
 
 const BottomTabBar: React.FC = () => {
@@ -30,11 +36,11 @@ const BottomTabBar: React.FC = () => {
 
   return (
     <nav className="bottom-tab-bar">
-      {tabs.map((tab, idx) => {
+      {tabs.map((tab) => {
         const active = isActive(tab)
         return (
           <Link
-            key={idx}
+            key={tab.to}
             to={tab.to}
             className={`bottom-tab-item${active ? ' active' : ''}${tab.elevated ? ' elevated' : ''}`}
           >

@@ -35,6 +35,7 @@ import {
   type ChatRoom,
   type CheatSheet as CheatSheetData,
 } from '../services/api'
+import { uploadVideoAnswer } from '../services/trainingStudio'
 import '../App.css'
 import './ChatPage.css'
 
@@ -310,6 +311,25 @@ function ChatArea() {
               chat.setDispatchSummary(null)
               voice.audioPlayerRef.current?.stop()
               setTimeout(chat.scrollToBottom, 100)
+            }}
+            onVideoRecorded={async (result) => {
+              let videoUrl = result.url
+              let videoSize = result.size
+              try {
+                const uploaded = await uploadVideoAnswer(result.blob)
+                videoUrl = uploaded.url
+                videoSize = uploaded.size
+              } catch (error) {
+                console.error('Video upload failed, using local preview URL:', error)
+              }
+              chat.sendVideoAnswer({
+                url: videoUrl,
+                mimeType: result.mimeType,
+                title: 'Video answer',
+                durationMs: result.durationMs,
+                size: videoSize,
+                recordedAt: result.recordedAt,
+              })
             }}
             onLiveCoachClick={coaching.handleStartLiveCoaching}
             coachingSending={coaching.coachingSending}
