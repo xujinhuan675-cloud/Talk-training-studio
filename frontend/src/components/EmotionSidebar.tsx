@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import { X, Maximize2 } from 'lucide-react'
 import type { Message, PersonaSummary } from '../services/api'
+import { useI18n } from '../i18n'
 import './EmotionSidebar.css'
 
 interface Props {
@@ -31,7 +32,20 @@ interface DataPoint {
   [personaId: string]: number | string | null
 }
 
+interface ChartTooltipItem {
+  value?: number | string | readonly (number | string)[] | null
+  dataKey?: string | number | ((obj: unknown) => unknown)
+  stroke?: string
+  payload?: DataPoint
+}
+
+interface ChartTooltipProps {
+  active?: boolean
+  payload?: readonly ChartTooltipItem[]
+}
+
 export default function EmotionSidebar({ messages, personaMap, onClose, onExpand }: Props) {
+  const { tr } = useI18n()
   const { data, personaIds, latestScores } = useMemo(() => {
     const personaMsgs = messages.filter(
       (m) => m.sender_type === 'persona' && m.emotion_score != null,
@@ -77,22 +91,24 @@ export default function EmotionSidebar({ messages, personaMap, onClose, onExpand
     return { data: points, personaIds: pids, latestScores: latest }
   }, [messages])
 
-  const renderTooltip = ({ active, payload }: any) => {
+  const renderTooltip = ({ active, payload }: ChartTooltipProps) => {
     if (!active || !payload?.length) return null
-    const items = payload.filter((p: any) => p.value != null)
+    const items = payload.filter((p) => p.value != null && p.payload)
     if (items.length === 0) return null
     return (
       <div className="es-tooltip">
-        {items.map((item: any) => {
+        {items.map((item) => {
           const pid = item.dataKey as string
           const persona = personaMap[pid]
-          const label = item.payload[`${pid}_label`] || ''
+          const itemPayload = item.payload!
+          const label = itemPayload[`${pid}_label`] || ''
+          const score = Number(item.value)
           return (
             <div key={pid} className="es-tooltip-row">
               <span className="es-tooltip-dot" style={{ background: item.stroke }} />
               <span className="es-tooltip-name">{persona?.name || pid}</span>
               <span className="es-tooltip-score">
-                {item.value > 0 ? '+' : ''}{item.value}
+                {score > 0 ? '+' : ''}{score}
               </span>
               {label && <span className="es-tooltip-label">{label}</span>}
             </div>
@@ -105,19 +121,19 @@ export default function EmotionSidebar({ messages, personaMap, onClose, onExpand
   return (
     <aside className="emotion-sidebar">
       <div className="es-header">
-        <h4>实时情绪</h4>
+        <h4>{tr('实时情绪', 'Live Emotion')}</h4>
         <div className="es-header-actions">
-          <button className="es-icon-btn" onClick={onExpand} title="详细分析">
+          <button className="es-icon-btn" onClick={onExpand} title={tr('详细分析', 'Detailed analysis')}>
             <Maximize2 size={14} />
           </button>
-          <button className="es-icon-btn" onClick={onClose} title="关闭">
+          <button className="es-icon-btn" onClick={onClose} title={tr('关闭', 'Close')}>
             <X size={14} />
           </button>
         </div>
       </div>
 
       {data.length === 0 ? (
-        <div className="es-empty">发送消息后，情绪曲线将在此实时显示</div>
+        <div className="es-empty">{tr('发送消息后，情绪曲线将在此实时显示', 'Emotion curves will appear here after messages are sent')}</div>
       ) : (
         <>
           <div className="es-chart">

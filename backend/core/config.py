@@ -91,18 +91,20 @@ class IdempotencySettings(BaseModel):
 
 
 class DatabaseSettings(BaseModel):
-    url: str = "postgresql+asyncpg://stakecoach:password@localhost/stakecoachdb"
+    url: str = "sqlite+aiosqlite:///./app.db"
 
 
 class LLMSettings(BaseModel):
     provider: str = "openai"
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    wire_api: str = "chat_completions"
     default_model: str = "gpt-4o-mini"
     temperature: float = 0.7
     max_tokens: int = 4096
     timeout: int = 60
     max_retries: int = 2
+    user_agent: str = "TalkTrainingStudio/1.0"
 
 
 class AgentSDKSettings(BaseModel):
@@ -254,6 +256,33 @@ class Settings(BaseSettings):
         default=["*"], validation_alias=AliasChoices("CORS_ALLOW_HEADERS")
     )
 
+    # OpenAI-compatible aliases. Nested LLM__* values take precedence; these
+    # aliases let local/dev deployments reuse common gateway env names.
+    OPENAI_COMPATIBLE_API_KEY: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_COMPATIBLE_API_KEY")
+    )
+    OPENAI_COMPATIBLE_BASE_URL: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_COMPATIBLE_BASE_URL")
+    )
+    OPENAI_COMPATIBLE_MODEL: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_COMPATIBLE_MODEL")
+    )
+    OPENAI_COMPATIBLE_WIRE_API: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_COMPATIBLE_WIRE_API")
+    )
+    OPENAI_API_KEY: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_API_KEY")
+    )
+    OPENAI_BASE_URL: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_BASE_URL", "OPENAI_API_BASE")
+    )
+    OPENAI_MODEL: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_MODEL", "OPENAI_DEFAULT_MODEL")
+    )
+    OPENAI_WIRE_API: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_WIRE_API")
+    )
+
     llm: LLMSettings = Field(default_factory=LLMSettings)
     agent_sdk: AgentSDKSettings = Field(default_factory=AgentSDKSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
@@ -344,7 +373,7 @@ class Settings(BaseSettings):
 
     # pydantic-settings v2 configuration
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parent.parent / ".env",
         case_sensitive=False,
         # Fail fast for unknown keys in `.env` to avoid "configured but not used" footguns.
         extra="forbid",
@@ -356,6 +385,20 @@ class Settings(BaseSettings):
         # 所有环境均要求显式配置 SECRET_KEY
         if not self.SECRET_KEY:
             raise ValueError("SECRET_KEY 未配置。请在环境变量或 .env 中设置 SECRET_KEY")
+
+        llm_defaults = LLMSettings()
+        if not self.llm.api_key:
+            self.llm.api_key = self.OPENAI_COMPATIBLE_API_KEY or self.OPENAI_API_KEY
+        if not self.llm.base_url:
+            self.llm.base_url = self.OPENAI_COMPATIBLE_BASE_URL or self.OPENAI_BASE_URL
+        if self.llm.default_model == llm_defaults.default_model:
+            self.llm.default_model = (
+                self.OPENAI_COMPATIBLE_MODEL or self.OPENAI_MODEL or self.llm.default_model
+            )
+        if self.llm.wire_api == llm_defaults.wire_api:
+            self.llm.wire_api = (
+                self.OPENAI_COMPATIBLE_WIRE_API or self.OPENAI_WIRE_API or self.llm.wire_api
+            )
         return self
 
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")

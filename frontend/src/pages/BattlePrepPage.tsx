@@ -4,18 +4,19 @@ import { Loader2, Zap, ArrowLeft } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { generateBattlePrep, startBattle, type BattlePrepResult } from '../services/api'
 import {
-  DEFAULT_TRAINING_STUDIO_CONFIG,
   buildTrainingStudioPrompt,
+  getDefaultTrainingStudioConfig,
   toBattleDifficulty,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
+import { useI18n, type Translate } from '../i18n'
 import './BattlePrepPage.css'
 
-function initialState() {
+function initialState(t: Translate) {
   return {
     step: 1 as 1 | 2 | 3,
     description: '',
-    studioConfig: DEFAULT_TRAINING_STUDIO_CONFIG as TrainingStudioConfig,
+    studioConfig: getDefaultTrainingStudioConfig(t) as TrainingStudioConfig,
     loading: false,
     error: null as string | null,
     prepResult: null as BattlePrepResult | null,
@@ -27,9 +28,14 @@ function initialState() {
   }
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 export default function BattlePrepPage() {
   const navigate = useNavigate()
-  const [state, setState] = useState(initialState)
+  const { t, tr } = useI18n()
+  const [state, setState] = useState(() => initialState(t))
 
   const {
     step,
@@ -50,7 +56,7 @@ export default function BattlePrepPage() {
     if (description.trim().length < 10) return
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
-      const result = await generateBattlePrep(buildTrainingStudioPrompt(studioConfig, description))
+      const result = await generateBattlePrep(buildTrainingStudioPrompt(studioConfig, description, t))
       setState((s) => ({
         ...s,
         loading: false,
@@ -61,8 +67,8 @@ export default function BattlePrepPage() {
         selectedPoints: [...result.training_points],
         step: 2,
       }))
-    } catch (e: any) {
-      setState((s) => ({ ...s, loading: false, error: e.message || '生成失败，请重试' }))
+    } catch (e: unknown) {
+      setState((s) => ({ ...s, loading: false, error: getErrorMessage(e, tr('生成失败，请重试', 'Generation failed. Please try again.')) }))
     }
   }
 
@@ -75,13 +81,13 @@ export default function BattlePrepPage() {
         persona_name: personaName,
         persona_role: personaRole,
         persona_style: personaStyle,
-        scenario_context: buildTrainingStudioPrompt(studioConfig, prepResult.scenario_context),
+        scenario_context: buildTrainingStudioPrompt(studioConfig, prepResult.scenario_context, t),
         selected_training_points: selectedPoints,
         difficulty: toBattleDifficulty(studioConfig.difficulty),
       })
       navigate(`/chat/${room.id}`)
-    } catch (e: any) {
-      setState((s) => ({ ...s, submitting: false, error: e.message || '启动失败，请重试' }))
+    } catch (e: unknown) {
+      setState((s) => ({ ...s, submitting: false, error: getErrorMessage(e, tr('启动失败，请重试', 'Start failed. Please try again.')) }))
     }
   }
 
@@ -102,13 +108,13 @@ export default function BattlePrepPage() {
         {/* Back link */}
         <button className="bpp-back" onClick={() => navigate('/')}>
           <ArrowLeft size={16} />
-          <span>返回首页</span>
+          <span>{tr('返回首页', 'Back Home')}</span>
         </button>
 
         {/* Title */}
         <div className="bpp-title-row">
           <Zap size={22} className="bpp-title-icon" />
-          <h1 className="bpp-title">紧急备战</h1>
+          <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
         </div>
 
         {/* Step indicator */}
@@ -119,7 +125,11 @@ export default function BattlePrepPage() {
                 {n}
               </div>
               <span className={`bpp-step-label ${step === n ? 'active' : ''}`}>
-                {n === 1 ? '描述会议' : n === 2 ? '预览对手' : '开始练习'}
+                {n === 1
+                  ? tr('描述会议', 'Describe Meeting')
+                  : n === 2
+                    ? tr('预览对手', 'Preview Opponent')
+                    : tr('开始练习', 'Start Practice')}
               </span>
               {n < 3 && <div className={`bpp-step-line ${step > n ? 'done' : ''}`} />}
             </div>
@@ -130,14 +140,20 @@ export default function BattlePrepPage() {
         {step === 1 && (
           <div className="bpp-card">
             <p className="bpp-hint">
-              详细描述你即将参加的会议，AI 将为你生成专属对手角色并制定训练计划。
+              {tr(
+                '详细描述你即将参加的会议，AI 将为你生成专属对手角色并制定训练计划。',
+                'Describe the meeting you are about to attend. AI will create a tailored opponent and training plan.',
+              )}
             </p>
 
             <textarea
               className="bpp-textarea"
               value={description}
               onChange={(e) => setState((s) => ({ ...s, description: e.target.value }))}
-              placeholder="描述你即将参加的会议：跟谁谈、谈什么、你的目标是什么、对方可能的态度..."
+              placeholder={tr(
+                '描述你即将参加的会议：跟谁谈、谈什么、你的目标是什么、对方可能的态度...',
+                'Describe the meeting: who you will talk to, the topic, your goal, and the other side’s likely stance...',
+              )}
               rows={6}
               disabled={loading}
             />
@@ -159,10 +175,10 @@ export default function BattlePrepPage() {
                 {loading ? (
                   <span className="bpp-loading-inline">
                     <Loader2 size={16} className="bpp-spinner" />
-                    AI 正在分析...
+                    {tr('AI 正在分析...', 'AI is analyzing...')}
                   </span>
                 ) : (
-                  '生成对手 \u2192'
+                  tr('生成对手 →', 'Generate Opponent →')
                 )}
               </button>
             </div>
@@ -172,21 +188,23 @@ export default function BattlePrepPage() {
         {/* ---- Step 2: Review Opponent ---- */}
         {step === 2 && prepResult && (
           <div className="bpp-card">
-            <p className="bpp-hint">AI 已生成对手角色，你可以在此微调，然后选择训练点。</p>
+            <p className="bpp-hint">
+              {tr('AI 已生成对手角色，你可以在此微调，然后选择训练点。', 'AI has generated an opponent. Refine it here, then choose training points.')}
+            </p>
 
             {/* Persona preview */}
             <div className="bpp-persona-preview">
               <div className="bpp-persona-avatar">{personaInitial}</div>
               <div className="bpp-persona-meta">
-                <span className="bpp-persona-name-display">{personaName || '未命名'}</span>
-                <span className="bpp-persona-role-display">{personaRole || '未知角色'}</span>
+                <span className="bpp-persona-name-display">{personaName || tr('未命名', 'Unnamed')}</span>
+                <span className="bpp-persona-role-display">{personaRole || tr('未知角色', 'Unknown role')}</span>
               </div>
             </div>
 
             {/* Editable fields */}
             <div className="bpp-fields">
               <label className="bpp-field">
-                <span className="bpp-field-label">角色名称</span>
+                <span className="bpp-field-label">{tr('角色名称', 'Persona Name')}</span>
                 <input
                   type="text"
                   className="bpp-input"
@@ -195,7 +213,7 @@ export default function BattlePrepPage() {
                 />
               </label>
               <label className="bpp-field">
-                <span className="bpp-field-label">职位 / 角色</span>
+                <span className="bpp-field-label">{tr('职位 / 角色', 'Position / Role')}</span>
                 <input
                   type="text"
                   className="bpp-input"
@@ -204,7 +222,7 @@ export default function BattlePrepPage() {
                 />
               </label>
               <label className="bpp-field">
-                <span className="bpp-field-label">谈判风格</span>
+                <span className="bpp-field-label">{tr('谈判风格', 'Negotiation Style')}</span>
                 <textarea
                   className="bpp-textarea bpp-textarea--sm"
                   value={personaStyle}
@@ -215,7 +233,7 @@ export default function BattlePrepPage() {
             </div>
 
             {/* Training points */}
-            <div className="bpp-section-label">训练点（至少选 1 个）</div>
+            <div className="bpp-section-label">{tr('训练点（至少选 1 个）', 'Training Points (choose at least 1)')}</div>
             <div className="bpp-training-list">
               {prepResult.training_points.map((point) => (
                 <label key={point} className={`bpp-training-item ${selectedPoints.includes(point) ? 'checked' : ''}`}>
@@ -237,7 +255,7 @@ export default function BattlePrepPage() {
                 onClick={() => setState((s) => ({ ...s, step: 1, error: null }))}
               >
                 <ArrowLeft size={14} />
-                上一步
+                {tr('上一步', 'Previous')}
               </button>
               <button
                 className="bpp-btn-primary"
@@ -252,10 +270,10 @@ export default function BattlePrepPage() {
                 {submitting ? (
                   <span className="bpp-loading-inline">
                     <Loader2 size={16} className="bpp-spinner" />
-                    启动中...
+                    {tr('启动中...', 'Starting...')}
                   </span>
                 ) : (
-                  '开始练习 \u2192'
+                  tr('开始练习 →', 'Start Practice →')
                 )}
               </button>
             </div>

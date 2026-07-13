@@ -9,6 +9,7 @@ import {
   type PersonaRelationship,
   type Scenario,
 } from '../services/api'
+import { useI18n } from '../i18n'
 import './CreateRoomDialog.css'
 
 interface CreateRoomDialogProps {
@@ -18,6 +19,7 @@ interface CreateRoomDialogProps {
 }
 
 export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoomDialogProps) {
+  const { tr } = useI18n()
   const [personas, setPersonas] = useState<PersonaSummary[]>([])
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [relationships, setRelationships] = useState<PersonaRelationship[]>([])
@@ -96,8 +98,8 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
 
   // When switching type, reset selection if it violates constraints
   useEffect(() => {
-    if (type === 'private' && selectedPersonas.length > 1) {
-      setSelectedPersonas([selectedPersonas[0]])
+    if (type === 'private') {
+      setSelectedPersonas((current) => (current.length > 1 ? [current[0]] : current))
     }
   }, [type])
 
@@ -121,8 +123,8 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
       })
       onCreated(room.id)
       onClose()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : tr('创建失败，请重试', 'Creation failed. Please try again.'))
     } finally {
       setSubmitting(false)
     }
@@ -133,42 +135,42 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>创建聊天室</h3>
+        <h3>{tr('创建聊天室', 'Create Chat Room')}</h3>
         <div className="dialog-body">
           <label className="field-label">
-            名称
+            {tr('名称', 'Name')}
             <input
               name="name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="输入聊天室名称"
+              placeholder={tr('输入聊天室名称', 'Enter chat room name')}
               autoFocus
             />
           </label>
 
           <label className="field-label">
-            类型
+            {tr('类型', 'Type')}
             <select
               name="type"
               value={type}
               onChange={(e) => setType(e.target.value as 'private' | 'group')}
             >
-              <option value="private">私聊</option>
-              <option value="group">群聊</option>
+              <option value="private">{tr('私聊', 'Private')}</option>
+              <option value="group">{tr('群聊', 'Group')}</option>
             </select>
           </label>
 
           {scenarios.length > 0 && (
             <label className="field-label">
-              场景（可选）
+              {tr('场景（可选）', 'Scenario (optional)')}
               <select
                 value={selectedScenarioId ?? ''}
                 onChange={(e) =>
                   handleScenarioChange(e.target.value ? Number(e.target.value) : null)
                 }
               >
-                <option value="">不使用场景</option>
+                <option value="">{tr('不使用场景', 'No scenario')}</option>
                 {scenarios.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -179,7 +181,7 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
           )}
 
           <div className="field-label">
-            选择角色 {type === 'private' ? '(选择 1 个)' : '(至少 2 个)'}
+            {tr('选择角色', 'Choose Personas')} {type === 'private' ? tr('(选择 1 个)', '(choose 1)') : tr('(至少 2 个)', '(at least 2)')}
           </div>
           <div className="persona-select-list">
             {personas.map((p) => (
@@ -200,7 +202,7 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
 
           {type === 'group' && recommendedPersonas.length > 0 && (
             <div style={{ marginTop: 8 }}>
-              <div className="field-label" style={{ marginBottom: 4 }}>推荐添加（有关系的角色）</div>
+              <div className="field-label" style={{ marginBottom: 4 }}>{tr('推荐添加（有关系的角色）', 'Recommended additions (related personas)')}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {recommendedPersonas.map((pid) => {
                   const p = personas.find((pp) => pp.id === pid)
@@ -226,13 +228,13 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
         </div>
 
         <div className="dialog-actions">
-          <button className="btn-cancel" onClick={onClose}>取消</button>
+          <button className="btn-cancel" onClick={onClose}>{tr('取消', 'Cancel')}</button>
           <button
             className="btn-submit"
             onClick={handleSubmit}
             disabled={!isValid() || submitting}
           >
-            {submitting ? '创建中...' : '创建'}
+            {submitting ? tr('创建中...', 'Creating...') : tr('创建', 'Create')}
           </button>
         </div>
       </div>

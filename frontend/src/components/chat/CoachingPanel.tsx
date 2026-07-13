@@ -2,6 +2,7 @@ import React from 'react'
 import Markdown from 'react-markdown'
 import { GraduationCap, Lightbulb, X, Send } from 'lucide-react'
 import type { CoachingMessageItem } from '../../services/api'
+import { useI18n } from '../../i18n'
 import './CoachingPanel.css'
 
 export interface CoachingPanelProps {
@@ -31,6 +32,7 @@ export default function CoachingPanel({
   sessionId,
   listRef,
 }: CoachingPanelProps) {
+  const { tr } = useI18n()
   if (!open) return null
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -47,7 +49,7 @@ export default function CoachingPanel({
     <aside className="coaching-panel">
       <div className="coaching-header">
         {mode === 'live' ? <Lightbulb size={18} /> : <GraduationCap size={18} />}
-        <h3>{mode === 'live' ? '实时教练' : 'AI Coach 复盘'}</h3>
+        <h3>{mode === 'live' ? tr('实时教练', 'Live Coach') : tr('AI Coach 复盘', 'AI Coach Review')}</h3>
         <button className="coaching-close" onClick={onClose}>
           <X size={18} />
         </button>
@@ -55,7 +57,7 @@ export default function CoachingPanel({
       <div className="coaching-messages" ref={listRef}>
         {messages.map((msg) => (
           <div key={msg.id} className={`coaching-msg ${msg.role}`}>
-            <div className="coaching-msg-role">{msg.role === 'coach' ? 'Coach' : '你'}</div>
+            <div className="coaching-msg-role">{msg.role === 'coach' ? tr('Coach', 'Coach') : tr('你', 'You')}</div>
             <div className="coaching-msg-bubble">
               <Markdown>{msg.content}</Markdown>
             </div>
@@ -73,7 +75,7 @@ export default function CoachingPanel({
         {sending && !streamingContent && messages.length === 0 && (
           <div className="coaching-loading">
             <div className="typing-dots"><span /><span /><span /></div>
-            Coach 正在思考
+            {tr('Coach 正在思考', 'Coach is thinking')}
           </div>
         )}
       </div>
@@ -83,7 +85,7 @@ export default function CoachingPanel({
           value={inputValue}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="回复 Coach..."
+          placeholder={tr('回复 Coach...', 'Reply to Coach...')}
           disabled={inputDisabled}
         />
         <button

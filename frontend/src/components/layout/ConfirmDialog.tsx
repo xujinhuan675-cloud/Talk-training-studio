@@ -1,4 +1,5 @@
 import { AlertTriangle } from 'lucide-react'
+import { useI18n } from '../../i18n'
 import './ConfirmDialog.css'
 
 interface ConfirmDialogProps {
@@ -16,12 +17,14 @@ export default function ConfirmDialog({
   open,
   title,
   message,
-  confirmLabel = '确定',
-  cancelLabel = '取消',
+  confirmLabel,
+  cancelLabel,
   danger = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { tr } = useI18n()
+
   if (!open) return null
 
   return (
@@ -34,14 +37,14 @@ export default function ConfirmDialog({
         <p className="confirm-message">{message}</p>
         <div className="confirm-actions">
           <button className="confirm-btn cancel" onClick={onCancel}>
-            {cancelLabel}
+            {cancelLabel || tr('取消', 'Cancel')}
           </button>
           <button
             className={`confirm-btn ${danger ? 'danger' : 'primary'}`}
             onClick={onConfirm}
             autoFocus
           >
-            {confirmLabel}
+            {confirmLabel || tr('确定', 'OK')}
           </button>
         </div>
       </div>

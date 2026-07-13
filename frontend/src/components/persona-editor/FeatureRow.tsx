@@ -4,6 +4,7 @@
 // pos: 表示层 - persona editor 特征行 (Story 2.7 AC)；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 import { useEffect, useRef, useState } from 'react'
 import { Search, X } from 'lucide-react'
+import { useI18n } from '../../i18n'
 
 interface Props {
   emoji: string
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export default function FeatureRow(props: Props) {
+  const { tr } = useI18n()
   const [editing, setEditing] = useState(false)
   // Draft is seeded from props.text only when entering edit mode; during edit
   // it's fully controlled by the input's onChange.
@@ -71,14 +73,14 @@ export default function FeatureRow(props: Props) {
           <span>{props.text}</span>
         )}
       </div>
-      {props.lowConfidence && <span className="warn-chip">⚠ 证据不足</span>}
+      {props.lowConfidence && <span className="warn-chip">⚠ {tr('证据不足', 'Low evidence')}</span>}
       <div className="acts">
         {props.onShowEvidence && (
           <button
             type="button"
             className={`icon-circ evidence-btn ${props.evidenceFocused ? 'focused' : ''}`}
             onClick={() => props.onShowEvidence!(rowRef.current!)}
-            title="查证据"
+            title={tr('查证据', 'View evidence')}
           >
             <Search size={13} />
           </button>
@@ -88,7 +90,7 @@ export default function FeatureRow(props: Props) {
             type="button"
             className="icon-circ reject-btn"
             onClick={props.onReject}
-            title={props.rejected ? '取消标记' : '标记不对'}
+            title={props.rejected ? tr('取消标记', 'Clear mark') : tr('标记不对', 'Mark incorrect')}
           >
             <X size={13} />
           </button>

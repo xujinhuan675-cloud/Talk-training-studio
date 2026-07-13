@@ -58,6 +58,26 @@ def test_app_starts_without_stakeholder_config(monkeypatch: pytest.MonkeyPatch) 
     assert s.SECRET_KEY == "test-secret"
 
 
+def test_openai_compatible_aliases_populate_llm_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Common OpenAI-compatible env names can configure the project LLM."""
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.delenv("LLM__API_KEY", raising=False)
+    monkeypatch.delenv("LLM__BASE_URL", raising=False)
+    monkeypatch.delenv("LLM__DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("LLM__WIRE_API", raising=False)
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-compatible-test")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", "https://gateway.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_MODEL", "gpt-compatible")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_WIRE_API", "responses")
+
+    s = Settings(_env_file=None)
+
+    assert s.llm.api_key == "sk-compatible-test"
+    assert s.llm.base_url == "https://gateway.example.com/v1"
+    assert s.llm.default_model == "gpt-compatible"
+    assert s.llm.wire_api == "responses"
+
+
 @pytest.mark.asyncio
 async def test_anthropic_provider_generate_mock() -> None:
     """AC3: AnthropicProvider.generate() calls Anthropic SDK and returns LLMResponse."""

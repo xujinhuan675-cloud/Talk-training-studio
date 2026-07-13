@@ -4,6 +4,7 @@ import Avatar from '../Avatar'
 import VoiceRecorder from '../VoiceRecorder'
 import VideoAnswerRecorder, { type VideoAnswerResult } from '../VideoAnswerRecorder'
 import type { PersonaSummary } from '../../services/api'
+import { useI18n } from '../../i18n'
 import './ChatInput.css'
 
 export interface ChatInputProps {
@@ -32,7 +33,7 @@ export default function ChatInput({
   onKeyDown,
   onSend,
   sending,
-  placeholder = 'Type a message...',
+  placeholder,
   mentionQuery,
   mentionResults,
   onInsertMention,
@@ -45,15 +46,17 @@ export default function ChatInput({
   onLiveCoachClick,
   coachingSending,
 }: ChatInputProps) {
+  const { tr } = useI18n()
   const [videoOpen, setVideoOpen] = React.useState(false)
+  const inputPlaceholder = placeholder ?? tr('输入消息...', 'Type a message...')
 
   return (
     <div className="message-input-shell">
       {videoOpen && (
         <div className="message-video-recorder-panel">
           <div className="message-video-recorder-header">
-            <span>Video answer</span>
-            <button type="button" onClick={() => setVideoOpen(false)} title="Close video recorder">
+            <span>{tr('视频回答', 'Video answer')}</span>
+            <button type="button" onClick={() => setVideoOpen(false)} title={tr('关闭视频录制器', 'Close video recorder')}>
               <X size={16} />
             </button>
           </div>
@@ -89,7 +92,7 @@ export default function ChatInput({
           value={value}
           onChange={onInputChange}
           onKeyDown={onKeyDown}
-          placeholder={placeholder}
+          placeholder={inputPlaceholder}
           disabled={sending}
         />
         {voiceEnabled && roomId && (
@@ -102,7 +105,7 @@ export default function ChatInput({
         <button
           className="video-toggle-btn"
           onClick={() => setVideoOpen((open) => !open)}
-          title="Record video answer"
+          title={tr('录制视频回答', 'Record video answer')}
           type="button"
           disabled={sending}
         >
@@ -111,7 +114,7 @@ export default function ChatInput({
         <button
           className={`voice-toggle-btn ${voiceMuted ? 'muted' : ''}`}
           onClick={onToggleVoice}
-          title={!voiceEnabled ? 'Enable voice' : voiceMuted ? 'Disable voice mode' : 'Mute voice'}
+          title={!voiceEnabled ? tr('启用语音', 'Enable voice') : voiceMuted ? tr('关闭语音模式', 'Disable voice mode') : tr('静音语音', 'Mute voice')}
           type="button"
         >
           {voiceEnabled && !voiceMuted ? <Volume2 size={18} /> : <VolumeX size={18} />}
@@ -119,7 +122,7 @@ export default function ChatInput({
         <button
           className="live-coach-btn"
           onClick={onLiveCoachClick}
-          title="Ask coach"
+          title={tr('询问教练', 'Ask coach')}
           disabled={coachingSending}
           type="button"
         >

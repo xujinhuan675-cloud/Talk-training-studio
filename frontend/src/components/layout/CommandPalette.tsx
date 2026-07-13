@@ -8,6 +8,7 @@ import {
   User,
 } from 'lucide-react'
 import type { CommandResult } from '../../hooks/useCommandPalette'
+import { useI18n } from '../../i18n'
 import './CommandPalette.css'
 
 interface CommandPaletteProps {
@@ -35,6 +36,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   onClose,
   onQueryChange,
 }) => {
+  const { t } = useI18n()
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -118,7 +120,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
             ref={inputRef}
             className="cmd-palette-input"
             type="text"
-            placeholder="搜索或输入命令..."
+            placeholder={t('app.searchPlaceholder')}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
           />
@@ -130,33 +132,33 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
             <>
               {grouped.rooms.length > 0 && (
                 <>
-                  <div className="cmd-palette-section-label">对话</div>
+                  <div className="cmd-palette-section-label">{t('command.rooms')}</div>
                   {grouped.rooms.map(renderItem)}
                 </>
               )}
               {grouped.actions.length > 0 && (
                 <>
-                  <div className="cmd-palette-section-label">操作</div>
+                  <div className="cmd-palette-section-label">{t('command.actions')}</div>
                   {grouped.actions.map(renderItem)}
                 </>
               )}
               {grouped.personas.length > 0 && (
                 <>
-                  <div className="cmd-palette-section-label">角色</div>
+                  <div className="cmd-palette-section-label">{t('command.personas')}</div>
                   {grouped.personas.map(renderItem)}
                 </>
               )}
             </>
           ) : (
-            <div className="cmd-palette-empty">没有找到匹配结果</div>
+            <div className="cmd-palette-empty">{t('command.empty')}</div>
           )}
         </div>
 
         {/* Footer */}
         <div className="cmd-palette-footer">
-          <span><kbd>↑↓</kbd> 选择</span>
-          <span><kbd>↵</kbd> 打开</span>
-          <span><kbd>esc</kbd> 关闭</span>
+          <span><kbd>↑↓</kbd> {t('command.footer.select')}</span>
+          <span><kbd>↵</kbd> {t('command.footer.open')}</span>
+          <span><kbd>esc</kbd> {t('command.footer.close')}</span>
         </div>
       </div>
     </div>

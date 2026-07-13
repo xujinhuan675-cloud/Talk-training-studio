@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Circle, Play, Square, Trash2 } from 'lucide-react'
+import { useI18n } from '../i18n'
 import './VideoAnswerRecorder.css'
 
 export type VideoRecorderStatus = 'idle' | 'requesting' | 'ready' | 'recording' | 'recorded' | 'error'
@@ -45,6 +46,7 @@ export default function VideoAnswerRecorder({
   maxDurationMs,
   disabled = false,
 }: VideoAnswerRecorderProps) {
+  const { tr } = useI18n()
   const [status, setStatus] = useState<VideoRecorderStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -75,7 +77,7 @@ export default function VideoAnswerRecorder({
   const prepare = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus('error')
-      setError('This browser does not support camera recording.')
+      setError(tr('当前浏览器不支持摄像头录制。', 'This browser does not support camera recording.'))
       return null
     }
 
@@ -98,10 +100,10 @@ export default function VideoAnswerRecorder({
       return stream
     } catch (err) {
       setStatus('error')
-      setError(err instanceof Error ? err.message : 'Unable to access camera or microphone.')
+      setError(err instanceof Error ? err.message : tr('无法访问摄像头或麦克风。', 'Unable to access camera or microphone.'))
       return null
     }
-  }, [clearPreview])
+  }, [clearPreview, tr])
 
   const startRecording = useCallback(async () => {
     if (disabled) return
@@ -147,10 +149,10 @@ export default function VideoAnswerRecorder({
       setStatus('recording')
     } catch (err) {
       setStatus('error')
-      setError(err instanceof Error ? err.message : 'Failed to start recording.')
+      setError(err instanceof Error ? err.message : tr('录制启动失败。', 'Failed to start recording.'))
       stopStream()
     }
-  }, [clearPreview, disabled, mimeType, onRecorded, prepare, stopStream])
+  }, [clearPreview, disabled, mimeType, onRecorded, prepare, stopStream, tr])
 
   const stopRecording = useCallback(() => {
     const recorder = recorderRef.current
@@ -210,18 +212,18 @@ export default function VideoAnswerRecorder({
       <div className="video-answer-toolbar">
         <span className="video-answer-status">
           {status === 'recording' && <Circle size={10} fill="currentColor" />}
-          {status === 'requesting' ? 'Requesting access' : formatDuration(elapsedMs)}
+          {status === 'requesting' ? tr('正在请求权限', 'Requesting access') : formatDuration(elapsedMs)}
         </span>
         {status === 'recording' ? (
-          <button type="button" onClick={stopRecording} disabled={disabled} title="Stop recording">
+          <button type="button" onClick={stopRecording} disabled={disabled} title={tr('停止录制', 'Stop recording')}>
             <Square size={16} />
           </button>
         ) : (
-          <button type="button" onClick={startRecording} disabled={!canRecord} title="Start recording">
+          <button type="button" onClick={startRecording} disabled={!canRecord} title={tr('开始录制', 'Start recording')}>
             <Play size={16} />
           </button>
         )}
-        <button type="button" onClick={reset} disabled={status === 'requesting'} title="Clear recording">
+        <button type="button" onClick={reset} disabled={status === 'requesting'} title={tr('清除录制', 'Clear recording')}>
           <Trash2 size={16} />
         </button>
       </div>

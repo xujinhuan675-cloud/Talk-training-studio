@@ -8,6 +8,7 @@ import {
   Tooltip,
 } from 'recharts'
 import type { DefenseReport as DefenseReportData } from '../../services/api'
+import { useI18n } from '../../i18n'
 import './DefenseReport.css'
 
 interface Props {
@@ -39,6 +40,7 @@ function scoreBadgeClass(score: number): string {
 }
 
 export default function DefenseReport({ report }: Props) {
+  const { tr } = useI18n()
   const radarData = buildRadarData(report.dimension_scores)
 
   return (
@@ -48,13 +50,13 @@ export default function DefenseReport({ report }: Props) {
         <span className={`dr-score-number dr-score-number--${scoreClass(report.overall_score)}`}>
           {report.overall_score}
         </span>
-        <span className="dr-score-label">综合得分</span>
+        <span className="dr-score-label">{tr('综合得分', 'Overall Score')}</span>
       </div>
 
       {/* Radar chart */}
       {radarData.length > 0 && (
         <div className="dr-radar-section">
-          <h3 className="dr-section-title">维度评分</h3>
+          <h3 className="dr-section-title">{tr('维度评分', 'Dimension Scores')}</h3>
           <div className="dr-radar-wrapper">
             <ResponsiveContainer width="100%" height="100%">
               <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
@@ -69,7 +71,7 @@ export default function DefenseReport({ report }: Props) {
                   tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
                 />
                 <Radar
-                  name="得分"
+                  name={tr('得分', 'Score')}
                   dataKey="score"
                   stroke="var(--violet)"
                   fill="var(--violet)"
@@ -85,14 +87,14 @@ export default function DefenseReport({ report }: Props) {
 
       {/* Summary */}
       <div className="dr-summary-section">
-        <h3 className="dr-section-title">综合评价</h3>
+        <h3 className="dr-section-title">{tr('综合评价', 'Overall Evaluation')}</h3>
         <p className="dr-summary-text">{report.summary}</p>
       </div>
 
       {/* Top improvements */}
       {report.top_improvements.length > 0 && (
         <div className="dr-improvements-section">
-          <h3 className="dr-section-title">重点改进方向</h3>
+          <h3 className="dr-section-title">{tr('重点改进方向', 'Key Improvement Areas')}</h3>
           <ul className="dr-improvements-list">
             {report.top_improvements.map((item, i) => (
               <li key={i} className="dr-improvement-item">
@@ -107,7 +109,7 @@ export default function DefenseReport({ report }: Props) {
       {/* Question reviews */}
       {report.question_reviews.length > 0 && (
         <div className="dr-reviews-section">
-          <h3 className="dr-section-title">逐题点评</h3>
+          <h3 className="dr-section-title">{tr('逐题点评', 'Question-by-question Review')}</h3>
           <div className="dr-review-list">
             {report.question_reviews.map((review, i) => (
               <div key={i} className="dr-review-card">
@@ -120,15 +122,15 @@ export default function DefenseReport({ report }: Props) {
                   </span>
                 </div>
                 <div className="dr-review-answer">
-                  <span className="dr-review-answer-label">回答摘要:</span>
+                  <span className="dr-review-answer-label">{tr('回答摘要:', 'Answer Summary:')}</span>
                   {review.user_answer_summary}
                 </div>
                 <div className="dr-review-feedback">
-                  <span className="dr-review-feedback-label">点评:</span>
+                  <span className="dr-review-feedback-label">{tr('点评:', 'Feedback:')}</span>
                   {review.feedback}
                 </div>
                 <div className="dr-review-improvement">
-                  <span className="dr-review-improvement-label">改进建议:</span>
+                  <span className="dr-review-improvement-label">{tr('改进建议:', 'Improvement:')}</span>
                   {review.improvement}
                 </div>
               </div>

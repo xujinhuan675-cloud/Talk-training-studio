@@ -10,6 +10,7 @@ import {
   type Team,
 } from '../services/api'
 import Avatar from './Avatar'
+import { useI18n } from '../i18n'
 import './PersonaEditorDialog.css'
 
 interface PersonaEditorDialogProps {
@@ -27,6 +28,7 @@ export default function PersonaEditorDialog({
   editingPersona,
   currentOrg,
 }: PersonaEditorDialogProps) {
+  const { tr } = useI18n()
   const isEdit = !!editingPersona
 
   const [id, setId] = useState('')
@@ -97,7 +99,7 @@ export default function PersonaEditorDialog({
         })
       } else {
         if (!id.trim()) {
-          setError('ID 不能为空')
+          setError(tr('ID 不能为空', 'ID is required'))
           setSubmitting(false)
           return
         }
@@ -112,8 +114,8 @@ export default function PersonaEditorDialog({
       }
       onSaved()
       onClose()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSubmitting(false)
     }
@@ -121,14 +123,14 @@ export default function PersonaEditorDialog({
 
   const handleDelete = async () => {
     if (!editingPersona) return
-    if (!confirm(`确定删除角色「${editingPersona.name}」？`)) return
+    if (!confirm(tr('确定删除角色「{name}」？', 'Delete persona “{name}”?', { name: editingPersona.name }))) return
     setSubmitting(true)
     try {
       await deletePersona(editingPersona.id)
       onSaved()
       onClose()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSubmitting(false)
     }
@@ -142,7 +144,7 @@ export default function PersonaEditorDialog({
         className="dialog persona-editor-dialog"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>{isEdit ? '编辑角色' : '新建角色'}</h3>
+        <h3>{isEdit ? tr('编辑角色', 'Edit Persona') : tr('新建角色', 'New Persona')}</h3>
         <div className="dialog-body">
           <div className="persona-avatar-preview">
             <Avatar name={name || '?'} color={avatarColor} size={48} />
@@ -154,34 +156,34 @@ export default function PersonaEditorDialog({
               type="text"
               value={id}
               onChange={(e) => setId(e.target.value)}
-              placeholder="英文标识符，如 ceo"
+              placeholder={tr('英文标识符，如 ceo', 'English identifier, e.g. ceo')}
               disabled={isEdit}
               autoFocus={!isEdit}
             />
           </label>
 
           <label className="field-label">
-            名称
+            {tr('名称', 'Name')}
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="角色显示名称"
+              placeholder={tr('角色显示名称', 'Persona display name')}
             />
           </label>
 
           <label className="field-label">
-            角色
+            {tr('角色', 'Role')}
             <input
               type="text"
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              placeholder="如：CEO、产品经理"
+              placeholder={tr('如：CEO、产品经理', 'Example: CEO, Product Manager')}
             />
           </label>
 
           <label className="field-label">
-            头像颜色
+            {tr('头像颜色', 'Avatar Color')}
             <div className="color-field">
               <input
                 type="color"
@@ -194,12 +196,12 @@ export default function PersonaEditorDialog({
 
           {teams.length > 0 && (
             <label className="field-label">
-              所属团队
+              {tr('所属团队', 'Team')}
               <select
                 value={teamId ?? ''}
                 onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : null)}
               >
-                <option value="">不指定</option>
+                <option value="">{tr('不指定', 'None')}</option>
                 {teams.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
@@ -208,11 +210,11 @@ export default function PersonaEditorDialog({
           )}
 
           <label className="field-label">
-            内容（Markdown）
+            {tr('内容（Markdown）', 'Content (Markdown)')}
             <textarea
-              value={loading ? '加载中...' : content}
+              value={loading ? tr('加载中...', 'Loading...') : content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="角色画像的详细内容..."
+              placeholder={tr('角色画像的详细内容...', 'Detailed persona profile...')}
               disabled={loading}
             />
           </label>
@@ -227,18 +229,18 @@ export default function PersonaEditorDialog({
               onClick={handleDelete}
               disabled={submitting}
             >
-              删除
+              {tr('删除', 'Delete')}
             </button>
           )}
           <button className="btn-cancel" onClick={onClose}>
-            取消
+            {tr('取消', 'Cancel')}
           </button>
           <button
             className="btn-submit"
             onClick={handleSave}
             disabled={submitting || loading}
           >
-            {submitting ? '保存中...' : '保存'}
+            {submitting ? tr('保存中...', 'Saving...') : tr('保存', 'Save')}
           </button>
         </div>
       </div>

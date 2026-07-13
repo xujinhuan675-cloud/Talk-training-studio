@@ -24,6 +24,7 @@ import FeatureRow from '../components/persona-editor/FeatureRow'
 import EvidencePopover from '../components/persona-editor/EvidencePopover'
 import FloatingCTA from '../components/persona-editor/FloatingCTA'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
+import { useI18n } from '../i18n'
 import '../components/persona-editor/personaEditor.css'
 import './PersonaEditorPage.css'
 
@@ -149,6 +150,7 @@ const LAYER_META: Record<LayerKey, { title: string; emoji: string; color: LayerC
 const LOW_CONF = 0.6
 
 export default function PersonaEditorPage() {
+  const { tr } = useI18n()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [persona, setPersona] = useState<PersonaV2 | null>(null)
@@ -413,7 +415,7 @@ export default function PersonaEditorPage() {
       navigate(`/chat/${room.id}`)
     } catch (e: unknown) {
       const msg = (e as Error)?.message || String(e)
-      setSaveError(`开演练失败：${msg}`)
+      setSaveError(tr('开演练失败：{message}', 'Failed to start practice: {message}', { message: msg }))
     }
   }
 
@@ -429,13 +431,13 @@ export default function PersonaEditorPage() {
     void doStartBattle()
   }
 
-  if (loading) return <div className="editor-status">加载中…</div>
+  if (loading) return <div className="editor-status">{tr('加载中…', 'Loading...')}</div>
   if (error || !draft) {
     return (
       <div className="editor-status error">
-        <p>加载失败：{error || 'persona 不存在'}</p>
+        <p>{tr('加载失败：{error}', 'Failed to load: {error}', { error: error || tr('persona 不存在', 'persona does not exist') })}</p>
         <button type="button" onClick={() => navigate('/settings')}>
-          返回 Settings
+          {tr('返回设置', 'Back to Settings')}
         </button>
       </div>
     )
@@ -490,9 +492,9 @@ export default function PersonaEditorPage() {
         <FeatureRow
           key="id-ha"
           emoji="🕶️"
-          text={`隐藏议程：${id0.hidden_agenda}`}
+          text={tr('隐藏议程：{text}', 'Hidden agenda: {text}', { text: id0.hidden_agenda })}
           onChange={(v) =>
-            editIdentity({ hidden_agenda: v.replace(/^隐藏议程[：:]\s*/, '') })
+            editIdentity({ hidden_agenda: v.replace(/^(隐藏议程|Hidden agenda)[：:]\s*/i, '') })
           }
         />,
       )
@@ -502,9 +504,9 @@ export default function PersonaEditorPage() {
         <FeatureRow
           key="id-ip"
           emoji="📋"
-          text={`信息偏好：${id0.information_preference}`}
+          text={tr('信息偏好：{text}', 'Information preference: {text}', { text: id0.information_preference })}
           onChange={(v) =>
-            editIdentity({ information_preference: v.replace(/^信息偏好[：:]\s*/, '') })
+            editIdentity({ information_preference: v.replace(/^(信息偏好|Information preference)[：:]\s*/i, '') })
           }
         />,
       )
@@ -520,8 +522,8 @@ export default function PersonaEditorPage() {
         <FeatureRow
           key="ex-tone"
           emoji="🗣️"
-          text={`语气：${ex.tone}`}
-          onChange={(v) => editExpression({ tone: v.replace(/^语气[：:]\s*/, '') })}
+          text={tr('语气：{text}', 'Tone: {text}', { text: ex.tone })}
+          onChange={(v) => editExpression({ tone: v.replace(/^(语气|Tone)[：:]\s*/i, '') })}
         />,
       )
     }
@@ -539,10 +541,10 @@ export default function PersonaEditorPage() {
       <FeatureRow
         key="ex-int"
         emoji="✋"
-        text={`打断倾向：${ex.interruption_tendency}`}
+        text={tr('打断倾向：{text}', 'Interruption tendency: {text}', { text: ex.interruption_tendency })}
         onChange={(v) =>
           editExpression({
-            interruption_tendency: v.replace(/^打断倾向[：:]\s*/, ''),
+            interruption_tendency: v.replace(/^(打断倾向|Interruption tendency)[：:]\s*/i, ''),
           })
         }
       />,
@@ -558,8 +560,8 @@ export default function PersonaEditorPage() {
         <FeatureRow
           key="dc-style"
           emoji="🧠"
-          text={`决策风格：${dc.style}`}
-          onChange={(v) => editDecision({ style: v.replace(/^决策风格[：:]\s*/, '') })}
+          text={tr('决策风格：{text}', 'Decision style: {text}', { text: dc.style })}
+          onChange={(v) => editDecision({ style: v.replace(/^(决策风格|Decision style)[：:]\s*/i, '') })}
         />,
       )
     }
@@ -567,9 +569,9 @@ export default function PersonaEditorPage() {
       <FeatureRow
         key="dc-rt"
         emoji="⚠️"
-        text={`风险容忍：${dc.risk_tolerance}`}
+        text={tr('风险容忍：{text}', 'Risk tolerance: {text}', { text: dc.risk_tolerance })}
         onChange={(v) =>
-          editDecision({ risk_tolerance: v.replace(/^风险容忍[：:]\s*/, '') })
+          editDecision({ risk_tolerance: v.replace(/^(风险容忍|Risk tolerance)[：:]\s*/i, '') })
         }
       />,
     )
@@ -594,9 +596,9 @@ export default function PersonaEditorPage() {
         <FeatureRow
           key="ip-am"
           emoji="🤝"
-          text={`权威模式：${ip.authority_mode}`}
+          text={tr('权威模式：{text}', 'Authority mode: {text}', { text: ip.authority_mode })}
           onChange={(v) =>
-            editInterpersonal({ authority_mode: v.replace(/^权威模式[：:]\s*/, '') })
+            editInterpersonal({ authority_mode: v.replace(/^(权威模式|Authority mode)[：:]\s*/i, '') })
           }
         />,
       )
@@ -628,7 +630,10 @@ export default function PersonaEditorPage() {
           <FeatureRow
             key={`ip-ec-${ci}`}
             emoji="🔺"
-            text={`升级链：${chain.trigger} → ${stepsStr}`}
+            text={tr('升级链：{trigger} → {steps}', 'Escalation chain: {trigger} → {steps}', {
+              trigger: chain.trigger,
+              steps: stepsStr,
+            })}
             onChange={() => {}}
           />,
         )
@@ -637,7 +642,7 @@ export default function PersonaEditorPage() {
   }
 
   const emptyLayerNotice = (
-    <div className="layer-empty">暂无内容（可通过 Story 2.6 的生成器补充）</div>
+    <div className="layer-empty">{tr('暂无内容（可通过 Story 2.6 的生成器补充）', 'No content yet. You can supplement it through the Story 2.6 generator.')}</div>
   )
 
   return (
@@ -696,19 +701,19 @@ export default function PersonaEditorPage() {
 
       {saveError && (
         <div className="editor-save-error">
-          保存失败：{saveError}
+          {tr('保存失败：{message}', 'Save failed: {message}', { message: saveError })}
         </div>
       )}
 
       {/* User context — relationship to current user */}
       <div className="user-context-section">
-        <h3>与当前对话者的关系</h3>
-        <p className="user-context-hint">描述这个角色对你的期待、你们的汇报关系、他关心你负责的哪些领域</p>
+        <h3>{tr('与当前对话者的关系', 'Relationship to Current Speaker')}</h3>
+        <p className="user-context-hint">{tr('描述这个角色对你的期待、你们的汇报关系、他关心你负责的哪些领域', 'Describe this persona’s expectations, reporting relationship, and which areas they care about in your work.')}</p>
         <textarea
           className="user-context-textarea"
           value={draft.user_context || ''}
           onChange={(e) => setDraft((d) => d ? { ...d, user_context: e.target.value || null } : d)}
-          placeholder="例：我是万华，FDE质量体系负责人。他期望我负责评价体系和测试集构建，交付物要经得起推敲。会直接点名确认我是否理解。"
+          placeholder={tr('例：我是万华，FDE质量体系负责人。他期望我负责评价体系和测试集构建，交付物要经得起推敲。会直接点名确认我是否理解。', 'Example: I am Wanhua, responsible for FDE quality systems. This persona expects me to own evaluation systems and test set construction, and will directly check whether I understand the work.')}
           rows={4}
         />
       </div>
@@ -722,12 +727,12 @@ export default function PersonaEditorPage() {
       {/* Enhancement panel */}
       {showEnhance && (
         <div className="enhance-panel">
-          <h3>追加素材增强画像</h3>
+          <h3>{tr('追加素材增强画像', 'Enhance Profile with More Materials')}</h3>
           <textarea
             className="enhance-textarea"
             value={enhanceText}
             onChange={(e) => setEnhanceText(e.target.value)}
-            placeholder="粘贴新的聊天记录 / 邮件 / 会议纪要，AI 会将新发现的特征合并到现有画像中…"
+            placeholder={tr('粘贴新的聊天记录 / 邮件 / 会议纪要，AI 会将新发现的特征合并到现有画像中…', 'Paste new chat logs, emails, or meeting notes. AI will merge newly discovered traits into the existing profile...')}
             rows={6}
             disabled={enhance.status === 'running'}
           />
@@ -741,7 +746,7 @@ export default function PersonaEditorPage() {
               onClick={handleStartEnhance}
               disabled={!enhanceText.trim() || enhance.status === 'running'}
             >
-              {enhance.status === 'running' ? '增强中…' : '开始增强'}
+              {enhance.status === 'running' ? tr('增强中…', 'Enhancing...') : tr('开始增强', 'Start Enhancement')}
             </button>
             <button
               type="button"
@@ -749,7 +754,7 @@ export default function PersonaEditorPage() {
               onClick={() => { setShowEnhance(false); setEnhanceText(''); enhance.reset() }}
               disabled={enhance.status === 'running'}
             >
-              取消
+              {tr('取消', 'Cancel')}
             </button>
           </div>
         </div>
@@ -759,19 +764,19 @@ export default function PersonaEditorPage() {
       {enhanceDiff && (
         <div className="dialog-overlay" onClick={handleRejectEnhance}>
           <div className="dialog enhance-diff-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>增强完成 — 变更摘要</h3>
+            <h3>{tr('增强完成 — 变更摘要', 'Enhancement Complete — Change Summary')}</h3>
             <div className="enhance-diff-stats">
-              {enhanceDiff.added > 0 && <span className="diff-badge diff-added">+{enhanceDiff.added} 新增</span>}
-              {enhanceDiff.changed > 0 && <span className="diff-badge diff-changed">{enhanceDiff.changed} 修改</span>}
-              {enhanceDiff.removed > 0 && <span className="diff-badge diff-removed">-{enhanceDiff.removed} 移除</span>}
-              {enhanceDiff.items.length === 0 && <span className="diff-badge">无变化</span>}
+              {enhanceDiff.added > 0 && <span className="diff-badge diff-added">{tr('+{count} 新增', '+{count} added', { count: enhanceDiff.added })}</span>}
+              {enhanceDiff.changed > 0 && <span className="diff-badge diff-changed">{tr('{count} 修改', '{count} changed', { count: enhanceDiff.changed })}</span>}
+              {enhanceDiff.removed > 0 && <span className="diff-badge diff-removed">{tr('-{count} 移除', '-{count} removed', { count: enhanceDiff.removed })}</span>}
+              {enhanceDiff.items.length === 0 && <span className="diff-badge">{tr('无变化', 'No Changes')}</span>}
             </div>
             {enhanceDiff.items.length > 0 ? (
               <div className="enhance-diff-list">
                 {enhanceDiff.items.map((item, i) => (
                   <div key={i} className={`enhance-diff-item diff-${item.type}`}>
                     <span className="diff-type-tag">
-                      {item.type === 'added' ? '新增' : item.type === 'changed' ? '修改' : '移除'}
+                      {item.type === 'added' ? tr('新增', 'Added') : item.type === 'changed' ? tr('修改', 'Changed') : tr('移除', 'Removed')}
                     </span>
                     <span className="diff-layer">{item.layer}</span>
                     <span className="diff-field">{item.field}</span>
@@ -781,16 +786,16 @@ export default function PersonaEditorPage() {
               </div>
             ) : (
               <div className="enhance-diff-empty">
-                AI 已处理素材，但未检测到新的特征变化。可能素材中的信息已在现有画像中体现。
+                {tr('AI 已处理素材，但未检测到新的特征变化。可能素材中的信息已在现有画像中体现。', 'AI processed the material but found no new trait changes. The information may already be reflected in the current profile.')}
               </div>
             )}
             <div className="enhance-diff-actions">
               <button type="button" className="btn-primary" onClick={handleAcceptEnhance}>
-                {enhanceDiff.items.length > 0 ? '应用变更' : '确定'}
+                {enhanceDiff.items.length > 0 ? tr('应用变更', 'Apply Changes') : tr('确定', 'OK')}
               </button>
               {enhanceDiff.items.length > 0 && (
                 <button type="button" className="btn-ghost" onClick={handleRejectEnhance}>
-                  放弃
+                  {tr('放弃', 'Discard')}
                 </button>
               )}
             </div>
@@ -809,10 +814,10 @@ export default function PersonaEditorPage() {
 
       <ConfirmDialog
         open={Boolean(leaveConfirm)}
-        title="有未保存修改"
-        message="离开会丢失未保存的修改，确定离开？"
-        confirmLabel="离开"
-        cancelLabel="留下"
+        title={tr('有未保存修改', 'Unsaved Changes')}
+        message={tr('离开会丢失未保存的修改，确定离开？', 'Leaving will discard unsaved changes. Continue?')}
+        confirmLabel={tr('离开', 'Leave')}
+        cancelLabel={tr('留下', 'Stay')}
         danger
         onConfirm={() => {
           leaveConfirm?.()

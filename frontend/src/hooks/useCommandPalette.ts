@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ChatRoom, PersonaSummary } from '../services/api'
+import { useI18n } from '../i18n'
 
 export interface CommandResult {
   id: string
@@ -27,19 +28,25 @@ export function useCommandPalette(
   personaMap: Record<string, PersonaSummary>,
 ): UseCommandPaletteReturn {
   const [isOpen, setIsOpen] = useState(false)
-  const [query, setQuery] = useState('')
+  const [query, setQueryState] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const navigate = useNavigate()
+  const { t } = useI18n()
+
+  const setQuery = useCallback((nextQuery: string) => {
+    setQueryState(nextQuery)
+    setSelectedIndex(0)
+  }, [])
 
   const open = useCallback(() => {
     setIsOpen(true)
-    setQuery('')
+    setQueryState('')
     setSelectedIndex(0)
   }, [])
 
   const close = useCallback(() => {
     setIsOpen(false)
-    setQuery('')
+    setQueryState('')
     setSelectedIndex(0)
   }, [])
 
@@ -49,7 +56,7 @@ export function useCommandPalette(
       {
         id: 'action-battle-prep',
         type: 'action' as const,
-        label: '紧急备战',
+        label: t('command.action.battlePrep'),
         icon: 'Swords',
         shortcut: '\u2318B',
         onSelect: () => {
@@ -60,7 +67,7 @@ export function useCommandPalette(
       {
         id: 'action-new-chat',
         type: 'action' as const,
-        label: '新建对话',
+        label: t('command.action.newChat'),
         icon: 'Plus',
         shortcut: '\u2318\u21E7N',
         onSelect: () => {
@@ -71,7 +78,7 @@ export function useCommandPalette(
       {
         id: 'action-growth',
         type: 'action' as const,
-        label: '成长报告',
+        label: t('command.action.growth'),
         icon: 'TrendingUp',
         shortcut: '\u2318G',
         onSelect: () => {
@@ -80,7 +87,7 @@ export function useCommandPalette(
         },
       },
     ],
-    [close, navigate],
+    [close, navigate, t],
   )
 
   // Build search results
@@ -98,7 +105,12 @@ export function useCommandPalette(
         id: `room-${room.id}`,
         type: 'room',
         label: room.name,
-        description: room.type === 'battle_prep' ? '备战' : room.type === 'group' ? '群组' : '私聊',
+        description:
+          room.type === 'battle_prep'
+            ? t('command.roomType.battlePrep')
+            : room.type === 'group'
+              ? t('command.roomType.group')
+              : t('command.roomType.private'),
         icon: 'MessageSquare',
         onSelect: () => {
           close()
@@ -135,12 +147,9 @@ export function useCommandPalette(
     }
 
     return items
-  }, [query, rooms, personaMap, actions, close, navigate])
+  }, [query, rooms, personaMap, actions, close, navigate, t])
 
-  // Reset selectedIndex when results change
-  useEffect(() => {
-    setSelectedIndex(0)
-  }, [results.length, query])
+  const currentSelectedIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : 0
 
   // Global keyboard listeners
   useEffect(() => {
@@ -152,11 +161,11 @@ export function useCommandPalette(
         e.preventDefault()
         setIsOpen((prev) => {
           if (prev) {
-            setQuery('')
+            setQueryState('')
             setSelectedIndex(0)
             return false
           }
-          setQuery('')
+          setQueryState('')
           setSelectedIndex(0)
           return true
         })
@@ -204,7 +213,7 @@ export function useCommandPalette(
         }
         if (e.key === 'Enter') {
           e.preventDefault()
-          const item = results[selectedIndex]
+          const item = results[currentSelectedIndex]
           if (item) item.onSelect()
           return
         }
@@ -213,13 +222,13 @@ export function useCommandPalette(
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, results, selectedIndex, navigate, close])
+  }, [isOpen, results, currentSelectedIndex, navigate, close])
 
   return {
     isOpen,
     query,
     results,
-    selectedIndex,
+    selectedIndex: currentSelectedIndex,
     open,
     close,
     setQuery,

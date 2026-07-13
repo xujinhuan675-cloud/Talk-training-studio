@@ -3,15 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import { Loader2, Upload, FileText, ArrowLeft, Play } from 'lucide-react'
 import { createDefenseSession, startDefenseSession, type DefenseSession, type PersonaSummary } from '../services/api'
 import { useAppContext } from '../contexts/AppContext'
+import { useI18n } from '../i18n'
 import './DefensePrepPage.css'
 
-const SCENARIO_OPTIONS: { value: string; label: string; desc: string }[] = [
-  { value: 'performance_review', label: '绩效评审', desc: '年度/季度绩效汇报' },
-  { value: 'proposal_review', label: '方案评审', desc: '技术/业务方案答辩' },
-  { value: 'project_report', label: '项目汇报', desc: '项目进度与成果展示' },
-  { value: 'general', label: '通用答辩', desc: '自定义答辩场景' },
-  { value: 'interview', label: '面试', desc: '上传简历/JD，模拟面试' },
-  { value: 'probation_review', label: '转正答辩', desc: '试用期转正述职' },
+const SCENARIO_OPTIONS: { value: string; labelZh: string; labelEn: string; descZh: string; descEn: string }[] = [
+  { value: 'performance_review', labelZh: '绩效评审', labelEn: 'Performance Review', descZh: '年度/季度绩效汇报', descEn: 'Annual or quarterly performance presentation' },
+  { value: 'proposal_review', labelZh: '方案评审', labelEn: 'Proposal Review', descZh: '技术/业务方案答辩', descEn: 'Technical or business proposal defense' },
+  { value: 'project_report', labelZh: '项目汇报', labelEn: 'Project Report', descZh: '项目进度与成果展示', descEn: 'Project progress and outcomes presentation' },
+  { value: 'general', labelZh: '通用答辩', labelEn: 'General Defense', descZh: '自定义答辩场景', descEn: 'Custom defense scenario' },
+  { value: 'interview', labelZh: '面试', labelEn: 'Interview', descZh: '上传简历/JD，模拟面试', descEn: 'Upload a resume or JD for a mock interview' },
+  { value: 'probation_review', labelZh: '转正答辩', labelEn: 'Probation Review', descZh: '试用期转正述职', descEn: 'Probation-to-full-time review presentation' },
 ]
 
 function initialState() {
@@ -28,9 +29,14 @@ function initialState() {
   }
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 export default function DefensePrepPage() {
   const navigate = useNavigate()
   const { personaMap } = useAppContext()
+  const { tr, locale } = useI18n()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [state, setState] = useState(initialState)
 
@@ -78,8 +84,8 @@ export default function DefensePrepPage() {
     try {
       const sess = await createDefenseSession(file, selectedPersonaIds, scenarioType)
       setState((s) => ({ ...s, loading: false, session: sess, step: 2 }))
-    } catch (e: any) {
-      setState((s) => ({ ...s, loading: false, error: e.message || '创建失败，请重试' }))
+    } catch (e: unknown) {
+      setState((s) => ({ ...s, loading: false, error: getErrorMessage(e, tr('创建失败，请重试', 'Creation failed. Please try again.')) }))
     }
   }
 
@@ -92,14 +98,14 @@ export default function DefensePrepPage() {
       if (updated.room_id) {
         navigate(`/chat/${updated.room_id}`)
       } else {
-        setState((s) => ({ ...s, submitting: false, error: '未能创建聊天房间，请重试' }))
+        setState((s) => ({ ...s, submitting: false, error: tr('未能创建聊天房间，请重试', 'Could not create a chat room. Please try again.') }))
       }
-    } catch (e: any) {
-      setState((s) => ({ ...s, submitting: false, error: e.message || '启动失败，请重试' }))
+    } catch (e: unknown) {
+      setState((s) => ({ ...s, submitting: false, error: getErrorMessage(e, tr('启动失败，请重试', 'Start failed. Please try again.')) }))
     }
   }
 
-  const selectedPersonaNames = selectedPersonaIds.map(id => personaMap[id]?.name ?? id).join('、')
+  const selectedPersonaNames = selectedPersonaIds.map(id => personaMap[id]?.name ?? id).join(locale === 'zh' ? '、' : ', ')
   const selectedScenario = SCENARIO_OPTIONS.find((o) => o.value === scenarioType)
   const questions = session?.question_strategy?.questions ?? []
 
@@ -109,13 +115,13 @@ export default function DefensePrepPage() {
         {/* Back link */}
         <button className="dp-back" onClick={() => navigate('/')}>
           <ArrowLeft size={16} />
-          <span>返回首页</span>
+          <span>{tr('返回首页', 'Back Home')}</span>
         </button>
 
         {/* Title */}
         <div className="dp-title-row">
           <FileText size={22} className="dp-title-icon" />
-          <h1 className="dp-title">答辩准备</h1>
+          <h1 className="dp-title">{tr('答辩准备', 'Defense Prep')}</h1>
         </div>
 
         {/* Step indicator */}
@@ -126,7 +132,7 @@ export default function DefensePrepPage() {
                 {n}
               </div>
               <span className={`dp-step-label ${step === n ? 'active' : ''}`}>
-                {n === 1 ? '上传文档' : '确认开始'}
+                {n === 1 ? tr('上传文档', 'Upload Document') : tr('确认开始', 'Confirm Start')}
               </span>
               {n < 2 && <div className={`dp-step-line ${step > n ? 'done' : ''}`} />}
             </div>
@@ -137,11 +143,14 @@ export default function DefensePrepPage() {
         {step === 1 && (
           <div className="dp-card">
             <p className="dp-hint">
-              上传你的汇报文档，选择答辩官和场景类型，AI 将为你生成针对性的答辩问题。
+              {tr(
+                '上传你的汇报文档，选择答辩官和场景类型，AI 将为你生成针对性的答辩问题。',
+                'Upload your presentation document, choose reviewers and a scenario, and AI will generate targeted defense questions.',
+              )}
             </p>
 
             {/* File upload */}
-            <div className="dp-section-label">上传文档</div>
+            <div className="dp-section-label">{tr('上传文档', 'Upload Document')}</div>
             {!file ? (
               <div
                 className={`dp-upload-area ${dragOver ? 'drag-over' : ''}`}
@@ -151,8 +160,8 @@ export default function DefensePrepPage() {
                 onDragLeave={handleDragLeave}
               >
                 <Upload size={28} className="dp-upload-icon" />
-                <span className="dp-upload-text">点击或拖拽上传文件</span>
-                <span className="dp-upload-hint">支持 PDF、Word、PPT、Markdown 等格式</span>
+                <span className="dp-upload-text">{tr('点击或拖拽上传文件', 'Click or drag to upload a file')}</span>
+                <span className="dp-upload-hint">{tr('支持 PDF、Word、PPT、Markdown 等格式', 'Supports PDF, Word, PPT, Markdown, and more')}</span>
               </div>
             ) : (
               <div className="dp-file-selected">
@@ -162,7 +171,7 @@ export default function DefensePrepPage() {
                   className="dp-file-remove"
                   onClick={() => setState((s) => ({ ...s, file: null }))}
                 >
-                  移除
+                  {tr('移除', 'Remove')}
                 </button>
               </div>
             )}
@@ -174,7 +183,7 @@ export default function DefensePrepPage() {
             />
 
             {/* Persona selection */}
-            <div className="dp-section-label">选择答辩官（最多 5 位）</div>
+            <div className="dp-section-label">{tr('选择答辩官（最多 5 位）', 'Choose Reviewers (up to 5)')}</div>
             <div className="dp-multi-select">
               {personas.map((p) => (
                 <label key={p.id} className={`dp-multi-option ${selectedPersonaIds.includes(p.id) ? 'selected' : ''}`}>
@@ -199,7 +208,7 @@ export default function DefensePrepPage() {
             </div>
 
             {/* Scenario selection */}
-            <div className="dp-section-label">答辩场景</div>
+            <div className="dp-section-label">{tr('答辩场景', 'Defense Scenario')}</div>
             <div className="dp-scenario-grid">
               {SCENARIO_OPTIONS.map((opt) => (
                 <button
@@ -208,8 +217,8 @@ export default function DefensePrepPage() {
                   className={`dp-scenario-card ${scenarioType === opt.value ? 'selected' : ''}`}
                   onClick={() => setState((s) => ({ ...s, scenarioType: opt.value }))}
                 >
-                  <span className="dp-scenario-label">{opt.label}</span>
-                  <span className="dp-scenario-desc">{opt.desc}</span>
+                  <span className="dp-scenario-label">{tr(opt.labelZh, opt.labelEn)}</span>
+                  <span className="dp-scenario-desc">{tr(opt.descZh, opt.descEn)}</span>
                 </button>
               ))}
             </div>
@@ -225,12 +234,12 @@ export default function DefensePrepPage() {
                 {loading ? (
                   <span className="dp-loading-inline">
                     <Loader2 size={16} className="dp-spinner" />
-                    AI 正在准备...
+                    {tr('AI 正在准备...', 'AI is preparing...')}
                   </span>
                 ) : (
                   <>
                     <Upload size={14} />
-                    上传并准备
+                    {tr('上传并准备', 'Upload and Prepare')}
                   </>
                 )}
               </button>
@@ -241,28 +250,32 @@ export default function DefensePrepPage() {
         {/* ---- Step 2: Confirm + Start ---- */}
         {step === 2 && session && (
           <div className="dp-card">
-            <p className="dp-hint">AI 已完成分析，以下是答辩准备概要，确认后即可开始模拟答辩。</p>
+            <p className="dp-hint">
+              {tr('AI 已完成分析，以下是答辩准备概要，确认后即可开始模拟答辩。', 'AI has finished analysis. Review the preparation summary below, then start the mock defense.')}
+            </p>
 
             {/* Summary */}
             <div className="dp-summary">
               <div className="dp-summary-row">
-                <span className="dp-summary-label">文档</span>
+                <span className="dp-summary-label">{tr('文档', 'Document')}</span>
                 <span className="dp-summary-value">{session.document_title}</span>
               </div>
               <div className="dp-summary-row">
-                <span className="dp-summary-label">答辩官</span>
+                <span className="dp-summary-label">{tr('答辩官', 'Reviewers')}</span>
                 <span className="dp-summary-value">{selectedPersonaNames}</span>
               </div>
               <div className="dp-summary-row">
-                <span className="dp-summary-label">场景</span>
-                <span className="dp-summary-value">{selectedScenario?.label ?? session.scenario_type}</span>
+                <span className="dp-summary-label">{tr('场景', 'Scenario')}</span>
+                <span className="dp-summary-value">
+                  {selectedScenario ? tr(selectedScenario.labelZh, selectedScenario.labelEn) : session.scenario_type}
+                </span>
               </div>
             </div>
 
             {/* Question preview */}
             {questions.length > 0 && (
               <>
-                <div className="dp-section-label">预设问题 ({questions.length})</div>
+                <div className="dp-section-label">{tr('预设问题 ({count})', 'Prepared Questions ({count})', { count: questions.length })}</div>
                 <div className="dp-question-list">
                   {questions.map((q, i) => (
                     <div key={i} className="dp-question-item">
@@ -288,7 +301,7 @@ export default function DefensePrepPage() {
                 onClick={() => setState((s) => ({ ...s, step: 1, error: null }))}
               >
                 <ArrowLeft size={14} />
-                上一步
+                {tr('上一步', 'Previous')}
               </button>
               <button
                 className="dp-btn-primary"
@@ -298,12 +311,12 @@ export default function DefensePrepPage() {
                 {submitting ? (
                   <span className="dp-loading-inline">
                     <Loader2 size={16} className="dp-spinner" />
-                    启动中...
+                    {tr('启动中...', 'Starting...')}
                   </span>
                 ) : (
                   <>
                     <Play size={14} />
-                    开始模拟答辩
+                    {tr('开始模拟答辩', 'Start Mock Defense')}
                   </>
                 )}
               </button>

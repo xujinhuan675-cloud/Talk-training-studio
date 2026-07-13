@@ -36,6 +36,7 @@ import {
   type CheatSheet as CheatSheetData,
 } from '../services/api'
 import { uploadVideoAnswer } from '../services/trainingStudio'
+import { useI18n } from '../i18n'
 import '../App.css'
 import './ChatPage.css'
 
@@ -47,6 +48,7 @@ function ChatArea() {
   const { personaMap } = useAppContext()
   const { chat, voice, coaching, analysis } = useChatContext()
   const navigate = useNavigate()
+  const { tr } = useI18n()
 
   const [showEmotionSidebar, setShowEmotionSidebar] = useState(false)
   const [showEmotionCurve, setShowEmotionCurve] = useState(false)
@@ -81,13 +83,13 @@ function ChatArea() {
     if (!chat.selectedRoom || battlePrepEnding) return
     const personaId = chat.selectedRoom.room.persona_ids[0] || ''
     const persona = personaMap[personaId]
-    setCheatSheetPersona(persona?.name || '对方')
+    setCheatSheetPersona(persona?.name || tr('对方', 'The other side'))
     setBattlePrepEnding(true)
     try {
       const sheet = await generateCheatSheet(chat.selectedRoom.room.id)
       setCheatSheetData(sheet)
-    } catch (e: any) {
-      alert(e?.message || '话术纸条生成失败')
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : tr('话术纸条生成失败', 'Failed to generate cheat sheet'))
     } finally {
       setBattlePrepEnding(false)
     }
@@ -138,7 +140,7 @@ function ChatArea() {
           <button
             className="chat-page-back-btn"
             onClick={() => navigate('/chat')}
-            title="返回对话列表"
+            title={tr('返回对话列表', 'Back to conversation list')}
           >
             <ArrowLeft size={18} />
           </button>
@@ -146,10 +148,10 @@ function ChatArea() {
           {chat.selectedRoom && (
             <span className={`room-type-badge ${chat.selectedRoom.room.type}`}>
               {chat.selectedRoom.room.type === 'private'
-                ? '私聊'
+                ? tr('私聊', 'Private')
                 : chat.selectedRoom.room.type === 'group'
-                  ? '群聊'
-                  : '备战'}
+                  ? tr('群聊', 'Group')
+                  : tr('备战', 'Battle prep')}
             </span>
           )}
         </div>
@@ -157,21 +159,21 @@ function ChatArea() {
           <button
             className={`header-action-btn ${showEmotionSidebar ? 'active' : ''}`}
             onClick={() => setShowEmotionSidebar((v) => !v)}
-            title="实时情绪面板"
+            title={tr('实时情绪面板', 'Live emotion panel')}
           >
             <Activity size={16} />
           </button>
           <button
             className="header-action-btn"
             onClick={() => setShowEmotionCurve(true)}
-            title="情绪详细分析"
+            title={tr('情绪详细分析', 'Detailed emotion analysis')}
           >
             <BarChart3 size={16} />
           </button>
           <button
             className="header-action-btn"
             onClick={analysis.handleAnalyze}
-            title="分析"
+            title={tr('分析', 'Analyze')}
             disabled={analysis.analyzingRoom}
           >
             <BarChart2 size={16} />
@@ -179,7 +181,7 @@ function ChatArea() {
           <button
             className="header-action-btn coaching"
             onClick={() => coaching.handleStartCoaching()}
-            title="AI 复盘"
+            title={tr('AI 复盘', 'AI Review')}
             disabled={coaching.coachingSending}
           >
             <GraduationCap size={16} />
@@ -188,7 +190,7 @@ function ChatArea() {
             <button
               className="header-action-btn"
               onClick={() => setShowExportMenu((v) => !v)}
-              title="导出"
+              title={tr('导出', 'Export')}
             >
               <Download size={16} />
             </button>
@@ -203,8 +205,8 @@ function ChatArea() {
                 >
                   <FileText size={15} />
                   <div>
-                    <div>HTML 格式</div>
-                    <span className="export-menu-desc">保留聊天样式</span>
+                    <div>{tr('HTML 格式', 'HTML format')}</div>
+                    <span className="export-menu-desc">{tr('保留聊天样式', 'Preserves chat styling')}</span>
                   </div>
                 </div>
                 <div
@@ -216,8 +218,8 @@ function ChatArea() {
                 >
                   <FileDown size={15} />
                   <div>
-                    <div>Markdown 格式</div>
-                    <span className="export-menu-desc">纯文本，便于编辑</span>
+                    <div>{tr('Markdown 格式', 'Markdown format')}</div>
+                    <span className="export-menu-desc">{tr('纯文本，便于编辑', 'Plain text, easy to edit')}</span>
                   </div>
                 </div>
               </div>
@@ -230,7 +232,7 @@ function ChatArea() {
       {isBattlePrep && (
         <div className="chat-page-battle-bar">
           <Zap size={14} />
-          <span>备战模式 · 第 {battlePrepRoundCount}/12 轮</span>
+          <span>{tr('备战模式 · 第 {count}/12 轮', 'Battle prep · Round {count}/12', { count: battlePrepRoundCount })}</span>
           <div className="battle-progress">
             <div
               className="battle-progress-fill"
@@ -247,7 +249,7 @@ function ChatArea() {
             ) : (
               <Flag size={14} />
             )}
-            {battlePrepEnding ? '生成话术纸条...' : '结束备战'}
+            {battlePrepEnding ? tr('生成话术纸条...', 'Generating cheat sheet...') : tr('结束备战', 'End Battle Prep')}
           </button>
         </div>
       )}
@@ -272,10 +274,10 @@ function ChatArea() {
           {/* Mobile pill buttons above input */}
           <div className="chat-mobile-pills">
             {[
-              { key: 'cheatsheet', label: '锦囊' },
-              { key: 'coaching', label: '教练' },
-              { key: 'analysis', label: '评分' },
-              { key: 'emotion', label: '情绪' },
+              { key: 'cheatsheet', label: tr('锦囊', 'Tips') },
+              { key: 'coaching', label: tr('教练', 'Coach') },
+              { key: 'analysis', label: tr('评分', 'Score') },
+              { key: 'emotion', label: tr('情绪', 'Emotion') },
             ].map((pill) => (
               <button
                 key={pill.key}
@@ -295,8 +297,8 @@ function ChatArea() {
             sending={chat.sending}
             placeholder={
               chat.selectedRoom?.room.type === 'group'
-                ? '输入消息... 使用 @ 提及角色'
-                : '输入消息...'
+                ? tr('输入消息... 使用 @ 提及角色', 'Type a message... use @ to mention personas')
+                : tr('输入消息...', 'Type a message...')
             }
             mentionQuery={chat.mentionQuery}
             mentionResults={chat.mentionResults}
@@ -325,7 +327,7 @@ function ChatArea() {
               chat.sendVideoAnswer({
                 url: videoUrl,
                 mimeType: result.mimeType,
-                title: 'Video answer',
+                title: tr('视频回答', 'Video answer'),
                 durationMs: result.durationMs,
                 size: videoSize,
                 recordedAt: result.recordedAt,
@@ -401,10 +403,10 @@ function ChatArea() {
         <div className="chat-mobile-sheet">
           <div className="chat-mobile-sheet-header">
             <h4>
-              {mobileSheet === 'cheatsheet' && '锦囊'}
-              {mobileSheet === 'coaching' && '教练'}
-              {mobileSheet === 'analysis' && '评分'}
-              {mobileSheet === 'emotion' && '情绪'}
+              {mobileSheet === 'cheatsheet' && tr('锦囊', 'Tips')}
+              {mobileSheet === 'coaching' && tr('教练', 'Coach')}
+              {mobileSheet === 'analysis' && tr('评分', 'Score')}
+              {mobileSheet === 'emotion' && tr('情绪', 'Emotion')}
             </h4>
             <button
               className="chat-mobile-sheet-close"
@@ -414,10 +416,10 @@ function ChatArea() {
             </button>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-            {mobileSheet === 'cheatsheet' && '点击上方"结束备战"按钮后，可在此查看话术锦囊。'}
-            {mobileSheet === 'coaching' && '点击开始获取AI教练的实时指导建议。'}
-            {mobileSheet === 'analysis' && '完成对话后，可在此查看对话评分。'}
-            {mobileSheet === 'emotion' && '对话进行中会在此展示情绪变化曲线。'}
+            {mobileSheet === 'cheatsheet' && tr('点击上方"结束备战"按钮后，可在此查看话术锦囊。', 'Tap “End Battle Prep” above to view your cheat sheet here.')}
+            {mobileSheet === 'coaching' && tr('点击开始获取AI教练的实时指导建议。', 'Tap start to get real-time AI coaching suggestions.')}
+            {mobileSheet === 'analysis' && tr('完成对话后，可在此查看对话评分。', 'After finishing the conversation, view scores here.')}
+            {mobileSheet === 'emotion' && tr('对话进行中会在此展示情绪变化曲线。', 'Emotion trends will appear here during the conversation.')}
           </p>
         </div>
       )}
@@ -432,6 +434,7 @@ function ChatArea() {
 export default function ChatPage() {
   const { roomId: roomIdParam } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
+  const { tr } = useI18n()
 
   const roomId = roomIdParam ? Number(roomIdParam) : null
 
@@ -470,14 +473,14 @@ export default function ChatPage() {
           <div className="chat-page-empty-icon">
             <MessageCircle size={32} strokeWidth={1.5} />
           </div>
-          <h2>选择一个对话开始练习</h2>
-          <p>从左侧选择聊天室，或创建一个新的对话</p>
+          <h2>{tr('选择一个对话开始练习', 'Choose a conversation to start practicing')}</h2>
+          <p>{tr('从左侧选择聊天室，或创建一个新的对话', 'Select a chat room from the left, or create a new conversation')}</p>
           <button
             className="chat-page-empty-cta"
             onClick={() => setShowCreateDialog(true)}
           >
             <Plus size={16} />
-            新建聊天室
+            {tr('新建聊天室', 'New Chat Room')}
           </button>
         </div>
       )}
@@ -505,6 +508,7 @@ function ChatAreaWithLoad({
   onRefresh: () => void
 }) {
   const { chat } = useChatContext()
+  const { tr } = useI18n()
 
   useEffect(() => {
     chat.loadRoomDetail(roomId)
@@ -522,8 +526,8 @@ function ChatAreaWithLoad({
         <div className="chat-page-empty-icon">
           <MessageCircle size={32} strokeWidth={1.5} />
         </div>
-        <h2>加载中...</h2>
-        <p>正在加载对话内容</p>
+        <h2>{tr('加载中...', 'Loading...')}</h2>
+        <p>{tr('正在加载对话内容', 'Loading conversation content')}</p>
       </div>
     )
   }

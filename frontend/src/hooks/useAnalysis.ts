@@ -6,6 +6,7 @@ import {
   type AnalysisReport,
   type AnalysisReportSummary,
 } from '../services/api'
+import { useI18n } from '../i18n'
 
 export interface UseAnalysisReturn {
   analysisResult: AnalysisReport | null
@@ -21,6 +22,7 @@ export interface UseAnalysisReturn {
 }
 
 export function useAnalysis(roomId: number | null): UseAnalysisReturn {
+  const { tr } = useI18n()
   const [analysisResult, setAnalysisResult] = useState<AnalysisReport | null>(null)
   const [analyzingRoom, setAnalyzingRoom] = useState(false)
   const [analysisReportList, setAnalysisReportList] = useState<AnalysisReportSummary[]>([])
@@ -46,17 +48,17 @@ export function useAnalysis(roomId: number | null): UseAnalysisReturn {
         setAnalysisResult(report)
         setAnalysisReportList([{ id: report.id, room_id: report.room_id, summary: report.summary, created_at: report.created_at }])
       }
-    } catch (e: any) {
-      const msg = e?.message || '分析失败'
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : tr('分析失败', 'Analysis failed')
       if (msg.includes('No messages') || msg.includes('NoMessages')) {
-        alert('暂无消息可分析，请先发送消息后再试')
+        alert(tr('暂无消息可分析，请先发送消息后再试', 'No messages to analyze yet. Please send a message first.'))
       } else {
         alert(msg)
       }
     } finally {
       setAnalyzingRoom(false)
     }
-  }, [roomId, analyzingRoom])
+  }, [roomId, analyzingRoom, tr])
 
   const handleGenerateNewReport = useCallback(async () => {
     if (!roomId || analyzingRoom) return
@@ -67,12 +69,12 @@ export function useAnalysis(roomId: number | null): UseAnalysisReturn {
       // Refresh list
       const reports = await listAnalysisReports(roomId)
       setAnalysisReportList(reports)
-    } catch (e: any) {
-      alert(e?.message || '生成失败')
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : tr('生成失败', 'Generation failed'))
     } finally {
       setAnalyzingRoom(false)
     }
-  }, [roomId, analyzingRoom])
+  }, [roomId, analyzingRoom, tr])
 
   const handleSelectReport = useCallback(async (reportId: number) => {
     if (!roomId) return
@@ -80,9 +82,9 @@ export function useAnalysis(roomId: number | null): UseAnalysisReturn {
       const full = await fetchAnalysisReport(roomId, reportId)
       setAnalysisResult(full)
     } catch {
-      alert('加载报告失败')
+      alert(tr('加载报告失败', 'Failed to load report'))
     }
-  }, [roomId])
+  }, [roomId, tr])
 
   const handleScrollToMessage = useCallback((messageIndices: number[] | undefined, messageIdMap: Record<string, number> | undefined) => {
     if (!messageIndices?.length || !messageIdMap) return

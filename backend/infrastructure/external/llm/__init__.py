@@ -40,11 +40,13 @@ async def init_llm_client() -> None:
         _llm_client = OpenAIProvider(
             api_key=llm_cfg.api_key,
             base_url=llm_cfg.base_url,
+            wire_api=llm_cfg.wire_api,
             default_model=llm_cfg.default_model,
             default_temperature=llm_cfg.temperature,
             default_max_tokens=llm_cfg.max_tokens,
             timeout=llm_cfg.timeout,
             max_retries=llm_cfg.max_retries,
+            user_agent=llm_cfg.user_agent,
         )
         logger.info(
             "llm_client_initialized",

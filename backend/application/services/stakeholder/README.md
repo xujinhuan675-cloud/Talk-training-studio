@@ -14,6 +14,7 @@
 | `sse.py` | RoomEventBus — SSE 事件总线 + format_sse 格式化 |
 | `dispatcher.py` | Dispatcher — 群聊调度器，decide_responders() + check_followup()；首轮调度为空时兜底选择首位角色避免冷场 |
 | `analysis_service.py` | AnalysisService — LLM 智能对话分析报告生成（阻力排名 + 有效论点 + 沟通建议） |
+| `growth_service.py` | GrowthService — 成长看板聚合不强依赖 LLM；评估、洞察、沟通力名片在配置 Stakeholder LLM 后生成 |
 | `compression_service.py` | CompressionService — 后台对话历史语义压缩（异步增量摘要，不阻塞聊天） |
 | `persona_migrator.py` | Story 2.3 — markdown v1 → 5-layer v2 迁移（pure functions + async run_migration），供 `scripts/migrate_personas_to_v2.py` 调用 |
 | `persona_builder_service.py` | Story 2.4 — PersonaBuilderService：agent→parse→adversarialize→persist 流式编排，yield BuildEvent 序列（AC1-AC8） |
@@ -31,3 +32,4 @@
 - `dispatcher.py` 依赖 `LLMPort`（调度决策 LLM 调用）、`PersonaLoader`（角色画像摘要）；LLM 返回空/解析失败时首轮调度兜底到房间首位角色
 - `persona_loader.py` 依赖文件系统（读取 `data/personas/*.md`）
 - `analysis_service.py` 依赖 `UnitOfWork`、`LLMPort`（分析生成）、`PersonaLoader`（角色信息）
+- `growth_service.py` 依赖 `UnitOfWork`、`PersonaLoader`；`LLMPort` 可选，缺失时只提供非生成式看板能力

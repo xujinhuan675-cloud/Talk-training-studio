@@ -39,6 +39,7 @@ import {
   type PersonaRelationship,
 } from '../services/api'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
+import { useI18n } from '../i18n'
 import './SettingsPage.css'
 
 /** Reusable confirm dialog state hook */
@@ -55,21 +56,25 @@ function useConfirmDialog() {
     setState((s) => ({ ...s, open: false }))
   }, [])
 
-  const confirm = useCallback(() => {
+  const confirm = () => {
     state.onConfirm()
     close()
-  }, [state.onConfirm, close])
+  }
 
   return { ...state, ask, close, confirm }
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 type TabKey = 'personas' | 'scenarios' | 'organizations' | 'preferences'
 
-const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-  { key: 'personas', label: '角色', icon: <Users size={14} /> },
-  { key: 'scenarios', label: '场景', icon: <Layers size={14} /> },
-  { key: 'organizations', label: '组织', icon: <Building2 size={14} /> },
-  { key: 'preferences', label: '偏好', icon: <Volume2 size={14} /> },
+const TABS: { key: TabKey; labelZh: string; labelEn: string; icon: React.ReactNode }[] = [
+  { key: 'personas', labelZh: '角色', labelEn: 'Personas', icon: <Users size={14} /> },
+  { key: 'scenarios', labelZh: '场景', labelEn: 'Scenarios', icon: <Layers size={14} /> },
+  { key: 'organizations', labelZh: '组织', labelEn: 'Organizations', icon: <Building2 size={14} /> },
+  { key: 'preferences', labelZh: '偏好', labelEn: 'Preferences', icon: <Volume2 size={14} /> },
 ]
 
 // ---------------------------------------------------------------------------
@@ -78,6 +83,7 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
 
 function PersonasTab() {
   const navigate = useNavigate()
+  const { tr } = useI18n()
   const { personaMap, currentOrg, reloadPersonas } = useAppContext()
   const personas = Object.values(personaMap)
   const dialog = useConfirmDialog()
@@ -107,19 +113,19 @@ function PersonasTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">角色管理</h3>
+        <h3 className="settings-section-title">{tr('角色管理', 'Persona Management')}</h3>
         <div className="settings-header-actions">
           <button
             className="persona-build-btn"
             onClick={() => navigate('/persona/new')}
-            title="粘贴素材让 AI 生成对手画像"
+            title={tr('粘贴素材让 AI 生成对手画像', 'Paste materials for AI to generate opponent profiles')}
           >
             <Sparkles size={14} />
-            从素材生成对手
+            {tr('从素材生成对手', 'Generate from Materials')}
           </button>
           <button className="settings-create-btn" onClick={startCreate}>
             <Plus size={14} />
-            创建新角色
+            {tr('创建新角色', 'Create Persona')}
           </button>
         </div>
       </div>
@@ -130,7 +136,7 @@ function PersonasTab() {
             <div className="settings-empty-icon">
               <Users size={36} />
             </div>
-            <p>暂无角色，点击上方按钮创建</p>
+            <p>{tr('暂无角色，点击上方按钮创建', 'No personas yet. Use the button above to create one.')}</p>
           </div>
         )}
         {personas.map((p) => (
@@ -150,14 +156,14 @@ function PersonasTab() {
               <button
                 className="settings-item-btn"
                 onClick={(e) => { e.stopPropagation(); navigate(`/persona/${encodeURIComponent(p.id)}/edit`) }}
-                title="查看详情"
+                title={tr('查看详情', 'View details')}
               >
                 <Eye size={14} />
               </button>
               <button
                 className="settings-item-btn"
                 onClick={(e) => { e.stopPropagation(); startEdit(p) }}
-                title="编辑"
+                title={tr('编辑', 'Edit')}
               >
                 <Pencil size={14} />
               </button>
@@ -165,11 +171,15 @@ function PersonasTab() {
                 className="settings-item-btn danger"
                 onClick={(e) => {
                   e.stopPropagation()
-                  dialog.ask('删除角色', `确定删除角色「${p.name}」？此操作无法撤销。`, () => {
+                  dialog.ask(
+                    tr('删除角色', 'Delete Persona'),
+                    tr('确定删除角色「{name}」？此操作无法撤销。', 'Delete persona “{name}”? This cannot be undone.', { name: p.name }),
+                    () => {
                     deletePersona(p.id).then(() => reloadPersonas())
-                  })
+                    },
+                  )
                 }}
-                title="删除"
+                title={tr('删除', 'Delete')}
               >
                 <Trash2 size={14} />
               </button>
@@ -185,7 +195,7 @@ function PersonasTab() {
         editingPersona={editing}
         currentOrg={currentOrg}
       />
-      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel="删除" danger onConfirm={dialog.confirm} onCancel={dialog.close} />
+      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={tr('删除', 'Delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
     </>
   )
 }
@@ -195,6 +205,7 @@ function PersonasTab() {
 // ---------------------------------------------------------------------------
 
 function ScenariosTab() {
+  const { tr } = useI18n()
   const { personaMap, reloadScenarios } = useAppContext()
   const dialog = useConfirmDialog()
 
@@ -261,7 +272,7 @@ function ScenariosTab() {
 
   const handleSave = async () => {
     if (!name.trim() || !contextPrompt.trim()) {
-      setError('名称和上下文提示词不能为空')
+      setError(tr('名称和上下文提示词不能为空', 'Name and context prompt are required'))
       return
     }
     setSubmitting(true)
@@ -285,8 +296,8 @@ function ScenariosTab() {
       await loadData()
       reloadScenarios()
       handleCancel()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     } finally {
       setSubmitting(false)
     }
@@ -294,28 +305,32 @@ function ScenariosTab() {
 
   const handleDelete = () => {
     if (!editing) return
-    dialog.ask('删除场景', `确定删除场景「${editing.name}」？此操作无法撤销。`, async () => {
+    dialog.ask(
+      tr('删除场景', 'Delete Scenario'),
+      tr('确定删除场景「{name}」？此操作无法撤销。', 'Delete scenario “{name}”? This cannot be undone.', { name: editing.name }),
+      async () => {
       setSubmitting(true)
       try {
         await deleteScenario(editing.id)
         await loadData()
         reloadScenarios()
         handleCancel()
-      } catch (e: any) {
-        setError(e.message)
+      } catch (e: unknown) {
+        setError(getErrorMessage(e))
       } finally {
         setSubmitting(false)
       }
-    })
+      },
+    )
   }
 
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">场景管理</h3>
+        <h3 className="settings-section-title">{tr('场景管理', 'Scenario Management')}</h3>
         <button className="settings-create-btn" onClick={startCreate}>
           <Plus size={14} />
-          新建场景
+          {tr('新建场景', 'New Scenario')}
         </button>
       </div>
 
@@ -325,7 +340,7 @@ function ScenariosTab() {
             <div className="settings-empty-icon">
               <Layers size={36} />
             </div>
-            <p>暂无场景，点击上方按钮创建</p>
+            <p>{tr('暂无场景，点击上方按钮创建', 'No scenarios yet. Use the button above to create one.')}</p>
           </div>
         )}
         {scenarios.map((s) => (
@@ -353,7 +368,7 @@ function ScenariosTab() {
               <button
                 className="settings-item-btn"
                 onClick={(e) => { e.stopPropagation(); startEdit(s) }}
-                title="编辑"
+                title={tr('编辑', 'Edit')}
               >
                 <Pencil size={14} />
               </button>
@@ -361,11 +376,15 @@ function ScenariosTab() {
                 className="settings-item-btn danger"
                 onClick={(e) => {
                   e.stopPropagation()
-                  dialog.ask('删除场景', `确定删除场景「${s.name}」？此操作无法撤销。`, () => {
+                  dialog.ask(
+                    tr('删除场景', 'Delete Scenario'),
+                    tr('确定删除场景「{name}」？此操作无法撤销。', 'Delete scenario “{name}”? This cannot be undone.', { name: s.name }),
+                    () => {
                     deleteScenario(s.id).then(() => { loadData(); reloadScenarios() })
-                  })
+                    },
+                  )
                 }}
-                title="删除"
+                title={tr('删除', 'Delete')}
               >
                 <Trash2 size={14} />
               </button>
@@ -376,39 +395,39 @@ function ScenariosTab() {
 
       {showForm && (
         <div className="settings-form-panel">
-          <h4>{isNew ? '新建场景' : '编辑场景'}</h4>
+          <h4>{isNew ? tr('新建场景', 'New Scenario') : tr('编辑场景', 'Edit Scenario')}</h4>
 
           <label className="field-label">
-            名称
+            {tr('名称', 'Name')}
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="场景名称"
+              placeholder={tr('场景名称', 'Scenario name')}
               autoFocus
             />
           </label>
 
           <label className="field-label">
-            描述（可选）
+            {tr('描述（可选）', 'Description (optional)')}
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="简短描述"
+              placeholder={tr('简短描述', 'Short description')}
             />
           </label>
 
           <label className="field-label">
-            上下文提示词
+            {tr('上下文提示词', 'Context Prompt')}
             <textarea
               value={contextPrompt}
               onChange={(e) => setContextPrompt(e.target.value)}
-              placeholder="设定场景的上下文提示词..."
+              placeholder={tr('设定场景的上下文提示词...', 'Set the context prompt for this scenario...')}
             />
           </label>
 
-          <div className="field-label" style={{ marginBottom: 4 }}>推荐角色（可选）</div>
+          <div className="field-label" style={{ marginBottom: 4 }}>{tr('推荐角色（可选）', 'Recommended Personas (optional)')}</div>
           <div className="settings-checkbox-list">
             {allPersonas.map((p) => (
               <label key={p.id} className="settings-checkbox-item">
@@ -431,21 +450,21 @@ function ScenariosTab() {
           <div className="settings-form-actions">
             {editing && (
               <button className="btn-delete" onClick={handleDelete} disabled={submitting}>
-                删除
+                {tr('删除', 'Delete')}
               </button>
             )}
-            <button className="btn-cancel" onClick={handleCancel}>取消</button>
+            <button className="btn-cancel" onClick={handleCancel}>{tr('取消', 'Cancel')}</button>
             <button
               className="btn-submit"
               onClick={handleSave}
               disabled={submitting}
             >
-              {submitting ? '保存中...' : '保存'}
+              {submitting ? tr('保存中...', 'Saving...') : tr('保存', 'Save')}
             </button>
           </div>
         </div>
       )}
-      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel="删除" danger onConfirm={dialog.confirm} onCancel={dialog.close} />
+      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={tr('删除', 'Delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
     </>
   )
 }
@@ -454,14 +473,15 @@ function ScenariosTab() {
 // Organizations Tab
 // ---------------------------------------------------------------------------
 
-const REL_LABELS: Record<string, string> = {
-  superior: '上级',
-  subordinate: '下级',
-  peer: '同级',
-  cross_department: '跨部门',
+const REL_LABELS: Record<string, { zh: string; en: string }> = {
+  superior: { zh: '上级', en: 'Manager' },
+  subordinate: { zh: '下级', en: 'Direct Report' },
+  peer: { zh: '同级', en: 'Peer' },
+  cross_department: { zh: '跨部门', en: 'Cross-functional' },
 }
 
 function OrganizationsTab() {
+  const { tr } = useI18n()
   const { reloadOrganizations, reloadPersonas } = useAppContext()
   const dialog = useConfirmDialog()
   const [personas, setPersonas] = useState<PersonaSummary[]>([])
@@ -492,7 +512,7 @@ function OrganizationsTab() {
 
   const loadOrgs = () => fetchOrganizations().then(setOrgs).catch(() => {})
 
-  const loadOrgDetail = async (orgId: number) => {
+  const loadOrgDetail = useCallback(async (orgId: number) => {
     const detail = await fetchOrganizationDetail(orgId)
     setSelectedOrg(detail.organization)
     setTeams(detail.teams)
@@ -501,7 +521,7 @@ function OrganizationsTab() {
     setOrgDescription(detail.organization.description)
     setOrgContextPrompt(detail.organization.context_prompt)
     fetchRelationships(orgId).then(setRelationships).catch(() => {})
-  }
+  }, [])
 
   useEffect(() => {
     loadOrgs()
@@ -511,9 +531,9 @@ function OrganizationsTab() {
 
   useEffect(() => {
     if (orgs.length > 0 && !selectedOrg) {
-      loadOrgDetail(orgs[0].id)
+      void loadOrgDetail(orgs[0].id)
     }
-  }, [orgs])
+  }, [orgs, selectedOrg, loadOrgDetail])
 
   const handleNewOrg = () => {
     setSelectedOrg(null)
@@ -549,8 +569,8 @@ function OrganizationsTab() {
         await loadOrgDetail(created.id)
       }
       reloadOrganizations()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     } finally {
       setSaving(false)
     }
@@ -558,7 +578,10 @@ function OrganizationsTab() {
 
   const handleDeleteOrg = () => {
     if (!selectedOrg) return
-    dialog.ask('删除组织', `确定删除组织「${selectedOrg.name}」？所有关联的团队和关系数据将一并删除，此操作无法撤销。`, async () => {
+    dialog.ask(
+      tr('删除组织', 'Delete Organization'),
+      tr('确定删除组织「{name}」？所有关联的团队和关系数据将一并删除，此操作无法撤销。', 'Delete organization “{name}”? All related teams and relationship data will also be removed. This cannot be undone.', { name: selectedOrg.name }),
+      async () => {
       try {
         await deleteOrganization(selectedOrg.id)
         setSelectedOrg(null)
@@ -571,10 +594,11 @@ function OrganizationsTab() {
         await loadOrgs()
         reloadOrganizations()
         reloadPersonas()
-      } catch (e: any) {
-        setError(e.message)
+      } catch (e: unknown) {
+        setError(getErrorMessage(e))
       }
-    })
+      },
+    )
   }
 
   const handleAddTeam = async () => {
@@ -583,8 +607,8 @@ function OrganizationsTab() {
       await createTeam(selectedOrg.id, { name: newTeamName.trim() })
       setNewTeamName('')
       await loadOrgDetail(selectedOrg.id)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -593,8 +617,8 @@ function OrganizationsTab() {
     try {
       await deleteTeam(selectedOrg.id, teamId)
       await loadOrgDetail(selectedOrg.id)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -609,8 +633,8 @@ function OrganizationsTab() {
       })
       setRelDesc('')
       fetchRelationships(selectedOrg.id).then(setRelationships)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -619,8 +643,8 @@ function OrganizationsTab() {
     try {
       await deleteRelationship(selectedOrg.id, relId)
       fetchRelationships(selectedOrg.id).then(setRelationships)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -637,8 +661,8 @@ function OrganizationsTab() {
       await updatePersona(personaId, { organization_id: selectedOrg.id, team_id: tId })
       reloadPersonas()
       fetchPersonas().then(setPersonas).catch(() => {})
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -648,8 +672,8 @@ function OrganizationsTab() {
       await updatePersona(personaId, { team_id: null })
       reloadPersonas()
       fetchPersonas().then(setPersonas).catch(() => {})
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -658,10 +682,10 @@ function OrganizationsTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">组织管理</h3>
+        <h3 className="settings-section-title">{tr('组织管理', 'Organization Management')}</h3>
         <button className="settings-create-btn" onClick={handleNewOrg}>
           <Plus size={14} />
-          新建组织
+          {tr('新建组织', 'New Organization')}
         </button>
       </div>
 
@@ -682,21 +706,21 @@ function OrganizationsTab() {
         {/* Org sub-tabs */}
         <div className="settings-org-tabs">
           <button className={`settings-org-tab${orgTab === 'info' ? ' active' : ''}`} onClick={() => setOrgTab('info')}>
-            基本信息
+            {tr('基本信息', 'Basic Info')}
           </button>
           <button
             className={`settings-org-tab${orgTab === 'teams' ? ' active' : ''}`}
             onClick={() => setOrgTab('teams')}
             disabled={!selectedOrg}
           >
-            团队
+            {tr('团队', 'Teams')}
           </button>
           <button
             className={`settings-org-tab${orgTab === 'relationships' ? ' active' : ''}`}
             onClick={() => setOrgTab('relationships')}
             disabled={!selectedOrg}
           >
-            角色关系
+            {tr('角色关系', 'Persona Relationships')}
           </button>
         </div>
 
@@ -704,28 +728,28 @@ function OrganizationsTab() {
           {orgTab === 'info' && (
             <>
               <label className="field-label">
-                组织名称
-                <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="如：Acme Corp" />
+                {tr('组织名称', 'Organization Name')}
+                <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder={tr('如：Acme Corp', 'Example: Acme Corp')} />
               </label>
               <label className="field-label">
-                行业
-                <input type="text" value={orgIndustry} onChange={(e) => setOrgIndustry(e.target.value)} placeholder="如：SaaS / 金融 / 制造" />
+                {tr('行业', 'Industry')}
+                <input type="text" value={orgIndustry} onChange={(e) => setOrgIndustry(e.target.value)} placeholder={tr('如：SaaS / 金融 / 制造', 'Example: SaaS / Finance / Manufacturing')} />
               </label>
               <label className="field-label">
-                组织描述
-                <textarea value={orgDescription} onChange={(e) => setOrgDescription(e.target.value)} placeholder="组织的业务、产品、文化..." style={{ minHeight: 60 }} />
+                {tr('组织描述', 'Organization Description')}
+                <textarea value={orgDescription} onChange={(e) => setOrgDescription(e.target.value)} placeholder={tr('组织的业务、产品、文化...', 'Business, products, culture...')} style={{ minHeight: 60 }} />
               </label>
               <label className="field-label">
-                上下文提示词
-                <textarea value={orgContextPrompt} onChange={(e) => setOrgContextPrompt(e.target.value)} placeholder="注入所有角色 system prompt 的组织背景..." style={{ minHeight: 80 }} />
+                {tr('上下文提示词', 'Context Prompt')}
+                <textarea value={orgContextPrompt} onChange={(e) => setOrgContextPrompt(e.target.value)} placeholder={tr('注入所有角色 system prompt 的组织背景...', 'Organization context injected into all persona system prompts...')} style={{ minHeight: 80 }} />
               </label>
 
               <div className="settings-form-actions">
                 {selectedOrg && (
-                  <button className="btn-delete" onClick={handleDeleteOrg}>删除组织</button>
+                  <button className="btn-delete" onClick={handleDeleteOrg}>{tr('删除组织', 'Delete Organization')}</button>
                 )}
                 <button className="btn-submit" onClick={handleSaveOrg} disabled={saving || !orgName.trim()}>
-                  {saving ? '保存中...' : '保存'}
+                  {saving ? tr('保存中...', 'Saving...') : tr('保存', 'Save')}
                 </button>
               </div>
             </>
@@ -744,7 +768,7 @@ function OrganizationsTab() {
                             <div className="team-item-name">{t.name}</div>
                             {t.description && <div className="team-item-desc">{t.description}</div>}
                           </div>
-                          <button className="team-delete-btn" onClick={() => handleDeleteTeam(t.id)}>删除</button>
+                          <button className="team-delete-btn" onClick={() => handleDeleteTeam(t.id)}>{tr('删除', 'Delete')}</button>
                         </div>
                         <div className="team-members">
                           {members.length > 0 ? (
@@ -755,19 +779,19 @@ function OrganizationsTab() {
                                 <button
                                   className="team-member-remove"
                                   onClick={() => handleRemoveFromTeam(p.id)}
-                                  title="移出团队"
+                                  title={tr('移出团队', 'Remove from team')}
                                 >&times;</button>
                               </span>
                             ))
                           ) : (
-                            <span className="team-members-empty">暂无成员</span>
+                            <span className="team-members-empty">{tr('暂无成员', 'No members')}</span>
                           )}
                           <select
                             className="team-add-member-select"
                             value=""
                             onChange={(e) => e.target.value && handleAssignToTeam(e.target.value, t.id)}
                           >
-                            <option value="">+ 添加角色</option>
+                            <option value="">{tr('+ 添加角色', '+ Add Persona')}</option>
                             {unassignedPersonas.map((p) => (
                               <option key={p.id} value={p.id}>{p.name} ({p.role})</option>
                             ))}
@@ -778,12 +802,14 @@ function OrganizationsTab() {
                   })}
                 </div>
               ) : (
-                <div className="empty-hint">暂无团队，添加第一个</div>
+                <div className="empty-hint">{tr('暂无团队，添加第一个', 'No teams yet. Add the first one.')}</div>
               )}
 
               {unassignedPersonas.length > 0 && teams.length > 0 && (
                 <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                  未分配团队的角色：{unassignedPersonas.map((p) => p.name).join('、')}
+                  {tr('未分配团队的角色：{names}', 'Personas without a team: {names}', {
+                    names: unassignedPersonas.map((p) => p.name).join(tr('、', ', ')),
+                  })}
                 </div>
               )}
 
@@ -792,10 +818,10 @@ function OrganizationsTab() {
                   type="text"
                   value={newTeamName}
                   onChange={(e) => setNewTeamName(e.target.value)}
-                  placeholder="团队名称"
+                  placeholder={tr('团队名称', 'Team name')}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddTeam()}
                 />
-                <button onClick={handleAddTeam} disabled={!newTeamName.trim()}>添加团队</button>
+                <button onClick={handleAddTeam} disabled={!newTeamName.trim()}>{tr('添加团队', 'Add Team')}</button>
               </div>
             </>
           )}
@@ -809,35 +835,37 @@ function OrganizationsTab() {
                       <span>
                         <strong>{personaName(r.from_persona_id)}</strong>
                         <span className={`rel-type-badge ${r.relationship_type}`}>
-                          {REL_LABELS[r.relationship_type] || r.relationship_type}
+                          {REL_LABELS[r.relationship_type]
+                            ? tr(REL_LABELS[r.relationship_type].zh, REL_LABELS[r.relationship_type].en)
+                            : r.relationship_type}
                         </span>
                         <strong>{personaName(r.to_persona_id)}</strong>
                         {r.description && <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>-- {r.description}</span>}
                       </span>
-                      <button className="team-delete-btn" onClick={() => handleDeleteRelationship(r.id)}>删除</button>
+                      <button className="team-delete-btn" onClick={() => handleDeleteRelationship(r.id)}>{tr('删除', 'Delete')}</button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="empty-hint">暂无角色关系</div>
+                <div className="empty-hint">{tr('暂无角色关系', 'No persona relationships yet')}</div>
               )}
               <div className="add-rel-form">
                 <select value={relFrom} onChange={(e) => setRelFrom(e.target.value)}>
-                  <option value="">角色A</option>
+                  <option value="">{tr('角色A', 'Persona A')}</option>
                   {personas.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 <select value={relType} onChange={(e) => setRelType(e.target.value)}>
-                  <option value="superior">上级</option>
-                  <option value="subordinate">下级</option>
-                  <option value="peer">同级</option>
-                  <option value="cross_department">跨部门</option>
+                  <option value="superior">{tr('上级', 'Manager')}</option>
+                  <option value="subordinate">{tr('下级', 'Direct Report')}</option>
+                  <option value="peer">{tr('同级', 'Peer')}</option>
+                  <option value="cross_department">{tr('跨部门', 'Cross-functional')}</option>
                 </select>
                 <select value={relTo} onChange={(e) => setRelTo(e.target.value)}>
-                  <option value="">角色B</option>
+                  <option value="">{tr('角色B', 'Persona B')}</option>
                   {personas.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
-                <input type="text" value={relDesc} onChange={(e) => setRelDesc(e.target.value)} placeholder="描述（可选）" style={{ flex: 1 }} />
-                <button onClick={handleAddRelationship} disabled={!relFrom || !relTo || relFrom === relTo}>添加</button>
+                <input type="text" value={relDesc} onChange={(e) => setRelDesc(e.target.value)} placeholder={tr('描述（可选）', 'Description (optional)')} style={{ flex: 1 }} />
+                <button onClick={handleAddRelationship} disabled={!relFrom || !relTo || relFrom === relTo}>{tr('添加', 'Add')}</button>
               </div>
             </>
           )}
@@ -845,7 +873,7 @@ function OrganizationsTab() {
           {error && <div className="settings-error">{error}</div>}
         </div>
       </div>
-      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel="删除" danger onConfirm={dialog.confirm} onCancel={dialog.close} />
+      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={tr('删除', 'Delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
     </>
   )
 }
@@ -855,13 +883,15 @@ function OrganizationsTab() {
 // ---------------------------------------------------------------------------
 
 function PreferencesTab() {
+  const { tr } = useI18n()
+
   return (
     <div className="settings-placeholder">
       <div className="settings-placeholder-icon">
         <Volume2 size={28} />
       </div>
-      <h3>语音设置即将推出</h3>
-      <p>TTS 语音合成、角色专属音色等功能正在开发中</p>
+      <h3>{tr('语音设置即将推出', 'Voice Settings Coming Soon')}</h3>
+      <p>{tr('TTS 语音合成、角色专属音色等功能正在开发中', 'TTS synthesis, persona-specific voices, and related features are in development.')}</p>
     </div>
   )
 }
@@ -871,6 +901,7 @@ function PreferencesTab() {
 // ---------------------------------------------------------------------------
 
 const SettingsPage: React.FC = () => {
+  const { tr } = useI18n()
   const [activeTab, setActiveTab] = useState<TabKey>('personas')
 
   return (
@@ -882,7 +913,7 @@ const SettingsPage: React.FC = () => {
             className={`settings-tab${activeTab === tab.key ? ' active' : ''}`}
             onClick={() => setActiveTab(tab.key)}
           >
-            {tab.label}
+            {tr(tab.labelZh, tab.labelEn)}
           </button>
         ))}
       </div>

@@ -1,86 +1,128 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Keyboard, Loader2, Mic2, Video, Wand2 } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { startBattle } from '../services/api'
 import {
-  DEFAULT_TRAINING_STUDIO_CONFIG,
   buildTrainingStudioPrompt,
+  getDefaultTrainingStudioConfig,
+  getExpressionFrameworkLabel,
+  getTrainingDifficultyLabel,
+  getTrainingLevelLabel,
+  getTrainingScenarioLabel,
   toBattleDifficulty,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
+import { useI18n, type Translate, type TranslationKey } from '../i18n'
 import './TrainingStudioPage.css'
 
 type TrainingMode = 'text' | 'voice' | 'video'
 
 const modeOptions: Array<{
   value: TrainingMode
-  label: string
-  description: string
+  labelKey: TranslationKey
+  descriptionKey: TranslationKey
   icon: typeof Keyboard
 }> = [
   {
     value: 'text',
-    label: 'Text',
-    description: 'Structured written practice with rubrics and replay.',
+    labelKey: 'training.mode.text.label',
+    descriptionKey: 'training.mode.text.desc',
     icon: Keyboard,
   },
   {
     value: 'voice',
-    label: 'Voice',
-    description: 'Start in chat with voice controls ready for spoken answers.',
+    labelKey: 'training.mode.voice.label',
+    descriptionKey: 'training.mode.voice.desc',
     icon: Mic2,
   },
   {
     value: 'video',
-    label: 'Video',
-    description: 'Record camera answers and keep the replay attached to messages.',
+    labelKey: 'training.mode.video.label',
+    descriptionKey: 'training.mode.video.desc',
     icon: Video,
   },
 ]
 
-function modeInstruction(mode: TrainingMode): string {
+const modeLabelKeys: Record<TrainingMode, TranslationKey> = {
+  text: 'training.mode.text.label',
+  voice: 'training.mode.voice.label',
+  video: 'training.mode.video.label',
+}
+
+function getModeLabel(mode: TrainingMode, t: Translate): string {
+  return t(modeLabelKeys[mode])
+}
+
+function modeInstruction(mode: TrainingMode, t: Translate): string {
   if (mode === 'voice') {
-    return 'Session mode: voice. Ask concise questions, wait for spoken answers, and give short turn-by-turn feedback.'
+    return t('training.mode.voice.instruction')
   }
   if (mode === 'video') {
-    return 'Session mode: video. Ask answer prompts that work well as recorded video responses and review delivery, structure, and evidence.'
+    return t('training.mode.video.instruction')
   }
-  return 'Session mode: text. Run a focused written communication drill with structured feedback.'
+  return t('training.mode.text.instruction')
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
 }
 
 export default function TrainingStudioPage() {
   const navigate = useNavigate()
-  const [config, setConfig] = useState<TrainingStudioConfig>(DEFAULT_TRAINING_STUDIO_CONFIG)
+  const { t } = useI18n()
+  const [config, setConfig] = useState<TrainingStudioConfig>(() => getDefaultTrainingStudioConfig(t))
+  const previousDefaultsRef = useRef(getDefaultTrainingStudioConfig(t))
   const [mode, setMode] = useState<TrainingMode>('voice')
   const [goal, setGoal] = useState('')
   const [starting, setStarting] = useState<'quick' | 'battle' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    const previousDefaults = previousDefaultsRef.current
+    const nextDefaults = getDefaultTrainingStudioConfig(t)
+
+    setConfig((current) => ({
+      ...current,
+      role: current.role === previousDefaults.role ? nextDefaults.role : current.role,
+      techStack: current.techStack === previousDefaults.techStack ? nextDefaults.techStack : current.techStack,
+    }))
+    previousDefaultsRef.current = nextDefaults
+  }, [t])
+
   const prompt = useMemo(() => {
-    const base = goal.trim() || `${config.role} ${config.scenario} practice`
-    return buildTrainingStudioPrompt(config, `${base}\n\n${modeInstruction(mode)}`)
-  }, [config, goal, mode])
+    const scenario = getTrainingScenarioLabel(config.scenario, t)
+    const role = config.role.trim() || t('training.defaults.roleFallback')
+    const base = goal.trim() || t('training.prompt.defaultGoal', { role, scenario })
+    return buildTrainingStudioPrompt(config, `${base}\n\n${modeInstruction(mode, t)}`, t)
+  }, [config, goal, mode, t])
 
   const startQuickSession = async () => {
     setStarting('quick')
     setError(null)
     try {
+      const role = config.role.trim() || t('training.defaults.roleFallback')
+      const scenario = getTrainingScenarioLabel(config.scenario, t)
+      const difficulty = getTrainingDifficultyLabel(config.difficulty, t)
+      const framework = getExpressionFrameworkLabel(config.framework, t)
+      const level = getTrainingLevelLabel(config.level, t)
+      const modeLabel = getModeLabel(mode, t)
+
       const room = await startBattle({
-        persona_name: `${config.role || 'Communication'} Coach`,
-        persona_role: `${config.level || 'Practice'} ${config.scenario} trainer`,
-        persona_style: `${config.difficulty} pressure, ${config.framework.toUpperCase()} feedback, ${mode} response mode`,
+        persona_name: t('training.prompt.personaName', { role }),
+        persona_role: t('training.prompt.personaRole', { level, scenario }),
+        persona_style: t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
         scenario_context: prompt,
         selected_training_points: [
-          `${config.framework.toUpperCase()} structure`,
-          `${mode} delivery`,
-          'evidence-backed answers',
+          t('training.prompt.structurePoint', { framework }),
+          t('training.prompt.deliveryPoint', { mode: modeLabel }),
+          t('training.prompt.evidencePoint'),
         ],
         difficulty: toBattleDifficulty(config.difficulty),
       })
       navigate(`/chat/${room.id}`)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to start session')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, t('training.error.startFailed')))
       setStarting(null)
     }
   }
@@ -94,8 +136,8 @@ export default function TrainingStudioPage() {
       <div className="training-studio-shell">
         <header className="training-studio-header">
           <div>
-            <h1>Communication Training Studio</h1>
-            <p>Pick the scenario, response mode, and pressure profile before entering a live practice room.</p>
+            <h1>{t('training.page.title')}</h1>
+            <p>{t('training.page.subtitle')}</p>
           </div>
           <button
             className="training-studio-primary"
@@ -104,11 +146,11 @@ export default function TrainingStudioPage() {
             disabled={starting !== null}
           >
             {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Wand2 size={16} />}
-            Start Room
+            {t('training.page.startRoom')}
           </button>
         </header>
 
-        <section className="training-studio-mode-panel" aria-label="Response mode">
+        <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
           {modeOptions.map((item) => {
             const Icon = item.icon
             return (
@@ -120,8 +162,8 @@ export default function TrainingStudioPage() {
                 disabled={starting !== null}
               >
                 <Icon size={20} />
-                <span>{item.label}</span>
-                <small>{item.description}</small>
+                <span>{t(item.labelKey)}</span>
+                <small>{t(item.descriptionKey)}</small>
               </button>
             )
           })}
@@ -130,12 +172,12 @@ export default function TrainingStudioPage() {
         <div className="training-studio-grid">
           <div className="training-studio-main">
             <label className="training-studio-goal">
-              <span>Practice Goal</span>
+              <span>{t('training.goal.label')}</span>
               <textarea
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
                 rows={4}
-                placeholder="Example: Practice answering senior frontend system-design interview questions with stronger evidence and tighter structure."
+                placeholder={t('training.goal.placeholder')}
                 disabled={starting !== null}
               />
             </label>
@@ -143,9 +185,9 @@ export default function TrainingStudioPage() {
             <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
           </div>
 
-          <aside className="training-studio-side" aria-label="Session actions">
+          <aside className="training-studio-side" aria-label={t('training.side.aria')}>
             <div className="training-studio-action-block">
-              <h2>Launch Path</h2>
+              <h2>{t('training.launch.title')}</h2>
               <button
                 className="training-studio-action"
                 type="button"
@@ -153,7 +195,7 @@ export default function TrainingStudioPage() {
                 disabled={starting !== null}
               >
                 {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Keyboard size={16} />}
-                Open Chat Room
+                {t('training.launch.openChat')}
               </button>
               <button
                 className="training-studio-action secondary"
@@ -162,17 +204,17 @@ export default function TrainingStudioPage() {
                 disabled={starting !== null}
               >
                 <Wand2 size={16} />
-                Open Battle Prep Flow
+                {t('training.launch.openBattlePrep')}
               </button>
               {error && <div className="training-studio-error">{error}</div>}
             </div>
 
             <div className="training-studio-action-block">
-              <h2>Mode Entry</h2>
+              <h2>{t('training.modeEntry.title')}</h2>
               <div className="training-studio-mode-note">
-                {mode === 'voice' && 'After entering the room, use the microphone button in the chat input to answer by voice.'}
-                {mode === 'video' && 'After entering the room, use the video button in the chat input to record and send answers.'}
-                {mode === 'text' && 'After entering the room, type answers in the chat input and request analysis or coaching.'}
+                {mode === 'voice' && t('training.modeEntry.voice')}
+                {mode === 'video' && t('training.modeEntry.video')}
+                {mode === 'text' && t('training.modeEntry.text')}
               </div>
             </div>
           </aside>

@@ -10,26 +10,29 @@ import SettingsPage from './pages/SettingsPage'
 import PersonaBuilderPage from './pages/PersonaBuilderPage'
 import PersonaEditorPage from './pages/PersonaEditorPage'
 import { AppProvider } from './contexts/AppContext'
+import { I18nProvider } from './i18n'
 
 function App() {
   return (
-    <AppProvider>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<HomePage />} />
-          <Route path="training-studio" element={<TrainingStudioPage />} />
-          <Route path="chat" element={<ChatPage />} />
-          <Route path="chat/:roomId" element={<ChatPage />} />
-          <Route path="battle-prep" element={<BattlePrepPage />} />
-          <Route path="defense-prep" element={<DefensePrepPage />} />
-          <Route path="growth" element={<GrowthPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="persona/new" element={<PersonaBuilderPage />} />
-          <Route path="persona/:id/edit" element={<PersonaEditorPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </AppProvider>
+    <I18nProvider>
+      <AppProvider>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route index element={<HomePage />} />
+            <Route path="training-studio" element={<TrainingStudioPage />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="chat/:roomId" element={<ChatPage />} />
+            <Route path="battle-prep" element={<BattlePrepPage />} />
+            <Route path="defense-prep" element={<DefensePrepPage />} />
+            <Route path="growth" element={<GrowthPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="persona/new" element={<PersonaBuilderPage />} />
+            <Route path="persona/:id/edit" element={<PersonaEditorPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </AppProvider>
+    </I18nProvider>
   )
 }
 

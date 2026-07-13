@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import html2canvas from 'html2canvas'
 import { type ProfileCard as ProfileCardData } from '../services/api'
 import ProfileCard from './ProfileCard'
+import { useI18n } from '../i18n'
 import './ProfileCard.css'
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function ProfileCardDialog({ open, onClose, data }: Props) {
+  const { tr } = useI18n()
   const cardRef = useRef<HTMLDivElement>(null)
   const [downloading, setDownloading] = useState(false)
 
@@ -23,7 +25,7 @@ export default function ProfileCardDialog({ open, onClose, data }: Props) {
     try {
       const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#fff' })
       const link = document.createElement('a')
-      link.download = '沟通力名片.png'
+      link.download = tr('沟通力名片.png', 'communication-profile-card.png')
       link.href = canvas.toDataURL('image/png')
       link.click()
     } finally {
@@ -36,8 +38,8 @@ export default function ProfileCardDialog({ open, onClose, data }: Props) {
       <div className="pc-dialog" onClick={(e) => e.stopPropagation()}>
         {/* Dialog header — outside cardRef, not captured in PNG */}
         <div className="pc-dialog-header">
-          <h2 className="pc-dialog-title">我的沟通力名片</h2>
-          <button className="pc-close-btn" onClick={onClose} aria-label="关闭">
+          <h2 className="pc-dialog-title">{tr('我的沟通力名片', 'My Communication Profile Card')}</h2>
+          <button className="pc-close-btn" onClick={onClose} aria-label={tr('关闭', 'Close')}>
             ✕
           </button>
         </div>
@@ -50,7 +52,7 @@ export default function ProfileCardDialog({ open, onClose, data }: Props) {
         {/* Footer buttons — outside cardRef, not captured in PNG */}
         <div className="pc-footer">
           <button className="pc-btn-download" onClick={handleDownload} disabled={downloading}>
-            {downloading ? '生成中...' : '下载图片'}
+            {downloading ? tr('生成中...', 'Generating...') : tr('下载图片', 'Download Image')}
           </button>
         </div>
       </div>

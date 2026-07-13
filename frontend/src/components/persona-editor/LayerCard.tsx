@@ -3,6 +3,7 @@
 // owner: wanhua.gu
 // pos: 表示层 - persona editor layer card 容器；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 import type { ReactNode } from 'react'
+import { useI18n } from '../../i18n'
 
 export type LayerColor = 'rose' | 'violet' | 'green' | 'amber'
 
@@ -23,13 +24,15 @@ export default function LayerCard({
   countLabel,
   children,
 }: Props) {
+  const { tr } = useI18n()
+
   return (
     <section className="layer layer-card">
       <header className="layer-head">
         <div className={`layer-icon ${color}`}>{emoji}</div>
         <h2 className="layer-title">{title}</h2>
         <span className="layer-count">
-          {count} {countLabel || '条'}
+          {count} {countLabel || tr('条', 'items')}
         </span>
       </header>
       <div className="layer-body">{children}</div>

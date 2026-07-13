@@ -1,8 +1,9 @@
 import React from 'react'
 import { type ProfileCard as ProfileCardData } from '../services/api'
+import { useI18n } from '../i18n'
 import './ProfileCard.css'
 
-const DIMENSION_LABELS: Record<string, string> = {
+const DIMENSION_LABELS_ZH: Record<string, string> = {
   persuasion: '说服力',
   emotional_management: '情绪管理',
   active_listening: '倾听回应',
@@ -11,7 +12,16 @@ const DIMENSION_LABELS: Record<string, string> = {
   stakeholder_alignment: '利益对齐',
 }
 
-const DIMENSIONS = Object.keys(DIMENSION_LABELS)
+const DIMENSION_LABELS_EN: Record<string, string> = {
+  persuasion: 'Persuasion',
+  emotional_management: 'Emotion Management',
+  active_listening: 'Active Listening',
+  structured_expression: 'Structured Expression',
+  conflict_resolution: 'Conflict Resolution',
+  stakeholder_alignment: 'Stakeholder Alignment',
+}
+
+const DIMENSIONS = Object.keys(DIMENSION_LABELS_ZH)
 
 interface Props {
   data: ProfileCardData
@@ -33,14 +43,16 @@ function getBarStyle(score: number): React.CSSProperties {
 }
 
 export default function ProfileCard({ data, cardRef }: Props) {
+  const { tr } = useI18n()
+
   // If style_label is empty, the user has insufficient evaluations
   if (!data.style_label) {
     return (
       <div className="profile-card" ref={cardRef}>
         <div className="pc-placeholder">
-          暂无足够数据生成沟通力名片，
+          {tr('暂无足够数据生成沟通力名片，', 'Not enough data to generate a communication profile card yet.')}
           <br />
-          请完成更多对话评估后再试。
+          {tr('请完成更多对话评估后再试。', 'Complete more conversation evaluations and try again.')}
         </div>
       </div>
     )
@@ -74,7 +86,7 @@ export default function ProfileCard({ data, cardRef }: Props) {
           const score = data.scores?.[dim] ?? 0
           return (
             <div key={dim} className="profile-bar-row">
-              <span className="profile-bar-label">{DIMENSION_LABELS[dim]}</span>
+              <span className="profile-bar-label">{tr(DIMENSION_LABELS_ZH[dim], DIMENSION_LABELS_EN[dim])}</span>
               <div className="profile-bar-track">
                 {/* Use inline style for width and gradient — needed for html2canvas */}
                 <div className="profile-bar-fill" style={getBarStyle(score)} />
@@ -91,7 +103,7 @@ export default function ProfileCard({ data, cardRef }: Props) {
       )}
 
       {/* Footer */}
-      <div className="profile-card-footer">DaBoss · 测测你的职场沟通风格 →</div>
+      <div className="profile-card-footer">{tr('DaBoss · 测测你的职场沟通风格 →', 'DaBoss · Discover your workplace communication style →')}</div>
     </div>
   )
 }

@@ -8,6 +8,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Loader2, Square } from 'lucide-react'
+import { useI18n } from '../i18n'
 import './VoiceRecorder.css'
 
 type RecordState = 'idle' | 'listening' | 'recording' | 'processing'
@@ -24,6 +25,7 @@ const HOLD_START_DELAY_MS = 250
 const TRANSCRIPTION_TIMEOUT_MS = 45000
 
 const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTranscription }) => {
+  const { tr } = useI18n()
   const [state, setState] = useState<RecordState>('idle')
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -127,7 +129,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
               clearTimeout(transcriptionTimeoutRef.current)
               transcriptionTimeoutRef.current = 0
             }
-            setError(msg.message || '语音识别失败')
+            setError(msg.message || tr('语音识别失败', 'Speech recognition failed'))
             setTimeout(() => setError(null), 3000)
             setRecordState('idle')
             setDuration(0)
@@ -141,7 +143,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
       }
       wsRef.current = ws
     })
-  }, [roomId, onTranscription, setRecordState])
+  }, [roomId, onTranscription, setRecordState, tr])
 
   const stopActiveRecorder = useCallback(() => {
     if (timerRef.current) {
@@ -212,7 +214,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
           }
           if (chunksSentCount === 0) {
             // No audio data was actually sent — don't send speech_end
-            setError('未录到音频数据，请重试')
+            setError(tr('未录到音频数据，请重试', 'No audio was recorded. Please try again.'))
             setTimeout(() => setError(null), 3000)
             setRecordState('idle')
             setDuration(0)
@@ -232,7 +234,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
               wsRef.current.close()
             }
             transcriptionTimeoutRef.current = 0
-            setError('语音识别超时，请重试')
+            setError(tr('语音识别超时，请重试', 'Speech recognition timed out. Please try again.'))
             setTimeout(() => setError(null), 3000)
             setRecordState('idle')
             setDuration(0)
@@ -259,19 +261,19 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
       const errorName = err instanceof DOMException ? err.name : ''
       const errorMessage = err instanceof Error ? err.message : ''
       if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
-        setError('请允许麦克风权限')
+        setError(tr('请允许麦克风权限', 'Please allow microphone access'))
       } else if (errorName === 'NotFoundError') {
-        setError('未检测到麦克风')
+        setError(tr('未检测到麦克风', 'No microphone detected'))
       } else if (errorMessage.includes('WebSocket')) {
-        setError('语音服务连接失败')
+        setError(tr('语音服务连接失败', 'Voice service connection failed'))
       } else {
-        setError('录音启动失败')
+        setError(tr('录音启动失败', 'Failed to start recording'))
       }
       setTimeout(() => setError(null), 3000)
     } finally {
       startingRef.current = false
     }
-  }, [connectWebSocket, setRecordState, stopActiveRecorder, stopEverything])
+  }, [connectWebSocket, setRecordState, stopActiveRecorder, stopEverything, tr])
 
   const stopRecording = useCallback(() => {
     stopActiveRecorder()
@@ -340,7 +342,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
         <span className="voice-duration">{formatDuration(duration)}</span>
       )}
       {state === 'processing' && (
-        <span className="voice-status">识别中...</span>
+        <span className="voice-status">{tr('识别中...', 'Recognizing...')}</span>
       )}
       <button
         className={`voice-btn ${state}`}
@@ -349,7 +351,13 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
         disabled={disabled || state === 'processing'}
-        title={state === 'idle' ? '点击录音 / 长按说话' : state === 'recording' ? '点击停止' : '识别中...'}
+        title={
+          state === 'idle'
+            ? tr('点击录音 / 长按说话', 'Click to record / hold to speak')
+            : state === 'recording'
+              ? tr('点击停止', 'Click to stop')
+              : tr('识别中...', 'Recognizing...')
+        }
       >
         {state === 'idle' && <Mic size={18} />}
         {state === 'listening' && <Mic size={18} />}

@@ -1,6 +1,9 @@
+import type { Translate, TranslationKey, TranslationParams } from '../i18n'
+
 export type TrainingScenario = 'interview' | 'sales' | 'negotiation' | 'workplace'
 export type TrainingDifficulty = 'easy' | 'medium' | 'hard'
 export type ExpressionFramework = 'prep' | 'star' | 'scqa' | 'pyramid'
+export type TrainingLevel = 'intern' | 'junior' | 'mid' | 'senior' | 'staff' | 'manager'
 
 export interface QuestionMix {
   behavioral: number
@@ -13,7 +16,7 @@ export interface TrainingStudioConfig {
   difficulty: TrainingDifficulty
   framework: ExpressionFramework
   role: string
-  level: string
+  level: TrainingLevel
   techStack: string
   questionMix: QuestionMix
   questionCount: number
@@ -34,24 +37,107 @@ interface ApiResponse<T> {
 
 const TRAINING_STUDIO_API_BASE = '/api/v1/training-studio'
 
-export const SCENARIO_OPTIONS: { value: TrainingScenario; label: string; desc: string }[] = [
-  { value: 'interview', label: 'Interview', desc: 'Interview answers and follow-ups' },
-  { value: 'sales', label: 'Sales', desc: 'Objections, value, and next steps' },
-  { value: 'negotiation', label: 'Negotiation', desc: 'Trade-offs, leverage, and concessions' },
-  { value: 'workplace', label: 'Workplace', desc: 'Alignment, feedback, and reporting' },
+interface LocalizedOption<T extends string> {
+  value: T
+  labelKey: TranslationKey
+  descKey?: TranslationKey
+  fallbackLabel: string
+  fallbackDesc?: string
+}
+
+export const SCENARIO_OPTIONS: LocalizedOption<TrainingScenario>[] = [
+  {
+    value: 'interview',
+    labelKey: 'training.scenario.interview.label',
+    descKey: 'training.scenario.interview.desc',
+    fallbackLabel: 'Interview',
+    fallbackDesc: 'Interview answers and follow-ups',
+  },
+  {
+    value: 'sales',
+    labelKey: 'training.scenario.sales.label',
+    descKey: 'training.scenario.sales.desc',
+    fallbackLabel: 'Sales',
+    fallbackDesc: 'Objections, value, and next steps',
+  },
+  {
+    value: 'negotiation',
+    labelKey: 'training.scenario.negotiation.label',
+    descKey: 'training.scenario.negotiation.desc',
+    fallbackLabel: 'Negotiation',
+    fallbackDesc: 'Trade-offs, leverage, and concessions',
+  },
+  {
+    value: 'workplace',
+    labelKey: 'training.scenario.workplace.label',
+    descKey: 'training.scenario.workplace.desc',
+    fallbackLabel: 'Workplace',
+    fallbackDesc: 'Alignment, feedback, and reporting',
+  },
 ]
 
-export const DIFFICULTY_OPTIONS: { value: TrainingDifficulty; label: string; desc: string }[] = [
-  { value: 'easy', label: 'Easy', desc: 'Gentle prompts' },
-  { value: 'medium', label: 'Medium', desc: 'Normal pressure' },
-  { value: 'hard', label: 'Hard', desc: 'Tough follow-ups' },
+export const DIFFICULTY_OPTIONS: LocalizedOption<TrainingDifficulty>[] = [
+  {
+    value: 'easy',
+    labelKey: 'training.difficulty.easy.label',
+    descKey: 'training.difficulty.easy.desc',
+    fallbackLabel: 'Easy',
+    fallbackDesc: 'Gentle prompts',
+  },
+  {
+    value: 'medium',
+    labelKey: 'training.difficulty.medium.label',
+    descKey: 'training.difficulty.medium.desc',
+    fallbackLabel: 'Medium',
+    fallbackDesc: 'Normal pressure',
+  },
+  {
+    value: 'hard',
+    labelKey: 'training.difficulty.hard.label',
+    descKey: 'training.difficulty.hard.desc',
+    fallbackLabel: 'Hard',
+    fallbackDesc: 'Tough follow-ups',
+  },
 ]
 
-export const FRAMEWORK_OPTIONS: { value: ExpressionFramework; label: string; desc: string }[] = [
-  { value: 'prep', label: 'PREP', desc: 'Point, reason, example, point' },
-  { value: 'star', label: 'STAR', desc: 'Situation, task, action, result' },
-  { value: 'scqa', label: 'SCQA', desc: 'Situation, complication, question, answer' },
-  { value: 'pyramid', label: 'Pyramid', desc: 'Answer first, then layered support' },
+export const FRAMEWORK_OPTIONS: LocalizedOption<ExpressionFramework>[] = [
+  {
+    value: 'prep',
+    labelKey: 'training.framework.prep.label',
+    descKey: 'training.framework.prep.desc',
+    fallbackLabel: 'PREP',
+    fallbackDesc: 'Point, reason, example, point',
+  },
+  {
+    value: 'star',
+    labelKey: 'training.framework.star.label',
+    descKey: 'training.framework.star.desc',
+    fallbackLabel: 'STAR',
+    fallbackDesc: 'Situation, task, action, result',
+  },
+  {
+    value: 'scqa',
+    labelKey: 'training.framework.scqa.label',
+    descKey: 'training.framework.scqa.desc',
+    fallbackLabel: 'SCQA',
+    fallbackDesc: 'Situation, complication, question, answer',
+  },
+  {
+    value: 'pyramid',
+    labelKey: 'training.framework.pyramid.label',
+    descKey: 'training.framework.pyramid.desc',
+    fallbackLabel: 'Pyramid',
+    fallbackDesc: 'Answer first, then layered support',
+  },
+]
+
+export const TRAINING_LEVEL_OPTIONS: LocalizedOption<TrainingLevel>[] = [
+  { value: 'intern', labelKey: 'training.level.intern.label', fallbackLabel: 'Intern' },
+  { value: 'junior', labelKey: 'training.level.junior.label', fallbackLabel: 'Junior' },
+  { value: 'mid', labelKey: 'training.level.mid.label', fallbackLabel: 'Mid-level' },
+  { value: 'senior', labelKey: 'training.level.senior.label', fallbackLabel: 'Senior' },
+  { value: 'staff', labelKey: 'training.level.staff.label', fallbackLabel: 'Staff' },
+  { value: 'manager', labelKey: 'training.level.manager.label', fallbackLabel: 'Manager' },
 ]
 
 export const DEFAULT_TRAINING_STUDIO_CONFIG: TrainingStudioConfig = {
@@ -59,7 +145,7 @@ export const DEFAULT_TRAINING_STUDIO_CONFIG: TrainingStudioConfig = {
   difficulty: 'medium',
   framework: 'star',
   role: 'Frontend Engineer',
-  level: 'Mid-level',
+  level: 'mid',
   techStack: 'React, TypeScript',
   questionMix: {
     behavioral: 35,
@@ -67,6 +153,45 @@ export const DEFAULT_TRAINING_STUDIO_CONFIG: TrainingStudioConfig = {
     pressure: 20,
   },
   questionCount: 8,
+}
+
+function formatFallback(template: string, params?: TranslationParams): string {
+  if (!params) return template
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => String(params[key] ?? `{${key}}`))
+}
+
+function translate(t: Translate | undefined, key: TranslationKey, fallback: string, params?: TranslationParams): string {
+  return t ? t(key, params) : formatFallback(fallback, params)
+}
+
+function optionLabel<T extends string>(options: LocalizedOption<T>[], value: T, t?: Translate): string {
+  const option = options.find((item) => item.value === value)
+  return option ? translate(t, option.labelKey, option.fallbackLabel) : value
+}
+
+export function getTrainingScenarioLabel(scenario: TrainingScenario, t?: Translate): string {
+  return optionLabel(SCENARIO_OPTIONS, scenario, t)
+}
+
+export function getTrainingDifficultyLabel(difficulty: TrainingDifficulty, t?: Translate): string {
+  return optionLabel(DIFFICULTY_OPTIONS, difficulty, t)
+}
+
+export function getExpressionFrameworkLabel(framework: ExpressionFramework, t?: Translate): string {
+  return optionLabel(FRAMEWORK_OPTIONS, framework, t)
+}
+
+export function getTrainingLevelLabel(level: TrainingLevel, t?: Translate): string {
+  return optionLabel(TRAINING_LEVEL_OPTIONS, level, t)
+}
+
+export function getDefaultTrainingStudioConfig(t?: Translate): TrainingStudioConfig {
+  return {
+    ...DEFAULT_TRAINING_STUDIO_CONFIG,
+    role: translate(t, 'training.defaults.role', DEFAULT_TRAINING_STUDIO_CONFIG.role),
+    techStack: translate(t, 'training.defaults.techStack', DEFAULT_TRAINING_STUDIO_CONFIG.techStack),
+    questionMix: { ...DEFAULT_TRAINING_STUDIO_CONFIG.questionMix },
+  }
 }
 
 export function normalizeQuestionMix(mix: QuestionMix): QuestionMix {
@@ -86,23 +211,26 @@ export function toBattleDifficulty(difficulty: TrainingDifficulty): 'easy' | 'no
   return difficulty === 'medium' ? 'normal' : difficulty
 }
 
-export function buildTrainingStudioPrompt(config: TrainingStudioConfig, description: string): string {
+export function buildTrainingStudioPrompt(config: TrainingStudioConfig, description: string, t?: Translate): string {
   const mix = normalizeQuestionMix(config.questionMix)
-  const scenario = SCENARIO_OPTIONS.find((item) => item.value === config.scenario)?.label ?? config.scenario
-  const framework = FRAMEWORK_OPTIONS.find((item) => item.value === config.framework)?.label ?? config.framework
+  const scenario = getTrainingScenarioLabel(config.scenario, t)
+  const difficulty = getTrainingDifficultyLabel(config.difficulty, t)
+  const framework = getExpressionFrameworkLabel(config.framework, t)
+  const level = getTrainingLevelLabel(config.level, t)
+  const notSpecified = translate(t, 'training.prompt.notSpecified', 'Not specified')
 
   return [
     description.trim(),
     '',
-    'Training Studio configuration:',
-    `- Scenario: ${scenario}`,
-    `- Difficulty: ${config.difficulty}`,
-    `- Expression framework: ${framework}`,
-    `- Target role: ${config.role || 'Not specified'}`,
-    `- Level: ${config.level || 'Not specified'}`,
-    `- Tech stack: ${config.techStack || 'Not specified'}`,
-    `- Question mix: behavioral ${mix.behavioral}%, technical ${mix.technical}%, pressure ${mix.pressure}%`,
-    `- Question count: ${config.questionCount}`,
+    translate(t, 'training.prompt.heading', 'Training Studio configuration:'),
+    `- ${translate(t, 'training.prompt.scenario', 'Scenario')}: ${scenario}`,
+    `- ${translate(t, 'training.prompt.difficulty', 'Difficulty')}: ${difficulty}`,
+    `- ${translate(t, 'training.prompt.framework', 'Expression framework')}: ${framework}`,
+    `- ${translate(t, 'training.prompt.role', 'Target role')}: ${config.role || notSpecified}`,
+    `- ${translate(t, 'training.prompt.level', 'Level')}: ${level || notSpecified}`,
+    `- ${translate(t, 'training.prompt.techStack', 'Tech stack')}: ${config.techStack || notSpecified}`,
+    `- ${translate(t, 'training.prompt.questionMix', 'Question mix')}: ${translate(t, 'training.launcher.behavioral', 'behavioral')} ${mix.behavioral}%, ${translate(t, 'training.launcher.technical', 'technical')} ${mix.technical}%, ${translate(t, 'training.launcher.pressure', 'pressure')} ${mix.pressure}%`,
+    `- ${translate(t, 'training.prompt.questionCount', 'Question count')}: ${config.questionCount}`,
   ].join('\n')
 }
 

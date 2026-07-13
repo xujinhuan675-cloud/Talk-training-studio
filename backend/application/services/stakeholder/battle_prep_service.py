@@ -161,6 +161,7 @@ class BattlePrepService:
 
     def _cleanup_old_personas(self) -> None:
         """Delete temporary bp-* persona files older than 24 hours."""
+        os.makedirs(self._persona_dir, exist_ok=True)
         now = datetime.now(timezone.utc).timestamp()
         cutoff = 24 * 60 * 60
 

@@ -10,14 +10,15 @@ import { useSpeakerDetection } from '../hooks/useSpeakerDetection'
 import PersonaBuildProgress from '../components/PersonaBuildProgress'
 import SpeakerSelector from '../components/SpeakerSelector'
 import type { DetectedSpeaker } from '../services/api'
+import { useI18n, type TranslateInline } from '../i18n'
 import './PersonaBuilderPage.css'
 
 type SegmentType = 'chat' | 'email' | 'meeting' | 'other'
-const SEGMENT_TAGS: { type: SegmentType; label: string; klass: string }[] = [
-  { type: 'chat', label: '聊天', klass: 'tag-chat' },
-  { type: 'email', label: '邮件', klass: 'tag-email' },
-  { type: 'meeting', label: '纪要', klass: 'tag-meeting' },
-  { type: 'other', label: '其他', klass: 'tag-other' },
+const SEGMENT_TAGS: { type: SegmentType; labelZh: string; labelEn: string; klass: string }[] = [
+  { type: 'chat', labelZh: '聊天', labelEn: 'Chat', klass: 'tag-chat' },
+  { type: 'email', labelZh: '邮件', labelEn: 'Email', klass: 'tag-email' },
+  { type: 'meeting', labelZh: '纪要', labelEn: 'Meeting Notes', klass: 'tag-meeting' },
+  { type: 'other', labelZh: '其他', labelEn: 'Other', klass: 'tag-other' },
 ]
 
 interface Segment {
@@ -33,16 +34,19 @@ function newSegment(): Segment {
   return { id: Math.random().toString(36).slice(2), text: '', type: 'chat' }
 }
 
-function placeholderFor(type: SegmentType): string {
+function placeholderFor(type: SegmentType, tr: TranslateInline): string {
   switch (type) {
     case 'chat':
-      return '粘贴聊天记录，例如：\n张三 09:21\n这个方案下周必须上线\n李四 09:22\n时间太紧…'
+      return tr(
+        '粘贴聊天记录，例如：\n张三 09:21\n这个方案下周必须上线\n李四 09:22\n时间太紧…',
+        'Paste chat logs, for example:\nAlex 09:21\nThis plan must launch next week\nJamie 09:22\nThe timeline is too tight...',
+      )
     case 'email':
-      return '粘贴邮件正文…'
+      return tr('粘贴邮件正文…', 'Paste the email body...')
     case 'meeting':
-      return '粘贴会议纪要…'
+      return tr('粘贴会议纪要…', 'Paste meeting notes...')
     default:
-      return '粘贴任何相关文本…'
+      return tr('粘贴任何相关文本…', 'Paste any relevant text...')
   }
 }
 
@@ -50,6 +54,7 @@ type Phase = 'input' | 'speaker-select' | 'building'
 
 export default function PersonaBuilderPage() {
   const navigate = useNavigate()
+  const { tr } = useI18n()
   const [segments, setSegments] = useState<Segment[]>([newSegment()])
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
@@ -126,6 +131,7 @@ export default function PersonaBuilderPage() {
   // When detection finishes with exactly 1 speaker, auto-select and build
   useEffect(() => {
     if (detection.status === 'done' && detection.speakers.length > 0) {
+      const t = window.setTimeout(() => {
       if (detection.speakers.length === 1) {
         // Single speaker — auto-build directly
         const sp = detection.speakers[0]
@@ -135,6 +141,8 @@ export default function PersonaBuilderPage() {
         setPhase('speaker-select')
         setSelectedSpeakers(new Set([detection.speakers[0].name]))
       }
+      }, 0)
+      return () => clearTimeout(t)
     }
   }, [detection.status, detection.speakers]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -164,16 +172,19 @@ export default function PersonaBuilderPage() {
     const queue = buildQueueRef.current
     if (phase !== 'building' || queue.length <= 1) return
     if (status === 'done' && buildIndex < queue.length - 1) {
-      const nextIdx = buildIndex + 1
-      setBuildIndex(nextIdx)
-      reset()
-      setTimeout(() => {
-        start({
-          materials: cleanedMaterials,
-          name: queue[nextIdx].name,
-          role: queue[nextIdx].role,
-        })
-      }, 500)
+      const t = window.setTimeout(() => {
+        const nextIdx = buildIndex + 1
+        setBuildIndex(nextIdx)
+        reset()
+        window.setTimeout(() => {
+          start({
+            materials: cleanedMaterials,
+            name: queue[nextIdx].name,
+            role: queue[nextIdx].role,
+          })
+        }, 500)
+      }, 0)
+      return () => clearTimeout(t)
     }
   }, [status, phase, buildIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -206,8 +217,8 @@ export default function PersonaBuilderPage() {
   return (
     <div className="persona-builder">
       <header className="builder-header">
-        <h1>从素材生成对手</h1>
-        <p>粘贴 1-5 段聊天记录 / 邮件 / 会议纪要，让 AI 在 2-3 分钟内分析出对手画像</p>
+        <h1>{tr('从素材生成对手', 'Generate an Opponent from Materials')}</h1>
+        <p>{tr('粘贴 1-5 段聊天记录 / 邮件 / 会议纪要，让 AI 在 2-3 分钟内分析出对手画像', 'Paste 1-5 chat logs, emails, or meeting notes and let AI build an opponent profile in 2-3 minutes.')}</p>
       </header>
 
       <div className="builder-grid">
@@ -215,22 +226,22 @@ export default function PersonaBuilderPage() {
         <section className="input-pane">
           <div className="builder-meta">
             <label className="meta-field">
-              <span>角色名（可选）</span>
+              <span>{tr('角色名（可选）', 'Persona Name (optional)')}</span>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="留空让 AI 提炼"
+                placeholder={tr('留空让 AI 提炼', 'Leave blank for AI to infer')}
                 disabled={status === 'running'}
               />
             </label>
             <label className="meta-field">
-              <span>职位（可选）</span>
+              <span>{tr('职位（可选）', 'Role (optional)')}</span>
               <input
                 type="text"
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                placeholder="留空让 AI 提炼"
+                placeholder={tr('留空让 AI 提炼', 'Leave blank for AI to infer')}
                 disabled={status === 'running'}
               />
             </label>
@@ -240,7 +251,7 @@ export default function PersonaBuilderPage() {
             {segments.map((seg, idx) => (
               <div key={seg.id} className="input-segment">
                 <div className="segment-head">
-                  <span className="segment-index">素材 #{idx + 1}</span>
+                  <span className="segment-index">{tr('素材 #{index}', 'Material #{index}', { index: idx + 1 })}</span>
                   <div className="segment-tags">
                     {SEGMENT_TAGS.map((t) => (
                       <button
@@ -250,7 +261,7 @@ export default function PersonaBuilderPage() {
                         onClick={() => updateSegment(seg.id, { type: t.type })}
                         disabled={status === 'running'}
                       >
-                        {t.label}
+                        {tr(t.labelZh, t.labelEn)}
                       </button>
                     ))}
                   </div>
@@ -260,7 +271,7 @@ export default function PersonaBuilderPage() {
                       className="segment-remove"
                       onClick={() => removeSegment(seg.id)}
                       disabled={status === 'running'}
-                      title="删除这段"
+                      title={tr('删除这段', 'Remove this segment')}
                     >
                       <X size={14} />
                     </button>
@@ -270,7 +281,7 @@ export default function PersonaBuilderPage() {
                   className="segment-textarea"
                   value={seg.text}
                   onChange={(e) => updateSegment(seg.id, { text: e.target.value })}
-                  placeholder={placeholderFor(seg.type)}
+                  placeholder={placeholderFor(seg.type, tr)}
                   disabled={status === 'running'}
                   rows={6}
                 />
@@ -285,7 +296,10 @@ export default function PersonaBuilderPage() {
             disabled={segments.length >= MAX_SEGMENTS || status === 'running'}
           >
             <Plus size={14} />
-            添加素材（{segments.length} / {MAX_SEGMENTS}）
+            {tr('添加素材（{count} / {max}）', 'Add Material ({count} / {max})', {
+              count: segments.length,
+              max: MAX_SEGMENTS,
+            })}
           </button>
 
           {/* Speaker selector (shown after detection) */}
@@ -302,28 +316,35 @@ export default function PersonaBuilderPage() {
 
           <div className="builder-footer">
             <span className={`char-count ${totalChars > CHAR_LIMIT ? 'over' : ''}`}>
-              {totalChars.toLocaleString()} / {CHAR_LIMIT.toLocaleString()} 字符
+              {tr('{count} / {max} 字符', '{count} / {max} characters', {
+                count: totalChars.toLocaleString(),
+                max: CHAR_LIMIT.toLocaleString(),
+              })}
             </span>
             {status === 'error' && (
               <button type="button" className="btn-retry retry" onClick={handleRetry}>
                 <RotateCcw size={14} />
-                重试
+                {tr('重试', 'Retry')}
               </button>
             )}
             {status === 'done' && personaId && (
               <button type="button" className="btn-goto" onClick={handleManualGoto}>
-                查看结果
+                {tr('查看结果', 'View Result')}
                 <ArrowRight size={14} />
               </button>
             )}
             {phase === 'speaker-select' && (
               <button type="button" className="btn-ghost" onClick={handleBackToInput}>
-                返回修改素材
+                {tr('返回修改素材', 'Back to Edit Materials')}
               </button>
             )}
             {phase === 'building' && buildQueue.length > 1 && (
               <span className="build-progress-label">
-                正在构建 {buildIndex + 1}/{buildQueue.length}: {buildQueue[buildIndex]?.name}
+                {tr('正在构建 {index}/{total}: {name}', 'Building {index}/{total}: {name}', {
+                  index: buildIndex + 1,
+                  total: buildQueue.length,
+                  name: buildQueue[buildIndex]?.name || '',
+                })}
               </span>
             )}
             {phase === 'input' && (
@@ -335,9 +356,9 @@ export default function PersonaBuilderPage() {
                   disabled={!canSubmit || detection.status === 'detecting'}
                 >
                   {detection.status === 'detecting' ? (
-                    <><Loader2 size={14} className="spin" /> 检测中…</>
+                    <><Loader2 size={14} className="spin" /> {tr('检测中…', 'Detecting...')}</>
                   ) : (
-                    <><Users size={14} /> 检测人物</>
+                    <><Users size={14} /> {tr('检测人物', 'Detect People')}</>
                   )}
                 </button>
                 <button
@@ -347,7 +368,7 @@ export default function PersonaBuilderPage() {
                   disabled={!canSubmit}
                 >
                   <Sparkles size={14} />
-                  {status === 'running' ? '分析中…' : '开始分析'}
+                  {status === 'running' ? tr('分析中…', 'Analyzing...') : tr('开始分析', 'Start Analysis')}
                 </button>
               </>
             )}
@@ -364,7 +385,7 @@ export default function PersonaBuilderPage() {
       {status === 'error' && error && (
         <div className="builder-toast">
           <X size={14} />
-          <span>分析失败：{error.message}</span>
+          <span>{tr('分析失败：{message}', 'Analysis failed: {message}', { message: error.message })}</span>
         </div>
       )}
     </div>

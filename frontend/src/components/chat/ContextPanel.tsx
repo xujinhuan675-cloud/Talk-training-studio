@@ -1,6 +1,7 @@
 import { ChevronRight, ChevronLeft } from 'lucide-react'
 import Avatar from '../Avatar'
 import type { PersonaSummary } from '../../services/api'
+import { useI18n } from '../../i18n'
 import './ContextPanel.css'
 
 export interface ContextPanelProps {
@@ -32,12 +33,13 @@ function tagColor(tag: string): { bg: string; color: string } {
 
 /** Mini bar chart for emotion trend (placeholder data) */
 function EmotionMiniChart() {
+  const { tr } = useI18n()
   const bars = [
-    { value: 0.3, label: '平静' },
-    { value: 0.6, label: '紧张' },
-    { value: 0.4, label: '缓和' },
-    { value: 0.8, label: '对抗' },
-    { value: 0.5, label: '合作' },
+    { value: 0.3, label: tr('平静', 'Calm') },
+    { value: 0.6, label: tr('紧张', 'Tense') },
+    { value: 0.4, label: tr('缓和', 'Easing') },
+    { value: 0.8, label: tr('对抗', 'Opposed') },
+    { value: 0.5, label: tr('合作', 'Cooperative') },
   ]
   const intensityColor = (v: number) => {
     if (v > 0.7) return 'var(--rose)'
@@ -65,19 +67,20 @@ export default function ContextPanel({
   onToggle,
   onExpandEmotion,
 }: ContextPanelProps) {
+  const { tr } = useI18n()
   /* Placeholder score data -- will be replaced with real data later */
   const grade = 'B+'
   const metrics = [
-    { label: '说服力', value: 72 },
-    { label: '情绪管理', value: 85 },
-    { label: '结构化', value: 68 },
-    { label: '倾听', value: 78 },
+    { label: tr('说服力', 'Persuasion'), value: 72 },
+    { label: tr('情绪管理', 'Emotion'), value: 85 },
+    { label: tr('结构化', 'Structure'), value: 68 },
+    { label: tr('倾听', 'Listening'), value: 78 },
   ]
   const sessionXP = 120
 
   return (
     <aside className={`context-panel${collapsed ? ' collapsed' : ''}`}>
-      <button className="ctx-toggle" onClick={onToggle} title={collapsed ? '展开面板' : '收起面板'}>
+      <button className="ctx-toggle" onClick={onToggle} title={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}>
         {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
       </button>
 
@@ -85,7 +88,7 @@ export default function ContextPanel({
         <div className="ctx-body">
           {/* Opponent profiles */}
           {personas.map((p) => {
-            const tags = PLACEHOLDER_TAGS[p.id] || [p.role || '未知角色']
+            const tags = PLACEHOLDER_TAGS[p.id] || [p.role || tr('未知角色', 'Unknown role')]
             return (
               <div key={p.id} className="ctx-profile-card">
                 <div className="ctx-profile-header">
@@ -108,18 +111,18 @@ export default function ContextPanel({
 
           {/* Emotion trend */}
           <div className="ctx-section">
-            <div className="ctx-section-title">情绪趋势</div>
+            <div className="ctx-section-title">{tr('情绪趋势', 'Emotion Trend')}</div>
             <EmotionMiniChart />
             {onExpandEmotion && (
               <button className="ctx-link-btn" onClick={onExpandEmotion}>
-                查看详情 →
+                {tr('查看详情 →', 'View details →')}
               </button>
             )}
           </div>
 
           {/* Live score */}
           <div className="ctx-section">
-            <div className="ctx-section-title">实时评分</div>
+            <div className="ctx-section-title">{tr('实时评分', 'Live Score')}</div>
             <div className="ctx-score-area">
               <div className="ctx-grade">{grade}</div>
               <div className="ctx-metrics-grid">
@@ -135,7 +138,7 @@ export default function ContextPanel({
 
           {/* Session XP */}
           <div className="ctx-xp-card">
-            <span className="ctx-xp-label">本次经验</span>
+            <span className="ctx-xp-label">{tr('本次经验', 'Session XP')}</span>
             <span className="ctx-xp-value">+{sessionXP} XP</span>
           </div>
         </div>

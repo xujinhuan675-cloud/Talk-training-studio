@@ -216,12 +216,16 @@ class GrowthService:
     def __init__(
         self,
         uow_factory: Callable[..., AbstractUnitOfWork],
-        llm: LLMPort,
+        llm: Optional[LLMPort],
         persona_loader,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm = llm
         self._persona_loader = persona_loader
+
+    @property
+    def has_llm(self) -> bool:
+        return self._llm is not None
 
     # ------------------------------------------------------------------
     # 1. Competency Evaluation (LLM-as-Judge)
@@ -232,6 +236,13 @@ class GrowthService:
 
         Idempotent: skips if evaluation already exists for report_id.
         """
+        if self._llm is None:
+            logger.warning(
+                "Skipping competency evaluation for report %d: stakeholder LLM is not configured",
+                report_id,
+            )
+            return None
+
         # Check idempotency
         async with self._uow_factory(readonly=True) as uow:
             existing = await uow.competency_evaluation_repository.get_by_report_id(report_id)
@@ -449,6 +460,14 @@ class GrowthService:
         prompt = _INSIGHT_SYSTEM_PROMPT.format(evaluation_data=evaluation_data)
 
         llm_messages = [LLMMessage(role="user", content=prompt)]
+        if self._llm is None:
+            return GrowthInsightDTO(
+                insight=(
+                    "当前未配置 Stakeholder LLM，无法生成跨 session 成长洞察。"
+                    "请配置 LLM__API_KEY（OpenAI 兼容模式），或 "
+                    "STAKEHOLDER__ANTHROPIC_API_KEY（Anthropic fallback）后重启服务。"
+                )
+            )
         response = await self._llm.generate(llm_messages, temperature=0.4)
 
         return GrowthInsightDTO(insight=response.content.strip())
@@ -469,6 +488,18 @@ class GrowthService:
                 style_label="",
                 tags=[],
                 summary="练习次数还不够，至少完成 2 次对话分析后才能生成沟通力名片。继续练习吧！",
+                scores={},
+            )
+
+        if self._llm is None:
+            return ProfileCardDTO(
+                style_label="",
+                tags=[],
+                summary=(
+                    "当前未配置 Stakeholder LLM，无法生成沟通力名片。"
+                    "请配置 LLM__API_KEY（OpenAI 兼容模式），或 "
+                    "STAKEHOLDER__ANTHROPIC_API_KEY（Anthropic fallback）后重启服务。"
+                ),
                 scores={},
             )
 

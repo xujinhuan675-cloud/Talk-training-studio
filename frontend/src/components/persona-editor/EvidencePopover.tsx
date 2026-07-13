@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import { X, MessageSquare, Mail, FileText } from 'lucide-react'
 import type { EvidenceItem } from '../../services/personaV2'
+import { useI18n } from '../../i18n'
 
 interface Props {
   evidence: EvidenceItem | null
@@ -19,6 +20,7 @@ function inferSourceIcon(materialId: string) {
 }
 
 export default function EvidencePopover({ evidence, anchor, onClose }: Props) {
+  const { tr } = useI18n()
   const [isMobile, setIsMobile] = useState(
     typeof window !== 'undefined' ? window.innerWidth <= 1180 : false,
   )
@@ -73,11 +75,11 @@ export default function EvidencePopover({ evidence, anchor, onClose }: Props) {
         </svg>
         <div>
           <div className="num">{evidence.confidence.toFixed(2)}</div>
-          <div className="lbl">置信度</div>
+          <div className="lbl">{tr('置信度', 'Confidence')}</div>
         </div>
       </div>
       {evidence.citations.length === 0 ? (
-        <div className="pop-empty">暂无原文引用</div>
+        <div className="pop-empty">{tr('暂无原文引用', 'No source citations yet')}</div>
       ) : (
         evidence.citations.map((c, i) => (
           <div key={i} className="pop-cite">
@@ -96,7 +98,7 @@ export default function EvidencePopover({ evidence, anchor, onClose }: Props) {
     return (
       <div className="evidence-sheet-overlay" onClick={onClose}>
         <div className="evidence-sheet" onClick={(e) => e.stopPropagation()}>
-          <button type="button" className="sheet-close" onClick={onClose} aria-label="关闭">
+          <button type="button" className="sheet-close" onClick={onClose} aria-label={tr('关闭', 'Close')}>
             <X size={16} />
           </button>
           {inner}

@@ -1,11 +1,14 @@
 import {
-  DEFAULT_TRAINING_STUDIO_CONFIG,
   DIFFICULTY_OPTIONS,
   FRAMEWORK_OPTIONS,
   SCENARIO_OPTIONS,
+  TRAINING_LEVEL_OPTIONS,
+  getDefaultTrainingStudioConfig,
   type QuestionMix,
+  type TrainingLevel,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
+import { useI18n } from '../i18n'
 import './TrainingStudioLauncher.css'
 
 interface TrainingStudioLauncherProps {
@@ -14,7 +17,6 @@ interface TrainingStudioLauncherProps {
   disabled?: boolean
 }
 
-const LEVEL_OPTIONS = ['Intern', 'Junior', 'Mid-level', 'Senior', 'Staff', 'Manager']
 const QUESTION_COUNT_OPTIONS = [5, 8, 10, 12, 15]
 
 function clampPercent(value: number) {
@@ -27,6 +29,8 @@ export default function TrainingStudioLauncher({
   onChange,
   disabled = false,
 }: TrainingStudioLauncherProps) {
+  const { t } = useI18n()
+
   const update = <K extends keyof TrainingStudioConfig>(key: K, nextValue: TrainingStudioConfig[K]) => {
     onChange({ ...value, [key]: nextValue })
   }
@@ -41,26 +45,26 @@ export default function TrainingStudioLauncher({
   const totalMix = value.questionMix.behavioral + value.questionMix.technical + value.questionMix.pressure
 
   return (
-    <section className="tsl-panel" aria-label="Training Studio configuration">
+    <section className="tsl-panel" aria-label={t('training.launcher.aria')}>
       <div className="tsl-header">
         <div>
-          <h2 className="tsl-title">Communication Training Studio</h2>
+          <h2 className="tsl-title">{t('training.launcher.title')}</h2>
           <p className="tsl-subtitle">
-            Choose the scenario, pressure, structure, and question mix before generating a practice opponent.
+            {t('training.launcher.subtitle')}
           </p>
         </div>
         <button
           className="tsl-reset"
           type="button"
-          onClick={() => onChange(DEFAULT_TRAINING_STUDIO_CONFIG)}
+          onClick={() => onChange(getDefaultTrainingStudioConfig(t))}
           disabled={disabled}
         >
-          Reset
+          {t('training.launcher.reset')}
         </button>
       </div>
 
       <div className="tsl-section">
-        <div className="tsl-label">Scenario</div>
+        <div className="tsl-label">{t('training.launcher.scenario')}</div>
         <div className="tsl-option-grid tsl-option-grid--four">
           {SCENARIO_OPTIONS.map((item) => (
             <button
@@ -70,8 +74,8 @@ export default function TrainingStudioLauncher({
               onClick={() => update('scenario', item.value)}
               disabled={disabled}
             >
-              <span>{item.label}</span>
-              <small>{item.desc}</small>
+              <span>{t(item.labelKey)}</span>
+              {item.descKey && <small>{t(item.descKey)}</small>}
             </button>
           ))}
         </div>
@@ -79,7 +83,7 @@ export default function TrainingStudioLauncher({
 
       <div className="tsl-two-col">
         <div className="tsl-section">
-          <div className="tsl-label">Difficulty</div>
+          <div className="tsl-label">{t('training.launcher.difficulty')}</div>
           <div className="tsl-option-grid">
             {DIFFICULTY_OPTIONS.map((item) => (
               <button
@@ -89,15 +93,15 @@ export default function TrainingStudioLauncher({
                 onClick={() => update('difficulty', item.value)}
                 disabled={disabled}
               >
-                <span>{item.label}</span>
-                <small>{item.desc}</small>
+                <span>{t(item.labelKey)}</span>
+                {item.descKey && <small>{t(item.descKey)}</small>}
               </button>
             ))}
           </div>
         </div>
 
         <div className="tsl-section">
-          <div className="tsl-label">Expression Framework</div>
+          <div className="tsl-label">{t('training.launcher.framework')}</div>
           <div className="tsl-option-grid tsl-option-grid--four">
             {FRAMEWORK_OPTIONS.map((item) => (
               <button
@@ -107,8 +111,8 @@ export default function TrainingStudioLauncher({
                 onClick={() => update('framework', item.value)}
                 disabled={disabled}
               >
-                <span>{item.label}</span>
-                <small>{item.desc}</small>
+                <span>{t(item.labelKey)}</span>
+                {item.descKey && <small>{t(item.descKey)}</small>}
               </button>
             ))}
           </div>
@@ -117,38 +121,42 @@ export default function TrainingStudioLauncher({
 
       <div className="tsl-form-grid">
         <label className="tsl-field">
-          <span>Role</span>
+          <span>{t('training.launcher.role')}</span>
           <input
             value={value.role}
             onChange={(event) => update('role', event.target.value)}
-            placeholder="Example: Frontend Engineer"
+            placeholder={t('training.placeholder.role')}
             disabled={disabled}
           />
         </label>
 
         <label className="tsl-field">
-          <span>Level</span>
-          <select value={value.level} onChange={(event) => update('level', event.target.value)} disabled={disabled}>
-            {LEVEL_OPTIONS.map((level) => (
-              <option key={level} value={level}>
-                {level}
+          <span>{t('training.launcher.level')}</span>
+          <select
+            value={value.level}
+            onChange={(event) => update('level', event.target.value as TrainingLevel)}
+            disabled={disabled}
+          >
+            {TRAINING_LEVEL_OPTIONS.map((level) => (
+              <option key={level.value} value={level.value}>
+                {t(level.labelKey)}
               </option>
             ))}
           </select>
         </label>
 
         <label className="tsl-field tsl-field--wide">
-          <span>Tech Stack</span>
+          <span>{t('training.launcher.techStack')}</span>
           <input
             value={value.techStack}
             onChange={(event) => update('techStack', event.target.value)}
-            placeholder="Example: React, TypeScript, Node.js"
+            placeholder={t('training.placeholder.techStack')}
             disabled={disabled}
           />
         </label>
 
         <label className="tsl-field">
-          <span>Questions</span>
+          <span>{t('training.launcher.questions')}</span>
           <select
             value={value.questionCount}
             onChange={(event) => update('questionCount', Number(event.target.value))}
@@ -156,7 +164,7 @@ export default function TrainingStudioLauncher({
           >
             {QUESTION_COUNT_OPTIONS.map((count) => (
               <option key={count} value={count}>
-                {count} questions
+                {t('training.launcher.questionOption', { count })}
               </option>
             ))}
           </select>
@@ -165,12 +173,14 @@ export default function TrainingStudioLauncher({
 
       <div className="tsl-section">
         <div className="tsl-mix-heading">
-          <div className="tsl-label">Question Mix</div>
-          <span className={totalMix === 100 ? 'tsl-total ok' : 'tsl-total'}>Total {totalMix}%</span>
+          <div className="tsl-label">{t('training.launcher.questionMix')}</div>
+          <span className={totalMix === 100 ? 'tsl-total ok' : 'tsl-total'}>
+            {t('training.launcher.total', { total: totalMix })}
+          </span>
         </div>
         <div className="tsl-mix-grid">
           <label className="tsl-range">
-            <span>Behavioral</span>
+            <span>{t('training.launcher.behavioral')}</span>
             <input
               type="range"
               min="0"
@@ -184,7 +194,7 @@ export default function TrainingStudioLauncher({
           </label>
 
           <label className="tsl-range">
-            <span>Technical</span>
+            <span>{t('training.launcher.technical')}</span>
             <input
               type="range"
               min="0"
@@ -198,7 +208,7 @@ export default function TrainingStudioLauncher({
           </label>
 
           <label className="tsl-range">
-            <span>Pressure</span>
+            <span>{t('training.launcher.pressure')}</span>
             <input
               type="range"
               min="0"

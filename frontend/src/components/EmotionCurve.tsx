@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { Message, PersonaSummary } from '../services/api'
+import { useI18n } from '../i18n'
 import './EmotionCurve.css'
 
 interface Props {
@@ -41,6 +42,24 @@ interface HeatmapCell {
   score: number | null
   label: string | null
   summary: string
+}
+
+interface ChartDotProps {
+  cx?: number
+  cy?: number
+  payload?: DataPoint
+}
+
+interface ChartTooltipItem {
+  value?: number | string | readonly (number | string)[] | null
+  dataKey?: string | number | ((obj: unknown) => unknown)
+  stroke?: string
+  payload?: DataPoint
+}
+
+interface ChartTooltipProps {
+  active?: boolean
+  payload?: readonly ChartTooltipItem[]
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +101,7 @@ function scoreToColor(score: number | null): string {
 // ---------------------------------------------------------------------------
 
 export default function EmotionCurve({ open, onClose, messages, personaMap }: Props) {
+  const { tr } = useI18n()
   const [tab, setTab] = useState<'curve' | 'heatmap'>('curve')
   const [hoverCell, setHoverCell] = useState<HeatmapCell | null>(null)
 
@@ -206,8 +226,8 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
   const tpLookup = new Set(turningPoints.map((tp) => `${tp.personaId}:${tp.index}`))
 
   // Custom dot renderer: highlight turning points
-  const renderDot = (pid: string) => (props: any) => {
-    const { cx, cy, index: _idx, payload } = props
+  const renderDot = (pid: string) => (props: ChartDotProps) => {
+    const { cx, cy, payload } = props
     if (cx == null || cy == null) return null
     const seq = payload?.index
     const isTp = tpLookup.has(`${pid}:${seq}`)
@@ -228,31 +248,33 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
   }
 
   // Enhanced tooltip with turning point info
-  const renderTooltip = ({ active, payload }: any) => {
+  const renderTooltip = ({ active, payload }: ChartTooltipProps) => {
     if (!active || !payload?.length) return null
-    const items = payload.filter((p: any) => p.value != null && !String(p.dataKey).endsWith('_trend'))
+    const items = payload.filter((p) => p.value != null && p.payload && !String(p.dataKey).endsWith('_trend'))
     if (items.length === 0) return null
     return (
       <div className="emotion-tooltip">
-        {items.map((item: any) => {
+        {items.map((item) => {
           const pid = item.dataKey as string
           const persona = personaMap[pid]
-          const label = item.payload[`${pid}_label`] || ''
-          const summary = item.payload[`${pid}_summary`] || ''
-          const seq = item.payload.index
+          const itemPayload = item.payload!
+          const label = itemPayload[`${pid}_label`] || ''
+          const summary = itemPayload[`${pid}_summary`] || ''
+          const seq = itemPayload.index
           const tp = turningPoints.find((t) => t.personaId === pid && t.index === seq)
+          const score = Number(item.value)
           return (
             <div key={pid} style={{ marginBottom: 4 }}>
               <span style={{ color: item.stroke, fontWeight: 600 }}>
                 {persona?.name || pid}
               </span>
               <span style={{ marginLeft: 8 }}>
-                {item.value > 0 ? '+' : ''}{item.value}
+                {score > 0 ? '+' : ''}{score}
               </span>
               {label && <span style={{ marginLeft: 6, color: '#888', fontSize: 12 }}>{label}</span>}
               {tp && (
                 <div className="emotion-tp-badge">
-                  转折点: {tp.prevScore > 0 ? '+' : ''}{tp.prevScore} → {tp.score > 0 ? '+' : ''}{tp.score}
+                  {tr('转折点', 'Turning point')}: {tp.prevScore > 0 ? '+' : ''}{tp.prevScore} → {tp.score > 0 ? '+' : ''}{tp.score}
                 </div>
               )}
               {summary && <div style={{ color: '#aaa', fontSize: 11, marginTop: 2 }}>{summary}…</div>}
@@ -266,20 +288,20 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog emotion-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>角色情绪分析</h3>
+        <h3>{tr('角色情绪分析', 'Persona Emotion Analysis')}</h3>
 
         {/* Tab bar */}
         <div className="emotion-tabs">
           <button className={`emotion-tab ${tab === 'curve' ? 'active' : ''}`} onClick={() => setTab('curve')}>
-            曲线图
+            {tr('曲线图', 'Curve')}
           </button>
           <button className={`emotion-tab ${tab === 'heatmap' ? 'active' : ''}`} onClick={() => setTab('heatmap')}>
-            热力图
+            {tr('热力图', 'Heatmap')}
           </button>
         </div>
 
         {data.length === 0 ? (
-          <div className="emotion-empty">暂无情绪数据，发送新消息后将自动生成</div>
+          <div className="emotion-empty">{tr('暂无情绪数据，发送新消息后将自动生成', 'No emotion data yet. New messages will generate it automatically.')}</div>
         ) : tab === 'curve' ? (
           <>
             <div className="emotion-chart-wrapper">
@@ -288,7 +310,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis
                     dataKey="index"
-                    label={{ value: '消息序号', position: 'insideBottom', offset: -5, fontSize: 12 }}
+                    label={{ value: tr('消息序号', 'Message #'), position: 'insideBottom', offset: -5, fontSize: 12 }}
                     tick={{ fontSize: 12 }}
                   />
                   <YAxis domain={[-5, 5]} ticks={[-5, -3, -1, 0, 1, 3, 5]} tick={{ fontSize: 12 }} width={30} />
@@ -334,7 +356,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
             {/* Turning points summary */}
             {turningPoints.length > 0 && (
               <div className="emotion-tp-summary">
-                <strong>情绪转折点：</strong>
+                <strong>{tr('情绪转折点：', 'Emotion Turning Points:')}</strong>
                 {turningPoints.map((tp, i) => {
                   const name = personaMap[tp.personaId]?.name || tp.personaId
                   const dir = tp.score > tp.prevScore ? '↑' : '↓'
@@ -354,7 +376,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
                 </div>
               ))}
               <div className="emotion-legend-item">
-                <span className="emotion-legend-line" /> 趋势线
+                <span className="emotion-legend-line" /> {tr('趋势线', 'Trend line')}
               </div>
             </div>
           </>
@@ -399,15 +421,15 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
             )}
             {/* Color legend */}
             <div className="heatmap-color-legend">
-              <span className="heatmap-legend-label">-5 反对</span>
+              <span className="heatmap-legend-label">{tr('-5 反对', '-5 Opposed')}</span>
               <div className="heatmap-gradient" />
-              <span className="heatmap-legend-label">+5 支持</span>
+              <span className="heatmap-legend-label">{tr('+5 支持', '+5 Supportive')}</span>
             </div>
           </div>
         )}
 
         <div className="dialog-actions">
-          <button className="btn-cancel" onClick={onClose}>关闭</button>
+          <button className="btn-cancel" onClick={onClose}>{tr('关闭', 'Close')}</button>
         </div>
       </div>
     </div>

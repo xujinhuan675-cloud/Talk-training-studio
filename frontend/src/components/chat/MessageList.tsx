@@ -3,17 +3,18 @@ import Markdown from 'react-markdown'
 import { MessageCircle, ClipboardList, Volume2, Video } from 'lucide-react'
 import Avatar from '../Avatar'
 import type { Message, DispatchPhase, PersonaSummary } from '../../services/api'
+import { useI18n } from '../../i18n'
 import './MessageList.css'
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function formatTime(ts: string | null): string {
+function formatTime(ts: string | null, locale: string): string {
   if (!ts) return ''
   const d = new Date(ts)
   if (isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 }
 
 /** Highlight @mentions inside a plain text string */
@@ -228,6 +229,7 @@ export default function MessageList({
   playingPersonaId,
   onClick,
 }: MessageListProps) {
+  const { tr, locale } = useI18n()
   const isEmpty = messages.length === 0 && streamingEntries.length === 0
 
   return (
@@ -235,7 +237,7 @@ export default function MessageList({
       {isEmpty ? (
         <div className="empty-messages">
           <MessageCircle size={36} strokeWidth={1.2} />
-          <p>发送第一条消息，开始模拟对话</p>
+          <p>{tr('发送第一条消息，开始模拟对话', 'Send the first message to start the simulation')}</p>
         </div>
       ) : (
         <>
@@ -269,7 +271,7 @@ export default function MessageList({
                         {renderContent(msg.content)}
                         {renderVideoAttachment(videoAttachment)}
                       </div>
-                      <div className="message-time">{formatTime(msg.timestamp)}</div>
+                      <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
                     </div>
                   </div>
                 )}
@@ -279,7 +281,7 @@ export default function MessageList({
                       {renderContent(msg.content)}
                       {renderVideoAttachment(videoAttachment)}
                     </div>
-                    <div className="message-time">{formatTime(msg.timestamp)}</div>
+                    <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
                   </>
                 )}
                 {msg.sender_type === 'system' && (
@@ -325,9 +327,9 @@ export default function MessageList({
           <div className="dispatch-summary-header">
             <ClipboardList size={15} className="dispatch-summary-icon" />
             <span>
-              本轮{' '}
-              {dispatchSummary.reduce((n, p) => n + p.responders.length, 0)}{' '}
-              位角色参与讨论
+              {tr('本轮 {count} 位角色参与讨论', '{count} personas joined this round', {
+                count: dispatchSummary.reduce((n, p) => n + p.responders.length, 0),
+              })}
             </span>
             <span className={`dispatch-expand-arrow ${dispatchExpanded ? 'expanded' : ''}`}>&#9662;</span>
           </div>
@@ -337,8 +339,12 @@ export default function MessageList({
                 <div key={i} className="dispatch-phase">
                   <div className="dispatch-phase-label">
                     {phase.phase === 'initial'
-                      ? '初始响应'
-                      : `跟进讨论${phase.trigger_persona_id ? `（由 ${personaMap[phase.trigger_persona_id]?.name || phase.trigger_persona_id} 触发）` : ''}`}
+                      ? tr('初始响应', 'Initial response')
+                      : phase.trigger_persona_id
+                        ? tr('跟进讨论（由 {name} 触发）', 'Follow-up discussion triggered by {name}', {
+                          name: personaMap[phase.trigger_persona_id]?.name || phase.trigger_persona_id,
+                        })
+                        : tr('跟进讨论', 'Follow-up discussion')}
                   </div>
                   <ul className="dispatch-responders">
                     {phase.responders.map((r) => (
@@ -347,7 +353,7 @@ export default function MessageList({
                           {personaMap[r.persona_id]?.name || r.persona_id}
                         </strong>
                         {' — '}
-                        {r.reason || '参与讨论'}
+                        {r.reason || tr('参与讨论', 'Joined the discussion')}
                       </li>
                     ))}
                   </ul>
@@ -361,14 +367,14 @@ export default function MessageList({
       {typingPersona && streamingEntries.length === 0 && (
         <div className="typing-indicator">
           <div className="typing-dots"><span /><span /><span /></div>
-          {personaMap[typingPersona]?.name || typingPersona} 正在回复
+          {tr('{name} 正在回复', '{name} is replying', { name: personaMap[typingPersona]?.name || typingPersona })}
         </div>
       )}
 
       {playingPersonaId && !typingPersona && (
         <div className="typing-indicator">
           <Volume2 size={14} />
-          &nbsp;{personaMap[playingPersonaId]?.name || playingPersonaId} 正在播放语音
+          &nbsp;{tr('{name} 正在播放语音', '{name} is playing voice', { name: personaMap[playingPersonaId]?.name || playingPersonaId })}
         </div>
       )}
     </div>

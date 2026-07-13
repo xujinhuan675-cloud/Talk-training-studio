@@ -3,6 +3,7 @@
 // owner: wanhua.gu
 // pos: 表示层 - persona editor Hero (Story 2.7 AC 设计基线)；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 import type { PersonaV2 } from '../../services/personaV2'
+import { useI18n } from '../../i18n'
 
 interface Props {
   persona: PersonaV2
@@ -21,6 +22,7 @@ export default function PersonaHero({
   evidenceCount,
   materialCount,
 }: Props) {
+  const { tr } = useI18n()
   const pct = Math.round(strength * 100)
   const innerStyle: React.CSSProperties = persona.avatar_color
     ? { background: persona.avatar_color }
@@ -39,20 +41,23 @@ export default function PersonaHero({
         <div className="sub">{persona.role || '—'}</div>
         <div className="tags">
           <span className="pill">v{persona.schema_version}</span>
-          {persona.identity?.hidden_agenda && <span className="pill alt">🕶️ 隐藏议程</span>}
-          {strength < 0.6 && <span className="pill warn">⚠ 证据偏弱</span>}
+          {persona.identity?.hidden_agenda && <span className="pill alt">{tr('隐藏议程', 'Hidden Agenda')}</span>}
+          {strength < 0.6 && <span className="pill warn">{tr('证据偏弱', 'Weak Evidence')}</span>}
         </div>
       </div>
       <div className="strength">
         <div className="label">
-          <span>Persona Strength</span>
+          <span>{tr('画像强度', 'Persona Strength')}</span>
           <b>{pct}%</b>
         </div>
         <div className="bar">
           <div className="fill" style={{ width: `${pct}%` }} />
         </div>
         <div className="meta">
-          基于 {materialCount} 条素材 · {evidenceCount} 条引用支撑
+          {tr('基于 {materialCount} 条素材 · {evidenceCount} 条引用支撑', 'Based on {materialCount} materials · {evidenceCount} citations', {
+            materialCount,
+            evidenceCount,
+          })}
         </div>
       </div>
     </div>

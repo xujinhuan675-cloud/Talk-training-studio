@@ -1,5 +1,6 @@
 import { Check, Users, MessageSquare, ChevronRight } from 'lucide-react'
 import type { DetectedSpeaker } from '../services/api'
+import { useI18n } from '../i18n'
 import './SpeakerSelector.css'
 
 interface Props {
@@ -11,10 +12,10 @@ interface Props {
   disabled?: boolean
 }
 
-const DOMINANCE_BADGE: Record<string, { label: string; cls: string }> = {
-  high: { label: '强势', cls: 'badge-high' },
-  medium: { label: '中等', cls: 'badge-medium' },
-  low: { label: '温和', cls: 'badge-low' },
+const DOMINANCE_BADGE: Record<string, { labelZh: string; labelEn: string; cls: string }> = {
+  high: { labelZh: '强势', labelEn: 'Strong', cls: 'badge-high' },
+  medium: { labelZh: '中等', labelEn: 'Medium', cls: 'badge-medium' },
+  low: { labelZh: '温和', labelEn: 'Mild', cls: 'badge-low' },
 }
 
 export default function SpeakerSelector({
@@ -25,13 +26,15 @@ export default function SpeakerSelector({
   onSkip,
   disabled,
 }: Props) {
+  const { tr } = useI18n()
+
   return (
     <div className="speaker-selector">
       <div className="speaker-header">
         <Users size={18} />
-        <h3>检测到 {speakers.length} 位说话人</h3>
+        <h3>{tr('检测到 {count} 位说话人', 'Detected {count} speakers', { count: speakers.length })}</h3>
       </div>
-      <p className="speaker-hint">选择要生成对手画像的人（可多选）</p>
+      <p className="speaker-hint">{tr('选择要生成对手画像的人（可多选）', 'Choose who to turn into opponent profiles (multi-select)')}</p>
 
       <div className="speaker-list">
         {speakers.map((s) => {
@@ -52,11 +55,11 @@ export default function SpeakerSelector({
                 <div className="speaker-name-row">
                   <span className="speaker-name">{s.name}</span>
                   {s.role && <span className="speaker-role">{s.role}</span>}
-                  <span className={`speaker-badge ${badge.cls}`}>{badge.label}</span>
+                  <span className={`speaker-badge ${badge.cls}`}>{tr(badge.labelZh, badge.labelEn)}</span>
                 </div>
                 <div className="speaker-meta">
                   <MessageSquare size={12} />
-                  <span>{s.speaking_turns} 次发言</span>
+                  <span>{tr('{count} 次发言', '{count} turns', { count: s.speaking_turns })}</span>
                 </div>
                 {s.sample_quote && (
                   <div className="speaker-quote">"{s.sample_quote}"</div>
@@ -74,7 +77,7 @@ export default function SpeakerSelector({
           onClick={onConfirm}
           disabled={disabled || selected.size === 0}
         >
-          为选中的 {selected.size} 人生成画像
+          {tr('为选中的 {count} 人生成画像', 'Generate profiles for {count} selected', { count: selected.size })}
           <ChevronRight size={14} />
         </button>
         <button
@@ -83,7 +86,7 @@ export default function SpeakerSelector({
           onClick={onSkip}
           disabled={disabled}
         >
-          跳过，直接分析全部素材
+          {tr('跳过，直接分析全部素材', 'Skip and analyze all materials')}
         </button>
       </div>
     </div>

@@ -81,12 +81,22 @@ async def get_llm_port() -> LLMPort:
     return client
 
 
+def get_stakeholder_llm_client() -> LLMPort | None:
+    """Prefer the configured OpenAI-compatible client for stakeholder flows.
+
+    Anthropic remains a fallback for deployments that still configure the
+    stakeholder-specific Claude provider.
+    """
+    return get_llm_client() or get_anthropic_client()
+
+
 async def get_stakeholder_llm_port() -> LLMPort:
-    client = get_anthropic_client()
+    client = get_stakeholder_llm_client()
     if client is None:
         raise RuntimeError(
-            "Anthropic client not initialized. "
-            "Set STAKEHOLDER__ANTHROPIC_API_KEY in environment or .env and restart."
+            "Stakeholder LLM client not initialized. "
+            "Set LLM__API_KEY for OpenAI-compatible mode, or "
+            "STAKEHOLDER__ANTHROPIC_API_KEY for Anthropic mode, then restart."
         )
     return client
 
@@ -202,10 +212,10 @@ def get_organization_service():
 
 async def get_growth_service(
     loader: PersonaLoader = Depends(get_persona_loader),
-    llm: LLMPort = Depends(get_stakeholder_llm_port),
 ):
     from application.services.stakeholder.growth_service import GrowthService
 
+    llm = get_stakeholder_llm_client()
     return GrowthService(uow_factory=SQLAlchemyUnitOfWork, llm=llm, persona_loader=loader)
 
 
@@ -283,7 +293,7 @@ async def get_persona_builder_service(
 ):
     """Construct a PersonaBuilderService for one request (Story 2.5).
 
-    Uses the singleton AgentSkillClient + Anthropic LLM; persistence is via
+    Uses the singleton AgentSkillClient + stakeholder LLM; persistence is via
     a UoW-bound adapter so the builder can save without holding the request
     session open across the entire build.
     """
