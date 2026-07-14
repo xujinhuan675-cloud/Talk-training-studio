@@ -25,6 +25,13 @@ interface OrganizationDialogProps {
   personas: PersonaSummary[]
 }
 
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'Operation failed'
+
 const REL_LABELS: Record<string, string> = {
   superior: '上级',
   subordinate: '下级',
@@ -107,8 +114,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
         await loadOrgDetail(created.id)
       }
       onOrgChanged()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     } finally {
       setSaving(false)
     }
@@ -127,8 +134,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
       setOrgContextPrompt('')
       await loadOrgs()
       onOrgChanged()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -138,8 +145,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
       await createTeam(selectedOrg.id, { name: newTeamName.trim() })
       setNewTeamName('')
       await loadOrgDetail(selectedOrg.id)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -148,8 +155,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
     try {
       await deleteTeam(selectedOrg.id, teamId)
       await loadOrgDetail(selectedOrg.id)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -164,8 +171,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
       })
       setRelDesc('')
       fetchRelationships(selectedOrg.id).then(setRelationships)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -174,8 +181,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
     try {
       await deleteRelationship(selectedOrg.id, relId)
       fetchRelationships(selectedOrg.id).then(setRelationships)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -192,8 +199,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
     try {
       await updatePersona(personaId, { organization_id: selectedOrg.id, team_id: teamId })
       onOrgChanged()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     }
   }
 
@@ -202,8 +209,8 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
     try {
       await updatePersona(personaId, { team_id: null })
       onOrgChanged()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     }
   }
 

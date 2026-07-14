@@ -162,7 +162,7 @@ export function useCoaching(roomId: number | null): UseCoachingReturn {
 
     try {
       // Get latest analysis report, or create one if none exists
-      let reports = await listAnalysisReports(roomId)
+      const reports = await listAnalysisReports(roomId)
       let reportId: number
       if (reports.length > 0) {
         reportId = reports[0].id

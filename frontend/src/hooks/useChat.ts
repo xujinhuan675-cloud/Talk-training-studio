@@ -273,7 +273,7 @@ export function useChat(
       await apiSendMessage(roomId, content)
       setTimeout(scrollToBottom, 100)
       return true
-    } catch (e: any) {
+    } catch (e) {
       console.error('Send failed:', e)
       // Fallback: refresh room detail
       if (roomId) {

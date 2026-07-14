@@ -42,6 +42,22 @@ export function getTrainingModeFromLocation(search: string, state: unknown): Tra
   return null
 }
 
+export function getTrainingSessionIdFromLocation(search: string, state: unknown): string | null {
+  const sessionIdFromQuery = new URLSearchParams(search).get('trainingSessionId')?.trim()
+  if (sessionIdFromQuery) {
+    return sessionIdFromQuery
+  }
+
+  if (state && typeof state === 'object' && 'trainingSessionId' in state) {
+    const sessionIdFromState = (state as TrainingModeLocationState).trainingSessionId
+    if (typeof sessionIdFromState === 'string' && sessionIdFromState.trim()) {
+      return sessionIdFromState.trim()
+    }
+  }
+
+  return null
+}
+
 export function isTrainingModeBattlePrep(
   roomType: string | null | undefined,
   mode: TrainingMode | null,

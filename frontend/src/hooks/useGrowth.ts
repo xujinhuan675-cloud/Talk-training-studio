@@ -125,7 +125,7 @@ export function computeStreak(rooms: ChatRoom[]): number {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   let streak = 0
-  let checkDate = new Date(today)
+  const checkDate = new Date(today)
 
   // If today has no activity, start from yesterday (still counts as active streak)
   const todayStr = checkDate.toISOString().slice(0, 10)
@@ -237,7 +237,6 @@ export interface SkillPathNode {
  */
 export function computeSkillPath(
   dimensionTrends: Record<string, { date: string | null; score: number }[]>,
-  _evaluationCount?: number,
 ): SkillPathNode[] {
   return DIMENSION_KEYS.map((dim) => {
     const trend = dimensionTrends[dim] || []
@@ -294,7 +293,8 @@ export function useGrowth(): UseGrowthReturn {
   }, [])
 
   useEffect(() => {
-    load()
+    const timerId = window.setTimeout(load, 0)
+    return () => window.clearTimeout(timerId)
   }, [load])
 
   const xp = useMemo(
@@ -316,7 +316,6 @@ export function useGrowth(): UseGrowthReturn {
       dashboard
         ? computeSkillPath(
             dashboard.dimension_trends,
-            dashboard.overview.total_evaluations,
           )
         : [],
     [dashboard],

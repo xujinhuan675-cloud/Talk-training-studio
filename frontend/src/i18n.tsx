@@ -12,7 +12,7 @@ const STORAGE_KEY = 'talk-training-studio.locale'
 const en = {
   'language.zh': '中文',
   'language.en': 'English',
-  'app.searchPlaceholder': 'Search or type a command...',
+  'app.searchPlaceholder': 'Search rooms, personas, or commands...',
   'app.languageLabel': 'Language',
   'app.levelTitle': 'Lv.5 Communication Expert',
   'app.avatarInitial': 'G',
@@ -265,7 +265,7 @@ export type TranslationKey = keyof typeof en
 const zh = {
   'language.zh': '中文',
   'language.en': 'English',
-  'app.searchPlaceholder': '搜索或输入命令...',
+  'app.searchPlaceholder': '搜索房间、角色或命令...',
   'app.languageLabel': '语言',
   'app.levelTitle': 'Lv.5 沟通达人',
   'app.avatarInitial': '顾',

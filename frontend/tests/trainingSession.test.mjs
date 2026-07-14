@@ -84,6 +84,76 @@ test('completeTrainingSession posts to the complete endpoint with JSON body', as
   assert.deepEqual(JSON.parse(calls[0].init.body), body)
 })
 
+test('completeTrainingSession posts an empty JSON body by default', async () => {
+  const calls = installFetchStub()
+
+  await trainingSession.completeTrainingSession('session-1')
+
+  assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session-1/complete')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
+  assert.deepEqual(JSON.parse(calls[0].init.body), {})
+})
+
+test('training session requests surface FastAPI detail string errors', async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ detail: 'training session already completed' }),
+  })
+
+  await assert.rejects(
+    trainingSession.completeTrainingSession('session-1'),
+    /training session already completed/,
+  )
+})
+
+test('requestTrainingGuidance posts guidance context and returns response data', async () => {
+  const data = {
+    session_id: 'session 1',
+    events: [
+      {
+        event_type: 'coaching_tip',
+        severity: 'info',
+        title: 'Ask a follow-up',
+        message: 'Probe for measurable impact.',
+        suggested_text: 'Can you share the result in numbers?',
+        metadata: { rubric_key: 'impact' },
+        created_at: '2026-07-14T08:00:00Z',
+      },
+    ],
+  }
+  const calls = installFetchStub(data)
+  const body = {
+    task_goal: 'Practice discovery calls',
+    rubric: { impact: 0.4, clarity: 0.6 },
+    recent_turns: [
+      { speaker: 'candidate', text: 'I improved conversion.', turn_id: 'turn-1' },
+      { speaker: 'coach', text: 'What changed after that?' },
+    ],
+  }
+
+  const result = await trainingSession.requestTrainingGuidance('session 1', body)
+
+  assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session%201/guidance')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
+  assert.deepEqual(JSON.parse(calls[0].init.body), body)
+  assert.deepEqual(result, data)
+})
+
+test('getTrainingGuidanceStreamUrl builds an EventSource endpoint', () => {
+  const url = trainingSession.getTrainingGuidanceStreamUrl('session 1', {
+    message_limit: 25,
+    poll_interval_ms: 750,
+  })
+
+  assert.equal(
+    url,
+    '/api/v1/training-studio/sessions/session%201/guidance/stream?message_limit=25&poll_interval_ms=750',
+  )
+})
+
 test('getTrainingSession and report use GET endpoints without request init', async () => {
   const calls = installFetchStub()
 

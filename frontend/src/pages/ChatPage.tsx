@@ -13,12 +13,14 @@ import {
   Zap,
   Flag,
   Loader2,
+  CheckCircle2,
   ArrowLeft,
   PhoneCall,
   Volume2,
   VolumeX,
   Video,
   X,
+  Lightbulb,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
 import { ChatProvider, useChatContext } from '../contexts/ChatContext'
@@ -40,9 +42,18 @@ import {
   generateCheatSheet,
   type ChatRoom,
   type CheatSheet as CheatSheetData,
+  type Message as ChatMessage,
 } from '../services/api'
+import {
+  completeTrainingSession,
+  getTrainingGuidanceStreamUrl,
+  requestTrainingGuidance,
+  type GuideEventDTO,
+  type TrainingGuidanceResponse,
+  type TranscriptTurnDTO,
+} from '../services/trainingSession'
 import { uploadVideoAnswer } from '../services/trainingStudio'
-import { getTrainingModeFromLocation, isTrainingModeBattlePrep } from '../services/trainingMode'
+import { getTrainingModeFromLocation, getTrainingSessionIdFromLocation, isTrainingModeBattlePrep } from '../services/trainingMode'
 import { useI18n } from '../i18n'
 import '../App.css'
 import './ChatPage.css'
@@ -51,6 +62,17 @@ function displayInitial(name: string): string {
   const first = name.trim().charAt(0)
   if (!first) return '?'
   return /[a-z]/i.test(first) ? first.toUpperCase() : first
+}
+
+const GUIDANCE_TURN_WINDOW = 8
+const GUIDANCE_AUTO_DELAY_MS = 900
+const GUIDANCE_AUTO_MIN_INTERVAL_MS = 1200
+
+type RefreshGuidanceOptions = {
+  open?: boolean
+  extraTurn?: TranscriptTurnDTO
+  autoOpenOnSignal?: boolean
+  minIntervalMs?: number
 }
 
 /* ------------------------------------------------------------------ */
@@ -64,7 +86,16 @@ function ChatArea() {
   const location = useLocation()
   const { tr } = useI18n()
   const preparedVoiceRoomRef = React.useRef<number | null>(null)
+  const guidanceTurnsRef = React.useRef<TranscriptTurnDTO[]>([])
+  const guidanceTimerRef = React.useRef<number | null>(null)
+  const guidanceInFlightRef = React.useRef(false)
+  const guidanceRequestSeqRef = React.useRef(0)
+  const guidanceLastRequestedAtRef = React.useRef(0)
+  const lastAutoGuidanceMessageKeyRef = React.useRef<string | null>(null)
+  const guidanceEventSourceRef = React.useRef<EventSource | null>(null)
+  const guidanceStreamVersionRef = React.useRef(0)
   const trainingMode = getTrainingModeFromLocation(location.search, location.state)
+  const trainingSessionId = getTrainingSessionIdFromLocation(location.search, location.state)
 
   const [showEmotionSidebar, setShowEmotionSidebar] = useState(false)
   const [showEmotionCurve, setShowEmotionCurve] = useState(false)
@@ -82,11 +113,115 @@ function ChatArea() {
   // Battle prep state
   const [battlePrepRoundCount, setBattlePrepRoundCount] = useState(0)
   const [battlePrepEnding, setBattlePrepEnding] = useState(false)
+  const [trainingSessionCompleting, setTrainingSessionCompleting] = useState(false)
+  const [trainingSessionCompleted, setTrainingSessionCompleted] = useState(false)
+  const [guidanceOpen, setGuidanceOpen] = useState(false)
+  const [guidanceLoading, setGuidanceLoading] = useState(false)
+  const [guidanceError, setGuidanceError] = useState<string | null>(null)
+  const [guidanceEvents, setGuidanceEvents] = useState<GuideEventDTO[]>([])
+  const [guidanceStreamConnected, setGuidanceStreamConnected] = useState(false)
   const [cheatSheetData, setCheatSheetData] = useState<CheatSheetData | null>(null)
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
   const sendChatMessage = chat.handleSend
+
+  useEffect(() => {
+    setTrainingSessionCompleted(false)
+    setGuidanceOpen(false)
+    setGuidanceError(null)
+    setGuidanceEvents([])
+    setGuidanceStreamConnected(false)
+    guidanceRequestSeqRef.current += 1
+    lastAutoGuidanceMessageKeyRef.current = null
+    if (guidanceTimerRef.current !== null) {
+      window.clearTimeout(guidanceTimerRef.current)
+      guidanceTimerRef.current = null
+    }
+    if (guidanceEventSourceRef.current) {
+      guidanceStreamVersionRef.current += 1
+      guidanceEventSourceRef.current.close()
+      guidanceEventSourceRef.current = null
+    }
+  }, [trainingSessionId])
+
+  useEffect(() => {
+    return () => {
+      if (guidanceTimerRef.current !== null) {
+        window.clearTimeout(guidanceTimerRef.current)
+      }
+      if (guidanceEventSourceRef.current) {
+        guidanceStreamVersionRef.current += 1
+        guidanceEventSourceRef.current.close()
+        guidanceEventSourceRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!trainingSessionId) return
+    if (guidanceEventSourceRef.current) {
+      guidanceStreamVersionRef.current += 1
+      guidanceEventSourceRef.current.close()
+      guidanceEventSourceRef.current = null
+    }
+
+    const streamVersion = guidanceStreamVersionRef.current + 1
+    guidanceStreamVersionRef.current = streamVersion
+    const es = new EventSource(getTrainingGuidanceStreamUrl(trainingSessionId, {
+      message_limit: 50,
+      poll_interval_ms: 1000,
+    }))
+    guidanceEventSourceRef.current = es
+    setGuidanceLoading(true)
+    setGuidanceError(null)
+
+    const isCurrentStream = () =>
+      guidanceEventSourceRef.current === es && guidanceStreamVersionRef.current === streamVersion
+
+    es.addEventListener('guidance_snapshot', (event) => {
+      if (!isCurrentStream()) return
+      try {
+        const data: TrainingGuidanceResponse = JSON.parse(event.data)
+        setGuidanceStreamConnected(true)
+        setGuidanceLoading(false)
+        setGuidanceError(null)
+        setGuidanceEvents(data.events)
+        if (data.events.some((item) => item.severity !== 'info')) {
+          setGuidanceOpen(true)
+        }
+      } catch {
+        setGuidanceError(tr('Live guidance stream failed', 'Live guidance stream failed'))
+      }
+    })
+
+    es.addEventListener('guidance_error', (event) => {
+      if (!isCurrentStream()) return
+      try {
+        const data = JSON.parse(event.data)
+        setGuidanceError(String(data.detail || tr('Live guidance stream failed', 'Live guidance stream failed')))
+      } catch {
+        setGuidanceError(tr('Live guidance stream failed', 'Live guidance stream failed'))
+      }
+      setGuidanceLoading(false)
+      setGuidanceStreamConnected(false)
+    })
+
+    es.onerror = () => {
+      if (!isCurrentStream()) return
+      setGuidanceLoading(false)
+      setGuidanceStreamConnected(false)
+    }
+
+    return () => {
+      guidanceStreamVersionRef.current += 1
+      es.close()
+      if (guidanceEventSourceRef.current === es) {
+        guidanceEventSourceRef.current = null
+      }
+      setGuidanceStreamConnected(false)
+    }
+  }, [trainingSessionId, tr])
 
   // Compute battle prep round count from existing messages
   const selectedRoomMessages = chat.selectedRoom?.messages
@@ -98,6 +233,31 @@ function ChatArea() {
       setBattlePrepRoundCount(0)
     }
   }, [selectedRoomId, selectedRoomType, selectedRoomMessages])
+  const guidanceTurns = React.useMemo<TranscriptTurnDTO[]>(() => {
+    return ((selectedRoomMessages || []) as ChatMessage[])
+      .filter((message) => message.content.trim())
+      .slice(-GUIDANCE_TURN_WINDOW)
+      .map((message) => ({
+        speaker: message.sender_type === 'persona'
+          ? 'counterpart'
+          : message.sender_type === 'system'
+            ? 'system'
+            : 'user',
+        text: message.content.trim(),
+        turn_id: String(message.id),
+        metadata: {
+          room_id: message.room_id,
+          sender_id: message.sender_id,
+          sender_type: message.sender_type,
+          emotion_score: message.emotion_score,
+          emotion_label: message.emotion_label,
+        },
+      }))
+  }, [selectedRoomMessages])
+
+  useEffect(() => {
+    guidanceTurnsRef.current = guidanceTurns
+  }, [guidanceTurns])
 
   const roomPersonas = chat.selectedRoom
     ? chat.selectedRoom.room.persona_ids
@@ -121,18 +281,100 @@ function ChatArea() {
     }
   }, [battlePrepEnding, chat.selectedRoom, personaMap, tr])
 
+  const refreshGuidance = React.useCallback(async (options: RefreshGuidanceOptions = {}) => {
+    if (!trainingSessionId) return
+    if (guidanceInFlightRef.current) {
+      if (options.open) setGuidanceOpen(true)
+      return
+    }
+    const now = Date.now()
+    const minInterval = options.minIntervalMs ?? 0
+    if (minInterval > 0 && now - guidanceLastRequestedAtRef.current < minInterval) {
+      const remaining = minInterval - (now - guidanceLastRequestedAtRef.current)
+      if (guidanceTimerRef.current !== null) {
+        window.clearTimeout(guidanceTimerRef.current)
+      }
+      guidanceTimerRef.current = window.setTimeout(() => {
+        guidanceTimerRef.current = null
+        void refreshGuidance({ ...options, minIntervalMs: 0 })
+      }, remaining)
+      return
+    }
+
+    const requestId = guidanceRequestSeqRef.current + 1
+    guidanceRequestSeqRef.current = requestId
+    guidanceLastRequestedAtRef.current = now
+    guidanceInFlightRef.current = true
+    if (options.open) setGuidanceOpen(true)
+    setGuidanceLoading(true)
+    setGuidanceError(null)
+
+    const turns = [...guidanceTurnsRef.current]
+    if (options.extraTurn?.text.trim()) {
+      turns.push(options.extraTurn)
+    }
+    const requestBody = options.extraTurn
+      ? {
+          recent_turns: turns.slice(-GUIDANCE_TURN_WINDOW),
+          message_limit: 50,
+        }
+      : { message_limit: 50 }
+
+    try {
+      const result = await requestTrainingGuidance(trainingSessionId, requestBody)
+      if (guidanceRequestSeqRef.current !== requestId) return
+      setGuidanceEvents(result.events)
+      if (options.autoOpenOnSignal && result.events.some((event) => event.severity !== 'info')) {
+        setGuidanceOpen(true)
+      }
+    } catch (e: unknown) {
+      if (guidanceRequestSeqRef.current !== requestId) return
+      setGuidanceError(e instanceof Error ? e.message : tr('Live guidance failed', 'Live guidance failed'))
+    } finally {
+      guidanceInFlightRef.current = false
+      if (guidanceRequestSeqRef.current === requestId) {
+        setGuidanceLoading(false)
+      }
+    }
+  }, [trainingSessionId, tr])
+
+  const scheduleGuidanceRefresh = React.useCallback((options: RefreshGuidanceOptions = {}) => {
+    if (!trainingSessionId || guidanceStreamConnected) return
+    if (guidanceTimerRef.current !== null) {
+      window.clearTimeout(guidanceTimerRef.current)
+    }
+    guidanceTimerRef.current = window.setTimeout(() => {
+      guidanceTimerRef.current = null
+      void refreshGuidance(options)
+    }, GUIDANCE_AUTO_DELAY_MS)
+  }, [guidanceStreamConnected, refreshGuidance, trainingSessionId])
+
   const handleSend = React.useCallback(async () => {
+    const outgoingText = chat.inputValue.trim()
     const success = await sendChatMessage()
     if (!success) return
+    if (trainingSessionId && outgoingText) {
+      scheduleGuidanceRefresh({
+        minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
+      })
+    }
     // Track battle prep rounds
-    if (selectedRoomType === 'battle_prep') {
+    if (selectedRoomType === 'battle_prep' && !trainingSessionId) {
       const newCount = battlePrepRoundCount + 1
       setBattlePrepRoundCount(newCount)
       if (newCount >= 12) {
         setTimeout(() => handleEndBattle(), 3000)
       }
     }
-  }, [battlePrepRoundCount, handleEndBattle, selectedRoomType, sendChatMessage])
+  }, [
+    battlePrepRoundCount,
+    chat.inputValue,
+    handleEndBattle,
+    scheduleGuidanceRefresh,
+    selectedRoomType,
+    sendChatMessage,
+    trainingSessionId,
+  ])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -155,7 +397,8 @@ function ChatArea() {
     )
   }
 
-  const isBattlePrep = selectedRoomType === 'battle_prep'
+  const isTrainingSession = Boolean(trainingSessionId)
+  const isBattlePrep = selectedRoomType === 'battle_prep' && !isTrainingSession
   const isVoiceBattlePrep = isTrainingModeBattlePrep(selectedRoomType, trainingMode, 'voice')
   const isVideoBattlePrep = isTrainingModeBattlePrep(selectedRoomType, trainingMode, 'video')
   const primaryPersona = roomPersonas[0]
@@ -167,6 +410,26 @@ function ChatArea() {
     )
     return personaMessages[personaMessages.length - 1]?.content.trim() || ''
   }, [selectedRoomMessages])
+  const latestGuidanceMessage = React.useMemo(() => {
+    const messages = ((selectedRoomMessages || []) as ChatMessage[]).filter((message) => message.content.trim())
+    return messages[messages.length - 1] || null
+  }, [selectedRoomMessages])
+
+  useEffect(() => {
+    if (!trainingSessionId || !latestGuidanceMessage || latestGuidanceMessage.sender_type !== 'persona') return
+    const messageKey = `${selectedRoomId || 'room'}:${latestGuidanceMessage.id}`
+    if (lastAutoGuidanceMessageKeyRef.current === messageKey) return
+    lastAutoGuidanceMessageKeyRef.current = messageKey
+    scheduleGuidanceRefresh({
+      autoOpenOnSignal: true,
+      minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
+    })
+  }, [
+    latestGuidanceMessage,
+    scheduleGuidanceRefresh,
+    selectedRoomId,
+    trainingSessionId,
+  ])
 
   useEffect(() => {
     if (!isVoiceBattlePrep || !selectedRoomId) {
@@ -234,6 +497,30 @@ function ChatArea() {
       setLastVoiceTranscript(null)
     }
   }, [])
+
+  const handleCompleteTrainingSession = React.useCallback(async () => {
+    if (!trainingSessionId || trainingSessionCompleting) return
+    setTrainingSessionCompleting(true)
+    try {
+      const session = await completeTrainingSession(trainingSessionId, { generate_report: true })
+      setTrainingSessionCompleted(true)
+      const reportId = Number(session.report_id)
+      if (Number.isFinite(reportId) && reportId > 0) {
+        await analysis.openReport(reportId)
+      } else {
+        await analysis.handleAnalyze()
+      }
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : tr('璁粌瀹屾垚澶辫触', 'Failed to complete training session'))
+    } finally {
+      setTrainingSessionCompleting(false)
+    }
+  }, [analysis, trainingSessionCompleting, trainingSessionId, tr])
+
+  const handleRequestGuidance = React.useCallback(async () => {
+    if (guidanceLoading) return
+    await refreshGuidance({ open: true })
+  }, [guidanceLoading, refreshGuidance])
 
   const videoAnswerCount = React.useMemo(() => {
     if (!isVideoBattlePrep || !selectedRoomMessages) return 0
@@ -303,11 +590,25 @@ function ChatArea() {
     if (sent && isVideoBattlePrep) {
       setVideoAnswerStatus('sent')
       setLastVideoAnswerAt(result.recordedAt)
+      scheduleGuidanceRefresh({
+        extraTurn: {
+          speaker: 'user',
+          text: chat.inputValue.trim() || fallbackCaption || tr('I submitted a recorded video answer.', 'I submitted a recorded video answer.'),
+          metadata: {
+            source: 'video_answer',
+            mimeType: result.mimeType,
+            durationMs: result.durationMs,
+            trainingMode: 'video',
+          },
+        },
+        autoOpenOnSignal: true,
+        minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
+      })
     } else if (isVideoBattlePrep) {
       setVideoAnswerStatus('error')
       setVideoAnswerError(tr('视频消息发送失败', 'Video message failed to send'))
     }
-  }, [chat, isVideoBattlePrep, tr])
+  }, [chat, isVideoBattlePrep, scheduleGuidanceRefresh, tr])
 
   return (
     <>
@@ -356,6 +657,17 @@ function ChatArea() {
           >
             <BarChart2 size={16} />
           </button>
+          {trainingSessionId && (
+            <button
+              className={`header-action-btn${trainingSessionCompleted ? ' active' : ''}`}
+              onClick={handleCompleteTrainingSession}
+              title={trainingSessionCompleted ? 'Training completed' : 'Complete training and generate review'}
+              aria-label={trainingSessionCompleted ? 'Training completed' : 'Complete training and generate review'}
+              disabled={trainingSessionCompleting || analysis.analyzingRoom}
+            >
+              {trainingSessionCompleting ? <Loader2 size={16} className="spin" /> : <CheckCircle2 size={16} />}
+            </button>
+          )}
           <button
             className="header-action-btn coaching"
             onClick={() => coaching.handleStartCoaching()}
@@ -405,6 +717,75 @@ function ChatArea() {
           </div>
         </div>
       </div>
+
+      {trainingSessionId && (
+        <section className="chat-page-guidance-bar" data-testid="training-guidance-bar">
+          <div className="guidance-copy">
+            <Lightbulb size={15} />
+            <strong>{tr('Realtime guidance', 'Realtime guidance')}</strong>
+            <span>
+              {guidanceError
+                ? guidanceError
+                : guidanceEvents[0]?.message || (
+                  guidanceStreamConnected
+                    ? tr('Streaming during this training session', 'Streaming during this training session')
+                    : tr('Ready during this training session', 'Ready during this training session')
+                )}
+            </span>
+          </div>
+          <button
+            className="guidance-action"
+            type="button"
+            onClick={handleRequestGuidance}
+            disabled={guidanceLoading}
+          >
+            {guidanceLoading ? <Loader2 size={14} className="spin" /> : <Lightbulb size={14} />}
+            {guidanceLoading ? tr('Thinking', 'Thinking') : tr('Guide me', 'Guide me')}
+          </button>
+        </section>
+      )}
+
+      {trainingSessionId && guidanceOpen && (
+        <section className="chat-page-guidance-panel" data-testid="training-guidance-panel">
+          <div className="guidance-panel-header">
+            <strong>{tr('Live coach', 'Live coach')}</strong>
+            <button
+              type="button"
+              onClick={() => setGuidanceOpen(false)}
+              title={tr('Close guidance', 'Close guidance')}
+              aria-label={tr('Close guidance', 'Close guidance')}
+            >
+              <X size={14} />
+            </button>
+          </div>
+          {guidanceLoading && guidanceEvents.length === 0 && (
+            <div className="guidance-empty">{tr('Reading the latest turn', 'Reading the latest turn')}</div>
+          )}
+          {!guidanceLoading && guidanceEvents.length === 0 && !guidanceError && (
+            <div className="guidance-empty">{tr('No guidance yet', 'No guidance yet')}</div>
+          )}
+          {guidanceError && (
+            <div className="guidance-error">{guidanceError}</div>
+          )}
+          {guidanceEvents.length > 0 && (
+            <div className="guidance-event-list">
+              {guidanceEvents.map((event, index) => (
+                <article
+                  className={`guidance-card ${event.severity || 'info'}`}
+                  key={`${event.event_type}-${index}`}
+                >
+                  <div className="guidance-card-header">
+                    <span>{event.title}</span>
+                    <small>{event.event_type.replace(/_/g, ' ')}</small>
+                  </div>
+                  <p>{event.message}</p>
+                  {event.suggested_text && <blockquote>{event.suggested_text}</blockquote>}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Battle prep bar */}
       {isBattlePrep && (
@@ -590,6 +971,18 @@ function ChatArea() {
               chat.setDispatchSummary(null)
               voice.audioPlayerRef.current?.stop()
               setLastVoiceTranscript(isVoiceBattlePrep ? transcript : null)
+              scheduleGuidanceRefresh({
+                extraTurn: {
+                  speaker: 'user',
+                  text: transcript,
+                  metadata: {
+                    source: 'voice_transcription',
+                    trainingMode: 'voice',
+                  },
+                },
+                autoOpenOnSignal: true,
+                minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
+              })
               setTimeout(chat.scrollToBottom, 100)
             }}
             onVoiceRecorderStateChange={handleVoiceRecorderStateChange}

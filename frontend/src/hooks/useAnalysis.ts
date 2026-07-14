@@ -17,6 +17,7 @@ export interface UseAnalysisReturn {
   setHighlightedMessageId: React.Dispatch<React.SetStateAction<number | null>>
   handleAnalyze: () => Promise<void>
   handleGenerateNewReport: () => Promise<void>
+  openReport: (reportId: number) => Promise<void>
   handleSelectReport: (reportId: number) => Promise<void>
   handleScrollToMessage: (messageIndices: number[] | undefined, messageIdMap: Record<string, number> | undefined) => void
 }
@@ -86,6 +87,18 @@ export function useAnalysis(roomId: number | null): UseAnalysisReturn {
     }
   }, [roomId, tr])
 
+  const openReport = useCallback(async (reportId: number) => {
+    if (!roomId) return
+    try {
+      const reports = await listAnalysisReports(roomId)
+      setAnalysisReportList(reports)
+      const full = await fetchAnalysisReport(roomId, reportId)
+      setAnalysisResult(full)
+    } catch {
+      alert(tr('鍔犺浇鎶ュ憡澶辫触', 'Failed to load report'))
+    }
+  }, [roomId, tr])
+
   const handleScrollToMessage = useCallback((messageIndices: number[] | undefined, messageIdMap: Record<string, number> | undefined) => {
     if (!messageIndices?.length || !messageIdMap) return
     // Find the first valid message ID
@@ -116,6 +129,7 @@ export function useAnalysis(roomId: number | null): UseAnalysisReturn {
     setHighlightedMessageId,
     handleAnalyze,
     handleGenerateNewReport,
+    openReport,
     handleSelectReport,
     handleScrollToMessage,
   }

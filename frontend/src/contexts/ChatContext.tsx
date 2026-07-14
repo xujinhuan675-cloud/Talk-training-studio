@@ -36,6 +36,7 @@ export function ChatProvider({
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useChatContext(): ChatContextType {
   const ctx = useContext(ChatContext)
   if (!ctx) {

@@ -15,6 +15,13 @@ interface ScenarioDialogProps {
   onClose: () => void
 }
 
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'Operation failed'
+
 export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [personas, setPersonas] = useState<PersonaSummary[]>([])
@@ -100,8 +107,8 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
       await loadData()
       setEditing(null)
       setIsNew(false)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     } finally {
       setSubmitting(false)
     }
@@ -116,8 +123,8 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
       await loadData()
       setEditing(null)
       setIsNew(false)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(getErrorMessage(e))
     } finally {
       setSubmitting(false)
     }

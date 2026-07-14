@@ -1,19 +1,20 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Dumbbell, MessageSquare, PanelLeftClose, PanelLeftOpen, Settings, Swords, TrendingUp } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, Dumbbell, Home, MessageSquare, Settings, Swords, TrendingUp } from 'lucide-react'
 import { useI18n, type TranslationKey } from '../../i18n'
 import './NavRail.css'
 
-const TALKWISE_ICON_SRC = '/talkwise-icon.svg'
 const STORAGE_KEY = 'talkwise.navrail.collapsed'
 
 interface NavItem {
   to: string
   icon: React.ReactNode
   labelKey: TranslationKey
+  exact?: boolean
 }
 
 const navItems: NavItem[] = [
+  { to: '/', icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
   { to: '/training-studio', icon: <Dumbbell size={18} />, labelKey: 'nav.trainingStudio' },
   { to: '/chat', icon: <MessageSquare size={18} />, labelKey: 'nav.chat' },
   { to: '/battle-prep', icon: <Swords size={18} />, labelKey: 'nav.battlePrep' },
@@ -29,38 +30,26 @@ const NavRail: React.FC = () => {
     return window.localStorage.getItem(STORAGE_KEY) === 'true'
   })
 
-  const isActive = (path: string) => location.pathname.startsWith(path)
+  const isActive = (item: NavItem) => {
+    if (item.exact) return location.pathname === item.to
+    return location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
+  }
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, String(collapsed))
   }, [collapsed])
 
   const toggleLabel = collapsed ? tr('展开侧边栏', 'Expand sidebar') : tr('收起侧边栏', 'Collapse sidebar')
+  const toggleText = collapsed ? tr('展开', 'Expand') : tr('收起', 'Collapse')
 
   return (
     <nav className={`navrail${collapsed ? ' navrail--collapsed' : ''}`} aria-label={tr('主导航', 'Primary navigation')}>
-      <div className="navrail-header">
-        <Link to="/" className="navrail-logo" aria-label={t('nav.home')} title={collapsed ? 'TalkWise' : undefined}>
-          <img className="navrail-logo-mark" src={TALKWISE_ICON_SRC} alt="" aria-hidden="true" />
-          <span className="navrail-wordmark">TalkWise</span>
-        </Link>
-        <button
-          type="button"
-          className="navrail-toggle"
-          aria-label={toggleLabel}
-          title={toggleLabel}
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsed((value) => !value)}
-        >
-          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-        </button>
-      </div>
       <div className="navrail-items">
         {navItems.map((item) => (
           <Link
             key={item.to}
             to={item.to}
-            className={`navrail-link${isActive(item.to) ? ' active' : ''}`}
+            className={`navrail-link${isActive(item) ? ' active' : ''}`}
             title={t(item.labelKey)}
             aria-label={t(item.labelKey)}
           >
@@ -70,6 +59,21 @@ const NavRail: React.FC = () => {
             <span className="navrail-link-label">{t(item.labelKey)}</span>
           </Link>
         ))}
+      </div>
+      <div className="navrail-footer">
+        <button
+          type="button"
+          className="navrail-toggle"
+          aria-label={toggleLabel}
+          title={toggleLabel}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          <span className="navrail-toggle-icon" aria-hidden="true">
+            {collapsed ? <ChevronsRight size={19} /> : <ChevronsLeft size={19} />}
+          </span>
+          <span className="navrail-toggle-label">{toggleText}</span>
+        </button>
       </div>
     </nav>
   )

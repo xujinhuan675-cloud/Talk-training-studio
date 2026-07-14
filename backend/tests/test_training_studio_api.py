@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.dependencies import (
     get_analysis_reader_service,
@@ -15,7 +17,14 @@ from api.dependencies import (
     get_chatroom_service,
     get_growth_service,
 )
-from api.routes.training_studio import get_storybank_service, get_training_session_service, router
+from api.routes.training_studio import (
+    get_live_guidance_service,
+    get_storybank_service,
+    get_training_session_service,
+    router,
+)
+from application.services.stakeholder.dto import ChatRoomDTO, ChatRoomDetailDTO, MessageDTO
+from application.services.training_studio.live_guidance_service import TrainingLiveGuidanceService
 from application.services.training_studio.session_service import TrainingSessionService
 from core.exceptions import register_exception_handlers
 from domain.training_studio.storybank import StoryBankService
@@ -25,19 +34,25 @@ class FakeReport(BaseModel):
     id: int
     room_id: int
     summary: str = "Good practice report"
-    content: dict = {}
+    content: dict = Field(default_factory=dict)
 
 
 class FakeAnalysisService:
+    def __init__(self) -> None:
+        self.generated_for: list[int] = []
+
     async def generate_report(self, room_id: int) -> FakeReport:
+        self.generated_for.append(room_id)
         return FakeReport(id=501, room_id=room_id)
 
 
 class FakeAnalysisReaderService:
     def __init__(self) -> None:
         self.reports: dict[int, FakeReport] = {}
+        self.requested_ids: list[int] = []
 
     async def get_report(self, report_id: int) -> FakeReport | None:
+        self.requested_ids.append(report_id)
         return self.reports.get(report_id)
 
 
@@ -52,10 +67,16 @@ class FakeGrowthService:
 class FakeChatroomService:
     def __init__(self) -> None:
         self.created_rooms: list[object] = []
+        self.details: dict[int, ChatRoomDetailDTO] = {}
+        self.detail_calls: list[tuple[int, int]] = []
 
     async def create_room(self, dto):
         self.created_rooms.append(dto)
         return SimpleNamespace(id=701)
+
+    async def get_room_detail(self, room_id: int, *, message_limit: int = 50) -> ChatRoomDetailDTO:
+        self.detail_calls.append((room_id, message_limit))
+        return self.details[room_id]
 
 
 @pytest.fixture
@@ -65,16 +86,21 @@ def app():
     test_app.include_router(router, prefix="/api/v1")
     storybank = StoryBankService()
     session_service = TrainingSessionService(id_factory=lambda: f"session-{len(session_service.list_sessions()) + 1}")
+    analysis_service = FakeAnalysisService()
     reader_service = FakeAnalysisReaderService()
     growth_service = FakeGrowthService()
     chatroom_service = FakeChatroomService()
+    guidance_service = TrainingLiveGuidanceService(monologue_word_threshold=20)
     test_app.dependency_overrides[get_storybank_service] = lambda: storybank
     test_app.dependency_overrides[get_training_session_service] = lambda: session_service
-    test_app.dependency_overrides[get_analysis_service] = lambda: FakeAnalysisService()
+    test_app.dependency_overrides[get_live_guidance_service] = lambda: guidance_service
+    test_app.dependency_overrides[get_analysis_service] = lambda: analysis_service
     test_app.dependency_overrides[get_analysis_reader_service] = lambda: reader_service
     test_app.dependency_overrides[get_growth_service] = lambda: growth_service
     test_app.dependency_overrides[get_chatroom_service] = lambda: chatroom_service
     test_app.state.training_session_service = session_service
+    test_app.state.guidance_service = guidance_service
+    test_app.state.analysis_service = analysis_service
     test_app.state.analysis_reader_service = reader_service
     test_app.state.growth_service = growth_service
     test_app.state.chatroom_service = chatroom_service
@@ -147,6 +173,33 @@ def session_payload(mode: str = "voice") -> dict:
     }
 
 
+def chat_detail(room_id: int, messages: list[MessageDTO]) -> ChatRoomDetailDTO:
+    return ChatRoomDetailDTO(
+        room=ChatRoomDTO(
+            id=room_id,
+            name=f"Room {room_id}",
+            type="battle_prep",
+            persona_ids=["customer-1"],
+        ),
+        messages=messages,
+    )
+
+
+def parse_sse_events(text: str) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    for block in text.strip().split("\n\n"):
+        event_name = "message"
+        data_lines: list[str] = []
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                event_name = line[len("event: ") :]
+            elif line.startswith("data: "):
+                data_lines.append(line[len("data: ") :])
+        if data_lines:
+            events.append((event_name, json.loads("\n".join(data_lines))))
+    return events
+
+
 @pytest.mark.asyncio
 async def test_training_session_create_list_and_get(client: AsyncClient) -> None:
     create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
@@ -166,6 +219,19 @@ async def test_training_session_create_list_and_get(client: AsyncClient) -> None
     get_resp = await client.get("/api/v1/training-studio/sessions/session-1")
     assert get_resp.status_code == 200
     assert get_resp.json()["data"]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_training_session_list_supports_skip_and_limit(client: AsyncClient) -> None:
+    for mode in ["text", "voice", "video"]:
+        create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload(mode))
+        assert create_resp.status_code == 201
+
+    list_resp = await client.get("/api/v1/training-studio/sessions", params={"skip": 1, "limit": 1})
+
+    assert list_resp.status_code == 200
+    data = list_resp.json()["data"]
+    assert [item["session_id"] for item in data] == ["session-2"]
 
 
 @pytest.mark.asyncio
@@ -229,6 +295,375 @@ async def test_training_session_complete_and_report(client: AsyncClient, app: Fa
     report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
     assert report_resp.status_code == 200
     assert report_resp.json()["data"]["id"] == 501
+
+
+@pytest.mark.asyncio
+async def test_training_session_complete_with_explicit_report_id_skips_generation(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={"report_id": 777, "generate_report": False},
+    )
+
+    assert complete_resp.status_code == 200
+    completed = complete_resp.json()["data"]
+    assert completed["status"] == "completed"
+    assert completed["report_id"] == "777"
+    assert app.state.analysis_service.generated_for == []
+    assert app.state.growth_service.evaluated == []
+
+    app.state.analysis_reader_service.reports[777] = FakeReport(id=777, room_id=42)
+    report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
+    assert report_resp.status_code == 200
+    assert report_resp.json()["data"]["id"] == 777
+
+
+@pytest.mark.asyncio
+async def test_training_session_report_returns_404_for_non_numeric_report_id(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={"report_id": "report-777", "generate_report": False},
+    )
+    assert complete_resp.status_code == 200
+
+    report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
+
+    assert report_resp.status_code == 404
+    assert app.state.analysis_reader_service.requested_ids == []
+
+
+@pytest.mark.asyncio
+async def test_training_session_complete_requires_numeric_room_id_when_generating_report(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": "room-42"},
+    )
+
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={},
+    )
+
+    assert complete_resp.status_code == 400
+    assert "room_id must be numeric" in complete_resp.json()["message"]
+    assert app.state.analysis_service.generated_for == []
+    assert app.state.growth_service.evaluated == []
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_reads_bound_room_messages(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    app.state.chatroom_service.details[42] = chat_detail(
+        42,
+        [
+            MessageDTO(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="me",
+                content="We can support your team with a pilot.",
+            ),
+            MessageDTO(
+                id=2,
+                room_id=42,
+                sender_type="persona",
+                sender_id="customer-1",
+                content="I am not convinced because this feels too expensive for our budget.",
+            ),
+        ],
+    )
+
+    resp = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        params={"message_limit": 12},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    event_types = {event["event_type"] for event in data["events"]}
+    assert data["source"] == "room"
+    assert data["total_turn_count"] == 2
+    assert {"risk", "next_reply"}.issubset(event_types)
+    assert app.state.chatroom_service.detail_calls == [(42, 12)]
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_accepts_request_turns(client: AsyncClient) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    long_answer = " ".join(["This answer keeps going without a pause"] * 5)
+
+    resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        json={
+            "task_goal": "Sales objection handling",
+            "rubric": {"discovery": 0.4},
+            "recent_turns": [
+                {"speaker": "user", "text": long_answer, "turn_id": "client-1"},
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["source"] == "request"
+    assert any(event["event_type"] == "delivery_nudge" for event in data["events"])
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_parses_video_answer_marker(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    captured_turns = []
+
+    class CapturingGuidanceService(TrainingLiveGuidanceService):
+        async def generate_guidance_async(self, **kwargs):
+            captured_turns.extend(kwargs["recent_turns"])
+            return []
+
+    app.dependency_overrides[get_live_guidance_service] = lambda: CapturingGuidanceService()
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("video"))
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    video_attachment = {
+        "url": "/api/v1/training-studio/video-answers/answer.webm",
+        "mimeType": "video/webm",
+        "durationMs": 42000,
+        "recordedAt": "2026-07-14T09:00:00Z",
+        "trainingEvent": {
+            "type": "video_answer_submitted",
+            "trainingMode": "video",
+            "schemaVersion": 1,
+            "reportDimensions": ["content_delivery", "camera_presence"],
+            "cameraPresenceStatus": "placeholder",
+        },
+    }
+    app.state.chatroom_service.details[42] = chat_detail(
+        42,
+        [
+            MessageDTO(
+                id=9,
+                room_id=42,
+                sender_type="user",
+                sender_id="me",
+                content="Here is my product demo answer.\n\n[video-answer]" + json.dumps(video_attachment),
+            ),
+        ],
+    )
+
+    resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/guidance")
+
+    assert resp.status_code == 200
+    assert len(captured_turns) == 1
+    turn = captured_turns[0]
+    assert turn.text == "Here is my product demo answer."
+    assert "[video-answer]" not in turn.text
+    assert turn.metadata["source"] == "video_answer"
+    assert turn.metadata["videoUrl"] == video_attachment["url"]
+    assert turn.metadata["trainingEvent"] == video_attachment["trainingEvent"]
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_stream_emits_initial_guidance(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    app.state.chatroom_service.details[42] = chat_detail(
+        42,
+        [
+            MessageDTO(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="me",
+                content="Can we start with a low-risk pilot?",
+            ),
+            MessageDTO(
+                id=2,
+                room_id=42,
+                sender_type="persona",
+                sender_id="customer-1",
+                content="I am worried that the budget will not work.",
+            ),
+        ],
+    )
+
+    async with client.stream(
+        "GET",
+        f"/api/v1/training-studio/sessions/{session_id}/guidance/stream",
+        params={"message_limit": 12, "max_events": 1},
+    ) as resp:
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        body = (await resp.aread()).decode()
+
+    events = parse_sse_events(body)
+    assert events[0][0] == "guidance_snapshot"
+    data = events[0][1]
+    event_types = {event["event_type"] for event in data["events"]}
+    assert data["session_id"] == session_id
+    assert data["source"] == "room"
+    assert data["total_turn_count"] == 2
+    assert {"risk", "next_reply"}.issubset(event_types)
+    assert app.state.chatroom_service.detail_calls == [(42, 12)]
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_stream_follows_room_message_events(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    from application.services.stakeholder.sse import room_event_bus
+
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    app.state.chatroom_service.details[42] = chat_detail(
+        42,
+        [
+            MessageDTO(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="me",
+                content="We can start with a small pilot.",
+            ),
+        ],
+    )
+
+    async def publish_room_message() -> None:
+        await asyncio.sleep(0.05)
+        app.state.chatroom_service.details[42] = chat_detail(
+            42,
+            [
+                MessageDTO(
+                    id=1,
+                    room_id=42,
+                    sender_type="user",
+                    sender_id="me",
+                    content="We can start with a small pilot.",
+                ),
+                MessageDTO(
+                    id=2,
+                    room_id=42,
+                    sender_type="persona",
+                    sender_id="customer-1",
+                    content="I am not convinced because the cost is risky.",
+                ),
+            ],
+        )
+        await room_event_bus.publish(
+            42,
+            "message",
+            {"id": 2, "room_id": 42, "sender_type": "persona", "sender_id": "customer-1"},
+        )
+
+    publish_task = asyncio.create_task(publish_room_message())
+    async with client.stream(
+        "GET",
+        f"/api/v1/training-studio/sessions/{session_id}/guidance/stream",
+        params={"message_limit": 12, "max_events": 2},
+    ) as resp:
+        assert resp.status_code == 200
+        body = (await resp.aread()).decode()
+    await publish_task
+
+    events = parse_sse_events(body)
+    assert [event for event, _ in events] == ["guidance_snapshot", "guidance_snapshot"]
+    assert events[0][1]["reason"] == "initial"
+    assert events[1][1]["reason"] == "room_message"
+    assert events[1][1]["trigger"]["message_id"] == 2
+    event_types = {event["event_type"] for event in events[1][1]["events"]}
+    assert "risk" in event_types
+    assert app.state.chatroom_service.detail_calls == [(42, 12), (42, 12)]
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_requires_active_session(client: AsyncClient) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    session_id = create_resp.json()["data"]["session_id"]
+
+    resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        json={"recent_turns": [{"speaker": "user", "text": "hello"}]},
+    )
+
+    assert resp.status_code == 400
+    assert "must be active" in resp.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_requires_numeric_room_id(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": "room-42"},
+    )
+
+    resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/guidance")
+
+    assert resp.status_code == 400
+    assert "room_id must be numeric" in resp.json()["message"]
+    assert app.state.chatroom_service.detail_calls == []
+
+
+@pytest.mark.asyncio
+async def test_training_session_guidance_returns_404_for_missing_session(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/training-studio/sessions/missing/guidance")
+
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

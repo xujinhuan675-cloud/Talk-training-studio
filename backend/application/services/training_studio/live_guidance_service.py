@@ -7,11 +7,14 @@ bounded state and returns extra guide events.
 
 from __future__ import annotations
 
+import logging
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptSpeaker(StrEnum):
@@ -96,6 +99,9 @@ class GuidanceState:
 
 
 LLMGuidanceCallback = Callable[[GuidanceState], Sequence[GuideEvent | dict[str, object]]]
+AsyncLLMGuidanceCallback = Callable[
+    [GuidanceState], Awaitable[Sequence[GuideEvent | dict[str, object]]]
+]
 
 
 class TrainingLiveGuidanceService:
@@ -123,6 +129,7 @@ class TrainingLiveGuidanceService:
         max_events: int = 5,
         monologue_word_threshold: int = 95,
         llm_callback: LLMGuidanceCallback | None = None,
+        async_llm_callback: AsyncLLMGuidanceCallback | None = None,
     ) -> None:
         if window_size < 1:
             raise ValueError("window_size must be at least 1")
@@ -132,6 +139,7 @@ class TrainingLiveGuidanceService:
         self.max_events = max_events
         self.monologue_word_threshold = monologue_word_threshold
         self.llm_callback = llm_callback
+        self.async_llm_callback = async_llm_callback
 
     def build_state(
         self,
@@ -165,15 +173,44 @@ class TrainingLiveGuidanceService:
             rubric=rubric,
             recent_turns=recent_turns,
         )
-        events = [
+        events = self._deterministic_events(state)
+        if self.llm_callback is not None:
+            events.extend(self._coerce_event(event) for event in self.llm_callback(state))
+        return events[: self.max_events]
+
+    async def generate_guidance_async(
+        self,
+        *,
+        training_session_id: str,
+        task_goal: str,
+        rubric: dict[str, object] | None = None,
+        recent_turns: Iterable[TranscriptTurn | dict[str, object]] = (),
+    ) -> list[GuideEvent]:
+        state = self.build_state(
+            training_session_id=training_session_id,
+            task_goal=task_goal,
+            rubric=rubric,
+            recent_turns=recent_turns,
+        )
+        events = self._deterministic_events(state)
+        if self.llm_callback is not None:
+            events.extend(self._coerce_event(event) for event in self.llm_callback(state))
+        if self.async_llm_callback is not None:
+            try:
+                llm_events = await self.async_llm_callback(state)
+            except Exception:
+                logger.exception("Training live guidance LLM callback failed")
+            else:
+                events.extend(self._coerce_event(event) for event in llm_events)
+        return events[: self.max_events]
+
+    def _deterministic_events(self, state: GuidanceState) -> list[GuideEvent]:
+        return [
             *self._detect_objection(state),
             *self._detect_delivery_nudge(state),
             *self._detect_missing_question(state),
             *self._build_next_reply(state),
         ]
-        if self.llm_callback is not None:
-            events.extend(self._coerce_event(event) for event in self.llm_callback(state))
-        return events[: self.max_events]
 
     def _detect_delivery_nudge(self, state: GuidanceState) -> list[GuideEvent]:
         latest_user_turn = self._latest_turn(state.user_turns)

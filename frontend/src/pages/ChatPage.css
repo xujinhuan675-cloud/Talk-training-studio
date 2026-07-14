@@ -235,6 +235,198 @@
   cursor: not-allowed;
 }
 
+.chat-page-guidance-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  border-bottom: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+  flex-shrink: 0;
+}
+
+.guidance-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.guidance-copy svg {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.guidance-copy strong {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.guidance-copy span {
+  min-width: 0;
+  overflow: hidden;
+  color: #166534;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guidance-action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #16a34a;
+  border-radius: 6px;
+  background: #fff;
+  color: #15803d;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.guidance-action:hover:not(:disabled) {
+  background: #dcfce7;
+}
+
+.guidance-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chat-page-guidance-panel {
+  flex-shrink: 0;
+  padding: 10px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.guidance-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.guidance-panel-header strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.guidance-panel-header button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.guidance-panel-header button:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.guidance-event-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.guidance-card {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #bbf7d0;
+  border-left: 3px solid #22c55e;
+  border-radius: 8px;
+  background: #f7fee7;
+}
+
+.guidance-card.warning {
+  border-color: #fed7aa;
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.guidance-card.critical {
+  border-color: #fecaca;
+  border-left-color: #ef4444;
+  background: #fff1f2;
+}
+
+.guidance-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.guidance-card-header span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guidance-card-header small {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.guidance-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.guidance-card blockquote {
+  margin: 7px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid currentColor;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.guidance-empty,
+.guidance-error {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.guidance-empty {
+  color: var(--text-secondary);
+  background: var(--bg-base);
+}
+
+.guidance-error {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
 .chat-page-voice-call-bar {
   display: flex;
   align-items: center;
@@ -801,6 +993,38 @@
   .chat-page-battle-bar {
     padding: 6px 12px;
     font-size: 12px;
+  }
+
+  .chat-page-guidance-bar {
+    padding: 7px 12px;
+    gap: 8px;
+  }
+
+  .guidance-copy {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .guidance-copy svg {
+    display: none;
+  }
+
+  .guidance-copy span {
+    max-width: 100%;
+  }
+
+  .guidance-action {
+    min-height: 30px;
+    padding: 0 9px;
+  }
+
+  .chat-page-guidance-panel {
+    padding: 10px 12px;
+  }
+
+  .guidance-event-list {
+    grid-template-columns: 1fr;
   }
 
   .chat-page-voice-call-bar {

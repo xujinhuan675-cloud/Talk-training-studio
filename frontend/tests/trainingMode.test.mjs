@@ -31,6 +31,15 @@ test('buildTrainingModeChatPath carries the selected voice mode', () => {
   assert.equal(trainingMode.buildTrainingModeChatPath(42, 'video'), '/chat/42?trainingMode=video')
 })
 
+test('buildTrainingModeChatPath carries training mode and training session id', () => {
+  const path = trainingMode.buildTrainingModeChatPath(42, 'voice', 'training-session-1')
+  const url = new URL(path, 'http://localhost')
+
+  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.searchParams.get('trainingMode'), 'voice')
+  assert.equal(url.searchParams.get('trainingSessionId'), 'training-session-1')
+})
+
 test('getTrainingModeFromLocation reads valid modes from query first', () => {
   assert.equal(
     trainingMode.getTrainingModeFromLocation('?trainingMode=voice', { trainingMode: 'text' }),
@@ -45,7 +54,22 @@ test('getTrainingModeFromLocation falls back to route state and rejects invalid 
     trainingMode.getTrainingModeFromLocation('?trainingMode=invalid', { trainingMode: 'video' }),
     'video',
   )
+  assert.equal(trainingMode.getTrainingModeFromLocation('', { trainingMode: 'voice' }), 'voice')
   assert.equal(trainingMode.getTrainingModeFromLocation('?trainingMode=invalid', null), null)
+})
+
+test('getTrainingSessionIdFromLocation reads query first and falls back to route state', () => {
+  assert.equal(
+    trainingMode.getTrainingSessionIdFromLocation('?trainingSessionId=session-from-query', {
+      trainingSessionId: 'session-from-state',
+    }),
+    'session-from-query',
+  )
+  assert.equal(
+    trainingMode.getTrainingSessionIdFromLocation('', { trainingSessionId: ' session-from-state ' }),
+    'session-from-state',
+  )
+  assert.equal(trainingMode.getTrainingSessionIdFromLocation('?trainingSessionId=', null), null)
 })
 
 test('isTrainingModeBattlePrep gates voice and video battle prep modes', () => {

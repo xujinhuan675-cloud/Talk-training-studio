@@ -56,6 +56,43 @@ export interface TrainingSessionReportDTO {
   created_at?: string | null
 }
 
+export interface TranscriptTurnDTO {
+  speaker: string
+  text: string
+  turn_id?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface GuideEventDTO {
+  event_type: string
+  severity: string
+  title: string
+  message: string
+  suggested_text?: string
+  metadata?: Record<string, unknown>
+  created_at?: string
+}
+
+export interface TrainingGuidanceRequest {
+  task_goal?: string
+  rubric?: Record<string, unknown>
+  recent_turns?: TranscriptTurnDTO[]
+  message_limit?: number
+}
+
+export interface TrainingGuidanceResponse {
+  session_id: string
+  events: GuideEventDTO[]
+  source?: string
+  window_size?: number
+  total_turn_count?: number
+}
+
+export interface TrainingGuidanceStreamOptions {
+  message_limit?: number
+  poll_interval_ms?: number
+}
+
 interface ApiResponse<T> {
   code: number
   message: string
@@ -141,6 +178,32 @@ export async function getTrainingSessionReport(
     undefined,
     'Failed to fetch training session report',
   )
+}
+
+export async function requestTrainingGuidance(
+  sessionId: TrainingSessionId,
+  data: TrainingGuidanceRequest = {},
+): Promise<TrainingGuidanceResponse> {
+  return requestJson<TrainingGuidanceResponse>(
+    sessionUrl(sessionId, '/guidance'),
+    jsonRequest('POST', data),
+    'Failed to request training guidance',
+  )
+}
+
+export function getTrainingGuidanceStreamUrl(
+  sessionId: TrainingSessionId,
+  options: TrainingGuidanceStreamOptions = {},
+): string {
+  const params = new URLSearchParams()
+  if (options.message_limit !== undefined) {
+    params.set('message_limit', String(options.message_limit))
+  }
+  if (options.poll_interval_ms !== undefined) {
+    params.set('poll_interval_ms', String(options.poll_interval_ms))
+  }
+  const query = params.toString()
+  return `${sessionUrl(sessionId, '/guidance/stream')}${query ? `?${query}` : ''}`
 }
 
 export async function listTrainingSessions(): Promise<TrainingSessionDTO[]> {
