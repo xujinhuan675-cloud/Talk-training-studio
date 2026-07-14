@@ -1,23 +1,49 @@
 .navrail {
+  --navrail-expanded-width: 216px;
+  --navrail-collapsed-width: 52px;
+
   display: flex;
   flex-direction: column;
-  align-items: center;
-  width: 52px;
+  width: var(--navrail-expanded-width);
   flex-shrink: 0;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
+  padding: 12px 10px;
+  gap: 14px;
+  overflow: hidden;
+  transition: width var(--transition-fast), padding var(--transition-fast);
+}
+
+.navrail--collapsed {
+  width: var(--navrail-collapsed-width);
   padding: 12px 0;
-  gap: 12px;
+  align-items: center;
+}
+
+.navrail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.navrail--collapsed .navrail-header {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
 }
 
 .navrail-logo {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  gap: 9px;
   text-decoration: none;
   border-radius: 6px;
+  color: var(--text-primary);
   transition: background var(--transition-fast);
 }
 
@@ -25,38 +51,125 @@
   background: var(--green-soft);
 }
 
-.navrail-items {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
+.navrail-logo-mark {
+  width: 24px;
+  height: 24px;
+  display: block;
+  flex-shrink: 0;
+  border-radius: 6px;
 }
 
-.navrail-icon {
+.navrail-wordmark {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.navrail-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 30px;
   height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.navrail-toggle:hover {
+  background: var(--bg-base);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.navrail-items {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.navrail-link {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  gap: 10px;
   border-radius: 6px;
   color: var(--text-muted);
-  opacity: 0.6;
   text-decoration: none;
+  opacity: 0.72;
   transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.navrail-icon:hover {
+.navrail-link:hover {
   opacity: 1;
   background: var(--bg-base);
+  color: var(--text-primary);
 }
 
-.navrail-icon.active {
+.navrail-link.active {
   background: var(--green-soft);
   color: var(--green);
   opacity: 1;
 }
 
-/* ---- Responsive: hide NavRail on mobile ---- */
+.navrail-link-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.navrail-link-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.navrail--collapsed .navrail-logo {
+  width: 30px;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+}
+
+.navrail--collapsed .navrail-wordmark,
+.navrail--collapsed .navrail-link-label {
+  display: none;
+}
+
+.navrail--collapsed .navrail-items {
+  align-items: center;
+  width: 100%;
+}
+
+.navrail--collapsed .navrail-link {
+  width: 30px;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+}
+
+/* ---- Responsive: hide desktop sidebar on mobile ---- */
 @media (max-width: 767px) {
   .navrail {
     display: none;

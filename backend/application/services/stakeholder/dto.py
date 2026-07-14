@@ -1,5 +1,6 @@
 # input: Pydantic BaseModel
 # output: CreateChatRoomDTO, ChatRoomDTO, ChatRoomDetailDTO, SendMessageDTO, CreatePersonaDTO(含 organization_id/team_id), UpdatePersonaDTO(含 organization_id/team_id), CreateScenarioDTO, ScenarioDTO, UpdateScenarioDTO, AnalysisReportDTO, AnalysisReportSummaryDTO, AnalysisContentDTO, Organization/Team/Relationship DTOs, Growth/Competency DTOs, BattlePrepGenerateDTO, BattlePrepResultDTO, StartBattleDTO, CheatSheetDTO, ProfileCardDTO, PersonaBuildRequestDTO (Story 2.5), PersonaV2DTO/PersonaPatchV2DTO + 5-layer sub-DTOs (Story 2.7), CreateDefenseSessionDTO, DefenseSessionDTO, DefenseReportDTO
+# output-update: AnalysisContentDTO also carries Training Studio content_delivery and camera_presence placeholders.
 # owner: wanhua.gu
 # pos: 应用层 - 聊天室、消息、角色、场景数据传输对象；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """DTOs for stakeholder chat room and message operations."""
@@ -236,6 +237,20 @@ class HighSignalMomentItem(BaseModel):
     message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
 
 
+class TrainingDimensionScoreDTO(BaseModel):
+    """A report dimension for Training Studio modality-specific review."""
+
+    score: Optional[int] = Field(default=None, ge=0, le=100)
+    label: str = ""
+    rationale: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    status: str = Field(default="placeholder", pattern=r"^(observed|placeholder|not_applicable)$")
+    message_indices: list[int] = Field(default_factory=list)
+    message_ids: list[int] = Field(default_factory=list)
+    message_anchors: list[MessageAnchorDTO] = Field(default_factory=list)
+
+
 class AnalysisContentDTO(BaseModel):
     """Structured content of an analysis report."""
 
@@ -251,6 +266,8 @@ class AnalysisContentDTO(BaseModel):
     rewrite_demos: list[RewriteDemoItem] = Field(default_factory=list)
     micro_drills: list[MicroDrillItem] = Field(default_factory=list)
     high_signal_moments: list[HighSignalMomentItem] = Field(default_factory=list)
+    content_delivery: Optional[TrainingDimensionScoreDTO] = None
+    camera_presence: Optional[TrainingDimensionScoreDTO] = None
 
 
 class AnalysisReportDTO(BaseModel):

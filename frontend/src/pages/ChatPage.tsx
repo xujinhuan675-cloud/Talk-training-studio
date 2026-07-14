@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageCircle,
   Plus,
@@ -14,6 +14,10 @@ import {
   Flag,
   Loader2,
   ArrowLeft,
+  PhoneCall,
+  Volume2,
+  VolumeX,
+  Video,
   X,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
@@ -22,6 +26,8 @@ import RoomList from '../components/RoomList'
 import CreateRoomDialog from '../components/CreateRoomDialog'
 import MessageList from '../components/chat/MessageList'
 import ChatInput from '../components/chat/ChatInput'
+import type { VoiceRecorderState } from '../components/VoiceRecorder'
+import VideoAnswerRecorder, { type VideoAnswerResult } from '../components/VideoAnswerRecorder'
 import ContextPanel from '../components/chat/ContextPanel'
 import CoachingPanel from '../components/chat/CoachingPanel'
 import AnalysisPanel from '../components/chat/AnalysisPanel'
@@ -36,9 +42,16 @@ import {
   type CheatSheet as CheatSheetData,
 } from '../services/api'
 import { uploadVideoAnswer } from '../services/trainingStudio'
+import { getTrainingModeFromLocation, isTrainingModeBattlePrep } from '../services/trainingMode'
 import { useI18n } from '../i18n'
 import '../App.css'
 import './ChatPage.css'
+
+function displayInitial(name: string): string {
+  const first = name.trim().charAt(0)
+  if (!first) return '?'
+  return /[a-z]/i.test(first) ? first.toUpperCase() : first
+}
 
 /* ------------------------------------------------------------------ */
 /*  Inner chat area — must be inside ChatProvider                      */
@@ -48,30 +61,43 @@ function ChatArea() {
   const { personaMap } = useAppContext()
   const { chat, voice, coaching, analysis } = useChatContext()
   const navigate = useNavigate()
+  const location = useLocation()
   const { tr } = useI18n()
+  const preparedVoiceRoomRef = React.useRef<number | null>(null)
+  const trainingMode = getTrainingModeFromLocation(location.search, location.state)
 
   const [showEmotionSidebar, setShowEmotionSidebar] = useState(false)
   const [showEmotionCurve, setShowEmotionCurve] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showContextPanel, setShowContextPanel] = useState(false)
   const [mobileSheet, setMobileSheet] = useState<string | null>(null)
+  const [lastVoiceTranscript, setLastVoiceTranscript] = useState<string | null>(null)
+  const [voiceRecorderState, setVoiceRecorderState] = useState<VoiceRecorderState>('idle')
+  const [voiceRecorderError, setVoiceRecorderError] = useState<string | null>(null)
+  const [lastVideoAnswerAt, setLastVideoAnswerAt] = useState<string | null>(null)
+  const [videoAnswerStatus, setVideoAnswerStatus] = useState<'idle' | 'uploading' | 'sent' | 'error'>('idle')
+  const [videoAnswerError, setVideoAnswerError] = useState<string | null>(null)
+  const [videoRecorderOpen, setVideoRecorderOpen] = useState(false)
 
   // Battle prep state
   const [battlePrepRoundCount, setBattlePrepRoundCount] = useState(0)
   const [battlePrepEnding, setBattlePrepEnding] = useState(false)
   const [cheatSheetData, setCheatSheetData] = useState<CheatSheetData | null>(null)
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
+  const selectedRoomId = chat.selectedRoom?.room.id ?? null
+  const selectedRoomType = chat.selectedRoom?.room.type
+  const sendChatMessage = chat.handleSend
 
   // Compute battle prep round count from existing messages
-  const roomMessages = chat.selectedRoom?.messages ?? []
+  const selectedRoomMessages = chat.selectedRoom?.messages
   useEffect(() => {
-    if (chat.selectedRoom?.room.type === 'battle_prep' && roomMessages.length > 0) {
-      const userMsgCount = roomMessages.filter((m: { sender_type: string }) => m.sender_type === 'user').length
+    if (selectedRoomType === 'battle_prep' && selectedRoomMessages && selectedRoomMessages.length > 0) {
+      const userMsgCount = selectedRoomMessages.filter((m: { sender_type: string }) => m.sender_type === 'user').length
       setBattlePrepRoundCount(userMsgCount)
     } else {
       setBattlePrepRoundCount(0)
     }
-  }, [chat.selectedRoom?.room.id, roomMessages.length])
+  }, [selectedRoomId, selectedRoomType, selectedRoomMessages])
 
   const roomPersonas = chat.selectedRoom
     ? chat.selectedRoom.room.persona_ids
@@ -79,7 +105,7 @@ function ChatArea() {
         .filter(Boolean)
     : []
 
-  const handleEndBattle = async () => {
+  const handleEndBattle = React.useCallback(async () => {
     if (!chat.selectedRoom || battlePrepEnding) return
     const personaId = chat.selectedRoom.room.persona_ids[0] || ''
     const persona = personaMap[personaId]
@@ -93,20 +119,20 @@ function ChatArea() {
     } finally {
       setBattlePrepEnding(false)
     }
-  }
+  }, [battlePrepEnding, chat.selectedRoom, personaMap, tr])
 
-  const handleSend = async () => {
-    const success = await chat.handleSend()
+  const handleSend = React.useCallback(async () => {
+    const success = await sendChatMessage()
     if (!success) return
     // Track battle prep rounds
-    if (chat.selectedRoom?.room.type === 'battle_prep') {
+    if (selectedRoomType === 'battle_prep') {
       const newCount = battlePrepRoundCount + 1
       setBattlePrepRoundCount(newCount)
       if (newCount >= 12) {
         setTimeout(() => handleEndBattle(), 3000)
       }
     }
-  }
+  }, [battlePrepRoundCount, handleEndBattle, selectedRoomType, sendChatMessage])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -129,7 +155,159 @@ function ChatArea() {
     )
   }
 
-  const isBattlePrep = chat.selectedRoom?.room.type === 'battle_prep'
+  const isBattlePrep = selectedRoomType === 'battle_prep'
+  const isVoiceBattlePrep = isTrainingModeBattlePrep(selectedRoomType, trainingMode, 'voice')
+  const isVideoBattlePrep = isTrainingModeBattlePrep(selectedRoomType, trainingMode, 'video')
+  const primaryPersona = roomPersonas[0]
+  const roomCounterpartName = (chat.selectedRoom?.room.name || '').replace(/^备战[:：]\s*/, '').trim()
+  const counterpartName = primaryPersona?.name || roomCounterpartName || tr('AI 面试官', 'AI Interviewer')
+  const latestPersonaPrompt = React.useMemo(() => {
+    const personaMessages = (selectedRoomMessages || []).filter(
+      (m: { sender_type: string; content: string }) => m.sender_type === 'persona' && m.content.trim(),
+    )
+    return personaMessages[personaMessages.length - 1]?.content.trim() || ''
+  }, [selectedRoomMessages])
+
+  useEffect(() => {
+    if (!isVoiceBattlePrep || !selectedRoomId) {
+      if (!isVoiceBattlePrep) {
+        preparedVoiceRoomRef.current = null
+        setLastVoiceTranscript(null)
+        setVoiceRecorderState('idle')
+        setVoiceRecorderError(null)
+      }
+      return
+    }
+    if (preparedVoiceRoomRef.current === selectedRoomId) return
+    voice.prepareVoiceSession()
+    preparedVoiceRoomRef.current = selectedRoomId
+  }, [isVoiceBattlePrep, selectedRoomId, voice])
+
+  useEffect(() => {
+    if (!isVideoBattlePrep) {
+      setLastVideoAnswerAt(null)
+      setVideoAnswerStatus('idle')
+      setVideoAnswerError(null)
+      setVideoRecorderOpen(false)
+    }
+  }, [isVideoBattlePrep])
+
+  const voicePracticeStatus = voice.playingPersonaId
+    ? tr('AI 正在语音回应', 'AI is speaking')
+    : chat.typingPersona
+      ? tr('AI 正在组织回应', 'AI is preparing a reply')
+      : voiceRecorderError
+        ? voiceRecorderError
+        : voice.voiceError
+        ? voice.voiceError
+        : voiceRecorderState === 'recording'
+          ? tr('正在聆听你的回答', 'Listening to your answer')
+          : voiceRecorderState === 'processing'
+            ? tr('正在识别你的语音', 'Recognizing your voice')
+            : lastVoiceTranscript
+              ? tr('语音轮次已发送', 'Voice turn sent')
+              : voice.voiceEnabled && !voice.voiceMuted
+                ? tr('语音已就绪', 'Voice ready')
+                : voice.voiceMuted
+                  ? tr('语音已静音', 'Voice muted')
+                  : tr('语音未开启', 'Voice off')
+
+  const voicePracticeActionLabel = voice.voiceEnabled && !voice.voiceMuted
+    ? tr('静音', 'Mute')
+    : tr('开启语音', 'Enable voice')
+
+  const handleVoicePracticeAction = () => {
+    if (voice.voiceEnabled && !voice.voiceMuted) {
+      voice.toggleVoice()
+      return
+    }
+    voice.prepareVoiceSession()
+  }
+
+  const handleVoiceRecorderStateChange = React.useCallback((
+    state: VoiceRecorderState,
+    error: string | null,
+  ) => {
+    setVoiceRecorderState(state)
+    setVoiceRecorderError(error)
+    if (state === 'recording' || state === 'processing') {
+      setLastVoiceTranscript(null)
+    }
+  }, [])
+
+  const videoAnswerCount = React.useMemo(() => {
+    if (!isVideoBattlePrep || !selectedRoomMessages) return 0
+    return selectedRoomMessages.filter((m: { sender_type: string; content: string }) => (
+      m.sender_type === 'user' && m.content.includes('[video-answer]')
+    )).length
+  }, [isVideoBattlePrep, selectedRoomMessages])
+
+  const videoPracticeStatus = chat.typingPersona
+    ? tr('AI 正在根据你的视频回答组织追问', 'AI is preparing a follow-up from your video answer')
+    : videoAnswerStatus === 'uploading'
+      ? tr('正在上传视频回答', 'Uploading video answer')
+      : videoAnswerStatus === 'error'
+        ? videoAnswerError || tr('视频提交失败，请重试', 'Video submission failed. Please try again')
+        : lastVideoAnswerAt || videoAnswerStatus === 'sent'
+      ? tr('视频回答已提交，正在进入追问或复盘流程', 'Video answer submitted; continuing into follow-up or review')
+      : videoAnswerCount > 0
+        ? tr('已提交 {count} 段视频回答', '{count} video answers submitted', { count: videoAnswerCount })
+        : tr('点击输入区的视频按钮后再打开摄像头录制', 'Use the video button in the input area, then open the camera to record')
+  const aiIsActive = Boolean(voice.playingPersonaId || chat.typingPersona)
+  const userIsActive = voiceRecorderState === 'recording' || voiceRecorderState === 'processing' || videoAnswerStatus === 'uploading'
+  const voicePrompt = latestPersonaPrompt || voicePracticeStatus
+  const videoWorkspacePrompt = latestPersonaPrompt || (
+    isVideoBattlePrep
+      ? videoPracticeStatus
+      : tr('录制一段视频回答并发送到当前对话。', 'Record a video answer and send it to this conversation.')
+  )
+
+  const handleVideoRecorded = React.useCallback(async (result: VideoAnswerResult) => {
+    setVideoRecorderOpen(false)
+    if (isVideoBattlePrep) {
+      setVideoAnswerStatus('uploading')
+      setVideoAnswerError(null)
+    }
+    const fallbackCaption = isVideoBattlePrep
+      ? tr('我提交了一段视频回答，请继续追问或总结。', 'I submitted a recorded video answer. Please continue with a follow-up or summary.')
+      : undefined
+    let videoUrl = result.url
+    let videoSize = result.size
+    try {
+      const uploaded = await uploadVideoAnswer(result.blob)
+      videoUrl = uploaded.url
+      videoSize = uploaded.size
+    } catch (error) {
+      console.error('Video upload failed:', error)
+      if (isVideoBattlePrep) {
+        setVideoAnswerStatus('error')
+        setVideoAnswerError(error instanceof Error ? error.message : tr('视频上传失败', 'Video upload failed'))
+        return
+      }
+    }
+    const sent = await chat.sendVideoAnswer({
+      url: videoUrl,
+      mimeType: result.mimeType,
+      title: tr('视频回答', 'Video answer'),
+      durationMs: result.durationMs,
+      size: videoSize,
+      recordedAt: result.recordedAt,
+      trainingEvent: isVideoBattlePrep ? {
+        type: 'video_answer_submitted',
+        trainingMode: 'video',
+        schemaVersion: 1,
+        reportDimensions: ['content_delivery', 'camera_presence'],
+        cameraPresenceStatus: 'placeholder',
+      } : undefined,
+    }, chat.inputValue.trim() || fallbackCaption)
+    if (sent && isVideoBattlePrep) {
+      setVideoAnswerStatus('sent')
+      setLastVideoAnswerAt(result.recordedAt)
+    } else if (isVideoBattlePrep) {
+      setVideoAnswerStatus('error')
+      setVideoAnswerError(tr('视频消息发送失败', 'Video message failed to send'))
+    }
+  }, [chat, isVideoBattlePrep, tr])
 
   return (
     <>
@@ -254,9 +432,105 @@ function ChatArea() {
         </div>
       )}
 
+      {isVoiceBattlePrep && (
+        <div className="chat-page-voice-call-bar" data-testid="voice-practice-bar">
+          <PhoneCall size={15} />
+          <div className="voice-call-copy">
+            <strong>{tr('电话式练习', 'Phone-style practice')}</strong>
+            <span>{voicePracticeStatus}</span>
+          </div>
+          <button
+            className="voice-call-action"
+            type="button"
+            onClick={handleVoicePracticeAction}
+          >
+            {voice.voiceEnabled && !voice.voiceMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+            {voicePracticeActionLabel}
+          </button>
+        </div>
+      )}
+
+      {isVideoBattlePrep && (
+        <div className="chat-page-video-answer-bar" data-testid="video-practice-bar">
+          <Video size={15} />
+          <div className="video-answer-copy">
+            <strong>{tr('视频回答训练', 'Video answer practice')}</strong>
+            <span>{videoPracticeStatus}</span>
+          </div>
+        </div>
+      )}
+
       {/* Chat body: messages + optional emotion sidebar */}
       <div className="chat-page-chat-with-sidebar">
+        {videoRecorderOpen && (
+          <section className="chat-page-video-recorder-overlay" data-testid="video-recorder-workspace">
+            <div className="video-workspace-header">
+              <div>
+                <strong>{tr('视频回答', 'Video answer')}</strong>
+                <span>{videoWorkspacePrompt}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVideoRecorderOpen(false)}
+                title={tr('关闭视频录制器', 'Close video recorder')}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="video-workspace-body">
+              <div className="video-workspace-context">
+                <div
+                  className="video-workspace-avatar"
+                  style={{ background: primaryPersona?.avatar_color || '#2D9C6F' }}
+                >
+                  {displayInitial(counterpartName)}
+                </div>
+                <div>
+                  <strong>{counterpartName}</strong>
+                  <span>{tr('等待你的视频回答', 'Waiting for your video answer')}</span>
+                </div>
+              </div>
+              <VideoAnswerRecorder
+                disabled={chat.sending}
+                onCancel={() => setVideoRecorderOpen(false)}
+                onRecorded={handleVideoRecorded}
+              />
+            </div>
+          </section>
+        )}
+
         <div className="chat-page-chat-column">
+          {isVoiceBattlePrep && (
+            <section className="training-voice-panel" data-testid="training-voice-panel">
+              <div className="training-voice-persona">
+                <div
+                  className="training-voice-avatar"
+                  style={{ background: primaryPersona?.avatar_color || '#2D9C6F' }}
+                >
+                  {displayInitial(counterpartName)}
+                </div>
+                <div className="training-voice-copy">
+                  <strong>{counterpartName}</strong>
+                  <span>{aiIsActive ? tr('AI 正在回应', 'AI is responding') : tr('电话式练习已就绪', 'Phone-style practice ready')}</span>
+                </div>
+              </div>
+              <div className="training-voice-current">
+                <div className={`training-voice-wave ${userIsActive ? 'listening' : aiIsActive ? 'speaking' : ''}`}>
+                  {Array.from({ length: 21 }, (_, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        height: `${8 + ((i * 7) % 24)}px`,
+                        animationDelay: `${i * 38}ms`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <p>{voicePrompt}</p>
+              </div>
+            </section>
+          )}
+
           <MessageList
             messages={chat.selectedRoom?.messages ?? []}
             streamingEntries={chat.streamingEntries}
@@ -308,31 +582,19 @@ function ChatArea() {
             onToggleVoice={voice.toggleVoice}
             roomId={chat.selectedRoom?.room.id ?? null}
             onVoiceTranscription={(text) => {
-              if (!text.trim()) return
+              const transcript = text.trim()
+              if (!transcript) return
               chat.setInputValue('')
+              chat.setMentionQuery(null)
+              chat.setMentionResults([])
               chat.setDispatchSummary(null)
               voice.audioPlayerRef.current?.stop()
+              setLastVoiceTranscript(isVoiceBattlePrep ? transcript : null)
               setTimeout(chat.scrollToBottom, 100)
             }}
-            onVideoRecorded={async (result) => {
-              let videoUrl = result.url
-              let videoSize = result.size
-              try {
-                const uploaded = await uploadVideoAnswer(result.blob)
-                videoUrl = uploaded.url
-                videoSize = uploaded.size
-              } catch (error) {
-                console.error('Video upload failed, using local preview URL:', error)
-              }
-              chat.sendVideoAnswer({
-                url: videoUrl,
-                mimeType: result.mimeType,
-                title: tr('视频回答', 'Video answer'),
-                durationMs: result.durationMs,
-                size: videoSize,
-                recordedAt: result.recordedAt,
-              })
-            }}
+            onVoiceRecorderStateChange={handleVoiceRecorderStateChange}
+            onVideoClick={() => setVideoRecorderOpen(true)}
+            videoActive={videoRecorderOpen}
             onLiveCoachClick={coaching.handleStartLiveCoaching}
             coachingSending={coaching.coachingSending}
           />

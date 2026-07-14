@@ -399,6 +399,10 @@ class Settings(BaseSettings):
             self.llm.wire_api = (
                 self.OPENAI_COMPATIBLE_WIRE_API or self.OPENAI_WIRE_API or self.llm.wire_api
             )
+        if not self.voice.stt_api_key:
+            self.voice.stt_api_key = self.llm.api_key
+        if not self.voice.stt_base_url:
+            self.voice.stt_base_url = self.llm.base_url
         return self
 
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")

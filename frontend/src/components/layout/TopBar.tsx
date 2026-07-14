@@ -3,13 +3,7 @@ import { Flame, Languages, Star } from 'lucide-react'
 import { SUPPORTED_LOCALES, useI18n, type Locale } from '../../i18n'
 import './TopBar.css'
 
-const LogoSvg: React.FC<{ size?: number }> = ({ size = 22 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#2D9C6F" strokeWidth="1.5" strokeLinejoin="round" />
-    <path d="M2 17l10 5 10-5" stroke="#2D9C6F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M2 12l10 5 10-5" stroke="#2D9C6F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
+const TALKWISE_ICON_SRC = '/talkwise-icon.svg'
 
 interface TopBarProps {
   onSearchClick?: () => void
@@ -22,8 +16,8 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
     <header className="topbar">
       <div className="topbar-left">
         <div className="topbar-logo">
-          <LogoSvg size={22} />
-          <span className="topbar-wordmark">DaBoss</span>
+          <img className="topbar-logo-mark" src={TALKWISE_ICON_SRC} alt="" aria-hidden="true" />
+          <span className="topbar-wordmark">TalkWise</span>
         </div>
         <div
           className="topbar-search"

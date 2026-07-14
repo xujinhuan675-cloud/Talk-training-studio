@@ -3,10 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { Keyboard, Loader2, Mic2, Video, Wand2 } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { startBattle } from '../services/api'
+import { createTrainingSession, startTrainingSession } from '../services/trainingSession'
+import { buildTrainingModeChatPath, type TrainingMode } from '../services/trainingMode'
 import {
   buildTrainingStudioPrompt,
   getDefaultTrainingStudioConfig,
   getExpressionFrameworkLabel,
+  getInterviewScenarioPreset,
+  getProductScenarioPreset,
   getTrainingDifficultyLabel,
   getTrainingLevelLabel,
   getTrainingScenarioLabel,
@@ -15,8 +19,6 @@ import {
 } from '../services/trainingStudio'
 import { useI18n, type Translate, type TranslationKey } from '../i18n'
 import './TrainingStudioPage.css'
-
-type TrainingMode = 'text' | 'voice' | 'video'
 
 const modeOptions: Array<{
   value: TrainingMode
@@ -68,6 +70,14 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+function splitTechStack(value: string, fallback: string): string[] {
+  const items = value
+    .split(/[,，、\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return items.length > 0 ? items : [fallback]
+}
+
 export default function TrainingStudioPage() {
   const navigate = useNavigate()
   const { t } = useI18n()
@@ -107,20 +117,65 @@ export default function TrainingStudioPage() {
       const framework = getExpressionFrameworkLabel(config.framework, t)
       const level = getTrainingLevelLabel(config.level, t)
       const modeLabel = getModeLabel(mode, t)
+      const interviewScenarioPreset = getInterviewScenarioPreset(config.interviewScenarioPreset)
+      const productScenarioPreset = getProductScenarioPreset(config.productScenarioPreset)
+      const interviewStakeholder = config.scenario === 'interview' ? interviewScenarioPreset : undefined
+      const productStakeholder = config.scenario === 'product_management' ? productScenarioPreset : undefined
+      const scenarioStakeholder = interviewStakeholder ?? productStakeholder
+      const trainingSession = await createTrainingSession({
+        mode,
+        task_config: {
+          role,
+          level,
+          tech_stack: splitTechStack(config.techStack, scenario),
+          question_type_ratios: { ...config.questionMix },
+          question_count: config.questionCount,
+          framework: config.framework,
+          difficulty: config.difficulty,
+          category: config.scenario,
+        },
+      })
 
       const room = await startBattle({
-        persona_name: t('training.prompt.personaName', { role }),
-        persona_role: t('training.prompt.personaRole', { level, scenario }),
-        persona_style: t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
+        persona_name: scenarioStakeholder
+          ? t(scenarioStakeholder.personaNameKey)
+          : t('training.prompt.personaName', { role }),
+        persona_role: scenarioStakeholder
+          ? t(scenarioStakeholder.personaRoleKey)
+          : t('training.prompt.personaRole', { level, scenario }),
+        persona_style: scenarioStakeholder
+          ? t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })
+          : t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
         scenario_context: prompt,
         selected_training_points: [
           t('training.prompt.structurePoint', { framework }),
+          ...(interviewStakeholder
+            ? [
+                t('training.prompt.interviewEvidencePoint'),
+                t('training.prompt.interviewFollowupPoint'),
+              ]
+            : []),
+          ...(productStakeholder
+            ? [
+                t('training.prompt.productAlignmentPoint'),
+                t('training.prompt.productTradeoffPoint'),
+              ]
+            : []),
           t('training.prompt.deliveryPoint', { mode: modeLabel }),
           t('training.prompt.evidencePoint'),
         ],
         difficulty: toBattleDifficulty(config.difficulty),
       })
-      navigate(`/chat/${room.id}`)
+      const startedSession = await startTrainingSession(trainingSession.session_id, {
+        room_id: room.id,
+      })
+      navigate(buildTrainingModeChatPath(room.id, mode, startedSession.session_id), {
+        state: {
+          source: 'training-studio',
+          trainingMode: mode,
+          trainingSessionId: startedSession.session_id,
+        },
+      })
     } catch (e: unknown) {
       setError(getErrorMessage(e, t('training.error.startFailed')))
       setStarting(null)

@@ -1,8 +1,7 @@
 import React from 'react'
-import { Send, Lightbulb, Volume2, VolumeX, Video, X } from 'lucide-react'
+import { Send, Lightbulb, Volume2, VolumeX, Video } from 'lucide-react'
 import Avatar from '../Avatar'
-import VoiceRecorder from '../VoiceRecorder'
-import VideoAnswerRecorder, { type VideoAnswerResult } from '../VideoAnswerRecorder'
+import VoiceRecorder, { type VoiceRecorderState } from '../VoiceRecorder'
 import type { PersonaSummary } from '../../services/api'
 import { useI18n } from '../../i18n'
 import './ChatInput.css'
@@ -22,7 +21,9 @@ export interface ChatInputProps {
   onToggleVoice: () => void
   roomId: number | null
   onVoiceTranscription?: (text: string) => void
-  onVideoRecorded?: (result: VideoAnswerResult) => void
+  onVoiceRecorderStateChange?: (state: VoiceRecorderState, error: string | null) => void
+  onVideoClick?: () => void
+  videoActive?: boolean
   onLiveCoachClick: () => void
   coachingSending: boolean
 }
@@ -42,35 +43,17 @@ export default function ChatInput({
   onToggleVoice,
   roomId,
   onVoiceTranscription,
-  onVideoRecorded,
+  onVoiceRecorderStateChange,
+  onVideoClick,
+  videoActive,
   onLiveCoachClick,
   coachingSending,
 }: ChatInputProps) {
   const { tr } = useI18n()
-  const [videoOpen, setVideoOpen] = React.useState(false)
   const inputPlaceholder = placeholder ?? tr('输入消息...', 'Type a message...')
 
   return (
     <div className="message-input-shell">
-      {videoOpen && (
-        <div className="message-video-recorder-panel">
-          <div className="message-video-recorder-header">
-            <span>{tr('视频回答', 'Video answer')}</span>
-            <button type="button" onClick={() => setVideoOpen(false)} title={tr('关闭视频录制器', 'Close video recorder')}>
-              <X size={16} />
-            </button>
-          </div>
-          <VideoAnswerRecorder
-            disabled={sending}
-            onCancel={() => setVideoOpen(false)}
-            onRecorded={(result) => {
-              onVideoRecorded?.(result)
-              setVideoOpen(false)
-            }}
-          />
-        </div>
-      )}
-
       <div className="message-input-bar">
         {mentionQuery !== null && mentionResults.length > 0 && (
           <div className="mention-dropdown">
@@ -100,11 +83,12 @@ export default function ChatInput({
             roomId={roomId}
             disabled={sending}
             onTranscription={onVoiceTranscription}
+            onStateChange={onVoiceRecorderStateChange}
           />
         )}
         <button
-          className="video-toggle-btn"
-          onClick={() => setVideoOpen((open) => !open)}
+          className={`video-toggle-btn ${videoActive ? 'active' : ''}`}
+          onClick={onVideoClick}
           title={tr('录制视频回答', 'Record video answer')}
           type="button"
           disabled={sending}

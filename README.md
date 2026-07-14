@@ -2,13 +2,13 @@
 
 <a name="readme-top"></a>
 
-<h1>DaBoss — 打Boss</h1>
+<h1>TalkWise</h1>
 
-<p><strong>职场牛马人的会前练习场 —— 用 AI 模拟你的老板，把高风险对话变成可重复的练习。</strong></p>
+<p><strong>关键对话的 AI 对练室 —— 用 AI 角色模拟真实互动，把重要表达变成可重复的练习。</strong></p>
 
 <p>
-喂入聊天记录和会议纪要，AI 帮你还原那个真实的 Boss。<br/>
-开会前先打一遍，反复过招，直到找到最优策略再上场。
+喂入聊天记录、会议纪要或场景描述，AI 帮你还原真实的对话对象。<br/>
+重要开口前先练一遍，反复过招，直到找到更清楚、更得体、更有力量的表达。
 </p>
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python)](https://python.org)
@@ -23,7 +23,7 @@
 
 ---
 
-<img src="docs/assets/homepage.png" alt="DaBoss 首页仪表盘" width="720"/>
+<img src="docs/assets/homepage.png" alt="TalkWise 首页仪表盘" width="720"/>
 
 </div>
 
@@ -40,7 +40,7 @@
 
 项目失败的头号原因不是技术——是沟通。PMI 研究显示，**56% 的项目风险源于沟通不畅**。一个关键会议的失误，可能意味着几个月的工作付诸东流。
 
-**DaBoss** 用 AI 创造了一个「安全但真实」的练习场——角色会打断你、质疑你、带着隐藏议程和情绪跟你博弈。你可以反复练习同一个场景，直到找到最优策略，然后带着准备好的方案走进真实会议室。
+**TalkWise** 用 AI 创造了一个「安全但真实」的练习场——角色会打断你、质疑你、带着隐藏议程和情绪跟你博弈。你可以反复练习同一个场景，直到找到更好的回应策略，然后带着准备好的表达走进真实对话。
 
 ---
 
@@ -165,7 +165,7 @@
 ## 30秒启动
 
 ```bash
-git clone <repo-url> && cd DaBoss
+git clone <repo-url> && cd TalkWise
 docker-compose up -d
 
 # 访问前端
@@ -181,12 +181,14 @@ cd backend && uv sync && uv run python main.py
 cd frontend && npm install && npm run dev
 ```
 
+多智能体或多人并行开发时，先按 [Multi-Agent Core Development Loop](docs/development/multi-agent-core-loop.md) 拆分切片，并用 `.\scripts\core-loop.ps1 -Slice voice` 这类快速检查先跑通核心路径，再扩展完整体验。
+
 ---
 
 ## 技术架构
 
 <div align="center">
-  <img src="docs/assets/architecture-overview.png" alt="DaBoss 模块协作架构" width="50%"/>
+  <img src="docs/assets/architecture-overview.png" alt="TalkWise 模块协作架构" width="50%"/>
   <p><em>6 个模块各司其职：练习 → 诊断 → 反思 → 成长 的完整闭环</em></p>
 </div>
 
@@ -217,9 +219,9 @@ frontend/src/
 
 ---
 
-## 为什么选择 DaBoss？
+## 为什么选择 TalkWise？
 
-| | DaBoss | 其他方案 |
+| | TalkWise | 其他方案 |
 |:---|:---|:---|
 | **真实性** | AI有情绪、有隐藏议程、有组织关系 | 静态脚本，过于理想化 |
 | **一键建模** | 粘贴素材 → AI 自动生成 5 层对手画像 + 证据链 | 手动填表或无角色定制 |

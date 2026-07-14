@@ -60,6 +60,7 @@ export default function VideoAnswerRecorder({
 
   const mimeType = useMemo(() => pickSupportedMimeType(), [])
   const canRecord = !disabled && status !== 'requesting' && status !== 'recording'
+  const canPreview = !disabled && (status === 'idle' || status === 'error')
 
   const clearPreview = useCallback(() => {
     if (previewUrlRef.current) {
@@ -212,11 +213,19 @@ export default function VideoAnswerRecorder({
       <div className="video-answer-toolbar">
         <span className="video-answer-status">
           {status === 'recording' && <Circle size={10} fill="currentColor" />}
-          {status === 'requesting' ? tr('正在请求权限', 'Requesting access') : formatDuration(elapsedMs)}
+          {status === 'requesting'
+            ? tr('正在请求权限', 'Requesting access')
+            : status === 'ready'
+              ? tr('摄像头已就绪', 'Camera ready')
+              : formatDuration(elapsedMs)}
         </span>
         {status === 'recording' ? (
           <button type="button" onClick={stopRecording} disabled={disabled} title={tr('停止录制', 'Stop recording')}>
             <Square size={16} />
+          </button>
+        ) : status === 'idle' || status === 'error' ? (
+          <button type="button" onClick={prepare} disabled={!canPreview} title={tr('打开摄像头预览', 'Open camera preview')}>
+            <Camera size={16} />
           </button>
         ) : (
           <button type="button" onClick={startRecording} disabled={!canRecord} title={tr('开始录制', 'Start recording')}>

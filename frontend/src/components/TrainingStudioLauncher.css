@@ -68,7 +68,13 @@
 }
 
 .tsl-option-grid--four {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+}
+
+.tsl-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 8px;
 }
 
 .tsl-option {
@@ -109,6 +115,10 @@
   font-size: 11px;
   line-height: 1.35;
   opacity: 0.78;
+}
+
+.tsl-option--compact {
+  min-height: 78px;
 }
 
 .tsl-two-col {

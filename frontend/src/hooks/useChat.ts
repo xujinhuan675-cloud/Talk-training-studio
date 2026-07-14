@@ -19,6 +19,13 @@ export interface LocalVideoAttachment {
   durationMs?: number
   size?: number
   recordedAt?: string
+  trainingEvent?: {
+    type: 'video_answer_submitted'
+    trainingMode: 'video'
+    schemaVersion: number
+    reportDimensions: Array<'content_delivery' | 'camera_presence'>
+    cameraPresenceStatus: 'placeholder'
+  }
 }
 
 export interface UseChatReturn {
@@ -72,6 +79,7 @@ function hydrateLocalVideoMessage(message: Message): Message {
         videoUrl: attachment.url,
         mimeType: attachment.mimeType,
         title: attachment.title || 'Video answer',
+        trainingEvent: attachment.trainingEvent,
       },
       attachments: [
         ...(message.attachments || []),
@@ -83,6 +91,7 @@ function hydrateLocalVideoMessage(message: Message): Message {
           durationMs: attachment.durationMs,
           size: attachment.size,
           recordedAt: attachment.recordedAt,
+          trainingEvent: attachment.trainingEvent,
         },
       ],
     }

@@ -565,15 +565,11 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica 
 # ---------------------------------------------------------------------------
 
 
-@router.post("/rooms/{room_id}/messages", summary="发送消息", status_code=201)
-async def send_message(
+async def _ensure_room_accepts_user_message(
     room_id: int,
-    body: SendMessageDTO,
-    background_tasks: BackgroundTasks,
-    svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
-    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
-):
-    # Battle prep 12-round limit enforcement
+    chatroom_svc: ChatRoomApplicationService,
+) -> None:
+    """Keep text and voice sends on the same battle-prep turn limit."""
     detail = await chatroom_svc.get_room_detail(room_id, message_limit=200)
     if detail.room.type == "battle_prep":
         user_msg_count = sum(1 for m in detail.messages if m.sender_type == "user")
@@ -583,6 +579,16 @@ async def send_message(
                 detail="备战对话已达到 12 轮上限，请结束备战生成话术纸条",
             )
 
+
+@router.post("/rooms/{room_id}/messages", summary="发送消息", status_code=201)
+async def send_message(
+    room_id: int,
+    body: SendMessageDTO,
+    background_tasks: BackgroundTasks,
+    svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+):
+    await _ensure_room_accepts_user_message(room_id, chatroom_svc)
     msg, room = await svc.send_message(room_id, body.content)
     background_tasks.add_task(svc.generate_replies, room_id, room)
     return success_response(data=msg.model_dump())
@@ -633,6 +639,7 @@ async def voice_ws(
     websocket: WebSocket,
     room_id: int,
     svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
 ):
     """WebSocket for voice message input.
 
@@ -647,6 +654,7 @@ async def voice_ws(
       Server → Client:
         { "type": "transcription", "text": "...", "is_final": false }
         { "type": "transcription", "text": "...", "is_final": true }
+        { "type": "message_sent", "message": { ... } }
         { "type": "error", "message": "..." }
     """
     await websocket.accept()
@@ -676,7 +684,17 @@ async def voice_ws(
             return False
 
     if stt is None:
-        await send_voice_json({"type": "error", "message": "STT service not configured"})
+        await send_voice_json(
+            {
+                "type": "error",
+                "code": "stt_not_configured",
+                "message": "STT service not configured",
+                "details": (
+                    "Set VOICE__STT_API_KEY, or configure an OpenAI-compatible "
+                    "LLM__API_KEY gateway that supports /audio/transcriptions, then restart."
+                ),
+            }
+        )
         await websocket.close(code=1011)
         return
 
@@ -701,6 +719,14 @@ async def voice_ws(
                         break
                     continue
 
+                try:
+                    await _ensure_room_accepts_user_message(room_id, chatroom_svc)
+                except HTTPException as exc:
+                    if not await send_voice_json({"type": "error", "message": str(exc.detail)}):
+                        break
+                    audio_buffer.clear()
+                    continue
+
                 # Transcribe accumulated audio
                 try:
                     audio_format = raw.get("format", "webm")
@@ -711,16 +737,27 @@ async def voice_ws(
                     )
                     text = result.text.strip()
 
-                    if not await send_voice_json(
+                    transcription_sent = await send_voice_json(
                         {"type": "transcription", "text": text, "is_final": True}
-                    ):
-                        break
+                    )
 
-                    # Auto-send as text message if transcription is not empty
+                    # Auto-send as text message if transcription is not empty.
+                    # The chat turn must not depend on best-effort websocket ACKs:
+                    # the frontend may close immediately after final transcription.
+                    message_ack_sent = True
                     if text:
                         msg, room = await svc.send_message(room_id, text)
                         # Generate replies in background (TTS audio will come via SSE)
                         asyncio.create_task(svc.generate_replies(room_id, room))
+                        message_ack_sent = await send_voice_json(
+                            {
+                                "type": "message_sent",
+                                "message": msg.model_dump(mode="json"),
+                            }
+                        )
+
+                    if not transcription_sent or not message_ack_sent:
+                        break
 
                 except httpx.TimeoutException as exc:
                     logger.warning(
@@ -731,6 +768,7 @@ async def voice_ws(
                     if not await send_voice_json(
                         {
                             "type": "error",
+                            "code": "stt_timeout",
                             "message": "语音识别服务连接超时，请检查 STT 网络或稍后重试",
                         }
                     ):
@@ -738,7 +776,11 @@ async def voice_ws(
                 except Exception as exc:
                     logger.exception("STT transcription failed for room %d", room_id)
                     if not await send_voice_json(
-                        {"type": "error", "message": f"Transcription failed: {exc}"}
+                        {
+                            "type": "error",
+                            "code": "stt_transcription_failed",
+                            "message": f"Transcription failed: {exc}",
+                        }
                     ):
                         break
                 finally:

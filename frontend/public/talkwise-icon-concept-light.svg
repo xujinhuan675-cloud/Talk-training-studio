@@ -1,0 +1,49 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="156" y1="118" x2="858" y2="908" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FCFFFD"/>
+      <stop offset="0.52" stop-color="#E9FBF6"/>
+      <stop offset="1" stop-color="#E7F4FF"/>
+    </linearGradient>
+    <linearGradient id="voice" x1="226" y1="548" x2="798" y2="548" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F766E"/>
+      <stop offset="0.5" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="leftBubble" x1="216" y1="322" x2="590" y2="680" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F3FFFB"/>
+    </linearGradient>
+    <linearGradient id="rightBubble" x1="434" y1="344" x2="808" y2="702" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FFFD"/>
+      <stop offset="1" stop-color="#EEF9FF"/>
+    </linearGradient>
+    <filter id="softShadow" x="148" y="156" width="728" height="724" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="20"/>
+      <feGaussianBlur stdDeviation="28"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.04 0 0 0 0 0.2 0 0 0 0 0.22 0 0 0 0.16 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <circle cx="238" cy="220" r="118" fill="#2DD4BF" fill-opacity="0.16"/>
+  <circle cx="812" cy="794" r="164" fill="#7DD3FC" fill-opacity="0.18"/>
+  <circle cx="830" cy="252" r="54" fill="#A7F3D0" fill-opacity="0.28"/>
+
+  <g filter="url(#softShadow)">
+    <path d="M294 322C250.922 322 216 356.922 216 400V544C216 587.078 250.922 622 294 622H344L382 680C388.962 690.629 405.5 685.697 405.5 672.988V622H512C555.078 622 590 587.078 590 544V400C590 356.922 555.078 322 512 322H294Z" fill="url(#leftBubble)" stroke="#BCEEE5" stroke-width="8"/>
+    <path d="M730 702C773.078 702 808 667.078 808 624V480C808 436.922 773.078 402 730 402H680L642 344C635.038 333.371 618.5 338.303 618.5 351.012V402H512C468.922 402 434 436.922 434 480V624C434 667.078 468.922 702 512 702H730Z" fill="url(#rightBubble)" stroke="#C9E9FA" stroke-width="8"/>
+  </g>
+
+  <path d="M248 538C300 538 312 456 364 456C416 456 418 610 472 610C526 610 532 456 584 456C636 456 640 610 694 610C748 610 756 538 776 538" stroke="url(#voice)" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M248 538C300 538 312 456 364 456C416 456 418 610 472 610C526 610 532 456 584 456C636 456 640 610 694 610C748 610 756 538 776 538" stroke="#FFFFFF" stroke-opacity="0.36" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="366" cy="456" r="18" fill="#0F4F49"/>
+  <circle cx="584" cy="456" r="18" fill="#0F4F49"/>
+  <circle cx="694" cy="610" r="18" fill="#0F4F49"/>
+</svg>

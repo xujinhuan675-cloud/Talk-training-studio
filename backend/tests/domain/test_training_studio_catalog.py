@@ -36,6 +36,23 @@ def test_training_task_config_normalizes_ratios_and_defaults():
     assert sum(config.rubric_weights.values()) == pytest.approx(1.0)
 
 
+def test_product_management_category_uses_pm_default_rubric_weights():
+    config = TrainingTaskConfig(
+        role="Product Manager",
+        level="Mid-level",
+        tech_stack=["Roadmap", "User research", "Metrics"],
+        question_type_ratios={"behavioral": 30, "craft": 45, "pressure": 25},
+        question_count=8,
+        framework="scqa",
+        difficulty="medium",
+        category="product_management",
+    )
+
+    assert config.category == ScenarioCategory.PRODUCT_MANAGEMENT
+    assert config.question_type_ratios["craft"] == pytest.approx(0.45)
+    assert config.rubric_weights[RubricDimension.RELEVANCE] == pytest.approx(0.25)
+
+
 def test_training_task_config_rejects_missing_rubric_dimension():
     with pytest.raises(DomainValidationException) as exc:
         TrainingTaskConfig(

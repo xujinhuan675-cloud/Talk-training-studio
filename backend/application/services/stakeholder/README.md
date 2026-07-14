@@ -8,18 +8,18 @@
 |------|------|
 | `persona_loader.py` | PersonaLoader — 从 Markdown 文件加载角色画像 |
 | `chatroom_service.py` | ChatRoomApplicationService — 聊天室 CRUD（创建/列表/详情） |
-| `dto.py` | 聊天室/分析报告 DTO（CreateChatRoomDTO, ChatRoomDTO, MessageDTO, AnalysisReportDTO, AnalysisContentDTO 等） |
+| `dto.py` | 聊天室/分析报告 DTO（CreateChatRoomDTO, ChatRoomDTO, MessageDTO, AnalysisReportDTO, AnalysisContentDTO 等；含 Training Studio 内容表达/镜头表现占位维度） |
 | `stakeholder_chat_service.py` | StakeholderChatService — 私聊消息发送与 AI 回复编排（含 SSE 推送） |
 | `prompt_builder.py` | build_llm_messages() — 构建 LLM 对话 prompt |
 | `sse.py` | RoomEventBus — SSE 事件总线 + format_sse 格式化 |
 | `dispatcher.py` | Dispatcher — 群聊调度器，decide_responders() + check_followup()；首轮调度为空时兜底选择首位角色避免冷场 |
-| `analysis_service.py` | AnalysisService — LLM 智能对话分析报告生成（阻力排名 + 有效论点 + 沟通建议） |
+| `analysis_service.py` | AnalysisService — LLM 智能对话分析报告生成（阻力排名 + 有效论点 + 沟通建议；会清洗视频回答 marker 并生成复盘占位维度） |
 | `growth_service.py` | GrowthService — 成长看板聚合不强依赖 LLM；评估、洞察、沟通力名片在配置 Stakeholder LLM 后生成 |
 | `compression_service.py` | CompressionService — 后台对话历史语义压缩（异步增量摘要，不阻塞聊天） |
 | `persona_migrator.py` | Story 2.3 — markdown v1 → 5-layer v2 迁移（pure functions + async run_migration），供 `scripts/migrate_personas_to_v2.py` 调用 |
-| `persona_builder_service.py` | Story 2.4 — PersonaBuilderService：agent→parse→adversarialize→persist 流式编排，yield BuildEvent 序列（AC1-AC8） |
+| `persona_builder_service.py` | Story 2.4 — PersonaBuilderService：agent→parse→adversarialize→persist 流式编排，yield BuildEvent 序列（AC1-AC8）；parse 支持 structured 输出与 legacy generate/repair 测试路径 |
 | `build_events.py` | Story 2.4 — BuildEvent dataclass + 6 canonical event types + heartbeat/error |
-| `adversarializer.py` | Story 2.4 — persona 对抗化 pure functions (apply_hostile/mark_hostile_fallback) + LLM 调用 |
+| `adversarializer.py` | Story 2.4 — persona 对抗化 pure functions (apply_hostile/mark_hostile_fallback) + LLM 调用；支持 structured 输出与 legacy generate JSON 测试路径 |
 | `persona_build_cache.py` | Story 2.4 — Redis 幂等缓存（TTL=15min, order-insensitive key, no-op fallback） |
 | `exceptions.py` | Story 2.4 — BuildError / BuildTimeoutError（应用层编排异常） |
 | `prompts/` | 应用层 LLM 提示词资源：`persona_v1_to_v2.md`（Story 2.3 迁移）、`persona_markdown_to_json.md`（Story 2.4 agent 输出解析）、`adversarialize.md`（Story 2.4 对抗化，含 4 规则段） |

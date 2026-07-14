@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-import base64
 import asyncio
+import base64
 import json
 import mimetypes
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from api.dependencies import (
+    get_analysis_reader_service,
+    get_analysis_service,
+    get_chatroom_service,
+    get_growth_service,
+)
+from application.services.stakeholder.analysis_service import AnalysisReaderService, AnalysisService
+from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
+from application.services.stakeholder.dto import CreateChatRoomDTO
 from application.services.training_studio.realtime_session import (
     RealtimeEvent,
     RealtimeSession,
@@ -21,6 +30,11 @@ from application.services.training_studio.realtime_session import (
 from application.services.training_studio.catalog_service import (
     TrainingCatalogService,
     TrainingTaskConfigDTO,
+)
+from application.services.training_studio.session_service import (
+    CreateTrainingSessionDTO,
+    TrainingSessionDTO,
+    TrainingSessionService,
 )
 from core.response import success_response
 from domain.common.exceptions import DomainValidationException
@@ -32,6 +46,7 @@ _TRAINING_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "training_st
 _storybank_service = StoryBankService(
     JsonFileStoryBankStore(_TRAINING_DATA_DIR / "storybank.json")
 )
+_training_session_service = TrainingSessionService()
 _VIDEO_ANSWER_DIR = _TRAINING_DATA_DIR / "video_answers"
 _VIDEO_MAX_BYTES = 100 * 1024 * 1024
 _VIDEO_EXTENSIONS = {
@@ -51,14 +66,42 @@ def get_storybank_service() -> StoryBankService:
     return _storybank_service
 
 
+def get_training_session_service() -> TrainingSessionService:
+    return _training_session_service
+
+
 class StoryBankRegisterDTO(BaseModel):
     answer_text: str = Field(..., min_length=20, max_length=20000)
     scenario_category: ScenarioCategory | str = ScenarioCategory.INTERVIEW
     tags: list[str] = Field(default_factory=list)
 
 
+class StartTrainingSessionDTO(BaseModel):
+    room_id: int | str | None = None
+    persona_ids: list[str] = Field(default_factory=list)
+    room_name: str | None = Field(default=None, min_length=1, max_length=255)
+    room_type: str = Field(default="battle_prep", pattern=r"^(private|group|battle_prep|defense)$")
+    scenario_id: int | None = None
+
+
+class CompleteTrainingSessionDTO(BaseModel):
+    report_id: int | str | None = None
+    score_id: int | str | None = None
+    generate_report: bool = True
+
+
 def _storybank_entry_to_dict(entry) -> dict:
     return entry.to_dict()
+
+
+def _session_to_dict(session) -> dict:
+    return TrainingSessionDTO.from_domain(session).model_dump(mode="json")
+
+
+def _not_found_if_missing(exc: ValueError) -> HTTPException:
+    if "not found" in str(exc).lower():
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
 
 
 def _event_to_wire(event: RealtimeEvent) -> dict:
@@ -96,6 +139,136 @@ def _resolve_video_answer_file(filename: str) -> Path:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Video answer not found") from exc
     return path
+
+
+@router.post("/sessions", status_code=201, summary="Create a Training Studio session")
+async def create_training_session(
+    body: CreateTrainingSessionDTO,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+):
+    try:
+        session = svc.create_session(body)
+    except (DomainValidationException, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return success_response(data=_session_to_dict(session))
+
+
+@router.get("/sessions", summary="List Training Studio sessions")
+async def list_training_sessions(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    svc: TrainingSessionService = Depends(get_training_session_service),
+):
+    sessions = svc.list_sessions()
+    window = sessions[skip : skip + limit]
+    return success_response(data=[_session_to_dict(session) for session in window])
+
+
+@router.get("/sessions/{session_id}", summary="Get a Training Studio session")
+async def get_training_session(
+    session_id: str,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+):
+    try:
+        session = svc.get_session(session_id)
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+    return success_response(data=_session_to_dict(session))
+
+
+@router.post("/sessions/{session_id}/start", summary="Start or bind a Training Studio session")
+async def start_training_session(
+    session_id: str,
+    body: StartTrainingSessionDTO,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+):
+    try:
+        session = svc.get_session(session_id)
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+
+    room_id = str(body.room_id).strip() if body.room_id is not None else ""
+    if not room_id:
+        if not body.persona_ids:
+            raise HTTPException(status_code=422, detail="room_id or persona_ids is required")
+        room_name = body.room_name or f"Training: {session.task_config.role}"
+        room = await chatroom_svc.create_room(
+            CreateChatRoomDTO(
+                name=room_name,
+                type=body.room_type,
+                persona_ids=body.persona_ids,
+                scenario_id=body.scenario_id,
+            )
+        )
+        room_id = str(room.id)
+
+    try:
+        started = svc.start_session(session_id, room_id=room_id)
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+    return success_response(data=_session_to_dict(started))
+
+
+@router.post("/sessions/{session_id}/complete", summary="Complete a Training Studio session")
+async def complete_training_session(
+    session_id: str,
+    body: CompleteTrainingSessionDTO,
+    background_tasks: BackgroundTasks,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    analysis_svc: AnalysisService = Depends(get_analysis_service),
+    growth_svc=Depends(get_growth_service),
+):
+    try:
+        session = svc.get_session(session_id)
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+
+    report_id = str(body.report_id).strip() if body.report_id is not None else ""
+    if body.generate_report and not report_id:
+        if not session.room_id:
+            raise HTTPException(status_code=400, detail="Session must be started before generating a report")
+        try:
+            room_id = int(session.room_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Session room_id must be numeric to generate a report") from exc
+        try:
+            report = await analysis_svc.generate_report(room_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        report_id = str(report.id)
+        background_tasks.add_task(growth_svc.evaluate_competency, report.id)
+
+    score_id = str(body.score_id).strip() if body.score_id is not None else None
+    try:
+        completed = svc.complete_session(session_id, report_id=report_id or None, score_id=score_id)
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+    return success_response(data=_session_to_dict(completed))
+
+
+@router.get("/sessions/{session_id}/report", summary="Get a Training Studio session report")
+async def get_training_session_report(
+    session_id: str,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    reader_svc: AnalysisReaderService = Depends(get_analysis_reader_service),
+):
+    try:
+        session = svc.get_session(session_id)
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+
+    if not session.report_id:
+        raise HTTPException(status_code=404, detail="Training session report not found")
+
+    try:
+        report_lookup_id = int(session.report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Training session report not found") from exc
+    report = await reader_svc.get_report(report_lookup_id)
+    if report is None or str(report.room_id) != str(session.room_id):
+        raise HTTPException(status_code=404, detail="Training session report not found")
+    return success_response(data=report.model_dump(mode="json"))
 
 
 @router.get("/catalog", summary="Get Training Studio catalog options")

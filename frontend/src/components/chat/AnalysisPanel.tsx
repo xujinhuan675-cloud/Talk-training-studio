@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import type { AnalysisReport, AnalysisReportSummary } from '../../services/api'
+import type { AnalysisReport, AnalysisReportSummary, TrainingDimensionScore } from '../../services/api'
 import { useI18n } from '../../i18n'
 import './AnalysisPanel.css'
 
@@ -16,6 +16,10 @@ export interface AnalysisPanelProps {
   ) => void
 }
 
+function hasDimensionContent(dimension: TrainingDimensionScore | null | undefined): dimension is TrainingDimensionScore {
+  return Boolean(dimension && dimension.status !== 'not_applicable')
+}
+
 export default function AnalysisPanel({
   result,
   reportList,
@@ -26,6 +30,23 @@ export default function AnalysisPanel({
   onScrollToMessage,
 }: AnalysisPanelProps) {
   const { tr, locale } = useI18n()
+  const videoDimensions: Array<{
+    key: string
+    title: string
+    value: TrainingDimensionScore
+  }> = [
+    {
+      key: 'content_delivery',
+      title: tr('内容表达', 'Content delivery'),
+      value: result.content.content_delivery,
+    },
+    {
+      key: 'camera_presence',
+      title: tr('镜头表现', 'Camera presence'),
+      value: result.content.camera_presence,
+    },
+  ].flatMap((item) => hasDimensionContent(item.value) ? [{ ...item, value: item.value }] : [])
+
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog analysis-dialog" onClick={(e) => e.stopPropagation()}>
@@ -74,6 +95,41 @@ export default function AnalysisPanel({
         )}
 
         <p className="analysis-summary">{result.summary}</p>
+
+        {videoDimensions.length > 0 && (
+          <div className="analysis-section">
+            <h4>{tr('视频级复盘', 'Video Review')}</h4>
+            <div className="analysis-cards">
+              {videoDimensions.map((item) => {
+                const dimension = item.value
+                const hasLinks = dimension.message_indices && dimension.message_indices.length > 0 && result.content.message_id_map
+                return (
+                  <div
+                    key={item.key}
+                    className={`analysis-card${hasLinks ? ' clickable' : ''}`}
+                    onClick={() => hasLinks && onScrollToMessage(dimension.message_indices, result.content.message_id_map)}
+                  >
+                    <div className="analysis-card-header">
+                      <span className="analysis-card-name">{item.title}</span>
+                      <span className={`analysis-card-score ${dimension.status === 'observed' ? 'positive' : 'neutral'}`}>
+                        {dimension.score === null || dimension.score === undefined ? tr('待补充', 'Pending') : dimension.score}
+                      </span>
+                    </div>
+                    <div className="analysis-card-body">{dimension.rationale || dimension.label}</div>
+                    {dimension.suggestions.length > 0 && (
+                      <div className="analysis-card-body">
+                        {dimension.suggestions.slice(0, 2).join(' / ')}
+                      </div>
+                    )}
+                    {dimension.status === 'placeholder' && (
+                      <div className="analysis-card-link">{tr('已预留结构化评分，等待视频表现分析接入', 'Structured score reserved; video performance analysis is not connected yet')}</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Resistance ranking cards */}
         {result.content.resistance_ranking.length > 0 && (

@@ -11,12 +11,13 @@ import { Mic, Loader2, Square } from 'lucide-react'
 import { useI18n } from '../i18n'
 import './VoiceRecorder.css'
 
-type RecordState = 'idle' | 'listening' | 'recording' | 'processing'
+export type VoiceRecorderState = 'idle' | 'listening' | 'recording' | 'processing'
 
 interface VoiceRecorderProps {
   roomId: number
   disabled?: boolean
   onTranscription?: (text: string) => void
+  onStateChange?: (state: VoiceRecorderState, error: string | null) => void
 }
 
 const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
@@ -24,12 +25,17 @@ const API_PREFIX = '/api/v1/stakeholder'
 const HOLD_START_DELAY_MS = 250
 const TRANSCRIPTION_TIMEOUT_MS = 45000
 
-const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTranscription }) => {
+const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
+  roomId,
+  disabled,
+  onTranscription,
+  onStateChange,
+}) => {
   const { tr } = useI18n()
-  const [state, setState] = useState<RecordState>('idle')
+  const [state, setState] = useState<VoiceRecorderState>('idle')
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const stateRef = useRef<RecordState>('idle')
+  const stateRef = useRef<VoiceRecorderState>('idle')
   const wsRef = useRef<WebSocket | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -44,7 +50,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
   const pendingSendsRef = useRef(0)
   const chunksRef = useRef<Blob[]>([])
 
-  const setRecordState = useCallback((next: RecordState) => {
+  const setRecordState = useCallback((next: VoiceRecorderState) => {
     stateRef.current = next
     setState(next)
   }, [])
@@ -52,6 +58,32 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
   useEffect(() => {
     stateRef.current = state
   }, [state])
+
+  useEffect(() => {
+    onStateChange?.(state, error)
+  }, [error, onStateChange, state])
+
+  const getVoiceErrorMessage = useCallback((msg: { code?: string; message?: string }) => {
+    if (msg.code === 'stt_not_configured') {
+      return tr(
+        '语音识别未配置：请在 backend/.env 配置 VOICE__STT_API_KEY，或确认 LLM 网关支持语音转写后重启后端。',
+        'Speech recognition is not configured. Set VOICE__STT_API_KEY in backend/.env, or use an LLM gateway that supports audio transcription, then restart the backend.',
+      )
+    }
+    if (msg.code === 'stt_timeout') {
+      return tr(
+        '语音识别服务连接超时，请检查 STT 网络或稍后重试',
+        'Speech recognition timed out. Check the STT network or try again later.',
+      )
+    }
+    if (msg.code === 'stt_transcription_failed') {
+      return tr(
+        '语音识别失败，请检查 STT 配置和音频转写网关。',
+        'Speech recognition failed. Check the STT configuration and transcription gateway.',
+      )
+    }
+    return msg.message || tr('语音识别失败', 'Speech recognition failed')
+  }, [tr])
 
   const stopEverything = useCallback(() => {
     if (timerRef.current) {
@@ -129,8 +161,8 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
               clearTimeout(transcriptionTimeoutRef.current)
               transcriptionTimeoutRef.current = 0
             }
-            setError(msg.message || tr('语音识别失败', 'Speech recognition failed'))
-            setTimeout(() => setError(null), 3000)
+            setError(getVoiceErrorMessage(msg))
+            setTimeout(() => setError(null), msg.code === 'stt_not_configured' ? 8000 : 3000)
             setRecordState('idle')
             setDuration(0)
             if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) {
@@ -143,7 +175,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ roomId, disabled, onTrans
       }
       wsRef.current = ws
     })
-  }, [roomId, onTranscription, setRecordState, tr])
+  }, [getVoiceErrorMessage, roomId, onTranscription, setRecordState])
 
   const stopActiveRecorder = useCallback(() => {
     if (timerRef.current) {

@@ -62,9 +62,9 @@ export default function ProfileCard({ data, cardRef }: Props) {
     <div className="profile-card" ref={cardRef}>
       {/* Header */}
       <div className="profile-card-header">
-        <div className="profile-card-logo">D</div>
+        <img className="profile-card-logo" src="/talkwise-icon.svg" alt="" aria-hidden="true" />
         <div className="profile-card-header-text">
-          <span className="profile-card-label">DABOSS PROFILE</span>
+          <span className="profile-card-label">TALKWISE PROFILE</span>
           <span className="profile-card-title">{data.style_label}</span>
         </div>
       </div>
@@ -103,7 +103,7 @@ export default function ProfileCard({ data, cardRef }: Props) {
       )}
 
       {/* Footer */}
-      <div className="profile-card-footer">{tr('DaBoss · 测测你的职场沟通风格 →', 'DaBoss · Discover your workplace communication style →')}</div>
+      <div className="profile-card-footer">{tr('TalkWise · 测测你的沟通风格 →', 'TalkWise · Discover your communication style →')}</div>
     </div>
   )
 }

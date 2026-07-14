@@ -78,6 +78,36 @@ def test_openai_compatible_aliases_populate_llm_settings(monkeypatch: pytest.Mon
     assert s.llm.wire_api == "responses"
 
 
+def test_voice_stt_falls_back_to_llm_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """STT can reuse the OpenAI-compatible LLM gateway when no voice key is set."""
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.delenv("VOICE__STT_API_KEY", raising=False)
+    monkeypatch.delenv("VOICE__STT_BASE_URL", raising=False)
+    monkeypatch.setenv("LLM__API_KEY", "sk-llm-test")
+    monkeypatch.setenv("LLM__BASE_URL", "https://gateway.example.com/v1")
+
+    s = Settings(_env_file=None)
+
+    assert s.voice.stt_api_key == "sk-llm-test"
+    assert s.voice.stt_base_url == "https://gateway.example.com/v1"
+
+
+def test_voice_stt_explicit_settings_override_llm_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dedicated STT credentials stay authoritative when configured."""
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("LLM__API_KEY", "sk-llm-test")
+    monkeypatch.setenv("LLM__BASE_URL", "https://gateway.example.com/v1")
+    monkeypatch.setenv("VOICE__STT_API_KEY", "sk-stt-test")
+    monkeypatch.setenv("VOICE__STT_BASE_URL", "https://stt.example.com/v1")
+
+    s = Settings(_env_file=None)
+
+    assert s.voice.stt_api_key == "sk-stt-test"
+    assert s.voice.stt_base_url == "https://stt.example.com/v1"
+
+
 @pytest.mark.asyncio
 async def test_anthropic_provider_generate_mock() -> None:
     """AC3: AnthropicProvider.generate() calls Anthropic SDK and returns LLMResponse."""

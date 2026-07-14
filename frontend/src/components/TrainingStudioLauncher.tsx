@@ -1,11 +1,20 @@
 import {
   DIFFICULTY_OPTIONS,
   FRAMEWORK_OPTIONS,
+  INTERVIEW_ROLE_PRESETS,
+  INTERVIEW_SCENARIO_PRESETS,
+  PRODUCT_ROLE_PRESETS,
+  PRODUCT_SCENARIO_PRESETS,
   SCENARIO_OPTIONS,
   TRAINING_LEVEL_OPTIONS,
   getDefaultTrainingStudioConfig,
+  type InterviewRolePreset,
+  type InterviewScenarioPreset,
   type QuestionMix,
+  type ProductRolePreset,
+  type ProductScenarioPreset,
   type TrainingLevel,
+  type TrainingScenario,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
 import { useI18n } from '../i18n'
@@ -42,6 +51,113 @@ export default function TrainingStudioLauncher({
     })
   }
 
+  const updateScenario = (scenario: TrainingScenario) => {
+    if (scenario === 'interview') {
+      onChange({
+        ...value,
+        scenario,
+        interviewRolePreset: value.interviewRolePreset || INTERVIEW_ROLE_PRESETS[1].value,
+        interviewScenarioPreset: value.interviewScenarioPreset || INTERVIEW_SCENARIO_PRESETS[1].value,
+        productRolePreset: '',
+        productScenarioPreset: '',
+      })
+      return
+    }
+
+    if (scenario === 'product_management') {
+      onChange({
+        ...value,
+        scenario,
+        interviewRolePreset: '',
+        interviewScenarioPreset: '',
+        productRolePreset: value.productRolePreset || PRODUCT_ROLE_PRESETS[0].value,
+        productScenarioPreset: value.productScenarioPreset || PRODUCT_SCENARIO_PRESETS[0].value,
+      })
+      return
+    }
+
+    onChange({
+      ...value,
+      scenario,
+      interviewRolePreset: '',
+      interviewScenarioPreset: '',
+      productRolePreset: '',
+      productScenarioPreset: '',
+    })
+  }
+
+  const applyInterviewRolePreset = (preset: InterviewRolePreset) => {
+    const fallbackScenario = value.interviewScenarioPreset || INTERVIEW_SCENARIO_PRESETS[1].value
+    onChange({
+      ...value,
+      scenario: 'interview',
+      interviewRolePreset: preset.value,
+      interviewScenarioPreset: fallbackScenario,
+      productRolePreset: '',
+      productScenarioPreset: '',
+      role: t(preset.roleKey),
+      level: preset.level,
+      techStack: t(preset.focusKey),
+      questionMix: { ...preset.questionMix },
+    })
+  }
+
+  const applyInterviewScenarioPreset = (preset: InterviewScenarioPreset) => {
+    const fallbackRole = INTERVIEW_ROLE_PRESETS.find((item) => item.value === value.interviewRolePreset)
+      ?? INTERVIEW_ROLE_PRESETS[1]
+
+    onChange({
+      ...value,
+      scenario: 'interview',
+      interviewRolePreset: value.interviewRolePreset || fallbackRole.value,
+      interviewScenarioPreset: preset.value,
+      productRolePreset: '',
+      productScenarioPreset: '',
+      role: value.scenario === 'interview' ? value.role : t(fallbackRole.roleKey),
+      level: value.scenario === 'interview' ? value.level : fallbackRole.level,
+      techStack: t(preset.focusKey),
+      framework: preset.framework,
+      difficulty: preset.difficulty,
+      questionMix: { ...preset.questionMix },
+    })
+  }
+
+  const applyProductRolePreset = (preset: ProductRolePreset) => {
+    const fallbackScenario = value.productScenarioPreset || PRODUCT_SCENARIO_PRESETS[0].value
+    onChange({
+      ...value,
+      scenario: 'product_management',
+      interviewRolePreset: '',
+      interviewScenarioPreset: '',
+      productRolePreset: preset.value,
+      productScenarioPreset: fallbackScenario,
+      role: t(preset.roleKey),
+      level: preset.level,
+      techStack: t(preset.focusKey),
+      questionMix: { ...preset.questionMix },
+    })
+  }
+
+  const applyProductScenarioPreset = (preset: ProductScenarioPreset) => {
+    const fallbackRole = PRODUCT_ROLE_PRESETS.find((item) => item.value === value.productRolePreset)
+      ?? PRODUCT_ROLE_PRESETS[0]
+
+    onChange({
+      ...value,
+      scenario: 'product_management',
+      interviewRolePreset: '',
+      interviewScenarioPreset: '',
+      productRolePreset: value.productRolePreset || fallbackRole.value,
+      productScenarioPreset: preset.value,
+      role: value.scenario === 'product_management' ? value.role : t(fallbackRole.roleKey),
+      level: value.scenario === 'product_management' ? value.level : fallbackRole.level,
+      techStack: t(preset.focusKey),
+      framework: preset.framework,
+      difficulty: preset.difficulty,
+      questionMix: { ...preset.questionMix },
+    })
+  }
+
   const totalMix = value.questionMix.behavioral + value.questionMix.technical + value.questionMix.pressure
 
   return (
@@ -71,7 +187,7 @@ export default function TrainingStudioLauncher({
               key={item.value}
               className={`tsl-option ${value.scenario === item.value ? 'selected' : ''}`}
               type="button"
-              onClick={() => update('scenario', item.value)}
+              onClick={() => updateScenario(item.value)}
               disabled={disabled}
             >
               <span>{t(item.labelKey)}</span>
@@ -80,6 +196,90 @@ export default function TrainingStudioLauncher({
           ))}
         </div>
       </div>
+
+      {value.scenario === 'interview' && (
+        <>
+          <div className="tsl-section">
+            <div className="tsl-label">{t('training.launcher.interviewRoles')}</div>
+            <div className="tsl-option-grid tsl-option-grid--four">
+              {INTERVIEW_ROLE_PRESETS.map((item) => (
+                <button
+                  key={item.value}
+                  className={`tsl-option ${value.interviewRolePreset === item.value ? 'selected' : ''}`}
+                  type="button"
+                  onClick={() => applyInterviewRolePreset(item)}
+                  disabled={disabled}
+                >
+                  <span>{t(item.labelKey)}</span>
+                  {item.descKey && <small>{t(item.descKey)}</small>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="tsl-section">
+            <div className="tsl-label">{t('training.launcher.interviewScenarios')}</div>
+            <div className="tsl-preset-grid">
+              {INTERVIEW_SCENARIO_PRESETS.map((item) => (
+                <button
+                  key={item.value}
+                  className={`tsl-option tsl-option--compact ${
+                    value.interviewScenarioPreset === item.value ? 'selected' : ''
+                  }`}
+                  type="button"
+                  onClick={() => applyInterviewScenarioPreset(item)}
+                  disabled={disabled}
+                >
+                  <span>{t(item.labelKey)}</span>
+                  {item.descKey && <small>{t(item.descKey)}</small>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {value.scenario === 'product_management' && (
+        <>
+          <div className="tsl-section">
+            <div className="tsl-label">{t('training.launcher.productRoles')}</div>
+            <div className="tsl-option-grid tsl-option-grid--four">
+              {PRODUCT_ROLE_PRESETS.map((item) => (
+                <button
+                  key={item.value}
+                  className={`tsl-option ${value.productRolePreset === item.value ? 'selected' : ''}`}
+                  type="button"
+                  onClick={() => applyProductRolePreset(item)}
+                  disabled={disabled}
+                >
+                  <span>{t(item.labelKey)}</span>
+                  {item.descKey && <small>{t(item.descKey)}</small>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="tsl-section">
+            <div className="tsl-label">{t('training.launcher.productScenarios')}</div>
+            <div className="tsl-preset-grid">
+              {PRODUCT_SCENARIO_PRESETS.map((item) => (
+                <button
+                  key={item.value}
+                  className={`tsl-option tsl-option--compact ${
+                    value.productScenarioPreset === item.value ? 'selected' : ''
+                  }`}
+                  type="button"
+                  onClick={() => applyProductScenarioPreset(item)}
+                  disabled={disabled}
+                >
+                  <span>{t(item.labelKey)}</span>
+                  {item.descKey && <small>{t(item.descKey)}</small>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="tsl-two-col">
         <div className="tsl-section">

@@ -170,6 +170,24 @@ async def test_generate_report_adds_anchors_and_enhanced_sections():
                 "message_indices": [2],
             }
         ],
+        "content_delivery": {
+            "score": 82,
+            "label": "Clear structure",
+            "rationale": "The answer used a phased rollout to organize risk control.",
+            "evidence": ["phased rollout"],
+            "suggestions": ["Lead with the budget cap next time."],
+            "status": "observed",
+            "message_indices": [1],
+        },
+        "camera_presence": {
+            "score": None,
+            "label": "Camera presence placeholder",
+            "rationale": "No visual metrics were available.",
+            "evidence": [],
+            "suggestions": ["Connect visual analysis before rating eye contact."],
+            "status": "placeholder",
+            "message_indices": [],
+        },
     }
     state = _state()
     llm = _FakeLLM("preface\n```json\n" + json.dumps(payload) + "\n```\npostscript")
@@ -186,6 +204,11 @@ async def test_generate_report_adds_anchors_and_enhanced_sections():
     assert report.content.rewrite_demos[0].message_anchors[0].speaker == "user"
     assert report.content.micro_drills[0].message_anchors[0].speaker == "CFO"
     assert report.content.high_signal_moments[0].message_ids == [102]
+    assert report.content.content_delivery is not None
+    assert report.content.content_delivery.score == 82
+    assert report.content.content_delivery.message_ids == [101]
+    assert report.content.camera_presence is not None
+    assert report.content.camera_presence.status == "placeholder"
     assert report.content.alternative_phrasings == []
     assert state.report_repo.created is not None
     assert state.report_repo.created.content["message_id_map"] == {"1": 101, "2": 102}
@@ -211,3 +234,70 @@ async def test_generate_report_keeps_legacy_fields_when_enhanced_fields_missing(
     assert report.summary == "Legacy report"
     assert report.content.evidence_reviews == []
     assert report.content.message_anchors[0].message_id == 101
+    assert report.content.content_delivery is None
+    assert report.content.camera_presence is None
+
+
+@pytest.mark.asyncio
+async def test_generate_report_turns_video_answer_marker_into_report_placeholders():
+    state = _state()
+    state.messages = [
+        Message(
+            id=201,
+            room_id=1,
+            sender_type="user",
+            sender_id="user",
+            content=(
+                "Here is my recorded answer.\n\n"
+                "[video-answer]"
+                + json.dumps(
+                    {
+                        "url": "/api/v1/training-studio/video-answers/answer.webm",
+                        "mimeType": "video/webm",
+                        "durationMs": 61000,
+                        "size": 1234,
+                        "recordedAt": "2026-07-13T12:00:00Z",
+                        "trainingEvent": {
+                            "type": "video_answer_submitted",
+                            "trainingMode": "video",
+                            "schemaVersion": 1,
+                            "reportDimensions": ["content_delivery", "camera_presence"],
+                            "cameraPresenceStatus": "placeholder",
+                        },
+                    }
+                )
+            ),
+        ),
+        Message(
+            id=202,
+            room_id=1,
+            sender_type="persona",
+            sender_id="cfo",
+            content="Tell me how you would prove this in the first month.",
+        ),
+    ]
+    llm = _FakeLLM(
+        json.dumps(
+            {
+                "summary": "Video answer submitted and follow-up requested.",
+                "resistance_ranking": [],
+                "effective_arguments": [],
+                "communication_suggestions": [],
+            }
+        )
+    )
+    service = AnalysisService(_uow_factory(state), llm=llm, persona_loader=_PersonaLoader())
+
+    report = await service.generate_report(1)
+
+    prompt = llm.messages[0].content
+    assert "[video-answer]" not in prompt
+    assert "/api/v1/training-studio/video-answers/answer.webm" not in prompt
+    assert "Training Studio video answer" in prompt
+    assert "visual_metrics=not_computed_yet" in prompt
+    assert report.content.content_delivery is not None
+    assert report.content.content_delivery.status == "placeholder"
+    assert report.content.camera_presence is not None
+    assert report.content.camera_presence.score is None
+    assert report.content.camera_presence.status == "placeholder"
+    assert report.content.message_anchors[0].quote.startswith("Here is my recorded answer.")

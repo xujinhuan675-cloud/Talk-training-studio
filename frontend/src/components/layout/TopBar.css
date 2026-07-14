@@ -23,6 +23,14 @@
   gap: 8px;
 }
 
+.topbar-logo-mark {
+  width: 24px;
+  height: 24px;
+  display: block;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
 .topbar-wordmark {
   font-size: 16px;
   font-weight: 700;

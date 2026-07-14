@@ -1,5 +1,6 @@
 # input: AbstractUnitOfWork, LLMPort, PersonaLoader
 # output: AnalysisService 对话分析报告生成服务, AnalysisReaderService 只读报告查询服务
+# output-update: Training Studio video-answer markers are sanitized into report input with content/camera review placeholders.
 # owner: wanhua.gu
 # pos: 应用层服务 - 利益相关者对话分析（AnalysisService=LLM 生成, AnalysisReaderService=只读查询）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Application service for generating stakeholder conversation analysis reports.
@@ -102,6 +103,15 @@ Additional report requirements:
     target_persona, and message_indices.
   - high_signal_moments: title, moment_type, why_it_matters,
     recommendation, and message_indices.
+- If the conversation includes a "[Training Studio video answer]" marker, also
+  output:
+  - content_delivery: score 0-100, label, rationale, evidence, suggestions,
+    status, and message_indices. Assess only the user's communication content,
+    structure, clarity, evidence, and delivery described in the transcript.
+  - camera_presence: score, label, rationale, evidence, suggestions, status,
+    and message_indices. If no actual visual metrics are available, set
+    score to null, status to "placeholder", and do not invent eye contact,
+    posture, facial expression, nervousness, or reading-from-notes findings.
 - Do not invent message IDs. Use message_indices only; the system resolves IDs.
 """
 
@@ -125,6 +135,73 @@ _ANCHOR_SECTION_FIELDS = {
     "micro_drills",
     "high_signal_moments",
 }
+
+_TRAINING_DIMENSION_FIELDS = {"content_delivery", "camera_presence"}
+_VIDEO_ANSWER_MARKER = "[video-answer]"
+
+
+def _split_video_answer_content(content: str) -> tuple[str, dict[str, Any] | None]:
+    """Return a clean caption plus parsed local video-answer metadata, if present."""
+    if _VIDEO_ANSWER_MARKER not in content:
+        return content, None
+
+    marker_index = content.index(_VIDEO_ANSWER_MARKER)
+    caption = content[:marker_index].strip()
+    raw = content[marker_index + len(_VIDEO_ANSWER_MARKER) :].strip()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return caption or content, None
+    if not isinstance(parsed, dict):
+        return caption or content, None
+    return caption, parsed
+
+
+def _format_duration_ms(value: Any) -> str:
+    if isinstance(value, bool):
+        return ""
+    try:
+        total_seconds = max(0, int(value) // 1000)
+    except (TypeError, ValueError):
+        return ""
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}:{seconds:02d}"
+
+
+def _format_video_answer_for_analysis(content: str) -> tuple[str, bool]:
+    caption, attachment = _split_video_answer_content(content)
+    if not attachment:
+        return content, False
+
+    details = ["type=video_answer_submitted"]
+    duration = _format_duration_ms(attachment.get("durationMs"))
+    if duration:
+        details.append(f"duration={duration}")
+    mime_type = _text(attachment.get("mimeType"))
+    if mime_type:
+        details.append(f"mime_type={mime_type}")
+    recorded_at = _text(attachment.get("recordedAt"))
+    if recorded_at:
+        details.append(f"recorded_at={recorded_at}")
+
+    training_event = attachment.get("trainingEvent")
+    if isinstance(training_event, dict):
+        dimensions = training_event.get("reportDimensions")
+        if isinstance(dimensions, list):
+            clean_dimensions = [str(item) for item in dimensions if isinstance(item, str)]
+            if clean_dimensions:
+                details.append(f"report_dimensions={','.join(clean_dimensions)}")
+        camera_status = _text(training_event.get("cameraPresenceStatus"))
+        if camera_status:
+            details.append(f"camera_presence_status={camera_status}")
+
+    readable_caption = caption or _text(attachment.get("title")) or "Video answer submitted"
+    note = (
+        "[Training Studio video answer: "
+        + "; ".join(details)
+        + "; visual_metrics=not_computed_yet]"
+    )
+    return f"{readable_caption}\n{note}", True
 
 
 def _extract_json_object(raw_text: str) -> dict[str, Any]:
@@ -189,6 +266,21 @@ def _coerce_score(value: Any) -> int:
     return max(-5, min(5, score))
 
 
+def _coerce_optional_percentage(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, score))
+
+
+def _string_list(value: Any) -> list[str]:
+    items = value if isinstance(value, list) else [value]
+    return [item for item in items if isinstance(item, str) and item.strip()]
+
+
 def _sanitize_analysis_item(field: str, item: dict[str, Any]) -> dict[str, Any]:
     if field == "resistance_ranking":
         item["persona_id"] = _text(item.get("persona_id"))
@@ -208,6 +300,40 @@ def _sanitize_analysis_item(field: str, item: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def _normalize_training_dimension(
+    value: Any,
+    message_id_map: dict[int, int],
+    anchor_map: dict[int, dict[str, Any]],
+    *,
+    include_placeholder: bool,
+    fallback_label: str,
+    fallback_rationale: str,
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        if not include_placeholder:
+            return None
+        value = {}
+
+    item = dict(value)
+    score = _coerce_optional_percentage(item.get("score"))
+    status = item.get("status")
+    if status not in {"observed", "placeholder", "not_applicable"}:
+        status = "observed" if score is not None else "placeholder"
+
+    indices = _coerce_message_indices(item.get("message_indices"))
+    return {
+        "score": score,
+        "label": _text(item.get("label")) or fallback_label,
+        "rationale": _text(item.get("rationale")) or fallback_rationale,
+        "evidence": _string_list(item.get("evidence")),
+        "suggestions": _string_list(item.get("suggestions")),
+        "status": status,
+        "message_indices": indices,
+        "message_ids": [message_id_map[i] for i in indices if i in message_id_map],
+        "message_anchors": [anchor_map[i] for i in indices if i in anchor_map],
+    }
+
+
 def _build_message_anchors(history: list[dict], persona_loader) -> dict[int, dict[str, Any]]:
     anchors: dict[int, dict[str, Any]] = {}
     seq = 0
@@ -221,13 +347,14 @@ def _build_message_anchors(history: list[dict], persona_loader) -> dict[int, dic
         if sender_type == "persona":
             p = persona_loader.get_persona(sender_id) if persona_loader else None
             speaker = p.name if p else sender_id
+        quote, _ = _format_video_answer_for_analysis(msg.get("content", ""))
         anchors[seq] = {
             "message_index": seq,
             "message_id": msg.get("id"),
             "sender_type": sender_type,
             "sender_id": sender_id,
             "speaker": speaker,
-            "quote": msg.get("content", ""),
+            "quote": quote,
             "emotion_score": msg.get("emotion_score"),
             "emotion_label": msg.get("emotion_label"),
         }
@@ -238,6 +365,8 @@ def _normalize_analysis_payload(
     parsed: dict[str, Any],
     message_id_map: dict[int, int],
     anchor_map: dict[int, dict[str, Any]],
+    *,
+    has_video_answers: bool = False,
 ) -> dict[str, Any]:
     normalized: dict[str, Any] = {"summary": str(parsed.get("summary") or "分析完成")}
     for field in _LIST_FIELDS:
@@ -266,6 +395,26 @@ def _normalize_analysis_payload(
         if isinstance(item, dict)
     ]
 
+    normalized["content_delivery"] = _normalize_training_dimension(
+        parsed.get("content_delivery"),
+        message_id_map,
+        anchor_map,
+        include_placeholder=has_video_answers,
+        fallback_label="Content delivery pending",
+        fallback_rationale="Video answer was captured, but no structured content-delivery assessment was returned.",
+    )
+    normalized["camera_presence"] = _normalize_training_dimension(
+        parsed.get("camera_presence"),
+        message_id_map,
+        anchor_map,
+        include_placeholder=has_video_answers,
+        fallback_label="Camera presence placeholder",
+        fallback_rationale=(
+            "Video answer metadata is available, but eye contact, facial expression, posture, "
+            "and nervousness metrics have not been computed yet."
+        ),
+    )
+
     return normalized
 
 
@@ -290,7 +439,7 @@ def _build_conversation_text(history: list[dict], persona_loader) -> tuple[str, 
             message_id_map[seq] = msg_id
 
         sender_id = msg["sender_id"]
-        content = msg["content"]
+        content, _has_video = _format_video_answer_for_analysis(msg["content"])
         emotion = ""
         if msg.get("emotion_score") is not None:
             emotion = f" [情绪: {msg.get('emotion_label', '未知')}({msg['emotion_score']})]"
@@ -303,6 +452,14 @@ def _build_conversation_text(history: list[dict], persona_loader) -> tuple[str, 
             lines.append(f"[#{seq}] [{name}]{emotion}: {content}")
 
     return "\n\n".join(lines), message_id_map
+
+
+def _has_video_answers(history: list[dict]) -> bool:
+    return any(
+        msg.get("sender_type") == "user"
+        and _format_video_answer_for_analysis(msg.get("content", ""))[1]
+        for msg in history
+    )
 
 
 def _build_persona_profiles(persona_ids: list[str], persona_loader, org_context: str = "") -> str:
@@ -370,6 +527,7 @@ class AnalysisService:
 
         conversation_text, message_id_map = _build_conversation_text(history, self._persona_loader)
         anchor_map = _build_message_anchors(history, self._persona_loader)
+        has_video_answers = _has_video_answers(history)
 
         # Build org context for analysis if any persona belongs to an org
         org_ctx = ""
@@ -440,7 +598,12 @@ class AnalysisService:
             "message_id_map": {str(k): v for k, v in message_id_map.items()},
         }
 
-        normalized = _normalize_analysis_payload(parsed, message_id_map, anchor_map)
+        normalized = _normalize_analysis_payload(
+            parsed,
+            message_id_map,
+            anchor_map,
+            has_video_answers=has_video_answers,
+        )
         summary = normalized.pop("summary")
         content_data = normalized
 

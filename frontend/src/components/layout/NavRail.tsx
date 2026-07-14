@@ -1,16 +1,11 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Dumbbell, MessageSquare, Swords, TrendingUp, Settings } from 'lucide-react'
+import { Dumbbell, MessageSquare, PanelLeftClose, PanelLeftOpen, Settings, Swords, TrendingUp } from 'lucide-react'
 import { useI18n, type TranslationKey } from '../../i18n'
 import './NavRail.css'
 
-const LogoMark: React.FC = () => (
-  <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-    <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#2D9C6F" strokeWidth="1.5" strokeLinejoin="round" />
-    <path d="M2 17l10 5 10-5" stroke="#2D9C6F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M2 12l10 5 10-5" stroke="#2D9C6F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
+const TALKWISE_ICON_SRC = '/talkwise-icon.svg'
+const STORAGE_KEY = 'talkwise.navrail.collapsed'
 
 interface NavItem {
   to: string
@@ -28,24 +23,51 @@ const navItems: NavItem[] = [
 
 const NavRail: React.FC = () => {
   const location = useLocation()
-  const { t } = useI18n()
+  const { t, tr } = useI18n()
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(STORAGE_KEY) === 'true'
+  })
 
   const isActive = (path: string) => location.pathname.startsWith(path)
 
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, String(collapsed))
+  }, [collapsed])
+
+  const toggleLabel = collapsed ? tr('展开侧边栏', 'Expand sidebar') : tr('收起侧边栏', 'Collapse sidebar')
+
   return (
-    <nav className="navrail">
-      <Link to="/" className="navrail-logo" aria-label={t('nav.home')}>
-        <LogoMark />
-      </Link>
+    <nav className={`navrail${collapsed ? ' navrail--collapsed' : ''}`} aria-label={tr('主导航', 'Primary navigation')}>
+      <div className="navrail-header">
+        <Link to="/" className="navrail-logo" aria-label={t('nav.home')} title={collapsed ? 'TalkWise' : undefined}>
+          <img className="navrail-logo-mark" src={TALKWISE_ICON_SRC} alt="" aria-hidden="true" />
+          <span className="navrail-wordmark">TalkWise</span>
+        </Link>
+        <button
+          type="button"
+          className="navrail-toggle"
+          aria-label={toggleLabel}
+          title={toggleLabel}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+        </button>
+      </div>
       <div className="navrail-items">
         {navItems.map((item) => (
           <Link
             key={item.to}
             to={item.to}
-            className={`navrail-icon${isActive(item.to) ? ' active' : ''}`}
+            className={`navrail-link${isActive(item.to) ? ' active' : ''}`}
             title={t(item.labelKey)}
+            aria-label={t(item.labelKey)}
           >
-            {item.icon}
+            <span className="navrail-link-icon" aria-hidden="true">
+              {item.icon}
+            </span>
+            <span className="navrail-link-label">{t(item.labelKey)}</span>
           </Link>
         ))}
       </div>

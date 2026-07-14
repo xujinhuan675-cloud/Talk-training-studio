@@ -342,6 +342,16 @@ export interface SuggestionItem {
   priority: string
 }
 
+export interface TrainingDimensionScore {
+  score: number | null
+  label: string
+  rationale: string
+  evidence: string[]
+  suggestions: string[]
+  status: 'observed' | 'placeholder' | 'not_applicable'
+  message_indices?: number[]
+}
+
 export interface AnalysisReport {
   id: number
   room_id: number
@@ -351,6 +361,8 @@ export interface AnalysisReport {
     effective_arguments: ArgumentItem[]
     communication_suggestions: SuggestionItem[]
     message_id_map?: Record<string, number>
+    content_delivery?: TrainingDimensionScore | null
+    camera_presence?: TrainingDimensionScore | null
   }
   created_at: string | null
 }

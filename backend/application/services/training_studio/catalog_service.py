@@ -9,6 +9,10 @@ from domain.training_studio.catalog import (
     DEFAULT_RUBRIC_WEIGHTS,
     Difficulty,
     ExpressionFramework,
+    INTERVIEW_ROLE_PRESETS,
+    INTERVIEW_SCENARIO_PRESETS,
+    PRODUCT_MANAGEMENT_ROLE_PRESETS,
+    PRODUCT_MANAGEMENT_SCENARIO_PRESETS,
     RubricDimension,
     ScenarioCategory,
     TrainingTaskConfig,
@@ -27,12 +31,37 @@ class RubricWeightsDTO(BaseModel):
     weights: dict[str, float]
 
 
+class RolePresetDTO(BaseModel):
+    value: str
+    category: str
+    label: str
+    description: str
+    default_level: str
+    default_focus: list[str]
+    default_question_type_ratios: dict[str, float]
+
+
+class ScenarioPresetDTO(BaseModel):
+    value: str
+    category: str
+    label: str
+    description: str
+    counterpart_role: str
+    context_prompt: str
+    suggested_role_values: list[str]
+    default_framework: str
+    default_difficulty: str
+    default_question_type_ratios: dict[str, float]
+
+
 class TrainingCatalogDTO(BaseModel):
     categories: list[CatalogOptionDTO]
     difficulties: list[CatalogOptionDTO]
     frameworks: list[CatalogOptionDTO]
     rubric_versions: list[str]
     default_rubric_weights: dict[str, dict[str, float]]
+    role_presets: list[RolePresetDTO]
+    scenario_presets: list[ScenarioPresetDTO]
 
 
 class TrainingTaskConfigDTO(BaseModel):
@@ -94,6 +123,33 @@ class TrainingCatalogService:
                 }
                 for category, weights in DEFAULT_RUBRIC_WEIGHTS.items()
             },
+            role_presets=[
+                RolePresetDTO(
+                    value=preset.value,
+                    category=preset.category.value,
+                    label=preset.label,
+                    description=preset.description,
+                    default_level=preset.default_level,
+                    default_focus=list(preset.default_focus),
+                    default_question_type_ratios=dict(preset.default_question_type_ratios),
+                )
+                for preset in (*INTERVIEW_ROLE_PRESETS, *PRODUCT_MANAGEMENT_ROLE_PRESETS)
+            ],
+            scenario_presets=[
+                ScenarioPresetDTO(
+                    value=preset.value,
+                    category=preset.category.value,
+                    label=preset.label,
+                    description=preset.description,
+                    counterpart_role=preset.counterpart_role,
+                    context_prompt=preset.context_prompt,
+                    suggested_role_values=list(preset.suggested_role_values),
+                    default_framework=preset.default_framework.value,
+                    default_difficulty=preset.default_difficulty.value,
+                    default_question_type_ratios=dict(preset.default_question_type_ratios),
+                )
+                for preset in (*INTERVIEW_SCENARIO_PRESETS, *PRODUCT_MANAGEMENT_SCENARIO_PRESETS)
+            ],
         )
 
     def get_default_rubric_weights(

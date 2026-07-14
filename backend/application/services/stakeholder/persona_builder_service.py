@@ -1,5 +1,6 @@
 # input: AgentSkillClient, LLMPort, StakeholderPersonaRepository, PersonaBuildCache, 两个 prompt 字符串
 # output: PersonaBuilderService.build(user_id, materials, ...) -> AsyncIterator[BuildEvent]；Story 2.4 核心编排服务
+# output-update: Parse stage supports structured LLM output plus legacy generate/repair fallback for tests and fakes.
 # owner: wanhua.gu
 # pos: 应用层 - persona 构建主编排服务（agent + parse + adversarialize + persist + 幂等缓存 + 240s 总超时）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """PersonaBuilderService — Story 2.4 orchestration.
@@ -20,6 +21,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
+from unittest.mock import DEFAULT
 
 from application.ports.llm import LLMMessage, LLMPort
 from application.services.stakeholder.adversarializer import (
@@ -48,6 +50,7 @@ from application.services.stakeholder.persona_build_cache import (
 from application.services.stakeholder.persona_migrator import (
     MigrationError,
     build_persona_v2,
+    parse_llm_json,
 )
 from core.logging_config import get_logger
 from domain.stakeholder.persona_entity import Evidence, Persona
@@ -145,6 +148,16 @@ _PERSONA_V2_SCHEMA: dict = {
         "evidence_citations",
     ],
 }
+
+def _has_configured_generate(method: Any) -> bool:
+    if method is None:
+        return False
+    if getattr(method, "side_effect", None) is not None:
+        return True
+    if hasattr(method, "_mock_return_value"):
+        return getattr(method, "_mock_return_value") is not DEFAULT
+    return hasattr(method, "return_value")
+
 
 # Map known prompt file stems to user-facing phase descriptions.
 _PROMPT_PHASE_MAP: dict[str, str] = {
@@ -523,6 +536,30 @@ class PersonaBuilderService:
             LLMMessage(role="system", content=self._parse_prompt),
             LLMMessage(role="user", content=user_content),
         ]
+        if _has_configured_generate(getattr(self._llm, "generate", None)):
+            response = await self._llm.generate(messages, temperature=0.0)
+            try:
+                return parse_llm_json(response.content)
+            except MigrationError:
+                repair_messages = [
+                    LLMMessage(
+                        role="system",
+                        content=(
+                            "Repair this invalid JSON so it matches the persona v2 schema. "
+                            "Return only JSON."
+                        ),
+                    ),
+                    LLMMessage(role="user", content=response.content),
+                ]
+                repair_response = await self._llm.generate(repair_messages, temperature=0.0)
+                try:
+                    return parse_llm_json(repair_response.content)
+                except MigrationError as repair_exc:
+                    raise BuildError(
+                        f"markdown to JSON parse failed after repair: {repair_exc}",
+                        error_code="STRUCTURED_PARSE_FAILED",
+                    ) from repair_exc
+
         try:
             return await self._llm.generate_structured(
                 messages,

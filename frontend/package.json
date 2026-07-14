@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test:training-mode": "node --test tests/trainingMode.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

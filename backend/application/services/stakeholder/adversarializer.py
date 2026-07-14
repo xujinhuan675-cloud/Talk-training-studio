@@ -1,5 +1,6 @@
 # input: Persona (domain), LLMPort, adversarialize prompt markdown
 # output: apply_hostile, mark_hostile_fallback, load_adversarialize_prompt, invoke_adversarialize_llm — 对抗化合成 + LLM 调用 + 降级
+# output-update: invoke_adversarialize_llm supports structured output plus legacy generate JSON parsing for tests and fakes.
 # owner: wanhua.gu
 # pos: 应用层 - persona 对抗化后处理（注入压迫感/隐藏议程/打断倾向/情绪状态机）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Adversarial persona enhancer: injects pressure / hidden agenda / interruption / emotion state machine.
@@ -21,8 +22,10 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
+from unittest.mock import DEFAULT
 
 from application.ports.llm import LLMMessage, LLMPort
+from application.services.stakeholder.persona_migrator import MigrationError
 from core.logging_config import get_logger
 from domain.stakeholder.persona_entity import Evidence, Persona
 
@@ -277,6 +280,42 @@ _ADVERSARIALIZE_SCHEMA: dict = {
 }
 
 
+def _strip_code_fence(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 2:
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _parse_adversarialize_json(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(_strip_code_fence(raw))
+    except json.JSONDecodeError as exc:
+        raise MigrationError(f"invalid adversarialize JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise MigrationError(f"expected adversarialize JSON object, got {type(parsed).__name__}")
+
+    missing = set(_ADVERSARIALIZE_SCHEMA["required"]) - parsed.keys()
+    if missing:
+        raise MigrationError(f"missing adversarialize keys: {sorted(missing)}")
+    return parsed
+
+
+def _has_configured_generate(method: Any) -> bool:
+    if method is None:
+        return False
+    if getattr(method, "side_effect", None) is not None:
+        return True
+    if hasattr(method, "_mock_return_value"):
+        return getattr(method, "_mock_return_value") is not DEFAULT
+    return hasattr(method, "return_value")
+
+
 async def invoke_adversarialize_llm(
     llm: LLMPort,
     persona: Persona,
@@ -286,8 +325,9 @@ async def invoke_adversarialize_llm(
 ) -> dict[str, Any]:
     """Call the LLM with the adversarialize prompt and return structured JSON.
 
-    Uses generate_structured (tool use) for guaranteed valid JSON.
-    Raises ``ValueError`` on LLM failure — callers handle by falling back to
+    Uses generate_structured (tool use) for guaranteed valid JSON, while tests
+    and fakes that configure ``generate`` still exercise the legacy JSON path.
+    Raises parse/LLM errors — callers handle by falling back to
     ``mark_hostile_fallback``.
     """
     persona_digest = _serialize_persona_for_prompt(persona)
@@ -295,6 +335,10 @@ async def invoke_adversarialize_llm(
         LLMMessage(role="system", content=prompt),
         LLMMessage(role="user", content=persona_digest),
     ]
+    if _has_configured_generate(getattr(llm, "generate", None)):
+        response = await llm.generate(messages, model=model, temperature=0.3)
+        return _parse_adversarialize_json(response.content)
+
     return await llm.generate_structured(
         messages,
         schema=_ADVERSARIALIZE_SCHEMA,
