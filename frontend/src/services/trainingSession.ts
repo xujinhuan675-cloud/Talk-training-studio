@@ -1,4 +1,6 @@
-export type TrainingMode = 'text' | 'voice' | 'video' | 'realtime'
+import type { TrainingMode } from './trainingMode'
+
+export type { TrainingMode } from './trainingMode'
 
 export type TrainingSessionStatus = 'created' | 'active' | 'completed' | 'failed'
 
@@ -13,12 +15,16 @@ export interface TrainingTaskConfigDTO {
   category: string
   rubric_version?: string
   rubric_weights?: Record<string, number>
+  metadata?: Record<string, unknown>
 }
 
 export interface TrainingSessionDTO {
   session_id: string
   task_config: TrainingTaskConfigDTO
   mode: TrainingMode
+  scenario_template_id?: string | null
+  user_id?: string | null
+  team_id?: string | null
   status: TrainingSessionStatus
   room_id?: string | null
   report_id?: string | number | null
@@ -32,6 +38,9 @@ export interface TrainingSessionDTO {
 export interface CreateTrainingSessionRequest {
   task_config: TrainingTaskConfigDTO
   mode: TrainingMode
+  scenario_template_id?: string | null
+  user_id?: string | null
+  team_id?: string | null
 }
 
 export interface StartTrainingSessionRequest {

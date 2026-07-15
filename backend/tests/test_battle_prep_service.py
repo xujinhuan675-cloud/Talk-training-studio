@@ -52,6 +52,17 @@ async def test_start_battle_creates_missing_persona_dir(tmp_path) -> None:
     persona_files = list(persona_dir.glob("bp-*.md"))
     assert persona_dir.is_dir()
     assert len(persona_files) == 1
+    persona_text = persona_files[0].read_text(encoding="utf-8")
     assert room.type == "battle_prep"
     assert room.persona_ids == [persona_files[0].stem]
     assert chatroom_service.created_rooms[0].persona_ids == [persona_files[0].stem]
+    assert persona_text.count("---") == 2
+    assert "temporary: true" in persona_text
+    assert "真实对手扮演守则" in persona_text
+    assert "不是训练系统的讲解员" in persona_text
+    assert "Handle budget objections" in persona_text
+
+    loaded = loader.get_persona(persona_files[0].stem)
+    assert loaded is not None
+    assert "Handle budget objections" in loaded.profile_summary
+    assert len(loaded.profile_summary) > 200

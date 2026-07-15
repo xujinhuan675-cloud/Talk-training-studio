@@ -26,9 +26,34 @@ async function loadTrainingModeModule() {
 
 const trainingMode = await loadTrainingModeModule()
 
-test('buildTrainingModeChatPath carries the selected voice mode', () => {
-  assert.equal(trainingMode.buildTrainingModeChatPath(42, 'voice'), '/chat/42?trainingMode=voice')
-  assert.equal(trainingMode.buildTrainingModeChatPath(42, 'video'), '/chat/42?trainingMode=video')
+test('buildTrainingModeChatPath carries the selected training mode', () => {
+  const voicePath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice'), 'http://localhost')
+  const videoPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'video'), 'http://localhost')
+
+  assert.equal(voicePath.pathname, '/chat/42')
+  assert.equal(voicePath.searchParams.get('trainingMode'), 'voice')
+  assert.equal(voicePath.searchParams.get('interactionMode'), 'turn_based')
+  assert.equal(videoPath.pathname, '/chat/42')
+  assert.equal(videoPath.searchParams.get('trainingMode'), 'video')
+  assert.equal(videoPath.searchParams.get('interactionMode'), 'turn_based')
+})
+
+test('buildTrainingModeChatPath carries realtime as interaction mode', () => {
+  const path = trainingMode.buildTrainingModeChatPath(42, 'voice', null, 'realtime')
+  const url = new URL(path, 'http://localhost')
+
+  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.searchParams.get('trainingMode'), 'voice')
+  assert.equal(url.searchParams.get('interactionMode'), 'realtime')
+})
+
+test('buildTrainingModeChatPath maps legacy realtime mode to voice plus realtime interaction', () => {
+  const path = trainingMode.buildTrainingModeChatPath(42, 'realtime')
+  const url = new URL(path, 'http://localhost')
+
+  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.searchParams.get('trainingMode'), 'voice')
+  assert.equal(url.searchParams.get('interactionMode'), 'realtime')
 })
 
 test('buildTrainingModeChatPath carries training mode and training session id', () => {
@@ -40,6 +65,22 @@ test('buildTrainingModeChatPath carries training mode and training session id', 
   assert.equal(url.searchParams.get('trainingSessionId'), 'training-session-1')
 })
 
+test('buildTrainingModeChatPath carries live coach profile and language pair', () => {
+  const path = trainingMode.buildTrainingModeChatPath(42, 'voice', 'training-session-1', 'realtime', {
+    trainingProfile: 'live_coach',
+    sourceLanguage: 'zh-CN',
+    targetLanguage: 'en-US',
+  })
+  const url = new URL(path, 'http://localhost')
+
+  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.searchParams.get('trainingMode'), 'voice')
+  assert.equal(url.searchParams.get('interactionMode'), 'realtime')
+  assert.equal(url.searchParams.get('trainingProfile'), 'live_coach')
+  assert.equal(url.searchParams.get('sourceLanguage'), 'zh-CN')
+  assert.equal(url.searchParams.get('targetLanguage'), 'en-US')
+})
+
 test('getTrainingModeFromLocation reads valid modes from query first', () => {
   assert.equal(
     trainingMode.getTrainingModeFromLocation('?trainingMode=voice', { trainingMode: 'text' }),
@@ -47,6 +88,7 @@ test('getTrainingModeFromLocation reads valid modes from query first', () => {
   )
   assert.equal(trainingMode.getTrainingModeFromLocation('?trainingMode=text', null), 'text')
   assert.equal(trainingMode.getTrainingModeFromLocation('?trainingMode=video', null), 'video')
+  assert.equal(trainingMode.getTrainingModeFromLocation('?trainingMode=realtime', null), 'voice')
 })
 
 test('getTrainingModeFromLocation falls back to route state and rejects invalid modes', () => {
@@ -56,6 +98,30 @@ test('getTrainingModeFromLocation falls back to route state and rejects invalid 
   )
   assert.equal(trainingMode.getTrainingModeFromLocation('', { trainingMode: 'voice' }), 'voice')
   assert.equal(trainingMode.getTrainingModeFromLocation('?trainingMode=invalid', null), null)
+})
+
+test('getInteractionModeFromLocation reads valid modes from query first', () => {
+  assert.equal(
+    trainingMode.getInteractionModeFromLocation('?interactionMode=realtime', { interactionMode: 'turn_based' }),
+    'realtime',
+  )
+  assert.equal(trainingMode.getInteractionModeFromLocation('?interactionMode=turn_based', null), 'turn_based')
+})
+
+test('getInteractionModeFromLocation falls back to route state and defaults to turn based', () => {
+  assert.equal(
+    trainingMode.getInteractionModeFromLocation('?interactionMode=invalid', { interactionMode: 'realtime' }),
+    'realtime',
+  )
+  assert.equal(trainingMode.getInteractionModeFromLocation('', null), 'turn_based')
+  assert.equal(trainingMode.getInteractionModeFromLocation('?interactionMode=invalid', null), 'turn_based')
+})
+
+test('legacy realtime route state and query map to voice plus realtime interaction', () => {
+  assert.equal(trainingMode.getTrainingModeFromLocation('?trainingMode=realtime', null), 'voice')
+  assert.equal(trainingMode.getInteractionModeFromLocation('?trainingMode=realtime', null), 'realtime')
+  assert.equal(trainingMode.getTrainingModeFromLocation('', { trainingMode: 'realtime' }), 'voice')
+  assert.equal(trainingMode.getInteractionModeFromLocation('', { trainingMode: 'realtime' }), 'realtime')
 })
 
 test('getTrainingSessionIdFromLocation reads query first and falls back to route state', () => {
@@ -72,10 +138,45 @@ test('getTrainingSessionIdFromLocation reads query first and falls back to route
   assert.equal(trainingMode.getTrainingSessionIdFromLocation('?trainingSessionId=', null), null)
 })
 
+test('getTrainingProfileFromLocation reads query first and defaults to practice', () => {
+  assert.equal(
+    trainingMode.getTrainingProfileFromLocation('?trainingProfile=live_coach', { trainingProfile: 'practice' }),
+    'live_coach',
+  )
+  assert.equal(trainingMode.getTrainingProfileFromLocation('', { trainingProfile: 'live_coach' }), 'live_coach')
+  assert.equal(trainingMode.getTrainingProfileFromLocation('', { source: 'live-coach' }), 'live_coach')
+  assert.equal(trainingMode.getTrainingProfileFromLocation('?trainingProfile=invalid', null), 'practice')
+})
+
+test('getLiveCoachLanguagePairFromLocation reads query first and falls back to state', () => {
+  assert.deepEqual(
+    trainingMode.getLiveCoachLanguagePairFromLocation(
+      '?sourceLanguage=zh-CN&targetLanguage=en-US',
+      { sourceLanguage: 'ja-JP', targetLanguage: 'ko-KR' },
+    ),
+    { sourceLanguage: 'zh-CN', targetLanguage: 'en-US' },
+  )
+  assert.deepEqual(
+    trainingMode.getLiveCoachLanguagePairFromLocation('', {
+      sourceLanguage: ' ja-JP ',
+      targetLanguage: ' ko-KR ',
+    }),
+    { sourceLanguage: 'ja-JP', targetLanguage: 'ko-KR' },
+  )
+  assert.deepEqual(
+    trainingMode.getLiveCoachLanguagePairFromLocation('?sourceLanguage=&targetLanguage=', null),
+    { sourceLanguage: null, targetLanguage: null },
+  )
+})
+
 test('isTrainingModeBattlePrep gates voice and video battle prep modes', () => {
   assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'voice', 'voice'), true)
   assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'video', 'video'), true)
+  assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'realtime', 'realtime'), true)
+  assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'voice', 'voice', 'realtime', 'realtime'), true)
   assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'video', 'voice'), false)
+  assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'voice', 'realtime'), false)
+  assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'voice', 'voice', 'turn_based', 'realtime'), false)
   assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'text', 'video'), false)
   assert.equal(trainingMode.isTrainingModeBattlePrep('private', 'voice', 'voice'), false)
   assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', null, 'voice'), false)

@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Keyboard, Loader2, Mic2, Video, Wand2 } from 'lucide-react'
+import { Keyboard, Languages, Loader2, Mic2, Radio, Video, Wand2 } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { startBattle } from '../services/api'
 import { createTrainingSession, startTrainingSession } from '../services/trainingSession'
-import { buildTrainingModeChatPath, type TrainingMode } from '../services/trainingMode'
+import {
+  buildTrainingModeChatPath,
+  type InteractionMode,
+  type TrainingMode,
+  type TrainingProfile,
+} from '../services/trainingMode'
 import {
   buildTrainingStudioPrompt,
   getDefaultTrainingStudioConfig,
@@ -20,50 +25,144 @@ import {
 import { useI18n, type Translate, type TranslationKey } from '../i18n'
 import './TrainingStudioPage.css'
 
+type LaunchMode = TrainingMode | 'realtime' | 'live_coach'
+type TopLevelMode = TrainingMode | 'live_coach'
+
+const supportsRealtimeVideo = false
+
+interface TrainingStudioPageProps {
+  initialProfile?: TrainingProfile
+}
+
+const liveCoachLanguageOptions: Array<{ value: string; labelKey: TranslationKey }> = [
+  { value: 'zh-CN', labelKey: 'training.liveCoach.language.zhCn' },
+  { value: 'en-US', labelKey: 'training.liveCoach.language.enUs' },
+  { value: 'ja-JP', labelKey: 'training.liveCoach.language.jaJp' },
+  { value: 'ko-KR', labelKey: 'training.liveCoach.language.koKr' },
+  { value: 'es-ES', labelKey: 'training.liveCoach.language.esEs' },
+  { value: 'fr-FR', labelKey: 'training.liveCoach.language.frFr' },
+]
+
 const modeOptions: Array<{
-  value: TrainingMode
+  value: TopLevelMode
+  defaultMode: LaunchMode
   labelKey: TranslationKey
   descriptionKey: TranslationKey
   icon: typeof Keyboard
+  interactions?: Array<{
+    id: string
+    value?: LaunchMode
+    labelKey: TranslationKey
+    descriptionKey: TranslationKey
+    icon: typeof Keyboard
+    disabled?: boolean
+    badgeKey?: TranslationKey
+  }>
 }> = [
   {
     value: 'text',
+    defaultMode: 'text',
     labelKey: 'training.mode.text.label',
     descriptionKey: 'training.mode.text.desc',
     icon: Keyboard,
   },
   {
     value: 'voice',
+    defaultMode: 'voice',
     labelKey: 'training.mode.voice.label',
     descriptionKey: 'training.mode.voice.desc',
     icon: Mic2,
+    interactions: [
+      {
+        id: 'voice-turn-based',
+        value: 'voice',
+        labelKey: 'training.interaction.turnBased.label',
+        descriptionKey: 'training.interaction.voice.turnBased.desc',
+        icon: Mic2,
+      },
+      {
+        id: 'voice-realtime',
+        value: 'realtime',
+        labelKey: 'training.interaction.realtime.label',
+        descriptionKey: 'training.interaction.voice.realtime.desc',
+        icon: Radio,
+      },
+    ],
   },
   {
     value: 'video',
+    defaultMode: 'video',
     labelKey: 'training.mode.video.label',
     descriptionKey: 'training.mode.video.desc',
     icon: Video,
+    interactions: [
+      {
+        id: 'video-turn-based',
+        value: 'video',
+        labelKey: 'training.interaction.turnBased.label',
+        descriptionKey: 'training.interaction.video.turnBased.desc',
+        icon: Video,
+      },
+      {
+        id: 'video-realtime',
+        labelKey: 'training.interaction.realtime.label',
+        descriptionKey: 'training.interaction.video.realtime.desc',
+        icon: Radio,
+        disabled: !supportsRealtimeVideo,
+        badgeKey: 'training.interaction.comingSoon',
+      },
+    ],
+  },
+  {
+    value: 'live_coach',
+    defaultMode: 'live_coach',
+    labelKey: 'training.mode.liveCoach.label',
+    descriptionKey: 'training.mode.liveCoach.desc',
+    icon: Languages,
   },
 ]
 
-const modeLabelKeys: Record<TrainingMode, TranslationKey> = {
+const modeLabelKeys: Record<LaunchMode, TranslationKey> = {
   text: 'training.mode.text.label',
   voice: 'training.mode.voice.label',
   video: 'training.mode.video.label',
+  realtime: 'training.mode.realtime.label',
+  live_coach: 'training.mode.liveCoach.label',
 }
 
-function getModeLabel(mode: TrainingMode, t: Translate): string {
+function getModeLabel(mode: LaunchMode, t: Translate): string {
   return t(modeLabelKeys[mode])
 }
 
-function modeInstruction(mode: TrainingMode, t: Translate): string {
+function modeInstruction(mode: LaunchMode, t: Translate): string {
   if (mode === 'voice') {
     return t('training.mode.voice.instruction')
   }
   if (mode === 'video') {
     return t('training.mode.video.instruction')
   }
+  if (mode === 'realtime') {
+    return t('training.mode.realtime.instruction')
+  }
+  if (mode === 'live_coach') {
+    return t('training.mode.liveCoach.instruction')
+  }
   return t('training.mode.text.instruction')
+}
+
+function getLaunchTrainingMode(mode: LaunchMode): TrainingMode {
+  return mode === 'realtime' || mode === 'live_coach' ? 'voice' : mode
+}
+
+function getLaunchInteractionMode(mode: LaunchMode): InteractionMode {
+  return mode === 'realtime' || mode === 'live_coach' ? 'realtime' : 'turn_based'
+}
+
+function isModeCardSelected(cardMode: TopLevelMode, selectedMode: LaunchMode): boolean {
+  if (cardMode === 'voice') {
+    return selectedMode === 'voice' || selectedMode === 'realtime'
+  }
+  return cardMode === selectedMode
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -78,15 +177,28 @@ function splitTechStack(value: string, fallback: string): string[] {
   return items.length > 0 ? items : [fallback]
 }
 
-export default function TrainingStudioPage() {
+function getLiveCoachLanguageLabel(value: string, t: Translate): string {
+  const option = liveCoachLanguageOptions.find((item) => item.value === value)
+  return option ? t(option.labelKey) : value
+}
+
+export default function TrainingStudioPage({ initialProfile = 'practice' }: TrainingStudioPageProps) {
   const navigate = useNavigate()
   const { t } = useI18n()
   const [config, setConfig] = useState<TrainingStudioConfig>(() => getDefaultTrainingStudioConfig(t))
   const previousDefaultsRef = useRef(getDefaultTrainingStudioConfig(t))
-  const [mode, setMode] = useState<TrainingMode>('voice')
+  const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : 'voice')
+  const [liveCoachSourceLanguage, setLiveCoachSourceLanguage] = useState('zh-CN')
+  const [liveCoachTargetLanguage, setLiveCoachTargetLanguage] = useState('en-US')
   const [goal, setGoal] = useState('')
   const [starting, setStarting] = useState<'quick' | 'battle' | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (initialProfile === 'live_coach') {
+      setMode('live_coach')
+    }
+  }, [initialProfile])
 
   useEffect(() => {
     const previousDefaults = previousDefaultsRef.current
@@ -116,14 +228,20 @@ export default function TrainingStudioPage() {
       const difficulty = getTrainingDifficultyLabel(config.difficulty, t)
       const framework = getExpressionFrameworkLabel(config.framework, t)
       const level = getTrainingLevelLabel(config.level, t)
+      const trainingMode = getLaunchTrainingMode(mode)
+      const interactionMode = getLaunchInteractionMode(mode)
       const modeLabel = getModeLabel(mode, t)
+      const trainingProfile: TrainingProfile = mode === 'live_coach' ? 'live_coach' : 'practice'
+      const isLiveCoachMode = trainingProfile === 'live_coach'
+      const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachSourceLanguage, t)
+      const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachTargetLanguage, t)
       const interviewScenarioPreset = getInterviewScenarioPreset(config.interviewScenarioPreset)
       const productScenarioPreset = getProductScenarioPreset(config.productScenarioPreset)
       const interviewStakeholder = config.scenario === 'interview' ? interviewScenarioPreset : undefined
       const productStakeholder = config.scenario === 'product_management' ? productScenarioPreset : undefined
       const scenarioStakeholder = interviewStakeholder ?? productStakeholder
       const trainingSession = await createTrainingSession({
-        mode,
+        mode: trainingMode,
         task_config: {
           role,
           level,
@@ -133,47 +251,93 @@ export default function TrainingStudioPage() {
           framework: config.framework,
           difficulty: config.difficulty,
           category: config.scenario,
+          metadata: isLiveCoachMode
+            ? {
+                source: 'live_coach_mvp',
+                trainingProfile,
+                liveCoach: {
+                  sourceLanguage: liveCoachSourceLanguage,
+                  targetLanguage: liveCoachTargetLanguage,
+                  captureStrategy: 'browser_microphone_mvp',
+                  transcriptStrategy: 'chat_room_messages',
+                  translationStrategy: 'text_first_mvp',
+                  extensionPoints: [
+                    'system_audio_tap',
+                    'virtual_microphone',
+                    'speech_to_speech_translation',
+                    'prosody_preservation',
+                    '70_plus_languages',
+                  ],
+                },
+              }
+            : undefined,
         },
       })
 
       const room = await startBattle({
-        persona_name: scenarioStakeholder
+        persona_name: isLiveCoachMode
+          ? t('training.liveCoach.personaName')
+          : scenarioStakeholder
           ? t(scenarioStakeholder.personaNameKey)
           : t('training.prompt.personaName', { role }),
-        persona_role: scenarioStakeholder
+        persona_role: isLiveCoachMode
+          ? t('training.liveCoach.personaRole')
+          : scenarioStakeholder
           ? t(scenarioStakeholder.personaRoleKey)
           : t('training.prompt.personaRole', { level, scenario }),
-        persona_style: scenarioStakeholder
+        persona_style: isLiveCoachMode
+          ? t('training.liveCoach.personaStyle')
+          : scenarioStakeholder
           ? t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })
           : t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
-        scenario_context: prompt,
-        selected_training_points: [
-          t('training.prompt.structurePoint', { framework }),
-          ...(interviewStakeholder
-            ? [
-                t('training.prompt.interviewEvidencePoint'),
-                t('training.prompt.interviewFollowupPoint'),
-              ]
-            : []),
-          ...(productStakeholder
-            ? [
-                t('training.prompt.productAlignmentPoint'),
-                t('training.prompt.productTradeoffPoint'),
-              ]
-            : []),
-          t('training.prompt.deliveryPoint', { mode: modeLabel }),
-          t('training.prompt.evidencePoint'),
-        ],
+        scenario_context: isLiveCoachMode
+          ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
+              sourceLanguage: sourceLanguageLabel,
+              targetLanguage: targetLanguageLabel,
+            })}`
+          : prompt,
+        selected_training_points: isLiveCoachMode
+          ? [
+              t('training.liveCoach.nextReplyPoint'),
+              t('training.liveCoach.riskPoint'),
+              t('training.liveCoach.translationPoint'),
+              t('training.liveCoach.reviewPoint'),
+            ]
+          : [
+              t('training.prompt.structurePoint', { framework }),
+              ...(interviewStakeholder
+                ? [
+                    t('training.prompt.interviewEvidencePoint'),
+                    t('training.prompt.interviewFollowupPoint'),
+                  ]
+                : []),
+              ...(productStakeholder
+                ? [
+                    t('training.prompt.productAlignmentPoint'),
+                    t('training.prompt.productTradeoffPoint'),
+                  ]
+                : []),
+              t('training.prompt.deliveryPoint', { mode: modeLabel }),
+              t('training.prompt.evidencePoint'),
+            ],
         difficulty: toBattleDifficulty(config.difficulty),
       })
       const startedSession = await startTrainingSession(trainingSession.session_id, {
         room_id: room.id,
       })
-      navigate(buildTrainingModeChatPath(room.id, mode, startedSession.session_id), {
+      navigate(buildTrainingModeChatPath(room.id, trainingMode, startedSession.session_id, interactionMode, {
+        trainingProfile,
+        sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,
+        targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : null,
+      }), {
         state: {
-          source: 'training-studio',
-          trainingMode: mode,
+          source: isLiveCoachMode ? 'live-coach' : 'training-studio',
+          trainingMode,
+          interactionMode,
           trainingSessionId: startedSession.session_id,
+          trainingProfile,
+          sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : undefined,
+          targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : undefined,
         },
       })
     } catch (e: unknown) {
@@ -208,18 +372,58 @@ export default function TrainingStudioPage() {
         <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
           {modeOptions.map((item) => {
             const Icon = item.icon
+            const selected = isModeCardSelected(item.value, mode)
             return (
-              <button
+              <div
                 key={item.value}
-                className={`training-studio-mode ${mode === item.value ? 'selected' : ''}`}
-                type="button"
-                onClick={() => setMode(item.value)}
-                disabled={starting !== null}
+                className={`training-studio-mode ${selected ? 'selected' : ''}`}
               >
-                <Icon size={20} />
-                <span>{t(item.labelKey)}</span>
-                <small>{t(item.descriptionKey)}</small>
-              </button>
+                <button
+                  className="training-studio-mode-main"
+                  type="button"
+                  onClick={() => setMode(item.defaultMode)}
+                  disabled={starting !== null}
+                  aria-pressed={selected}
+                >
+                  <Icon size={20} />
+                  <span>{t(item.labelKey)}</span>
+                  <small>{t(item.descriptionKey)}</small>
+                </button>
+                {item.interactions && (
+                  <div
+                    className="training-studio-interaction-options"
+                    role="group"
+                    aria-label={`${t(item.labelKey)} ${t('training.page.interactionOptionsAria')}`}
+                  >
+                    {item.interactions.map((option) => {
+                      const OptionIcon = option.icon
+                      const optionSelected = option.value === mode
+                      const disabled = starting !== null || option.disabled || !option.value
+                      return (
+                        <button
+                          key={option.id}
+                          className={`training-studio-interaction ${optionSelected ? 'selected' : ''}`}
+                          type="button"
+                          onClick={() => {
+                            if (option.value) {
+                              setMode(option.value)
+                            }
+                          }}
+                          disabled={disabled}
+                          aria-pressed={optionSelected}
+                        >
+                          <span className="training-studio-interaction-label">
+                            <OptionIcon size={14} />
+                            {t(option.labelKey)}
+                            {option.badgeKey && <em>{t(option.badgeKey)}</em>}
+                          </span>
+                          <small>{t(option.descriptionKey)}</small>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             )
           })}
         </section>
@@ -236,6 +440,43 @@ export default function TrainingStudioPage() {
                 disabled={starting !== null}
               />
             </label>
+
+            {mode === 'live_coach' && (
+              <section className="training-studio-live-coach-panel" aria-label={t('training.liveCoach.panelAria')}>
+                <label>
+                  <span>{t('training.liveCoach.sourceLanguage')}</span>
+                  <select
+                    value={liveCoachSourceLanguage}
+                    onChange={(event) => setLiveCoachSourceLanguage(event.target.value)}
+                    disabled={starting !== null}
+                  >
+                    {liveCoachLanguageOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {t(option.labelKey)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t('training.liveCoach.targetLanguage')}</span>
+                  <select
+                    value={liveCoachTargetLanguage}
+                    onChange={(event) => setLiveCoachTargetLanguage(event.target.value)}
+                    disabled={starting !== null}
+                  >
+                    {liveCoachLanguageOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {t(option.labelKey)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="training-studio-live-coach-badge">
+                  <Languages size={14} />
+                  {t('training.liveCoach.languageAdapter')}
+                </div>
+              </section>
+            )}
 
             <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
           </div>
@@ -269,6 +510,8 @@ export default function TrainingStudioPage() {
               <div className="training-studio-mode-note">
                 {mode === 'voice' && t('training.modeEntry.voice')}
                 {mode === 'video' && t('training.modeEntry.video')}
+                {mode === 'realtime' && t('training.modeEntry.realtime')}
+                {mode === 'live_coach' && t('training.modeEntry.liveCoach')}
                 {mode === 'text' && t('training.modeEntry.text')}
               </div>
             </div>

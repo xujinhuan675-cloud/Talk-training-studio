@@ -133,6 +133,7 @@ class SQLAlchemyStakeholderMessageRepository(MessageRepository):
             timestamp=model.timestamp,
             emotion_score=model.emotion_score,
             emotion_label=model.emotion_label,
+            metadata=dict(model.extra_metadata or {}),
         )
 
     async def create(self, message: Message) -> Message:
@@ -144,6 +145,7 @@ class SQLAlchemyStakeholderMessageRepository(MessageRepository):
             timestamp=message.timestamp,
             emotion_score=message.emotion_score,
             emotion_label=message.emotion_label,
+            extra_metadata=message.metadata or {},
         )
         self.session.add(model)
         await self.session.flush()

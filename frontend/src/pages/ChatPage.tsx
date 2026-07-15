@@ -21,6 +21,7 @@ import {
   Video,
   X,
   Lightbulb,
+  Radio,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
 import { ChatProvider, useChatContext } from '../contexts/ChatContext'
@@ -29,6 +30,7 @@ import CreateRoomDialog from '../components/CreateRoomDialog'
 import MessageList from '../components/chat/MessageList'
 import ChatInput from '../components/chat/ChatInput'
 import type { VoiceRecorderState } from '../components/VoiceRecorder'
+import RealtimeVoiceRecorder from '../components/RealtimeVoiceRecorder'
 import VideoAnswerRecorder, { type VideoAnswerResult } from '../components/VideoAnswerRecorder'
 import ContextPanel from '../components/chat/ContextPanel'
 import CoachingPanel from '../components/chat/CoachingPanel'
@@ -47,13 +49,33 @@ import {
 import {
   completeTrainingSession,
   getTrainingGuidanceStreamUrl,
+  getTrainingSessionReport,
   requestTrainingGuidance,
   type GuideEventDTO,
+  type TrainingSessionReportDTO,
   type TrainingGuidanceResponse,
   type TranscriptTurnDTO,
 } from '../services/trainingSession'
 import { uploadVideoAnswer } from '../services/trainingStudio'
-import { getTrainingModeFromLocation, getTrainingSessionIdFromLocation, isTrainingModeBattlePrep } from '../services/trainingMode'
+import {
+  getInteractionModeFromLocation,
+  getLiveCoachLanguagePairFromLocation,
+  getTrainingProfileFromLocation,
+  getTrainingModeFromLocation,
+  getTrainingSessionIdFromLocation,
+  isTrainingModeBattlePrep,
+} from '../services/trainingMode'
+import {
+  findScenarioTrainingIdBySession,
+  getScenarioTrainingCardById,
+  getScenarioTrainingProgress,
+  markScenarioTrainingCompleted,
+  saveScenarioTrainingProgress,
+  type ScenarioTrainingCategory,
+  type ScenarioTrainingDifficulty,
+  type ScenarioTrainingProgressScope,
+} from '../data/trainingScenarios'
+import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n } from '../i18n'
 import '../App.css'
 import './ChatPage.css'
@@ -64,9 +86,83 @@ function displayInitial(name: string): string {
   return /[a-z]/i.test(first) ? first.toUpperCase() : first
 }
 
+function getScenarioTrainingIdFromLocation(search: string, state: unknown): string | null {
+  const stateValue = state && typeof state === 'object'
+    ? (state as { scenarioTrainingId?: unknown }).scenarioTrainingId
+    : undefined
+  if (typeof stateValue === 'string' && stateValue.trim()) {
+    return stateValue.trim()
+  }
+  const value = new URLSearchParams(search).get('scenarioTrainingId')
+  return value?.trim() || null
+}
+
+function getScenarioTrainingIdFromProgress(
+  trainingSessionId: string | null,
+  scope?: ScenarioTrainingProgressScope,
+): string | null {
+  return findScenarioTrainingIdBySession(getScenarioTrainingProgress(scope), trainingSessionId)
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function getStateStringValue(state: unknown, key: string): string | null {
+  const value = asRecord(state)?.[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function compactStrings(values: Array<string | null | undefined | false>): string[] {
+  return values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+}
+
+function coercePercentScore(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function extractTrainingReportScore(report: TrainingSessionReportDTO): number | undefined {
+  const content = asRecord(report.content)
+  if (!content) return undefined
+  for (const key of ['content_delivery', 'camera_presence']) {
+    const dimension = asRecord(content[key])
+    const score = coercePercentScore(dimension?.score)
+    if (score !== undefined) return score
+  }
+  return coercePercentScore(content.score)
+}
+
 const GUIDANCE_TURN_WINDOW = 8
 const GUIDANCE_AUTO_DELAY_MS = 900
 const GUIDANCE_AUTO_MIN_INTERVAL_MS = 1200
+
+const scenarioDifficultyLabels: Record<ScenarioTrainingDifficulty, string> = {
+  easy: '简单',
+  medium: '进阶',
+  hard: '困难',
+  expert: '专家',
+}
+
+const scenarioCategoryLabels: Record<ScenarioTrainingCategory, string> = {
+  sales: '销售',
+  customer_service: '服务',
+  negotiation: '谈判',
+  interview: '面试',
+}
+
+const trainingModeLabels: Record<string, string> = {
+  text: '文字',
+  voice: '语音',
+  video: '视频',
+}
+
+const interactionModeLabels: Record<string, string> = {
+  turn_based: '轮次对练',
+  realtime: '实时对练',
+}
 
 type RefreshGuidanceOptions = {
   open?: boolean
@@ -82,6 +178,7 @@ type RefreshGuidanceOptions = {
 function ChatArea() {
   const { personaMap } = useAppContext()
   const { chat, voice, coaching, analysis } = useChatContext()
+  const { currentUser } = useAuthContext()
   const navigate = useNavigate()
   const location = useLocation()
   const { tr } = useI18n()
@@ -95,7 +192,18 @@ function ChatArea() {
   const guidanceEventSourceRef = React.useRef<EventSource | null>(null)
   const guidanceStreamVersionRef = React.useRef(0)
   const trainingMode = getTrainingModeFromLocation(location.search, location.state)
+  const interactionMode = getInteractionModeFromLocation(location.search, location.state)
   const trainingSessionId = getTrainingSessionIdFromLocation(location.search, location.state)
+  const trainingProfile = getTrainingProfileFromLocation(location.search, location.state)
+  const liveCoachLanguagePair = getLiveCoachLanguagePairFromLocation(location.search, location.state)
+  const isLiveCoachSession = trainingProfile === 'live_coach'
+  const progressScope = React.useMemo(() => ({
+    userId: currentUser?.userId ?? null,
+    teamId: currentUser?.teamId ?? null,
+  }), [currentUser?.teamId, currentUser?.userId])
+  const scenarioTrainingId = getScenarioTrainingIdFromLocation(location.search, location.state)
+    ?? getScenarioTrainingIdFromProgress(trainingSessionId, progressScope)
+  const scenarioTrainingCard = getScenarioTrainingCardById(scenarioTrainingId)
 
   const [showEmotionSidebar, setShowEmotionSidebar] = useState(false)
   const [showEmotionCurve, setShowEmotionCurve] = useState(false)
@@ -399,8 +507,27 @@ function ChatArea() {
 
   const isTrainingSession = Boolean(trainingSessionId)
   const isBattlePrep = selectedRoomType === 'battle_prep' && !isTrainingSession
-  const isVoiceBattlePrep = isTrainingModeBattlePrep(selectedRoomType, trainingMode, 'voice')
-  const isVideoBattlePrep = isTrainingModeBattlePrep(selectedRoomType, trainingMode, 'video')
+  const isVoiceBattlePrep = isTrainingModeBattlePrep(
+    selectedRoomType,
+    trainingMode,
+    'voice',
+    interactionMode,
+    'turn_based',
+  )
+  const isVideoBattlePrep = isTrainingModeBattlePrep(
+    selectedRoomType,
+    trainingMode,
+    'video',
+    interactionMode,
+    'turn_based',
+  )
+  const isRealtimeBattlePrep = isTrainingModeBattlePrep(
+    selectedRoomType,
+    trainingMode,
+    'voice',
+    interactionMode,
+    'realtime',
+  )
   const primaryPersona = roomPersonas[0]
   const roomCounterpartName = (chat.selectedRoom?.room.name || '').replace(/^备战[:：]\s*/, '').trim()
   const counterpartName = primaryPersona?.name || roomCounterpartName || tr('AI 面试官', 'AI Interviewer')
@@ -414,6 +541,82 @@ function ChatArea() {
     const messages = ((selectedRoomMessages || []) as ChatMessage[]).filter((message) => message.content.trim())
     return messages[messages.length - 1] || null
   }, [selectedRoomMessages])
+  const scenarioTitleFromState = getStateStringValue(location.state, 'scenarioTitle')
+  const scenarioOpeningLineFromState = getStateStringValue(location.state, 'scenarioOpeningLine')
+  const trainingBackPath = scenarioTrainingId ? '/scenario-training' : '/training-studio'
+  const trainingContextTitle = scenarioTrainingCard?.title
+    || scenarioTitleFromState
+    || chat.selectedRoom?.room.name
+    || tr('训练会话', 'Training session')
+  const trainingContextSubtitle = scenarioTrainingCard
+    ? compactStrings([
+      scenarioTrainingCard.persona.role,
+      scenarioTrainingCard.learnerRole ? `${tr('你扮演', 'You play')}: ${scenarioTrainingCard.learnerRole}` : null,
+    ]).join(' · ')
+    : compactStrings([
+      counterpartName,
+      trainingMode ? trainingModeLabels[trainingMode] : null,
+      interactionModeLabels[interactionMode],
+    ]).join(' · ')
+  const trainingContextTags = compactStrings([
+    scenarioTrainingCard ? scenarioCategoryLabels[scenarioTrainingCard.category] : null,
+    scenarioTrainingCard ? scenarioDifficultyLabels[scenarioTrainingCard.difficulty] : null,
+    scenarioTrainingCard?.required ? tr('必练', 'Required') : scenarioTrainingCard ? tr('选练', 'Optional') : null,
+    trainingMode ? trainingModeLabels[trainingMode] : null,
+    interactionModeLabels[interactionMode],
+  ])
+  const trainingContextDescription = scenarioTrainingCard?.description
+    || scenarioOpeningLineFromState
+    || tr('本轮训练已连接 AI 陪练，完成对话后可结束练习并生成复盘。', 'This training session is connected to an AI coach. End the practice when you are ready for review.')
+  const trainingContextOpeningLine = scenarioTrainingCard?.openingLine || scenarioOpeningLineFromState
+  const trainingContextPoints = scenarioTrainingCard?.trainingPoints.slice(0, 3).join(' / ')
+  const trainingInputPlaceholder = scenarioTrainingCard?.category === 'sales' || scenarioTrainingCard?.category === 'customer_service'
+    ? tr('输入你想对客户说的话，Enter 发送', 'Type what you want to say to the customer. Enter to send')
+    : tr('输入你的回应，Enter 发送', 'Type your response. Enter to send')
+
+  const liveCoachLanguageSummary = compactStrings([
+    liveCoachLanguagePair.sourceLanguage,
+    liveCoachLanguagePair.targetLanguage,
+  ]).join(' -> ')
+  const resolvedTrainingBackPath = isLiveCoachSession ? '/live-coach' : trainingBackPath
+  const resolvedTrainingContextTitle = isLiveCoachSession ? tr('Live coach', 'Live coach') : trainingContextTitle
+  const resolvedTrainingContextSubtitle = isLiveCoachSession
+    ? compactStrings([
+      tr('Real conversation', 'Real conversation'),
+      liveCoachLanguageSummary || null,
+      interactionModeLabels[interactionMode],
+    ]).join(' / ')
+    : trainingContextSubtitle
+  const resolvedTrainingContextTags = isLiveCoachSession
+    ? compactStrings([
+      tr('Live coach', 'Live coach'),
+      liveCoachLanguagePair.sourceLanguage,
+      liveCoachLanguagePair.targetLanguage,
+      interactionModeLabels[interactionMode],
+    ])
+    : trainingContextTags
+  const resolvedTrainingContextDescription = isLiveCoachSession
+    ? tr('Private AI coaching is connected to the live transcript and review loop.', 'Private AI coaching is connected to the live transcript and review loop.')
+    : trainingContextDescription
+  const resolvedTrainingContextOpeningLine = isLiveCoachSession ? null : trainingContextOpeningLine
+  const resolvedTrainingContextPoints = isLiveCoachSession ? null : trainingContextPoints
+  const resolvedTrainingInputPlaceholder = isLiveCoachSession
+    ? tr('Type a meeting line or your next reply. Enter to send', 'Type a meeting line or your next reply. Enter to send')
+    : trainingInputPlaceholder
+  const guidanceBarTitle = isLiveCoachSession ? tr('Live coach', 'Live coach') : tr('Realtime guidance', 'Realtime guidance')
+  const guidanceReadyText = isLiveCoachSession
+    ? tr('Ready to coach this conversation', 'Ready to coach this conversation')
+    : tr('Ready during this training session', 'Ready during this training session')
+  const guidanceStreamingText = isLiveCoachSession
+    ? tr('Watching the live transcript', 'Watching the live transcript')
+    : tr('Streaming during this training session', 'Streaming during this training session')
+  const guidanceActionText = isLiveCoachSession ? tr('Ask coach', 'Ask coach') : tr('Guide me', 'Guide me')
+  const realtimeBarTitle = isLiveCoachSession
+    ? tr('Live conversation coach', 'Live conversation coach')
+    : tr('实时语音训练', 'Realtime voice practice')
+  const realtimeBarCopy = isLiveCoachSession
+    ? liveCoachLanguageSummary || tr('Realtime channel is bound to live coaching', 'Realtime channel is bound to live coaching')
+    : latestPersonaPrompt || tr('实时通道已绑定当前训练房间', 'Realtime channel is bound to this training room')
 
   useEffect(() => {
     if (!trainingSessionId || !latestGuidanceMessage || latestGuidanceMessage.sender_type !== 'persona') return
@@ -498,6 +701,42 @@ function ChatArea() {
     }
   }, [])
 
+  const handleRealtimeTranscriptPersisted = React.useCallback((text: string, role: 'user' | 'assistant' = 'user') => {
+    const transcript = text.trim()
+    if (!transcript) return
+    setLastVoiceTranscript(transcript)
+    scheduleGuidanceRefresh({
+      extraTurn: {
+        speaker: role === 'assistant' ? 'counterpart' : 'user',
+        text: transcript,
+        metadata: {
+          source: isLiveCoachSession ? 'live_coach_realtime_voice' : 'realtime_voice',
+          trainingMode: 'voice',
+          interactionMode: 'realtime',
+          trainingProfile,
+          realtimeRole: role,
+          ...(isLiveCoachSession
+            ? {
+                sourceLanguage: liveCoachLanguagePair.sourceLanguage,
+                targetLanguage: liveCoachLanguagePair.targetLanguage,
+                translationStrategy: 'text_first_mvp',
+              }
+            : {}),
+        },
+      },
+      autoOpenOnSignal: true,
+      minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
+    })
+    setTimeout(chat.scrollToBottom, 100)
+  }, [
+    chat.scrollToBottom,
+    isLiveCoachSession,
+    liveCoachLanguagePair.sourceLanguage,
+    liveCoachLanguagePair.targetLanguage,
+    scheduleGuidanceRefresh,
+    trainingProfile,
+  ])
+
   const handleCompleteTrainingSession = React.useCallback(async () => {
     if (!trainingSessionId || trainingSessionCompleting) return
     setTrainingSessionCompleting(true)
@@ -505,6 +744,25 @@ function ChatArea() {
       const session = await completeTrainingSession(trainingSessionId, { generate_report: true })
       setTrainingSessionCompleted(true)
       const reportId = Number(session.report_id)
+      const scenarioScore = Number.isFinite(reportId) && reportId > 0
+        ? await getTrainingSessionReport(trainingSessionId)
+          .then(extractTrainingReportScore)
+          .catch(() => undefined)
+        : undefined
+      if (scenarioTrainingId) {
+        saveScenarioTrainingProgress(
+          markScenarioTrainingCompleted(getScenarioTrainingProgress(progressScope), scenarioTrainingId, {
+            trainingSessionId: session.session_id || trainingSessionId,
+            reportId: session.report_id,
+            scoreId: session.score_id,
+            score: scenarioScore,
+            scoreStatus: scenarioScore === undefined ? 'pending' : 'ready',
+            scope: progressScope,
+            completedAt: session.completed_at ?? undefined,
+          }),
+          progressScope,
+        )
+      }
       if (Number.isFinite(reportId) && reportId > 0) {
         await analysis.openReport(reportId)
       } else {
@@ -515,7 +773,7 @@ function ChatArea() {
     } finally {
       setTrainingSessionCompleting(false)
     }
-  }, [analysis, trainingSessionCompleting, trainingSessionId, tr])
+  }, [analysis, progressScope, scenarioTrainingId, trainingSessionCompleting, trainingSessionId, tr])
 
   const handleRequestGuidance = React.useCallback(async () => {
     if (guidanceLoading) return
@@ -599,6 +857,7 @@ function ChatArea() {
             mimeType: result.mimeType,
             durationMs: result.durationMs,
             trainingMode: 'video',
+            interactionMode: 'turn_based',
           },
         },
         autoOpenOnSignal: true,
@@ -657,17 +916,6 @@ function ChatArea() {
           >
             <BarChart2 size={16} />
           </button>
-          {trainingSessionId && (
-            <button
-              className={`header-action-btn${trainingSessionCompleted ? ' active' : ''}`}
-              onClick={handleCompleteTrainingSession}
-              title={trainingSessionCompleted ? 'Training completed' : 'Complete training and generate review'}
-              aria-label={trainingSessionCompleted ? 'Training completed' : 'Complete training and generate review'}
-              disabled={trainingSessionCompleting || analysis.analyzingRoom}
-            >
-              {trainingSessionCompleting ? <Loader2 size={16} className="spin" /> : <CheckCircle2 size={16} />}
-            </button>
-          )}
           <button
             className="header-action-btn coaching"
             onClick={() => coaching.handleStartCoaching()}
@@ -718,18 +966,78 @@ function ChatArea() {
         </div>
       </div>
 
+      {isTrainingSession && (
+        <section className="chat-page-training-banner" data-testid="training-context-banner">
+          <div className="chat-page-training-top">
+            <button
+              className="chat-page-training-back"
+              type="button"
+              onClick={() => navigate(resolvedTrainingBackPath)}
+            >
+              <ArrowLeft size={15} />
+              {tr('返回', 'Back')}
+            </button>
+
+            <div className="chat-page-training-copy">
+              <strong>{resolvedTrainingContextTitle}</strong>
+              {resolvedTrainingContextSubtitle && <span>{resolvedTrainingContextSubtitle}</span>}
+              <div className="chat-page-training-tags" aria-label={tr('练习标签', 'Practice tags')}>
+                {resolvedTrainingContextTags.map((tag) => (
+                  <span key={tag}>{tag}</span>
+                ))}
+              </div>
+            </div>
+
+            <button
+              className={`chat-page-training-complete${trainingSessionCompleted ? ' completed' : ''}`}
+              type="button"
+              onClick={handleCompleteTrainingSession}
+              disabled={trainingSessionCompleting || analysis.analyzingRoom}
+            >
+              {trainingSessionCompleting ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
+              {trainingSessionCompleted ? tr('已结束', 'Ended') : tr('结束练习', 'End practice')}
+            </button>
+          </div>
+
+          <div className="chat-page-training-scene">
+            {scenarioTrainingCard?.customerProfile && (
+              <p>
+                <strong>{tr('客户画像', 'Customer profile')}:</strong>
+                <span>{scenarioTrainingCard.customerProfile}</span>
+              </p>
+            )}
+            <p>
+              <strong>{tr('场景描述', 'Scenario')}:</strong>
+              <span>{resolvedTrainingContextDescription}</span>
+            </p>
+            {resolvedTrainingContextOpeningLine && resolvedTrainingContextOpeningLine !== resolvedTrainingContextDescription && (
+              <p>
+                <strong>{tr('客户开场', 'Opening line')}:</strong>
+                <span>{resolvedTrainingContextOpeningLine}</span>
+              </p>
+            )}
+            {resolvedTrainingContextPoints && (
+              <p>
+                <strong>{tr('练习重点', 'Focus')}:</strong>
+                <span>{resolvedTrainingContextPoints}</span>
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
       {trainingSessionId && (
         <section className="chat-page-guidance-bar" data-testid="training-guidance-bar">
           <div className="guidance-copy">
             <Lightbulb size={15} />
-            <strong>{tr('Realtime guidance', 'Realtime guidance')}</strong>
+            <strong>{guidanceBarTitle}</strong>
             <span>
               {guidanceError
                 ? guidanceError
                 : guidanceEvents[0]?.message || (
                   guidanceStreamConnected
-                    ? tr('Streaming during this training session', 'Streaming during this training session')
-                    : tr('Ready during this training session', 'Ready during this training session')
+                    ? guidanceStreamingText
+                    : guidanceReadyText
                 )}
             </span>
           </div>
@@ -740,7 +1048,7 @@ function ChatArea() {
             disabled={guidanceLoading}
           >
             {guidanceLoading ? <Loader2 size={14} className="spin" /> : <Lightbulb size={14} />}
-            {guidanceLoading ? tr('Thinking', 'Thinking') : tr('Guide me', 'Guide me')}
+            {guidanceLoading ? tr('Thinking', 'Thinking') : guidanceActionText}
           </button>
         </section>
       )}
@@ -828,6 +1136,29 @@ function ChatArea() {
             {voice.voiceEnabled && !voice.voiceMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
             {voicePracticeActionLabel}
           </button>
+        </div>
+      )}
+
+      {isRealtimeBattlePrep && (
+        <div
+          className={`chat-page-realtime-call-bar${isLiveCoachSession ? ' live-coach' : ''}`}
+          data-testid="realtime-practice-bar"
+          data-training-profile={trainingProfile}
+        >
+          <Radio size={15} />
+          <div className="realtime-call-copy">
+            <strong>{realtimeBarTitle}</strong>
+            <span>{realtimeBarCopy}</span>
+          </div>
+          <RealtimeVoiceRecorder
+            key={`${trainingSessionId || 'no-session'}:${selectedRoomId || 'no-room'}`}
+            roomId={selectedRoomId}
+            trainingSessionId={trainingSessionId}
+            disabled={chat.sending}
+            personaId={primaryPersona?.id || null}
+            counterpartName={counterpartName}
+            onPersistedTranscript={handleRealtimeTranscriptPersisted}
+          />
         </div>
       )}
 
@@ -951,7 +1282,9 @@ function ChatArea() {
             onSend={handleSend}
             sending={chat.sending}
             placeholder={
-              chat.selectedRoom?.room.type === 'group'
+              isTrainingSession
+                ? resolvedTrainingInputPlaceholder
+                : chat.selectedRoom?.room.type === 'group'
                 ? tr('输入消息... 使用 @ 提及角色', 'Type a message... use @ to mention personas')
                 : tr('输入消息...', 'Type a message...')
             }
@@ -978,6 +1311,7 @@ function ChatArea() {
                   metadata: {
                     source: 'voice_transcription',
                     trainingMode: 'voice',
+                    interactionMode: 'turn_based',
                   },
                 },
                 autoOpenOnSignal: true,
@@ -988,8 +1322,8 @@ function ChatArea() {
             onVoiceRecorderStateChange={handleVoiceRecorderStateChange}
             onVideoClick={() => setVideoRecorderOpen(true)}
             videoActive={videoRecorderOpen}
-            onLiveCoachClick={coaching.handleStartLiveCoaching}
-            coachingSending={coaching.coachingSending}
+            onLiveCoachClick={isLiveCoachSession ? handleRequestGuidance : coaching.handleStartLiveCoaching}
+            coachingSending={isLiveCoachSession ? guidanceLoading : coaching.coachingSending}
           />
         </div>
 

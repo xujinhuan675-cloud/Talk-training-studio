@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Flame, Languages, Star } from 'lucide-react'
 import { SUPPORTED_LOCALES, useI18n, type Locale } from '../../i18n'
 import { useGrowth } from '../../hooks/useGrowth'
+import UserMenu from './UserMenu'
 import './TopBar.css'
 
 const TALKWISE_ICON_SRC = '/talkwise-icon.svg'
@@ -109,7 +110,7 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
         >
           {levelText}
         </Link>
-        <div className="topbar-avatar">{t('app.avatarInitial')}</div>
+        <UserMenu />
       </div>
     </header>
   )

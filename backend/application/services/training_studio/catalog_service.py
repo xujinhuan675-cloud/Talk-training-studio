@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from domain.training_studio.catalog import (
@@ -14,7 +16,9 @@ from domain.training_studio.catalog import (
     PRODUCT_MANAGEMENT_ROLE_PRESETS,
     PRODUCT_MANAGEMENT_SCENARIO_PRESETS,
     RubricDimension,
+    SCENARIO_TRAINING_TEMPLATES,
     ScenarioCategory,
+    ScenarioTrainingTemplate,
     TrainingTaskConfig,
     normalize_training_task_config,
 )
@@ -54,6 +58,54 @@ class ScenarioPresetDTO(BaseModel):
     default_question_type_ratios: dict[str, float]
 
 
+class ScenarioTrainingPersonaDTO(BaseModel):
+    name: str
+    role: str
+    style: str
+
+
+class ScenarioTrainingTemplateDTO(BaseModel):
+    id: str
+    title: str
+    description: str
+    customer_profile: str
+    difficulty: str
+    category: str
+    required: bool
+    status: str
+    opening_line: str
+    persona: ScenarioTrainingPersonaDTO
+    learner_role: str
+    framework: str
+    training_points: list[str]
+    score: int | None = None
+    last_practiced_at: str | None = None
+
+    @classmethod
+    def from_domain(cls, template: ScenarioTrainingTemplate) -> "ScenarioTrainingTemplateDTO":
+        return cls(
+            id=template.id,
+            title=template.title,
+            description=template.description,
+            customer_profile=template.customer_profile,
+            difficulty=template.difficulty,
+            category=template.category,
+            required=template.required,
+            status=template.status,
+            opening_line=template.opening_line,
+            persona=ScenarioTrainingPersonaDTO(
+                name=template.persona.name,
+                role=template.persona.role,
+                style=template.persona.style,
+            ),
+            learner_role=template.learner_role,
+            framework=template.framework.value,
+            training_points=list(template.training_points),
+            score=template.score,
+            last_practiced_at=template.last_practiced_at,
+        )
+
+
 class TrainingCatalogDTO(BaseModel):
     categories: list[CatalogOptionDTO]
     difficulties: list[CatalogOptionDTO]
@@ -77,6 +129,7 @@ class TrainingTaskConfigDTO(BaseModel):
     category: ScenarioCategory | str = ScenarioCategory.INTERVIEW
     rubric_version: str = DEFAULT_RUBRIC_VERSION
     rubric_weights: dict[RubricDimension | str, float] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_domain(cls, config: TrainingTaskConfig) -> "TrainingTaskConfigDTO":
@@ -91,6 +144,7 @@ class TrainingTaskConfigDTO(BaseModel):
             category=config.category.value,
             rubric_version=config.rubric_version,
             rubric_weights={dimension.value: weight for dimension, weight in config.rubric_weights.items()},
+            metadata=dict(config.metadata),
         )
 
     def to_domain(self) -> TrainingTaskConfig:
@@ -105,6 +159,7 @@ class TrainingTaskConfigDTO(BaseModel):
             category=self.category,
             rubric_version=self.rubric_version,
             rubric_weights=dict(self.rubric_weights),
+            metadata=dict(self.metadata),
         )
 
 
@@ -151,6 +206,12 @@ class TrainingCatalogService:
                 for preset in (*INTERVIEW_SCENARIO_PRESETS, *PRODUCT_MANAGEMENT_SCENARIO_PRESETS)
             ],
         )
+
+    def get_scenario_templates(self) -> list[ScenarioTrainingTemplateDTO]:
+        return [
+            ScenarioTrainingTemplateDTO.from_domain(template)
+            for template in SCENARIO_TRAINING_TEMPLATES
+        ]
 
     def get_default_rubric_weights(
         self,

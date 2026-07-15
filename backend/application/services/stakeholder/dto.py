@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -49,6 +49,7 @@ class MessageDTO(BaseModel):
     timestamp: Optional[datetime] = None
     emotion_score: Optional[int] = None
     emotion_label: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatRoomDetailDTO(BaseModel):
@@ -74,6 +75,7 @@ class CreatePersonaDTO(BaseModel):
     content: str = Field(default="")
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
+    temporary: bool = False
 
 
 class UpdatePersonaDTO(BaseModel):

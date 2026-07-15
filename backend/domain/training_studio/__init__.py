@@ -17,6 +17,7 @@ from domain.training_studio.catalog import (
     normalize_training_task_config,
 )
 from domain.training_studio.session import TrainingSession, TrainingSessionMode, TrainingSessionStatus
+from domain.training_studio.session_repository import TrainingSessionRepository
 from domain.training_studio.storybank import StoryBankEntry, StoryBankService
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "StoryBankService",
     "TrainingSession",
     "TrainingSessionMode",
+    "TrainingSessionRepository",
     "TrainingSessionStatus",
     "TrainingTaskConfig",
     "normalize_training_task_config",

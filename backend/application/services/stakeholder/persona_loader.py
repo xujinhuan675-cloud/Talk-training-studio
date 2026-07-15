@@ -148,7 +148,12 @@ class PersonaLoader:
             if not name:
                 name = persona_id
 
-        profile_summary = self._extract_summary(body)
+        temporary = str(frontmatter.get("temporary", "")).strip().lower() == "true"
+        profile_summary = self._extract_summary(
+            body,
+            max_chars=5000 if temporary else 200,
+            preserve_format=temporary,
+        )
 
         return Persona(
             id=persona_id,
@@ -214,10 +219,19 @@ class PersonaLoader:
         except (ValueError, TypeError):
             return None
 
-    def _extract_summary(self, body: str) -> str:
-        """Extract first ~200 chars as profile summary."""
-        lines = [l.strip() for l in body.split("\n") if l.strip() and not l.startswith("#")]
-        text = " ".join(lines)
-        if len(text) > 200:
-            return text[:200] + "..."
+    def _extract_summary(
+        self,
+        body: str,
+        *,
+        max_chars: int = 200,
+        preserve_format: bool = False,
+    ) -> str:
+        """Extract a compact summary, or preserve full temp-drill notes for prompts."""
+        if preserve_format:
+            text = body.strip()
+        else:
+            lines = [l.strip() for l in body.split("\n") if l.strip() and not l.startswith("#")]
+            text = " ".join(lines)
+        if len(text) > max_chars:
+            return text[:max_chars] + "..."
         return text

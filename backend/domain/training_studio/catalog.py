@@ -103,6 +103,154 @@ class ScenarioPreset:
     default_question_type_ratios: dict[str, float]
 
 
+@dataclass(frozen=True)
+class ScenarioTrainingPersona:
+    name: str
+    role: str
+    style: str
+
+
+@dataclass(frozen=True)
+class ScenarioTrainingTemplate:
+    id: str
+    title: str
+    description: str
+    customer_profile: str
+    difficulty: str
+    category: str
+    required: bool
+    status: str
+    opening_line: str
+    persona: ScenarioTrainingPersona
+    learner_role: str
+    framework: ExpressionFramework
+    training_points: list[str]
+    score: int | None = None
+    last_practiced_at: str | None = None
+
+
+SCENARIO_TRAINING_TEMPLATES: tuple[ScenarioTrainingTemplate, ...] = (
+    ScenarioTrainingTemplate(
+        id="new-customer-discount",
+        title="新客优惠咨询",
+        description="门店新客想了解价格、服务边界和是否值得当场下单。",
+        customer_profile="首次到店客户，预算敏感，愿意尝试但担心被推销。",
+        difficulty="easy",
+        category="sales",
+        required=True,
+        status="not_started",
+        opening_line="你好，我看到你们门口说有新客优惠，能介绍一下吗？",
+        persona=ScenarioTrainingPersona(
+            name="李女士",
+            role="预算敏感的新客",
+            style="友好但谨慎，会追问价格、隐性费用和是否马上决策。",
+        ),
+        learner_role="Salesperson",
+        framework=ExpressionFramework.PREP,
+        training_points=["快速建立信任", "清楚解释优惠边界", "用开放问题确认真实需求"],
+    ),
+    ScenarioTrainingTemplate(
+        id="enterprise-demo-objection",
+        title="企业客户 Demo 异议",
+        description="客户认可价值，但担心上线周期、集成成本和团队采用率。",
+        customer_profile="中型企业部门负责人，有预算但需要降低实施风险。",
+        difficulty="medium",
+        category="sales",
+        required=True,
+        status="in_progress",
+        score=76,
+        last_practiced_at="2026-07-12",
+        opening_line="方案听起来不错，但我们之前导入工具都很慢，你们怎么保证不会拖住团队？",
+        persona=ScenarioTrainingPersona(
+            name="陈总",
+            role="企业采购决策人",
+            style="关注风险、落地成本和团队阻力，会要求具体案例与推进计划。",
+        ),
+        learner_role="Salesperson",
+        framework=ExpressionFramework.SCQA,
+        training_points=["识别真实反对点", "用证据化案例降低风险", "推进下一步共同计划"],
+    ),
+    ScenarioTrainingTemplate(
+        id="refund-service-recovery",
+        title="退款与服务补救",
+        description="客户体验不佳要求退款，需要稳定情绪、确认事实并给出补救方案。",
+        customer_profile="已购买客户，情绪不满，认为服务承诺没有兑现。",
+        difficulty="hard",
+        category="customer_service",
+        required=True,
+        status="not_started",
+        opening_line="我上次体验很差，如果今天不给我一个说法，我就要求全额退款。",
+        persona=ScenarioTrainingPersona(
+            name="王先生",
+            role="不满的已购客户",
+            style="情绪强烈，容易打断，只有感到被理解后才愿意讨论方案。",
+        ),
+        learner_role="Customer Success Specialist",
+        framework=ExpressionFramework.PREP,
+        training_points=["先接住情绪", "复述事实并确认缺口", "给出可执行补救选项"],
+    ),
+    ScenarioTrainingTemplate(
+        id="renewal-price-negotiation",
+        title="续约价格谈判",
+        description="老客户准备续约，但拿竞品价格压价，要求额外折扣。",
+        customer_profile="年度续约客户，使用频率高，采购希望压低预算。",
+        difficulty="expert",
+        category="negotiation",
+        required=False,
+        status="completed",
+        score=88,
+        last_practiced_at="2026-07-10",
+        opening_line="竞品给了我们更低的价格，如果你们不能再降 20%，我们很难续约。",
+        persona=ScenarioTrainingPersona(
+            name="赵经理",
+            role="价格强势的采购经理",
+            style="强势、关注让步空间，会用竞品和预算压力测试底线。",
+        ),
+        learner_role="Account Manager",
+        framework=ExpressionFramework.PYRAMID,
+        training_points=["守住价值锚点", "交换条件而不是单向让步", "明确 BATNA 和下一步"],
+    ),
+    ScenarioTrainingTemplate(
+        id="recruiter-sales-interview",
+        title="销售岗位初筛",
+        description="候选人需要在短时间内讲清楚过往业绩、销售方法和动机。",
+        customer_profile="招聘方初筛，关注表达结构、业绩真实性和岗位匹配。",
+        difficulty="medium",
+        category="interview",
+        required=False,
+        status="not_started",
+        opening_line="请你先用一分钟介绍一下自己，重点讲讲最近一段销售经历。",
+        persona=ScenarioTrainingPersona(
+            name="周 HR",
+            role="销售岗位招聘初筛官",
+            style="时间紧、问题直接，会追问业绩数字、客户类型和离职动机。",
+        ),
+        learner_role="Sales Candidate",
+        framework=ExpressionFramework.STAR,
+        training_points=["用结果开场", "用 STAR 讲清楚关键案例", "解释动机和岗位匹配"],
+    ),
+    ScenarioTrainingTemplate(
+        id="angry-vip-priority",
+        title="VIP 优先级升级",
+        description="重点客户认为自己被忽视，要求立即升级优先级。",
+        customer_profile="高价值客户负责人，业务影响大，对响应速度非常敏感。",
+        difficulty="hard",
+        category="customer_service",
+        required=False,
+        status="not_started",
+        opening_line="我们是你们的大客户，这个问题拖了三天，为什么还没有优先处理？",
+        persona=ScenarioTrainingPersona(
+            name="沈总",
+            role="高价值客户负责人",
+            style="压迫感强，要求承诺明确时间表，不接受含糊解释。",
+        ),
+        learner_role="Customer Success Manager",
+        framework=ExpressionFramework.SCQA,
+        training_points=["承认影响而不甩锅", "澄清优先级与责任人", "给出可追踪的恢复计划"],
+    ),
+)
+
+
 PRODUCT_MANAGEMENT_ROLE_PRESETS: tuple[RolePreset, ...] = (
     RolePreset(
         value="core_pm",
@@ -427,6 +575,7 @@ class TrainingTaskConfig:
     category: ScenarioCategory | str = ScenarioCategory.INTERVIEW
     rubric_version: str = DEFAULT_RUBRIC_VERSION
     rubric_weights: dict[RubricDimension | str, float] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.role = self.role.strip()
@@ -451,6 +600,7 @@ class TrainingTaskConfig:
         weights = self.rubric_weights or DEFAULT_RUBRIC_WEIGHTS[self.category]
         self.rubric_weights = self._normalize_weights(weights)
         self.rubric_version = self.rubric_version.strip() or DEFAULT_RUBRIC_VERSION
+        self.metadata = dict(self.metadata or {})
 
     def _normalize_ratios(self, ratios: dict[str, float]) -> dict[str, float]:
         cleaned = {key.strip(): float(value) for key, value in ratios.items() if key.strip()}
@@ -515,4 +665,5 @@ def normalize_training_task_config(config: TrainingTaskConfig) -> TrainingTaskCo
         category=config.category,
         rubric_version=config.rubric_version,
         rubric_weights=dict(config.rubric_weights),
+        metadata=dict(config.metadata),
     )

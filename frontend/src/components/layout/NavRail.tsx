@@ -1,7 +1,19 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { ChevronsLeft, ChevronsRight, Dumbbell, Home, MessageSquare, Settings, Swords, TrendingUp } from 'lucide-react'
+import {
+  ChevronsLeft,
+  ChevronsRight,
+  ClipboardList,
+  Dumbbell,
+  Home,
+  MessageSquare,
+  Settings,
+  Swords,
+  TrendingUp,
+} from 'lucide-react'
+import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n, type TranslationKey } from '../../i18n'
+import { type SystemRole } from '../../services/auth'
 import './NavRail.css'
 
 const STORAGE_KEY = 'talkwise.navrail.collapsed'
@@ -11,23 +23,32 @@ interface NavItem {
   icon: React.ReactNode
   labelKey: TranslationKey
   exact?: boolean
+  roles?: SystemRole[]
 }
 
 const navItems: NavItem[] = [
   { to: '/', icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
+  { to: '/scenario-training', icon: <ClipboardList size={18} />, labelKey: 'nav.scenarioTraining' },
   { to: '/training-studio', icon: <Dumbbell size={18} />, labelKey: 'nav.trainingStudio' },
   { to: '/chat', icon: <MessageSquare size={18} />, labelKey: 'nav.chat' },
-  { to: '/battle-prep', icon: <Swords size={18} />, labelKey: 'nav.battlePrep' },
+  { to: '/battle-prep', icon: <Swords size={18} />, labelKey: 'nav.battlePrep', roles: ['admin'] },
   { to: '/growth', icon: <TrendingUp size={18} />, labelKey: 'nav.growth' },
-  { to: '/settings', icon: <Settings size={18} />, labelKey: 'nav.settings' },
+  { to: '/settings', icon: <Settings size={18} />, labelKey: 'nav.settings', roles: ['admin'] },
 ]
 
 const NavRail: React.FC = () => {
   const location = useLocation()
   const { t, tr } = useI18n()
+  const { currentUser } = useAuthContext()
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(STORAGE_KEY) === 'true'
+  })
+
+  const visibleNavItems = navItems.filter((item) => {
+    if (!item.roles) return true
+    if (!currentUser) return false
+    return currentUser.systemRole ? item.roles.includes(currentUser.systemRole) : false
   })
 
   const isActive = (item: NavItem) => {
@@ -41,11 +62,10 @@ const NavRail: React.FC = () => {
 
   const toggleLabel = collapsed ? tr('展开侧边栏', 'Expand sidebar') : tr('收起侧边栏', 'Collapse sidebar')
   const toggleText = collapsed ? tr('展开', 'Expand') : tr('收起', 'Collapse')
-
   return (
     <nav className={`navrail${collapsed ? ' navrail--collapsed' : ''}`} aria-label={tr('主导航', 'Primary navigation')}>
       <div className="navrail-items">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <Link
             key={item.to}
             to={item.to}

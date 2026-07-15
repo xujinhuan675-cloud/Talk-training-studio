@@ -42,6 +42,9 @@ test('createTrainingSession posts to the sessions collection with JSON body', as
   const calls = installFetchStub()
   const body = {
     mode: 'voice',
+    scenario_template_id: 'new-customer-discount',
+    user_id: 'user-sales-001',
+    team_id: 'team-revenue',
     task_config: {
       role: 'Sales Associate',
       level: 'Senior',
@@ -51,6 +54,10 @@ test('createTrainingSession posts to the sessions collection with JSON body', as
       framework: 'prep',
       difficulty: 'medium',
       category: 'sales',
+      metadata: {
+        source: 'scenario_training',
+        scenario_training: { id: 'new-customer-discount' },
+      },
     },
   }
 

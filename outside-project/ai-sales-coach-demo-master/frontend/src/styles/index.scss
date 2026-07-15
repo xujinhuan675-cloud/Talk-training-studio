@@ -1,0 +1,240 @@
+@import './variables.scss';
+@import './mixin.scss';
+@import './transition.scss';
+@import './element-ui.scss';
+@import './sidebar.scss';
+@import './design-system.scss';
+body {
+  height: 100%;
+  font-size: 14px;
+  background-color: #f9fafb;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+ul,ol{
+  list-style: none;
+}
+label {
+  font-weight: 700;
+}
+
+html {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+#app {
+  height: 100%;
+}
+
+*,
+*:before,
+*:after {
+  box-sizing: inherit;
+  margin: 0;
+  padding: 0;
+}
+
+a:focus,
+a:active {
+  outline: none;
+}
+
+a,
+a:focus,
+a:hover {
+  cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+}
+
+div:focus {
+  outline: none;
+}
+
+.clearfix {
+  &:after {
+    visibility: hidden;
+    display: block;
+    font-size: 0;
+    content: " ";
+    clear: both;
+    height: 0;
+  }
+}
+
+// main-container global css
+.app-container {
+  padding: 20px;
+}
+
+
+.flex{
+  display: flex;
+}
+.flex-x-center{
+ justify-content: center;
+}
+.flex-y-center{
+  align-items: center;
+}
+
+
+
+.content_main_box_padding{
+  padding:0 16px 16px;
+}
+
+
+.table_top_btns{
+  .left_box{
+    flex: 1;
+    text-align: left;
+    font-size: 14px;
+  }
+}
+
+.custom_btn{
+  color: $menuActiveText;
+  margin: 0 5px;
+  cursor: pointer;
+}
+
+
+// 重置button的plain样式
+.el-button--primary.is-plain{
+  height: 34px!important;
+  line-height: 34px!important;
+  background: none!important;
+  border-color: $menuActiveText!important;
+  color: $menuActiveText!important;
+  padding: 0 13px!important;
+  background: $menuActiveText!important;
+  color: #fff!important;
+}
+.el-button--primary.is-plain:hover{
+  background: $menuActiveText!important;
+  color: #fff!important;
+}
+.el-button--primary.is-plain{
+  height: 100%!important;
+  width: 100%!important;
+  display: flex!important;
+  justify-content: center!important;
+  align-items: center!important;
+  i{
+    margin-right: 5px!important;
+  }
+}
+
+
+.no-wrap {
+  white-space: nowrap;
+}
+
+
+
+.v-modal{
+  opacity: 0.2!important;
+  background: #000!important;
+  backdrop-filter: blur(5px);
+}
+
+
+.el-message{
+  min-width: 160px!important;
+}
+
+
+
+/* 解决报错问题
+     *     https://blog.csdn.net/qq_44063746/article/details/143932385
+     */
+     input[aria-hidden=true]{
+      display: none !important;
+ }
+
+
+
+ .el-tooltip__popper{
+  max-width: 70vw!important;
+}
+
+.el-message--error{
+  pointer-events: none;
+}
+
+
+.is-sortable>.cell{
+  display: flex!important;
+  align-items: center!important;
+}
+.el-table .caret-wrapper{
+  margin-top: 4px;
+}
+
+
+
+
+//头像样式
+.vue-avatar--wrapper{
+  background: #5751F4!important;
+  span{
+    font-size: 15px;
+    color: #fff;
+  }
+}
+
+
+/* 最高层级loading */
+.loading-high-zindex {
+  z-index: 99999 !important; /* 设为极高值，确保覆盖所有元素 */
+}
+/* 兼容Element UI loading的遮罩层 */
+.loading-high-zindex .el-loading-mask {
+  z-index: 99999 !important;
+}
+
+.el-tooltip__popper{
+  max-width: 400px!important;
+}
+.el-menu--vertical .el-menu-item{
+  color: #333333 !important;
+}
+.el-menu--vertical .is-active{
+    color: transparent !important;
+    background: -webkit-gradient(linear, left bottom, left top, from(#525BFF), to(#633BDB));
+    background: linear-gradient(0deg, #525BFF 0%, #633BDB 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+.el-popover.my_changxt_pop {
+  top:34px !important;
+}
+.el-textarea__inner {
+  color: #1D2129 !important;
+}
+
+.el-input__inner{
+  color: #1D2129!important;
+}
+
+
+
+
+.el-table--mini th, .el-table--mini td{
+  padding: 10px 0!important;
+}
+.download_btn{
+  color: #5751F4!important;
+}
+
+
+.ellipsis {
+  white-space: nowrap; /* 防止文本换行 */
+  overflow: hidden; /* 隐藏溢出的文本 */
+  text-overflow: ellipsis; /* 显示省略号 */
+}

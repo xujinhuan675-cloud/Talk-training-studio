@@ -1,0 +1,516 @@
+.scenario-training-page {
+  min-height: 100%;
+  padding: 28px 28px 42px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.scenario-training-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: end;
+  margin: 0 auto 18px;
+  max-width: 1180px;
+}
+
+.scenario-training-title-block {
+  min-width: 0;
+}
+
+.scenario-training-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scenario-training-title-block h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.18;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.scenario-training-title-block p {
+  max-width: 760px;
+  margin: 9px 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.scenario-training-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(92px, 1fr));
+  gap: 8px;
+  min-width: 330px;
+}
+
+.scenario-training-summary div {
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+}
+
+.scenario-training-summary span {
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.scenario-training-summary small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-training-toolbar,
+.scenario-training-error,
+.scenario-training-grid,
+.scenario-training-empty,
+.scenario-training-admin {
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.scenario-training-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.scenario-training-search,
+.scenario-training-select,
+.scenario-training-mode {
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.scenario-training-search,
+.scenario-training-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+}
+
+.scenario-training-search input,
+.scenario-training-select select {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.scenario-training-search input {
+  width: 100%;
+}
+
+.scenario-training-select select {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.scenario-training-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+}
+
+.scenario-training-mode button {
+  min-width: 54px;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scenario-training-mode button:hover,
+.scenario-training-mode button.selected {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.scenario-training-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(199, 91, 91, 0.28);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--rose-soft);
+  color: var(--rose);
+  font-size: 13px;
+}
+
+.scenario-training-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(318px, 1fr));
+  gap: 14px;
+}
+
+.scenario-training-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.scenario-training-card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.scenario-training-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scenario-training-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.scenario-training-card-tags span,
+.scenario-training-status,
+.scenario-training-meta span,
+.scenario-training-points span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  border-radius: 7px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.scenario-training-card-tags span {
+  background: var(--bg-base);
+  color: var(--text-muted);
+}
+
+.scenario-training-card-tags .required {
+  background: var(--rose-soft);
+  color: var(--rose);
+}
+
+.scenario-training-card-tags .difficulty.easy {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.scenario-training-card-tags .difficulty.medium {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.scenario-training-card-tags .difficulty.hard {
+  background: var(--rose-soft);
+  color: var(--rose);
+}
+
+.scenario-training-card-tags .difficulty.expert {
+  background: var(--violet-soft);
+  color: var(--violet);
+}
+
+.scenario-training-card h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.scenario-training-status {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-muted);
+}
+
+.scenario-training-status.completed {
+  border-color: rgba(45, 156, 111, 0.22);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.scenario-training-status.in_progress {
+  border-color: rgba(200, 148, 74, 0.28);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.scenario-training-desc {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.scenario-training-customer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border-left: 3px solid var(--green);
+  padding-left: 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.scenario-training-customer svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--green);
+}
+
+.scenario-training-card blockquote {
+  margin: 0;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.scenario-training-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.scenario-training-meta span {
+  background: var(--bg-base);
+  color: var(--text-secondary);
+}
+
+.scenario-training-meta span:first-child {
+  color: var(--amber);
+}
+
+.scenario-training-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scenario-training-points span {
+  background: rgba(45, 156, 111, 0.08);
+  color: var(--green);
+}
+
+.scenario-training-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.scenario-training-start {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--green);
+  border-radius: 8px;
+  padding: 0 13px;
+  background: var(--green);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.scenario-training-start:hover:not(:disabled) {
+  border-color: var(--green-hover);
+  background: var(--green-hover);
+  transform: translateY(-1px);
+}
+
+.scenario-training-start:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.scenario-training-empty {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.scenario-training-empty p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.scenario-training-admin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--bg-card);
+}
+
+.scenario-training-admin div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.scenario-training-admin strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.scenario-training-admin span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.scenario-training-admin a {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.scenario-training-admin a:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.scenario-training-spin {
+  animation: scenario-training-spin 0.8s linear infinite;
+}
+
+@keyframes scenario-training-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 980px) {
+  .scenario-training-page {
+    padding: 22px 18px 36px;
+  }
+
+  .scenario-training-hero,
+  .scenario-training-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-training-summary {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .scenario-training-page {
+    padding: 18px 12px 88px;
+  }
+
+  .scenario-training-title-block h1 {
+    font-size: 23px;
+  }
+
+  .scenario-training-summary,
+  .scenario-training-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-training-mode {
+    width: 100%;
+  }
+
+  .scenario-training-mode button {
+    flex: 1;
+  }
+
+  .scenario-training-card-head,
+  .scenario-training-admin {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scenario-training-status,
+  .scenario-training-start,
+  .scenario-training-admin a {
+    width: 100%;
+  }
+
+  .scenario-training-actions {
+    justify-content: stretch;
+  }
+}

@@ -181,7 +181,7 @@ cd backend && uv sync && uv run python main.py
 cd frontend && npm install && npm run dev
 ```
 
-多智能体或多人并行开发时，先按 [Multi-Agent Core Development Loop](docs/development/multi-agent-core-loop.md) 拆分切片，并用 `.\scripts\core-loop.ps1 -Slice voice` 这类快速检查先跑通核心路径，再扩展完整体验。
+多智能体或多人并行开发时，先按 [Multi-Agent Core Development Loop](docs/development/multi-agent-core-loop.md) 拆分切片；涉及跨前后端/外部服务/持久化的纵切功能时，按 [Agentic Vertical Slice Development Loop](docs/development/agentic-vertical-slice-loop.md) 执行 code graph、子智能体、最小验收和风险收口，再用 `.\scripts\core-loop.ps1 -Slice voice` 这类快速检查先跑通核心路径。
 
 ---
 

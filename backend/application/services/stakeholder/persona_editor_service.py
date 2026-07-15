@@ -73,6 +73,7 @@ class PersonaEditorService:
             dto.content,
             organization_id=dto.organization_id,
             team_id=dto.team_id,
+            extra_frontmatter={"temporary": "true"} if dto.temporary else None,
         )
         path.write_text(md, encoding="utf-8")
         logger.info("persona_created", persona_id=dto.id)

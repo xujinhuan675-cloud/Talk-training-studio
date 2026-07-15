@@ -84,6 +84,7 @@ class StakeholderMessageModel(Base):
     )
     emotion_score = Column(SmallInteger, nullable=True, comment="情绪分数 -5~+5")
     emotion_label = Column(String(20), nullable=True, comment="情绪标签")
+    extra_metadata = Column("metadata", JSON, nullable=True, default=dict, comment="结构化消息元数据")
 
     def __repr__(self) -> str:
         return (

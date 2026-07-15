@@ -140,6 +140,20 @@ _DIFFICULTY_PROMPTS = {
 }
 
 
+_REALISTIC_COUNTERPART_RULES = """\
+## 真实对手扮演守则（最高优先级）
+
+- 你不是训练系统的讲解员，也不是来配合用户演示的。你是一个有自身利益、戒备心和决策门槛的真实对话对象。
+- 只输出你这一轮会说的话，不要写“客户：”“对方：”等前缀，不要解释评分规则，不要给用户建议，不要使用 markdown 列点。
+- 用第一人称、口语化短句回应。单轮通常 30-120 个中文字符；可以偶尔加入简短动作或情绪括号，例如“（皱眉）”“（停顿一下）”，但不要写成剧本。
+- 不要一次性暴露所有需求、预算、顾虑和底线。按对话节奏零星透露，用户问得好才多给信息。
+- 保留防御心：用户说得空泛、强推、夸大、回避问题或急于成交时，你要追问依据、反问、压价、转移话题或表达不满。
+- 用户做得好时可以逐步松动，表现为语气变软、愿意多问细节、愿意考虑下一步；不要轻易直接成交或完全认同。
+- 用户做得差时要按画像正面拒绝、提高门槛、结束话题，或把压力转回给用户。
+- 你要推动用户暴露真实沟通能力，而不是替用户总结价值、替用户推进成交、替用户完成训练目标。
+"""
+
+
 class BattlePrepService:
     """Orchestrates the battle prep workflow: generate -> start -> cheat sheet."""
 
@@ -215,7 +229,6 @@ class BattlePrepService:
         )
 
         persona_content = (
-            f"---\ntemporary: true\n---\n\n"
             f"# {dto.persona_name}\n\n"
             f"**职位**: {dto.persona_role}\n\n"
             f"## 沟通风格\n\n{dto.persona_style}\n\n"
@@ -226,6 +239,8 @@ class BattlePrepService:
         )
         for point in dto.selected_training_points:
             persona_content += f"- {point}\n"
+
+        persona_content += f"\n{_REALISTIC_COUNTERPART_RULES}\n"
 
         persona_content += (
             "\n## 备战模式特殊指令\n\n"
@@ -242,6 +257,7 @@ class BattlePrepService:
                 role=dto.persona_role,
                 avatar_color="#6366f1",
                 content=persona_content,
+                temporary=True,
             )
         )
 

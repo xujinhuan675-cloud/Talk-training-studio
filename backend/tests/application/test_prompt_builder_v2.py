@@ -131,6 +131,20 @@ def test_empty_layers_omit_sections() -> None:
     assert "层级行为约束" in system
 
 
+def test_profile_summary_is_included_for_markdown_personas() -> None:
+    p = Persona(
+        id="bp-sales",
+        name="预算敏感客户",
+        role="模拟客户",
+        profile_summary="## 真实对手扮演守则\n不要配合演示，要保留防御心，并逐步透露预算顾虑。",
+    )
+    system = build_system_prompt(p)
+    assert "## Profile Summary" in system
+    assert "真实对手扮演守则" in system
+    assert "逐步透露预算顾虑" in system
+    assert "自然对话回复契约" in system
+
+
 # ---------------------------------------------------------------------------
 # Compressed wrapper preserves layer content
 # ---------------------------------------------------------------------------

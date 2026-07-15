@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
-
-from domain.file_asset.repository import FileAssetRepository
 from domain.conversation.repository import (
+    AgentConfigRepository,
     ConversationRepository,
     MessageRepository,
     RunRepository,
-    AgentConfigRepository,
 )
-from domain.stakeholder.repository import ScenarioRepository
 from domain.defense_prep.repository import DefenseSessionRepository
+from domain.file_asset.repository import FileAssetRepository
+from domain.stakeholder.repository import ScenarioRepository
+from domain.training_studio.session_repository import TrainingSessionRepository
 
 
 class AbstractUnitOfWork(ABC):
@@ -38,6 +38,7 @@ class AbstractUnitOfWork(ABC):
         self.agent_config_repository = None  # type: ignore[assignment]
         self.scenario_repository: ScenarioRepository = None  # type: ignore[assignment]
         self.defense_session_repository: DefenseSessionRepository = None  # type: ignore[assignment]
+        self.training_session_repository: TrainingSessionRepository = None  # type: ignore[assignment]
 
     async def __aenter__(self) -> "AbstractUnitOfWork":
         return self

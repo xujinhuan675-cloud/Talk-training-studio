@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from domain.common.exceptions import DomainValidationException
 
@@ -68,6 +68,7 @@ class Message:
     timestamp: Optional[datetime] = None
     emotion_score: Optional[int] = None  # -5 (strongly opposed) to +5 (strongly supportive)
     emotion_label: Optional[str] = None  # e.g. 支持, 质疑, 愤怒, 犹豫
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.sender_type not in _SENDER_TYPES:
@@ -80,6 +81,8 @@ class Message:
             self.timestamp = _utcnow()
         else:
             self.timestamp = _ensure_utc(self.timestamp)
+        if self.metadata is None:
+            self.metadata = {}
 
 
 @dataclass

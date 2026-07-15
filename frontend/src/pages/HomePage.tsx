@@ -6,6 +6,7 @@ import {
   Activity,
   Users,
   Check,
+  ClipboardList,
   Lock,
   ChevronRight,
   FileText,
@@ -117,6 +118,22 @@ const HomePage: React.FC = () => {
 
       {/* 2. Quick Action Cards */}
       <section className="home-actions-grid">
+        {/* Scenario Training */}
+        <Link to="/scenario-training" className="home-action-card home-action-card--green">
+          <div className="home-action-icon home-action-icon--green">
+            <ClipboardList size={18} />
+          </div>
+          <div className="home-action-text">
+            <span className="home-action-label home-action-label--green">
+              {t('nav.scenarioTraining')}
+            </span>
+            <span className="home-action-title">{tr('按业务场景开练', 'Practice by Business Scenario')}</span>
+            <span className="home-action-desc">
+              {tr('从销售、客服、谈判卡片进入 AI 客户陪练', 'Start from sales, service, and negotiation cards with an AI customer')}
+            </span>
+          </div>
+        </Link>
+
         {/* Battle Prep */}
         <Link to="/battle-prep" className="home-action-card home-action-card--amber">
           <div className="home-action-icon home-action-icon--amber">

@@ -20,9 +20,12 @@ def make_task_config() -> TrainingTaskConfig:
 
 def test_training_session_start_record_and_complete():
     session = TrainingSession(
-        session_id="session-1",
+        session_id=" session-1 ",
         task_config=make_task_config(),
         mode="text",
+        scenario_template_id=" new-customer-discount ",
+        user_id=" user-sales-001 ",
+        team_id=" team-revenue ",
     )
 
     session.start("room-1")
@@ -31,6 +34,10 @@ def test_training_session_start_record_and_complete():
     session.complete(report_id="report-1", score_id="score-1")
 
     assert session.mode == TrainingSessionMode.TEXT
+    assert session.session_id == "session-1"
+    assert session.scenario_template_id == "new-customer-discount"
+    assert session.user_id == "user-sales-001"
+    assert session.team_id == "team-revenue"
     assert session.status == TrainingSessionStatus.COMPLETED
     assert session.room_id == "room-1"
     assert session.started_at is not None

@@ -28,6 +28,9 @@ class TrainingSession:
     session_id: str
     task_config: TrainingTaskConfig
     mode: TrainingSessionMode | str
+    scenario_template_id: str | None = None
+    user_id: str | None = None
+    team_id: str | None = None
     status: TrainingSessionStatus | str = TrainingSessionStatus.CREATED
     room_id: str | None = None
     started_at: datetime | None = None
@@ -44,6 +47,12 @@ class TrainingSession:
         self.task_config = normalize_training_task_config(self.task_config)
         self.mode = self._coerce_enum(TrainingSessionMode, self.mode, "mode")
         self.status = self._coerce_enum(TrainingSessionStatus, self.status, "status")
+        if self.scenario_template_id is not None:
+            self.scenario_template_id = self.scenario_template_id.strip() or None
+        if self.user_id is not None:
+            self.user_id = self.user_id.strip() or None
+        if self.team_id is not None:
+            self.team_id = self.team_id.strip() or None
         if self.room_id is not None:
             self.room_id = self.room_id.strip() or None
         if self.report_id is not None:

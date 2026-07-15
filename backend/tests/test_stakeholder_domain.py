@@ -173,7 +173,14 @@ async def test_chatroom_repo_crud(async_session: AsyncSession) -> None:
     assert updated.last_message_at is not None
 
     # Create messages
-    msg = Message(id=None, room_id=created.id, sender_type="user", sender_id="user", content="Hi")
+    msg = Message(
+        id=None,
+        room_id=created.id,
+        sender_type="user",
+        sender_id="user",
+        content="Hi",
+        metadata={"source": "realtime_voice"},
+    )
     created_msg = await msg_repo.create(msg)
     assert created_msg.id is not None
 
@@ -181,6 +188,7 @@ async def test_chatroom_repo_crud(async_session: AsyncSession) -> None:
     messages = await msg_repo.list_by_room_id(created.id)
     assert len(messages) == 1
     assert messages[0].content == "Hi"
+    assert messages[0].metadata == {"source": "realtime_voice"}
 
 
 @pytest.mark.asyncio

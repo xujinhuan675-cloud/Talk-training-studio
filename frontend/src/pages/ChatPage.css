@@ -88,6 +88,139 @@
   flex-shrink: 0;
 }
 
+.chat-page-training-banner {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-card, #fff);
+}
+
+.chat-page-training-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px 8px;
+}
+
+.chat-page-training-back,
+.chat-page-training-complete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-page-training-back {
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-elevated, #f9fafb);
+  color: var(--text-secondary, #6b7280);
+}
+
+.chat-page-training-back:hover {
+  background: var(--bg-base, #f3f4f6);
+  color: var(--text-primary, #1f2937);
+}
+
+.chat-page-training-complete {
+  border: 1px solid #ef4444;
+  background: #fff;
+  color: #dc2626;
+}
+
+.chat-page-training-complete:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.chat-page-training-complete.completed {
+  border-color: var(--green, #2D9C6F);
+  color: var(--green, #2D9C6F);
+}
+
+.chat-page-training-complete:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chat-page-training-copy {
+  min-width: 0;
+  text-align: center;
+}
+
+.chat-page-training-copy strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary, #1f2937);
+  font-size: 15px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-page-training-copy > span {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-page-training-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.chat-page-training-tags span {
+  padding: 2px 7px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.chat-page-training-scene {
+  display: grid;
+  gap: 5px;
+  padding: 9px 20px 11px;
+  border-top: 1px solid var(--border-light, #f3f4f6);
+  background: #fbfdff;
+}
+
+.chat-page-training-scene p {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.chat-page-training-scene strong {
+  flex: 0 0 auto;
+  color: var(--text-primary, #1f2937);
+  font-weight: 800;
+}
+
+.chat-page-training-scene span {
+  min-width: 0;
+}
+
 /* Chat body: message list area */
 .chat-page-body {
   flex: 1;
@@ -479,6 +612,117 @@
 
 .chat-page-voice-call-bar .voice-call-action:hover {
   background: #d1fae5;
+}
+
+.chat-page-realtime-call-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  background: #f0fdfa;
+  border-bottom: 1px solid #99f6e4;
+  color: #0f766e;
+  flex-shrink: 0;
+}
+
+.chat-page-realtime-call-bar.live-coach {
+  background: #eef2ff;
+  border-bottom-color: #c7d2fe;
+  color: #4338ca;
+}
+
+.chat-page-realtime-call-bar .realtime-call-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-page-realtime-call-bar strong {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.chat-page-realtime-call-bar span {
+  min-width: 0;
+  overflow: hidden;
+  color: #115e59;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-page-realtime-call-bar.live-coach span {
+  color: #3730a3;
+}
+
+.realtime-voice-recorder {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  margin-left: auto;
+}
+
+.realtime-voice-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  align-items: flex-end;
+}
+
+.realtime-voice-status span,
+.realtime-voice-status small {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.realtime-voice-status span {
+  color: #115e59;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.realtime-voice-status small {
+  color: #134e4a;
+  font-size: 11px;
+}
+
+.realtime-voice-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 72px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #0d9488;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f766e;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.realtime-voice-action.active {
+  background: #ccfbf1;
+}
+
+.realtime-voice-action:hover:not(:disabled) {
+  background: #ccfbf1;
+}
+
+.realtime-voice-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .chat-page-video-answer-bar {
@@ -897,6 +1141,42 @@
     display: none;
   }
 
+  .chat-page-training-top {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .chat-page-training-copy {
+    text-align: left;
+  }
+
+  .chat-page-training-copy strong,
+  .chat-page-training-copy > span {
+    white-space: normal;
+  }
+
+  .chat-page-training-tags {
+    justify-content: flex-start;
+  }
+
+  .chat-page-training-complete {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .chat-page-training-scene {
+    padding: 8px 12px 10px;
+  }
+
+  .chat-page-training-scene p {
+    display: block;
+  }
+
+  .chat-page-training-scene strong {
+    margin-right: 4px;
+  }
+
   /* Mobile pill buttons */
   .chat-mobile-pills {
     display: flex;
@@ -1040,6 +1320,32 @@
 
   .chat-page-voice-call-bar .voice-call-action {
     min-height: 30px;
+    padding: 0 9px;
+  }
+
+  .chat-page-realtime-call-bar {
+    padding: 7px 12px;
+    gap: 8px;
+  }
+
+  .chat-page-realtime-call-bar .realtime-call-copy {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+
+  .realtime-voice-recorder {
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  .realtime-voice-status {
+    display: none;
+  }
+
+  .realtime-voice-action {
+    min-height: 30px;
+    min-width: 68px;
     padding: 0 9px;
   }
 

@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Dumbbell, Home, MessageSquare, TrendingUp, User } from 'lucide-react'
+import { ClipboardList, Home, MessageSquare, TrendingUp, User } from 'lucide-react'
 import { useI18n, type TranslationKey } from '../../i18n'
 import './BottomTabBar.css'
 
@@ -16,11 +16,11 @@ const tabs: TabItem[] = [
   { to: '/', icon: <Home size={20} />, labelKey: 'nav.home' },
   { to: '/chat', icon: <MessageSquare size={20} />, labelKey: 'nav.chat', matchPrefix: '/chat' },
   {
-    to: '/training-studio',
-    icon: <Dumbbell size={20} />,
-    labelKey: 'nav.trainingStudioShort',
+    to: '/scenario-training',
+    icon: <ClipboardList size={20} />,
+    labelKey: 'nav.scenarioTrainingShort',
     elevated: true,
-    matchPrefix: '/training-studio',
+    matchPrefix: '/scenario-training',
   },
   { to: '/growth', icon: <TrendingUp size={20} />, labelKey: 'nav.growth', matchPrefix: '/growth' },
   { to: '/settings', icon: <User size={20} />, labelKey: 'nav.me', matchPrefix: '/settings' },

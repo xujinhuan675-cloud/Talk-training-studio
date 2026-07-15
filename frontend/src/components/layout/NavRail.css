@@ -76,6 +76,8 @@
 
 .navrail-footer {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
   flex-shrink: 0;
   width: 100%;
   padding-top: 8px;
@@ -130,6 +132,7 @@
 }
 
 .navrail--collapsed .navrail-footer {
+  align-items: center;
   justify-content: center;
 }
 

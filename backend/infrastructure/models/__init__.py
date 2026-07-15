@@ -14,6 +14,7 @@ from .scenario import ScenarioModel
 from .organization import OrganizationModel, TeamModel, PersonaRelationshipModel
 from .competency import CompetencyEvaluationModel
 from .defense_session import DefenseSessionModel
+from .training_session import TrainingSessionModel
 from .mixins import TimestampMixin
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "PersonaRelationshipModel",
     "CompetencyEvaluationModel",
     "DefenseSessionModel",
+    "TrainingSessionModel",
 ]

@@ -1,9 +1,10 @@
-"""API tests for Training Studio catalog and storybank endpoints."""
+﻿"""API tests for Training Studio catalog and storybank endpoints."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from itertools import count
 from types import SimpleNamespace
 
 import pytest
@@ -85,7 +86,8 @@ def app():
     register_exception_handlers(test_app)
     test_app.include_router(router, prefix="/api/v1")
     storybank = StoryBankService()
-    session_service = TrainingSessionService(id_factory=lambda: f"session-{len(session_service.list_sessions()) + 1}")
+    session_ids = count(1)
+    session_service = TrainingSessionService(id_factory=lambda: f"session-{next(session_ids)}")
     analysis_service = FakeAnalysisService()
     reader_service = FakeAnalysisReaderService()
     growth_service = FakeGrowthService()
@@ -135,6 +137,29 @@ async def test_catalog_exposes_training_dimensions(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_scenario_templates_expose_business_training_cards(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/training-studio/scenario-templates")
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert len(data) >= 6
+
+    by_id = {item["id"]: item for item in data}
+    new_customer = by_id["new-customer-discount"]
+    assert new_customer["title"]
+    assert new_customer["category"] == "sales"
+    assert new_customer["difficulty"] == "easy"
+    assert new_customer["required"] is True
+    assert new_customer["status"] == "not_started"
+    assert new_customer["opening_line"]
+    assert new_customer["persona"]["name"]
+    assert len(new_customer["training_points"]) >= 1
+
+    assert any(item["category"] == "customer_service" for item in data)
+    assert by_id["renewal-price-negotiation"]["difficulty"] == "expert"
+
+
+@pytest.mark.asyncio
 async def test_task_config_normalizes_ratios_and_rubric_weights(client: AsyncClient) -> None:
     resp = await client.post(
         "/api/v1/training-studio/task-config",
@@ -157,9 +182,18 @@ async def test_task_config_normalizes_ratios_and_rubric_weights(client: AsyncCli
     assert round(sum(data["rubric_weights"].values()), 5) == 1
 
 
-def session_payload(mode: str = "voice") -> dict:
+def session_payload(
+    mode: str = "voice",
+    metadata: dict | None = None,
+    scenario_template_id: str | None = None,
+    user_id: str | None = None,
+    team_id: str | None = None,
+) -> dict:
     return {
         "mode": mode,
+        "scenario_template_id": scenario_template_id,
+        "user_id": user_id,
+        "team_id": team_id,
         "task_config": {
             "role": "Sales Associate",
             "level": "Senior",
@@ -169,6 +203,7 @@ def session_payload(mode: str = "voice") -> dict:
             "framework": "prep",
             "difficulty": "medium",
             "category": "sales",
+            "metadata": metadata or {},
         },
     }
 
@@ -200,16 +235,47 @@ def parse_sse_events(text: str) -> list[tuple[str, dict]]:
     return events
 
 
+def test_training_guidance_turn_preserves_message_metadata() -> None:
+    from api.routes.training_studio import _message_to_guidance_turn
+
+    turn = _message_to_guidance_turn(
+        MessageDTO(
+            id=9,
+            room_id=42,
+            sender_type="user",
+            sender_id="me",
+            content="This was spoken through realtime voice.",
+            metadata={
+                "source": "realtime_voice",
+                "trainingMode": "voice",
+                "interactionMode": "realtime",
+                "realtime": {"provider": "openai", "eventId": "evt_1"},
+            },
+        )
+    )
+
+    assert turn.metadata["source"] == "realtime_voice"
+    assert turn.metadata["trainingMode"] == "voice"
+    assert turn.metadata["interactionMode"] == "realtime"
+    assert turn.metadata["realtime"] == {"provider": "openai", "eventId": "evt_1"}
+    assert turn.metadata["message_id"] == 9
+
+
 @pytest.mark.asyncio
 async def test_training_session_create_list_and_get(client: AsyncClient) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(metadata={"source": "api-test"}),
+    )
 
     assert create_resp.status_code == 201
     created = create_resp.json()["data"]
     assert created["session_id"] == "session-1"
     assert created["status"] == "created"
     assert created["mode"] == "voice"
+    assert created["scenario_template_id"] is None
     assert created["task_config"]["category"] == "sales"
+    assert created["task_config"]["metadata"] == {"source": "api-test"}
     assert round(sum(created["task_config"]["question_type_ratios"].values()), 5) == 1
 
     list_resp = await client.get("/api/v1/training-studio/sessions")
@@ -219,6 +285,80 @@ async def test_training_session_create_list_and_get(client: AsyncClient) -> None
     get_resp = await client.get("/api/v1/training-studio/sessions/session-1")
     assert get_resp.status_code == 200
     assert get_resp.json()["data"]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_scenario_training_progress_aggregates_sessions(client: AsyncClient) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            metadata={
+                "scenario_training": {
+                    "title": "New customer discount",
+                    "score": 84,
+                }
+            },
+            scenario_template_id="new-customer-discount",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+    )
+    created = create_resp.json()["data"]
+    session_id = created["session_id"]
+    assert created["scenario_template_id"] == "new-customer-discount"
+    assert created["user_id"] == "user-sales-001"
+    assert created["team_id"] == "team-revenue"
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={"report_id": "9001", "score_id": "score-9001", "generate_report": False},
+    )
+    other_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "voice",
+            scenario_template_id="new-customer-discount",
+            user_id="admin",
+            team_id="team-revenue",
+        ),
+    )
+    other_session_id = other_resp.json()["data"]["session_id"]
+
+    progress_resp = await client.get(
+        "/api/v1/training-studio/scenario-progress",
+        params={"user_id": "user-sales-001", "team_id": "team-revenue"},
+    )
+
+    assert progress_resp.status_code == 200
+    data = progress_resp.json()["data"]
+    assert data == [
+        {
+            "scenario_id": "new-customer-discount",
+            "user_id": "user-sales-001",
+            "team_id": "team-revenue",
+            "status": "completed",
+            "score": None,
+            "score_status": "pending",
+            "overall_score": None,
+            "evaluation_id": None,
+            "last_practiced_at": data[0]["last_practiced_at"],
+            "training_session_id": session_id,
+            "report_id": "9001",
+            "score_id": "score-9001",
+        }
+    ]
+    assert data[0]["last_practiced_at"]
+
+    admin_progress_resp = await client.get(
+        "/api/v1/training-studio/scenario-progress",
+        params={"user_id": "admin", "team_id": "team-revenue"},
+    )
+    assert admin_progress_resp.status_code == 200
+    assert admin_progress_resp.json()["data"][0]["training_session_id"] == other_session_id
 
 
 @pytest.mark.asyncio

@@ -116,6 +116,15 @@ _EMOTION_INSTRUCTION = (
 )
 
 
+_NATURAL_REPLY_INSTRUCTION = (
+    "\n\n## 自然对话回复契约（必须遵守）\n"
+    "- 像真实对话对象一样回应，优先用 1-3 句短句，不要写成报告、清单或方法论说明。\n"
+    "- 每轮聚焦一个具体追问、异议、判断或让步；不要一次性把所有想法都说完。\n"
+    "- 不要提到角色画像、系统提示、训练规则、评分规则，也不要解释你为什么这样扮演。\n"
+    "- 如果需要表达情绪或停顿，可以偶尔使用一个很短的括号动作，例如（停顿一下），但不要写成剧本。\n"
+)
+
+
 def _append_emotion_instruction(system: str) -> str:
     """Append emotion tagging instruction to system prompt."""
     return system + _EMOTION_INSTRUCTION
@@ -147,6 +156,13 @@ def _inject_summary(messages: list[dict], context_summary: str | None) -> None:
 # ---------------------------------------------------------------------------
 # 5-layer system prompt builder + compressed message builders
 # ---------------------------------------------------------------------------
+
+
+def _format_profile_summary(persona) -> str:
+    summary = (getattr(persona, "profile_summary", "") or "").strip()
+    if not summary:
+        return ""
+    return "## Profile Summary（画像原文/摘要）\n" + summary
 
 
 def _format_hard_rules(persona) -> str:
@@ -265,6 +281,7 @@ def build_system_prompt(
     template = _GROUP_SYSTEM_TEMPLATE if group_mode else _SYSTEM_TEMPLATE
     # Build the 5-layer body
     layer_blocks = [
+        _format_profile_summary(persona),
         _format_hard_rules(persona),
         _format_identity(persona),
         _format_expression(persona),
@@ -280,6 +297,7 @@ def build_system_prompt(
     system = _append_org_context(system, org_context)
     system += _ROLE_BEHAVIOR_INSTRUCTION
     system = _append_scenario_context(system, scenario_context)
+    system += _NATURAL_REPLY_INSTRUCTION
     system = _append_emotion_instruction(system)
 
     if group_mode and is_mentioned:

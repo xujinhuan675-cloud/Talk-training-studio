@@ -66,28 +66,26 @@
 
 .training-studio-mode-panel {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 16px;
 }
 
 .training-studio-mode {
   min-height: 104px;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 10px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   border: 1.5px solid var(--border);
   border-radius: 10px;
   padding: 14px;
   background: var(--bg-card);
   color: var(--text-primary);
-  text-align: left;
-  cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
-.training-studio-mode:hover:not(:disabled) {
+.training-studio-mode:hover,
+.training-studio-mode:focus-within {
   border-color: var(--amber);
   background: var(--amber-soft);
 }
@@ -97,15 +95,93 @@
   background: var(--amber-soft);
 }
 
-.training-studio-mode span {
+.training-studio-mode-main {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  align-items: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.training-studio-mode-main:disabled {
+  cursor: not-allowed;
+}
+
+.training-studio-mode-main span {
   font-size: 14px;
   font-weight: 800;
 }
 
-.training-studio-mode small {
+.training-studio-mode-main small {
   grid-column: 1 / -1;
   color: var(--text-secondary);
   font-size: 12px;
+  line-height: 1.45;
+}
+
+.training-studio-interaction-options {
+  display: grid;
+  gap: 8px;
+}
+
+.training-studio-interaction {
+  width: 100%;
+  min-height: 72px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.training-studio-interaction:hover:not(:disabled),
+.training-studio-interaction.selected {
+  border-color: var(--amber);
+  background: var(--bg-card);
+}
+
+.training-studio-interaction:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.training-studio-interaction-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.training-studio-interaction-label em {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.training-studio-interaction small {
+  color: var(--text-secondary);
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -158,6 +234,64 @@
 .training-studio-goal textarea:focus {
   border-color: var(--amber);
   box-shadow: 0 0 0 3px var(--amber-soft);
+}
+
+.training-studio-live-coach-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--bg-card);
+}
+
+.training-studio-live-coach-panel label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.training-studio-live-coach-panel span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.training-studio-live-coach-panel select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.training-studio-live-coach-panel select:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-soft);
+}
+
+.training-studio-live-coach-badge {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .training-studio-side {
@@ -221,6 +355,10 @@
 }
 
 @media (max-width: 960px) {
+  .training-studio-mode-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .training-studio-grid {
     grid-template-columns: 1fr;
   }
@@ -246,5 +384,13 @@
 
   .training-studio-mode-panel {
     grid-template-columns: 1fr;
+  }
+
+  .training-studio-live-coach-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .training-studio-live-coach-badge {
+    justify-content: flex-start;
   }
 }
