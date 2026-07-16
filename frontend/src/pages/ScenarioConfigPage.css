@@ -11,7 +11,7 @@
 .scenario-config-notice,
 .scenario-config-tabbar,
 .scenario-config-workspace {
-  width: min(1180px, 100%);
+  width: min(var(--page-max-width), 100%);
   margin-left: auto;
   margin-right: auto;
 }

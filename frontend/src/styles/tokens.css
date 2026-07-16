@@ -33,6 +33,11 @@
   --transition-fast: 0.15s ease;
   --transition-normal: 0.2s ease;
 
+  /* Layout */
+  --page-max-width: 1180px;
+  --page-gutter: 28px;
+  --page-gutter-mobile: 16px;
+
   /* Semantic aliases */
   --primary-gradient: linear-gradient(135deg, #2D9C6F, #5B8C5A);
   --border-light: #E8F0EB;

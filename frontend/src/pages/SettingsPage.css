@@ -1,5 +1,6 @@
 .settings-page {
-  max-width: 880px;
+  width: min(var(--page-max-width), calc(100% - (var(--page-gutter) * 2)));
+  max-width: none;
   margin: 0 auto;
   min-height: 100%;
   background: var(--bg-base);
@@ -13,7 +14,7 @@
   gap: 0;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
-  padding: 0 24px;
+  padding: 0;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -43,7 +44,7 @@
 
 /* Tab content area */
 .settings-content {
-  padding: 24px;
+  padding: 24px 0;
   flex: 1;
 }
 
@@ -556,4 +557,19 @@
 .persona-build-btn:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 767px) {
+  .settings-page {
+    width: auto;
+  }
+
+  .settings-tab-bar {
+    overflow-x: auto;
+    padding: 0 var(--page-gutter-mobile);
+  }
+
+  .settings-content {
+    padding: var(--page-gutter-mobile);
+  }
 }

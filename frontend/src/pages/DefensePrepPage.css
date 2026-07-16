@@ -7,12 +7,12 @@
   background: var(--bg-base);
   display: flex;
   justify-content: center;
-  padding: 32px 16px 64px;
+  padding: 32px var(--page-gutter) 64px;
 }
 
 .dp-container {
   width: 100%;
-  max-width: 640px;
+  max-width: var(--page-max-width);
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -496,4 +496,10 @@
 /* Hidden file input */
 .dp-file-input {
   display: none;
+}
+
+@media (max-width: 640px) {
+  .dp-page {
+    padding: 20px var(--page-gutter-mobile) 48px;
+  }
 }

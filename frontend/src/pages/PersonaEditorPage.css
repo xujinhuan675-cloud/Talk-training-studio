@@ -1,9 +1,10 @@
 /* input: 无；output: 编辑器整页布局 + 装饰 orb 背景 */
 
 .persona-editor {
-  max-width: 1100px;
+  width: min(var(--page-max-width), calc(100% - (var(--page-gutter) * 2)));
+  max-width: none;
   margin: 0 auto;
-  padding: 24px 28px 140px;
+  padding: 24px 0 140px;
   position: relative;
 }
 
@@ -340,6 +341,7 @@
 
 @media (max-width: 768px) {
   .persona-editor {
+    width: auto;
     padding: 16px 16px 160px;
   }
 }

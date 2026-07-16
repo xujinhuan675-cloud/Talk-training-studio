@@ -5,7 +5,7 @@
 }
 
 .training-studio-shell {
-  width: min(1180px, calc(100% - 32px));
+  width: min(var(--page-max-width), calc(100% - (var(--page-gutter) * 2)));
   margin: 0 auto;
   padding: 28px 0 40px;
 }
@@ -370,7 +370,7 @@
 
 @media (max-width: 720px) {
   .training-studio-shell {
-    width: min(100% - 20px, 1180px);
+    width: calc(100% - (var(--page-gutter-mobile) * 2));
     padding-top: 18px;
   }
 

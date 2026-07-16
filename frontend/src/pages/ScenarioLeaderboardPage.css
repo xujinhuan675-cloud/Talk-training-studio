@@ -10,7 +10,7 @@
 .scenario-leaderboard-metrics,
 .scenario-leaderboard-grid,
 .scenario-leaderboard-personal {
-  max-width: 1180px;
+  max-width: var(--page-max-width);
   margin-left: auto;
   margin-right: auto;
 }
@@ -184,7 +184,7 @@
 }
 
 .scenario-leaderboard-page > .scenario-leaderboard-panel {
-  max-width: 1180px;
+  max-width: var(--page-max-width);
   margin-left: auto;
   margin-right: auto;
 }

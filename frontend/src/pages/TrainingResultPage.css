@@ -14,7 +14,7 @@
 .training-result-insights,
 .training-result-coach-events,
 .training-result-replay {
-  max-width: 1180px;
+  max-width: var(--page-max-width);
   margin-left: auto;
   margin-right: auto;
 }
