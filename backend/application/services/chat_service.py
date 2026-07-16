@@ -12,6 +12,7 @@ from typing import AsyncIterator, Callable, Optional
 
 from application.dto import ChatRequestDTO, MessageDTO_Agent, RunDTO
 from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMResponse
+from core.logging_config import get_logger
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import Message, Run
 from domain.conversation.exceptions import (
@@ -19,7 +20,6 @@ from domain.conversation.exceptions import (
     ConversationNotFoundException,
     LLMProviderException,
 )
-from core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -39,10 +39,103 @@ class ChatApplicationService:
         self._uow_factory = uow_factory
         self._llm = llm
 
-    async def _load_history(self, uow, conversation_id: int) -> list[LLMMessage]:
-        """Load conversation messages as LLMMessage list."""
-        messages = await uow.message_repository.list_by_conversation(conversation_id, limit=200)
+    async def _load_history(
+        self,
+        uow,
+        conversation_id: int,
+        *,
+        tail_message_id: str | None = None,
+        branch_id: str | None = None,
+    ) -> list[LLMMessage]:
+        """Load the active branch path as an LLMMessage list."""
+
+        if tail_message_id:
+            messages: list[Message] = []
+            seen: set[str] = set()
+            current_id: str | None = tail_message_id
+            while current_id and len(messages) < 200:
+                if current_id in seen:
+                    raise ValueError("Message tree contains a cycle")
+                seen.add(current_id)
+                message = await uow.message_repository.get_by_public_id(current_id)
+                if message is None or message.conversation_id != conversation_id:
+                    raise ValueError("Message tree path contains an invalid message")
+                if message.status == "active":
+                    messages.append(message)
+                current_id = message.parent_message_id
+            messages.reverse()
+        else:
+            messages = await uow.message_repository.list_by_conversation(
+                conversation_id,
+                limit=200,
+                branch_id=branch_id,
+            )
+            messages = [message for message in messages if message.status == "active"]
         return [LLMMessage(role=m.role, content=m.content) for m in messages]
+
+    async def _resolve_parent_message(
+        self,
+        uow,
+        conversation_id: int,
+        dto: ChatRequestDTO,
+    ) -> tuple[Message | None, str]:
+        requested_branch = _clean_optional_text(dto.branch_id)
+        parent_public_id = _clean_optional_text(dto.parent_message_id)
+        if parent_public_id:
+            parent = await uow.message_repository.get_by_public_id(parent_public_id)
+            if parent is None or parent.conversation_id != conversation_id:
+                raise ValueError("parent_message_id does not reference this conversation")
+            if parent.status == "deleted":
+                raise ValueError("parent_message_id references a deleted message")
+            return parent, requested_branch or parent.branch_id or "main"
+
+        branch_id = requested_branch or "main"
+        parent = await uow.message_repository.get_latest_by_conversation(
+            conversation_id,
+            branch_id=branch_id,
+        )
+        return parent, branch_id
+
+    async def _create_user_message_run_and_history(
+        self,
+        uow,
+        *,
+        conversation_id: int,
+        dto: ChatRequestDTO,
+        model: str | None,
+        now: datetime,
+    ) -> tuple[Message, Run, list[LLMMessage]]:
+        parent_message, branch_id = await self._resolve_parent_message(uow, conversation_id, dto)
+        user_msg = Message(
+            id=None,
+            conversation_id=conversation_id,
+            role="user",
+            content=dto.message,
+            parent_message_id=parent_message.public_id if parent_message else None,
+            branch_id=branch_id,
+            model=model,
+            created_at=now,
+        )
+        user_msg = await uow.message_repository.create(user_msg)
+
+        run = Run(
+            id=None,
+            conversation_id=conversation_id,
+            status="running",
+            model=model,
+            metadata={"trigger_message_id": user_msg.public_id},
+            started_at=now,
+            created_at=now,
+        )
+        run = await uow.run_repository.create(run)
+
+        history = await self._load_history(
+            uow,
+            conversation_id,
+            tail_message_id=user_msg.public_id,
+            branch_id=branch_id,
+        )
+        return user_msg, run, history
 
     async def send_message_stream(
         self,
@@ -63,30 +156,13 @@ class ChatApplicationService:
 
             model = dto.model or conv.model
             now = _utcnow()
-
-            # Create user message
-            user_msg = Message(
-                id=None,
+            user_msg, run, history = await self._create_user_message_run_and_history(
+                uow,
                 conversation_id=conversation_id,
-                role="user",
-                content=dto.message,
-                created_at=now,
-            )
-            user_msg = await uow.message_repository.create(user_msg)
-
-            # Create run
-            run = Run(
-                id=None,
-                conversation_id=conversation_id,
-                status="running",
+                dto=dto,
                 model=model,
-                started_at=now,
-                created_at=now,
+                now=now,
             )
-            run = await uow.run_repository.create(run)
-
-            # Load history for LLM context
-            history = await self._load_history(uow, conversation_id)
 
             await uow.commit()
 
@@ -105,6 +181,9 @@ class ChatApplicationService:
             "message_created",
             {
                 "message_id": user_msg_id,
+                "public_id": user_msg.public_id,
+                "parent_message_id": user_msg.parent_message_id,
+                "branch_id": user_msg.branch_id,
                 "role": "user",
             },
         )
@@ -114,6 +193,8 @@ class ChatApplicationService:
         prompt_tokens = 0
         completion_tokens = 0
         total_tokens = 0
+        finish_reason: Optional[str] = None
+        response_model = model
 
         try:
             async for chunk in self._llm.stream(
@@ -135,6 +216,10 @@ class ChatApplicationService:
                     prompt_tokens = chunk.prompt_tokens
                     completion_tokens = chunk.completion_tokens
                     total_tokens = chunk.total_tokens
+                if chunk.finish_reason:
+                    finish_reason = chunk.finish_reason
+                if chunk.model:
+                    response_model = chunk.model
 
         except Exception as exc:
             logger.error("llm_stream_failed", error=str(exc), run_id=run_id)
@@ -159,6 +244,10 @@ class ChatApplicationService:
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,
+                parent_message_id=user_msg.public_id,
+                branch_id=user_msg.branch_id,
+                finish_reason=finish_reason,
+                model=response_model,
                 run_id=run_id,
                 token_count=completion_tokens,
                 created_at=_utcnow(),
@@ -171,6 +260,7 @@ class ChatApplicationService:
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    finish_reason=finish_reason,
                 )
                 await uow.run_repository.update(run_entity)
 
@@ -180,6 +270,9 @@ class ChatApplicationService:
             "message_complete",
             {
                 "message_id": assistant_msg.id,
+                "public_id": assistant_msg.public_id,
+                "parent_message_id": assistant_msg.parent_message_id,
+                "branch_id": assistant_msg.branch_id,
                 "role": "assistant",
                 "content": full_content,
             },
@@ -211,27 +304,13 @@ class ChatApplicationService:
 
             model = dto.model or conv.model
             now = _utcnow()
-
-            user_msg = Message(
-                id=None,
+            user_msg, run, history = await self._create_user_message_run_and_history(
+                uow,
                 conversation_id=conversation_id,
-                role="user",
-                content=dto.message,
-                created_at=now,
-            )
-            user_msg = await uow.message_repository.create(user_msg)
-
-            run = Run(
-                id=None,
-                conversation_id=conversation_id,
-                status="running",
+                dto=dto,
                 model=model,
-                started_at=now,
-                created_at=now,
+                now=now,
             )
-            run = await uow.run_repository.create(run)
-
-            history = await self._load_history(uow, conversation_id)
             await uow.commit()
 
         run_id = run.id
@@ -266,6 +345,10 @@ class ChatApplicationService:
                 conversation_id=conversation_id,
                 role="assistant",
                 content=response.content,
+                parent_message_id=user_msg.public_id,
+                branch_id=user_msg.branch_id,
+                finish_reason=response.finish_reason,
+                model=response.model or model,
                 run_id=run_id,
                 token_count=response.completion_tokens,
                 created_at=_utcnow(),
@@ -278,6 +361,7 @@ class ChatApplicationService:
                     prompt_tokens=response.prompt_tokens,
                     completion_tokens=response.completion_tokens,
                     total_tokens=response.total_tokens,
+                    finish_reason=response.finish_reason,
                 )
                 await uow.run_repository.update(run_entity)
 
@@ -292,3 +376,10 @@ class ChatApplicationService:
 def _sse_event(event: str, data: dict) -> str:
     """Format an SSE event string."""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _clean_optional_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

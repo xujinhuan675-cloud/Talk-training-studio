@@ -10,13 +10,24 @@ import os
 import re
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -33,10 +44,21 @@ from api.dependencies import (
     training_scope_for,
 )
 from application.ports.llm import LLMPort
+from application.ports.realtime import (
+    PersistedRealtimeTranscript,
+    RealtimeAudioChunk,
+    RealtimePipelineAdapter,
+    RealtimeSessionBinding,
+    RealtimeTranscript,
+)
 from application.services.stakeholder.analysis_service import AnalysisReaderService, AnalysisService
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.dto import CreateChatRoomDTO, MessageDTO
 from application.services.stakeholder.sse import room_event_bus
+from application.services.training_studio.catalog_service import (
+    TrainingCatalogService,
+    TrainingTaskConfigDTO,
+)
 from application.services.training_studio.live_guidance_llm_adapter import LiveGuidanceLLMAdapter
 from application.services.training_studio.live_guidance_service import (
     TrainingLiveGuidanceService,
@@ -46,6 +68,16 @@ from application.services.training_studio.live_guidance_service import (
 from application.services.training_studio.openai_realtime import (
     OpenAIRealtimeConfig,
     OpenAIRealtimeTranscriptionClient,
+)
+from application.services.training_studio.realtime_pipeline import (
+    FINAL_TRANSCRIPT_EVENT_TYPES,
+    build_realtime_transcript,
+    extract_final_transcript,
+    realtime_role_for_event,
+    transcript_to_message_metadata,
+)
+from application.services.training_studio.realtime_pipeline_runner import (
+    RealtimePipelineSessionRunner,
 )
 from application.services.training_studio.realtime_session import (
     RealtimeEvent,
@@ -57,10 +89,6 @@ from application.services.training_studio.scenario_config_service import (
     ScenarioConfigStateDTO,
     TrainingScenarioConfigService,
 )
-from application.services.training_studio.catalog_service import (
-    TrainingCatalogService,
-    TrainingTaskConfigDTO,
-)
 from application.services.training_studio.session_service import (
     CreateTrainingSessionDTO,
     TrainingSessionDTO,
@@ -68,9 +96,9 @@ from application.services.training_studio.session_service import (
 )
 from core.config import LLMSettings, VoiceSettings, settings
 from core.response import success_response
+from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
-from domain.common.exceptions import DomainValidationException
 from domain.training_studio.catalog import ScenarioCategory
 from domain.training_studio.session import TrainingSessionStatus
 from domain.training_studio.storybank import JsonFileStoryBankStore, StoryBankService
@@ -78,9 +106,7 @@ from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
 router = APIRouter(prefix="/training-studio", tags=["Training Studio"])
 _TRAINING_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "training_studio"
-_storybank_service = StoryBankService(
-    JsonFileStoryBankStore(_TRAINING_DATA_DIR / "storybank.json")
-)
+_storybank_service = StoryBankService(JsonFileStoryBankStore(_TRAINING_DATA_DIR / "storybank.json"))
 _training_scenario_config_service = TrainingScenarioConfigService(
     JsonFileScenarioConfigStore(_TRAINING_DATA_DIR / "scenario_config.json")
 )
@@ -175,7 +201,9 @@ def _clean_config_text(value: str | None) -> str | None:
         return None
     text = value.strip()
     if "\n" in text or "\r" in text:
-        raise HTTPException(status_code=400, detail="Configuration values cannot contain line breaks")
+        raise HTTPException(
+            status_code=400, detail="Configuration values cannot contain line breaks"
+        )
     return text or None
 
 
@@ -246,7 +274,9 @@ def _format_env_value(value: str | None) -> str:
     if not value:
         return ""
     if "\n" in value or "\r" in value:
-        raise HTTPException(status_code=400, detail="Configuration values cannot contain line breaks")
+        raise HTTPException(
+            status_code=400, detail="Configuration values cannot contain line breaks"
+        )
     if any(ch.isspace() for ch in value) or "#" in value:
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
@@ -256,7 +286,9 @@ def _format_env_value(value: str | None) -> str:
 def _write_env_file_values(updates: dict[str, str | None]) -> None:
     env_path = _settings_env_file_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True) if env_path.exists() else []
+    lines = (
+        env_path.read_text(encoding="utf-8").splitlines(keepends=True) if env_path.exists() else []
+    )
     pending = dict(updates)
 
     for index, line in enumerate(lines):
@@ -412,6 +444,22 @@ def get_training_realtime_openai_factory() -> Callable[[], OpenAIRealtimeTranscr
     return _factory
 
 
+RealtimePipelineFactory = Callable[[str], RealtimePipelineAdapter | None]
+
+
+def get_training_realtime_pipeline_factory() -> RealtimePipelineFactory:
+    def _factory(provider: str) -> RealtimePipelineAdapter | None:
+        if not _uses_pipecat_realtime(provider):
+            return None
+        try:
+            pipecat_adapter = _load_pipecat_realtime_adapter()
+            return pipecat_adapter.create_pipecat_realtime_pipeline()
+        except Exception:
+            return None
+
+    return _factory
+
+
 class StoryBankRegisterDTO(BaseModel):
     answer_text: str = Field(..., min_length=20, max_length=20000)
     scenario_category: ScenarioCategory | str = ScenarioCategory.INTERVIEW
@@ -508,10 +556,14 @@ def _assert_training_session_access(session, current_user: CurrentUser) -> None:
             return
         if session.user_id and session.user_id == current_user.user_id:
             return
-        raise HTTPException(status_code=403, detail="Training session is outside the current team scope")
+        raise HTTPException(
+            status_code=403, detail="Training session is outside the current team scope"
+        )
     if session.user_id and session.user_id == current_user.user_id:
         return
-    raise HTTPException(status_code=403, detail="Training session is outside the current user scope")
+    raise HTTPException(
+        status_code=403, detail="Training session is outside the current user scope"
+    )
 
 
 async def _require_accessible_training_session(
@@ -595,14 +647,16 @@ def _split_video_answer_content(content: str) -> tuple[str, dict[str, object] | 
 def _message_to_guidance_turn(message: MessageDTO) -> TranscriptTurn:
     text, video_answer = _split_video_answer_content(message.content)
     metadata: dict[str, object] = dict(message.metadata or {})
-    metadata.update({
-        "message_id": message.id,
-        "room_id": message.room_id,
-        "sender_type": message.sender_type,
-        "sender_id": message.sender_id,
-        "emotion_score": message.emotion_score,
-        "emotion_label": message.emotion_label,
-    })
+    metadata.update(
+        {
+            "message_id": message.id,
+            "room_id": message.room_id,
+            "sender_type": message.sender_type,
+            "sender_id": message.sender_id,
+            "emotion_score": message.emotion_score,
+            "emotion_label": message.emotion_label,
+        }
+    )
     if video_answer is not None:
         metadata.update(
             {
@@ -655,13 +709,20 @@ async def _require_guidance_persistence_room_id(
         current_user=current_user,
     )
     if session.status not in {TrainingSessionStatus.ACTIVE, TrainingSessionStatus.COMPLETED}:
-        raise HTTPException(status_code=400, detail="Training session must be active or completed before saving guidance")
+        raise HTTPException(
+            status_code=400,
+            detail="Training session must be active or completed before saving guidance",
+        )
     if not session.room_id:
-        raise HTTPException(status_code=400, detail="Training session must be started before saving guidance")
+        raise HTTPException(
+            status_code=400, detail="Training session must be started before saving guidance"
+        )
     try:
         return int(session.room_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Session room_id must be numeric to save guidance") from exc
+        raise HTTPException(
+            status_code=400, detail="Session room_id must be numeric to save guidance"
+        ) from exc
 
 
 async def _require_active_guidance_room_id(
@@ -681,13 +742,19 @@ async def _require_active_guidance_room_id(
             current_user=current_user,
         )
     if session.status != TrainingSessionStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Training session must be active before requesting guidance")
+        raise HTTPException(
+            status_code=400, detail="Training session must be active before requesting guidance"
+        )
     if not session.room_id:
-        raise HTTPException(status_code=400, detail="Training session must be started before requesting guidance")
+        raise HTTPException(
+            status_code=400, detail="Training session must be started before requesting guidance"
+        )
     try:
         return int(session.room_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Session room_id must be numeric to read guidance context") from exc
+        raise HTTPException(
+            status_code=400, detail="Session room_id must be numeric to read guidance context"
+        ) from exc
 
 
 async def _generate_training_guidance(
@@ -712,13 +779,13 @@ async def _generate_training_guidance(
         )
 
     if session.status != TrainingSessionStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Training session must be active before requesting guidance")
+        raise HTTPException(
+            status_code=400, detail="Training session must be active before requesting guidance"
+        )
 
     if body.recent_turns:
         recent_turns = [
-            _request_turn_to_guidance_turn(turn)
-            for turn in body.recent_turns
-            if turn.text.strip()
+            _request_turn_to_guidance_turn(turn) for turn in body.recent_turns if turn.text.strip()
         ]
         source = "request"
     else:
@@ -762,11 +829,7 @@ def _guidance_payload_signature(data: dict[str, object]) -> str:
     stable_events = []
     if isinstance(events, list):
         stable_events = [
-            {
-                key: value
-                for key, value in event.items()
-                if key != "created_at"
-            }
+            {key: value for key, value in event.items() if key != "created_at"}
             for event in events
             if isinstance(event, dict)
         ]
@@ -845,6 +908,66 @@ def _openai_realtime_session_config() -> dict[str, object]:
     }
 
 
+def _openai_realtime_capability_response() -> dict[str, object]:
+    effective_key = _openai_realtime_api_key()
+    return {
+        "configured": bool(
+            effective_key and settings.REALTIME_OPENAI_MODEL and settings.REALTIME_OPENAI_VOICE
+        ),
+        "effectiveKey": bool(effective_key),
+        "model": settings.REALTIME_OPENAI_MODEL,
+        "voice": settings.REALTIME_OPENAI_VOICE,
+    }
+
+
+def _load_pipecat_realtime_adapter() -> Any:
+    from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
+
+    return pipecat_adapter
+
+
+def _pipecat_realtime_capability_response() -> dict[str, object]:
+    try:
+        pipecat_adapter = _load_pipecat_realtime_adapter()
+    except Exception as exc:
+        return {
+            "available": False,
+            "coreAvailable": False,
+            "websocketAvailable": False,
+            "missingModules": ["infrastructure.external.pipecat"],
+            "error": str(exc),
+        }
+
+    try:
+        capability = pipecat_adapter.get_pipecat_capability(require_websocket=True)
+    except Exception as exc:
+        return {
+            "available": False,
+            "coreAvailable": False,
+            "websocketAvailable": False,
+            "missingModules": [],
+            "error": f"Pipecat capability check failed: {exc}",
+        }
+
+    data: dict[str, object] = {
+        "available": bool(capability.available),
+        "coreAvailable": bool(capability.core_available),
+        "websocketAvailable": bool(capability.websocket_available),
+        "missingModules": [str(module) for module in capability.missing_modules],
+        "error": capability.error,
+    }
+    with suppress(Exception):
+        data["sourceSnapshot"] = dict(pipecat_adapter.pipecat_source_snapshot())
+    return data
+
+
+def _realtime_capabilities_response() -> dict[str, object]:
+    return {
+        "openaiRealtime": _openai_realtime_capability_response(),
+        "pipecat": _pipecat_realtime_capability_response(),
+    }
+
+
 def _wire_value(payload: dict[str, object], *keys: str) -> object | None:
     for key in keys:
         value = payload.get(key)
@@ -892,6 +1015,10 @@ def _uses_openai_realtime(provider: str) -> bool:
     return provider in {"openai", "openai_realtime", "openai-realtime"}
 
 
+def _uses_pipecat_realtime(provider: str) -> bool:
+    return provider in {"pipecat", "pipecat_pipeline", "pipecat-pipeline"}
+
+
 def _configure_binding(payload: dict[str, object]) -> tuple[str | None, int | None]:
     session_id = _coerce_optional_text(_wire_value(payload, "session_id", "sessionId"))
     room_id = _coerce_optional_room_id(_wire_value(payload, "room_id", "roomId"))
@@ -918,15 +1045,23 @@ async def _resolve_realtime_binding(
     if current_user is not None:
         _assert_training_session_access(training_session, current_user)
     if training_session.status != TrainingSessionStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Training session must be active before binding realtime")
+        raise HTTPException(
+            status_code=400, detail="Training session must be active before binding realtime"
+        )
     if not training_session.room_id:
-        raise HTTPException(status_code=400, detail="Training session must be started before binding realtime")
+        raise HTTPException(
+            status_code=400, detail="Training session must be started before binding realtime"
+        )
 
     bound_room_id = _coerce_optional_room_id(training_session.room_id)
     if bound_room_id is None:
-        raise HTTPException(status_code=400, detail="Session room_id must be numeric to bind realtime")
+        raise HTTPException(
+            status_code=400, detail="Session room_id must be numeric to bind realtime"
+        )
     if room_id is not None and room_id != bound_room_id:
-        raise HTTPException(status_code=400, detail="room_id does not match the active training session")
+        raise HTTPException(
+            status_code=400, detail="room_id does not match the active training session"
+        )
 
     async with uow_factory(readonly=True) as uow:
         room = await uow.chat_room_repository.get_by_id(bound_room_id)
@@ -936,23 +1071,11 @@ async def _resolve_realtime_binding(
     return session_id, bound_room_id
 
 
-_FINAL_TRANSCRIPT_EVENT_TYPES = {
-    "transcript.done",
-    "input_audio_transcription.completed",
-    "conversation.item.input_audio_transcription.completed",
-    "response.audio_transcript.done",
-    "response.output_audio_transcript.done",
-}
+_FINAL_TRANSCRIPT_EVENT_TYPES = FINAL_TRANSCRIPT_EVENT_TYPES
 
 
 def _extract_final_transcript(payload: dict[str, object]) -> str | None:
-    if payload.get("type") not in _FINAL_TRANSCRIPT_EVENT_TYPES:
-        return None
-    value = _wire_value(payload, "text", "transcript")
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
-    return None
+    return extract_final_transcript(payload)
 
 
 def _metadata_scalar(value: object | None) -> object | None:
@@ -994,64 +1117,73 @@ def _realtime_transcript_metadata(
     realtime_session_id: str,
     role: str = "user",
 ) -> dict[str, object]:
-    realtime: dict[str, object] = {
-        "schemaVersion": 1,
-        "provider": provider,
-        "eventType": payload.get("type"),
-        "role": role,
-        "trainingSessionId": training_session_id,
-        "roomId": room_id,
-        "realtimeSessionId": realtime_session_id,
-        "isFinal": True,
-        "receivedAt": datetime.now(UTC).isoformat(),
-    }
-    for output_key, input_keys in {
-        "eventId": ("event_id", "eventId"),
-        "itemId": ("item_id", "itemId", "item"),
-        "responseId": ("response_id", "responseId", "response"),
-        "contentIndex": ("content_index", "contentIndex"),
-        "language": ("language", "lang"),
-        "confidence": ("confidence",),
-        "sequence": ("sequence",),
-        "sourceLanguage": ("sourceLanguage", "source_language", "sourceLang"),
-        "targetLanguage": ("targetLanguage", "target_language", "targetLang"),
-        "translationIntent": (
-            "translationIntent",
-            "translation_intent",
-            "translationStrategy",
-            "translationMode",
-        ),
-    }.items():
-        value = _metadata_scalar(_wire_metadata_value(payload, *input_keys))
-        if value is not None:
-            realtime[output_key] = value
-    metadata: dict[str, object] = {
-        "source": _metadata_scalar(_wire_metadata_value(payload, "source")) or "realtime_voice",
-        "trainingMode": "voice",
-        "interactionMode": "realtime",
-        "realtime": realtime,
-    }
-    for output_key, input_keys in {
-        "trainingProfile": ("trainingProfile", "training_profile"),
-        "sourceLanguage": ("sourceLanguage", "source_language", "sourceLang"),
-        "targetLanguage": ("targetLanguage", "target_language", "targetLang"),
-        "translationStrategy": ("translationStrategy", "translationMode", "translation_intent"),
-    }.items():
-        value = _metadata_scalar(_wire_metadata_value(payload, *input_keys))
-        if value is not None:
-            metadata[output_key] = value
-    for output_key in ("translation", "liveCoach"):
-        value = _metadata_scalar_mapping(_wire_metadata_value(payload, output_key))
-        if value is not None:
-            metadata[output_key] = value
-    return metadata
+    transcript = _normalize_realtime_transcript(
+        payload,
+        training_session_id=training_session_id,
+        room_id=room_id,
+        provider=provider,
+        realtime_session_id=realtime_session_id,
+        role=role,
+    )
+    return transcript_to_message_metadata(transcript)
 
 
 def _realtime_role_for_event(payload: dict[str, object]) -> str:
-    event_type = str(payload.get("type") or "")
-    if event_type.startswith("response."):
-        return "assistant"
-    return "user"
+    return realtime_role_for_event(payload)
+
+
+def _normalize_realtime_transcript(
+    payload: dict[str, object],
+    *,
+    training_session_id: str,
+    room_id: int,
+    provider: str,
+    realtime_session_id: str,
+    role: str | None = None,
+) -> RealtimeTranscript:
+    """Normalize realtime transcript payloads from OpenAI, Pipecat, or clients."""
+
+    event_type = str(payload.get("type") or "transcript.done")
+    normalized_payload = dict(payload)
+    if event_type not in _FINAL_TRANSCRIPT_EVENT_TYPES:
+        normalized_payload["type"] = "transcript.done"
+        normalized_payload.setdefault("text", _wire_value(payload, "text", "transcript", "content"))
+
+    binding = RealtimeSessionBinding(
+        training_session_id=training_session_id,
+        room_id=room_id,
+    )
+    transcript = build_realtime_transcript(
+        normalized_payload,
+        binding=binding,
+        provider=provider,
+        realtime_session_id=realtime_session_id,
+    )
+    if transcript is None:
+        text = _coerce_optional_text(_wire_value(payload, "text", "transcript", "content"))
+        if text is None:
+            raise ValueError("Realtime transcript payload must contain non-empty text")
+        transcript = RealtimeTranscript(
+            text=text,
+            role=role or realtime_role_for_event(payload),
+            binding=binding,
+            provider=provider,
+            realtime_session_id=realtime_session_id,
+            event_type=event_type,
+        )
+
+    resolved_role = role or transcript.role
+    metadata = dict(transcript.metadata)
+    realtime = dict(metadata.get("realtime") or {})
+    realtime["eventType"] = event_type
+    realtime["role"] = resolved_role
+    metadata["realtime"] = realtime
+    return replace(
+        transcript,
+        role=resolved_role,
+        event_type=event_type,
+        metadata=metadata,
+    )
 
 
 async def _persist_realtime_message(
@@ -1082,6 +1214,52 @@ async def _persist_realtime_message(
 
     await room_event_bus.publish(room_id, "message", dto.model_dump(mode="json"))
     return dto
+
+
+class _WebSocketTrainingTranscriptSink:
+    def __init__(
+        self,
+        *,
+        websocket: WebSocket,
+        session: RealtimeSession,
+        training_session_id: str,
+        room_id: int,
+        svc: TrainingSessionService,
+        uow_factory: Callable[..., AbstractUnitOfWork],
+    ) -> None:
+        self._websocket = websocket
+        self._session = session
+        self._training_session_id = training_session_id
+        self._room_id = room_id
+        self._svc = svc
+        self._uow_factory = uow_factory
+
+    async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
+        message = await _persist_realtime_message(
+            self._room_id,
+            transcript.text,
+            uow_factory=self._uow_factory,
+            metadata=transcript_to_message_metadata(transcript),
+            sender_type="persona" if transcript.role == "assistant" else "user",
+            sender_id="assistant" if transcript.role == "assistant" else "user",
+        )
+        await self._svc.record_turns(self._training_session_id)
+        payload = {
+            "trainingSessionId": self._training_session_id,
+            "roomId": self._room_id,
+            "message": message.model_dump(mode="json"),
+        }
+        await _send_wire_event(
+            self._websocket,
+            "transcript.persisted",
+            self._session,
+            payload,
+        )
+        return PersistedRealtimeTranscript(
+            transcript=transcript,
+            message_id=message.id,
+            payload=payload,
+        )
 
 
 async def _persist_realtime_transcript(
@@ -1117,30 +1295,29 @@ async def _pump_openai_realtime_events(
             return
         event_type = event.get("type")
         if event_type == "error":
-            message = _coerce_optional_text(_wire_value(event, "message")) or "OpenAI realtime error"
+            message = (
+                _coerce_optional_text(_wire_value(event, "message")) or "OpenAI realtime error"
+            )
             await _send_event(websocket, session.fail(message, "OPENAI_REALTIME_ERROR"))
             return
-        transcript = _extract_final_transcript(event)
+        transcript = build_realtime_transcript(
+            event,
+            binding=RealtimeSessionBinding(training_session_id=binding[0], room_id=binding[1]),
+            provider=provider,
+            realtime_session_id=session.session_id,
+        )
         if transcript is None:
             continue
         if session.status.value == "processing":
-            await _send_event(websocket, session.transcript_done(transcript))
-        role = _realtime_role_for_event(event)
-        metadata = _realtime_transcript_metadata(
-            event,
-            training_session_id=binding[0],
-            room_id=binding[1],
-            provider=provider,
-            realtime_session_id=session.session_id,
-            role=role,
-        )
+            await _send_event(websocket, session.transcript_done(transcript.text))
+        metadata = transcript_to_message_metadata(transcript)
         message = await _persist_realtime_message(
             binding[1],
-            transcript,
+            transcript.text,
             uow_factory=uow_factory,
             metadata=metadata,
-            sender_type="persona" if role == "assistant" else "user",
-            sender_id="assistant" if role == "assistant" else "user",
+            sender_type="persona" if transcript.role == "assistant" else "user",
+            sender_id="assistant" if transcript.role == "assistant" else "user",
         )
         await svc.record_turns(binding[0])
         await _send_wire_event(
@@ -1324,11 +1501,15 @@ async def complete_training_session(
     report_id = str(body.report_id).strip() if body.report_id is not None else ""
     if body.generate_report and not report_id:
         if not session.room_id:
-            raise HTTPException(status_code=400, detail="Session must be started before generating a report")
+            raise HTTPException(
+                status_code=400, detail="Session must be started before generating a report"
+            )
         try:
             room_id = int(session.room_id)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Session room_id must be numeric to generate a report") from exc
+            raise HTTPException(
+                status_code=400, detail="Session room_id must be numeric to generate a report"
+            ) from exc
         try:
             report = await analysis_svc.generate_report(room_id)
         except ValueError as exc:
@@ -1430,14 +1611,25 @@ async def create_realtime_sdp_call(
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"OpenAI Realtime SDP request failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"OpenAI Realtime SDP request failed: {exc}"
+        ) from exc
 
     if upstream.status_code >= 400:
         raise HTTPException(status_code=upstream.status_code, detail=upstream.text)
     return Response(content=upstream.text, media_type="application/sdp")
 
 
-@router.post("/realtime/transcripts", status_code=201, summary="Persist Realtime voice-agent transcripts")
+@router.get("/realtime/capabilities", summary="Get realtime provider capabilities")
+async def get_realtime_capabilities(
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+):
+    return success_response(data=_realtime_capabilities_response())
+
+
+@router.post(
+    "/realtime/transcripts", status_code=201, summary="Persist Realtime voice-agent transcripts"
+)
 async def persist_realtime_transcripts(
     body: RealtimeTranscriptPersistDTO,
     svc: TrainingSessionService = Depends(get_training_session_service),
@@ -1452,7 +1644,9 @@ async def persist_realtime_transcripts(
         current_user=current_user,
     )
     if binding is None:
-        raise HTTPException(status_code=400, detail="Realtime transcript persistence requires a bound session")
+        raise HTTPException(
+            status_code=400, detail="Realtime transcript persistence requires a bound session"
+        )
 
     persisted: list[MessageDTO] = []
     for item in body.messages:
@@ -1463,6 +1657,7 @@ async def persist_realtime_transcripts(
         sender_id = item.sender_id or ("assistant" if item.role == "assistant" else "user")
         payload: dict[str, object] = {
             "type": f"client.realtime_transcript.{item.role}",
+            "text": content,
             "event_id": item.event_id,
             "item_id": item.item_id,
             "response_id": item.response_id,
@@ -1489,7 +1684,9 @@ async def persist_realtime_transcripts(
     if persisted:
         await svc.record_turns(binding[0], len(persisted))
 
-    return success_response(data={"messages": [message.model_dump(mode="json") for message in persisted]})
+    return success_response(
+        data={"messages": [message.model_dump(mode="json") for message in persisted]}
+    )
 
 
 @router.get("/sessions/{session_id}/guidance", summary="Get Training Studio live guidance")
@@ -1534,7 +1731,11 @@ async def request_training_guidance(
     return success_response(data=data)
 
 
-@router.post("/sessions/{session_id}/guidance-events", status_code=201, summary="Persist Training Studio live guidance events")
+@router.post(
+    "/sessions/{session_id}/guidance-events",
+    status_code=201,
+    summary="Persist Training Studio live guidance events",
+)
 async def persist_training_guidance_events(
     session_id: str,
     body: PersistTrainingGuidanceEventsDTO,
@@ -1589,7 +1790,9 @@ async def persist_training_guidance_events(
     )
 
 
-@router.get("/sessions/{session_id}/guidance/stream", summary="Stream Training Studio live guidance")
+@router.get(
+    "/sessions/{session_id}/guidance/stream", summary="Stream Training Studio live guidance"
+)
 async def stream_training_guidance(
     session_id: str,
     request: Request,
@@ -1646,7 +1849,9 @@ async def stream_training_guidance(
                         guidance_svc=guidance_svc,
                     )
                 except HTTPException as exc:
-                    yield _format_sse("guidance_error", {"status_code": exc.status_code, "detail": exc.detail})
+                    yield _format_sse(
+                        "guidance_error", {"status_code": exc.status_code, "detail": exc.detail}
+                    )
                     return
 
                 signature = _guidance_payload_signature(data)
@@ -1853,7 +2058,9 @@ async def save_voice_config(
         await _reload_llm_client()
         await _reload_voice_clients()
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Configuration saved but reload failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Configuration saved but reload failed: {exc}"
+        ) from exc
 
     return success_response(
         data=_voice_config_response().model_dump(mode="json"),
@@ -1867,9 +2074,7 @@ async def get_scenario_config(
     _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
     config = svc.get_config()
-    return success_response(
-        data=config.model_dump(mode="json", by_alias=True, exclude_none=True)
-    )
+    return success_response(data=config.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
 @router.put("/scenario-config", summary="Save scenario configuration state")
@@ -1879,9 +2084,7 @@ async def save_scenario_config(
     _current_user: CurrentUser = Depends(require_system_roles("admin", "leader")),
 ):
     config = svc.save_config(body)
-    return success_response(
-        data=config.model_dump(mode="json", by_alias=True, exclude_none=True)
-    )
+    return success_response(data=config.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
 @router.get("/rubrics/default", summary="Get default rubric weights")
@@ -1988,6 +2191,7 @@ async def realtime_training_session(
     openai_factory: Callable[[], OpenAIRealtimeTranscriptionClient] = Depends(
         get_training_realtime_openai_factory
     ),
+    pipeline_factory: RealtimePipelineFactory = Depends(get_training_realtime_pipeline_factory),
 ):
     """Minimal bidirectional realtime session endpoint for audio event wiring."""
 
@@ -1998,6 +2202,41 @@ async def realtime_training_session(
     binding: tuple[str, int] | None = None
     openai_client: OpenAIRealtimeTranscriptionClient | None = None
     openai_task: asyncio.Task[None] | None = None
+    pipeline_runner: RealtimePipelineSessionRunner | None = None
+
+    async def _ensure_pipeline_runner(active_binding: tuple[str, int]) -> None:
+        nonlocal pipeline_runner
+        if pipeline_runner is not None or not _uses_pipecat_realtime(provider):
+            return
+        adapter = pipeline_factory(provider)
+        if adapter is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Pipecat realtime pipeline is not available",
+            )
+        sink = _WebSocketTrainingTranscriptSink(
+            websocket=websocket,
+            session=session,
+            training_session_id=active_binding[0],
+            room_id=active_binding[1],
+            svc=svc,
+            uow_factory=uow_factory,
+        )
+        runner = RealtimePipelineSessionRunner(adapter=adapter, transcript_sink=sink)
+        await runner.start(
+            binding=RealtimeSessionBinding(
+                training_session_id=active_binding[0],
+                room_id=active_binding[1],
+            ),
+            provider=provider,
+            realtime_session_id=session.session_id,
+            model=settings.REALTIME_OPENAI_MODEL,
+            voice=settings.REALTIME_OPENAI_VOICE,
+            input_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
+            context_metadata={"transport": "websocket"},
+        )
+        pipeline_runner = runner
+
     try:
         binding = await _resolve_realtime_binding(
             query_session_id,
@@ -2005,6 +2244,8 @@ async def realtime_training_session(
             svc=svc,
             uow_factory=uow_factory,
         )
+        if binding is not None:
+            await _ensure_pipeline_runner(binding)
         if _uses_openai_realtime(provider):
             if binding is None:
                 raise HTTPException(
@@ -2037,10 +2278,16 @@ async def realtime_training_session(
                 audio_bytes = raw["bytes"] or b""
                 if openai_client is not None:
                     await openai_client.append_audio(audio_bytes)
-                await _send_event(
-                    websocket,
-                    session.receive_audio(audio_bytes, "audio/pcm"),
-                )
+                audio_event = session.receive_audio(audio_bytes, "audio/pcm")
+                if pipeline_runner is not None:
+                    await pipeline_runner.append_audio(
+                        RealtimeAudioChunk(
+                            data=audio_bytes,
+                            mime_type="audio/pcm",
+                            sequence=session.input_sequence,
+                        )
+                    )
+                await _send_event(websocket, audio_event)
                 continue
 
             text = raw.get("text")
@@ -2071,6 +2318,7 @@ async def realtime_training_session(
                     raise HTTPException(status_code=400, detail="Realtime session is already bound")
                 binding = configured
                 session.session_id = configured[0]
+                await _ensure_pipeline_runner(binding)
                 await _send_wire_event(
                     websocket,
                     "session.configured",
@@ -2084,14 +2332,24 @@ async def realtime_training_session(
                 audio_bytes = base64.b64decode(audio) if isinstance(audio, str) and audio else b""
                 if openai_client is not None:
                     await openai_client.append_audio(audio_bytes)
-                await _send_event(
-                    websocket,
-                    session.receive_audio(audio_bytes, payload.get("mimeType")),
-                )
+                mime_type = _coerce_optional_text(payload.get("mimeType"))
+                audio_event = session.receive_audio(audio_bytes, mime_type)
+                if pipeline_runner is not None:
+                    await pipeline_runner.append_audio(
+                        RealtimeAudioChunk(
+                            data=audio_bytes,
+                            mime_type=mime_type,
+                            sequence=session.input_sequence,
+                        )
+                    )
+                await _send_event(websocket, audio_event)
             elif event_type == "audio.commit":
                 await _send_event(websocket, session.commit_audio())
                 if openai_client is not None:
                     await openai_client.commit_audio()
+                elif pipeline_runner is not None:
+                    await pipeline_runner.commit_audio()
+                    await _send_event(websocket, session.listen())
                 else:
                     await _send_event(websocket, session.transcript_delta(""))
                     await _send_event(websocket, session.transcript_done(""))
@@ -2104,8 +2362,20 @@ async def realtime_training_session(
                 await websocket.close()
                 break
             elif event_type in _FINAL_TRANSCRIPT_EVENT_TYPES:
-                transcript = _extract_final_transcript(payload)
-                if not transcript:
+                if binding is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Realtime session must be bound before transcript persistence",
+                    )
+                transcript = build_realtime_transcript(
+                    payload,
+                    binding=RealtimeSessionBinding(
+                        training_session_id=binding[0], room_id=binding[1]
+                    ),
+                    provider=provider,
+                    realtime_session_id=session.session_id,
+                )
+                if transcript is None:
                     await _send_wire_event(
                         websocket,
                         "transcript.ignored",
@@ -2113,23 +2383,13 @@ async def realtime_training_session(
                         {"reason": "empty_transcript"},
                     )
                     continue
-                if binding is None:
-                    raise HTTPException(status_code=400, detail="Realtime session must be bound before transcript persistence")
-                role = _realtime_role_for_event(payload)
                 message = await _persist_realtime_message(
                     binding[1],
-                    transcript,
+                    transcript.text,
                     uow_factory=uow_factory,
-                    metadata=_realtime_transcript_metadata(
-                        payload,
-                        training_session_id=binding[0],
-                        room_id=binding[1],
-                        provider=provider,
-                        realtime_session_id=session.session_id,
-                        role=role,
-                    ),
-                    sender_type="persona" if role == "assistant" else "user",
-                    sender_id="assistant" if role == "assistant" else "user",
+                    metadata=transcript_to_message_metadata(transcript),
+                    sender_type="persona" if transcript.role == "assistant" else "user",
+                    sender_id="assistant" if transcript.role == "assistant" else "user",
                 )
                 await svc.record_turns(binding[0])
                 await _send_wire_event(
@@ -2143,7 +2403,9 @@ async def realtime_training_session(
                     },
                 )
             else:
-                await _send_event(websocket, session.fail("Unsupported event type", "UNSUPPORTED_EVENT"))
+                await _send_event(
+                    websocket, session.fail("Unsupported event type", "UNSUPPORTED_EVENT")
+                )
                 break
     except WebSocketDisconnect:
         return
@@ -2156,6 +2418,8 @@ async def realtime_training_session(
             await _send_event(websocket, session.fail(str(exc), "SESSION_ERROR"))
         await websocket.close(code=1011)
     finally:
+        if pipeline_runner is not None:
+            await pipeline_runner.close()
         if openai_task is not None:
             openai_task.cancel()
             with suppress(asyncio.CancelledError):

@@ -30,6 +30,22 @@ async function loadTrainingSessionModule() {
     cleanupPaths.push(authPath)
     outputText = outputText.replace("from './auth'", `from '${pathToFileURL(authPath).href}'`)
   }
+  if (outputText.includes("from '../utils/errors'")) {
+    const errorsSource = fs.readFileSync(path.resolve('src/utils/errors.ts'), 'utf8')
+    const errorsOutput = ts.transpileModule(errorsSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const errorsPath = path.join(os.tmpdir(), `errors-utils-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(errorsPath, errorsOutput)
+    cleanupPaths.push(errorsPath)
+    outputText = outputText.replace(
+      "from '../utils/errors'",
+      `from '${pathToFileURL(errorsPath).href}'`,
+    )
+  }
   fs.writeFileSync(outputPath, outputText)
   try {
     return await import(pathToFileURL(outputPath).href)

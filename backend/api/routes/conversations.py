@@ -24,12 +24,9 @@ from application.dto import (
 from application.services.conversation_service import ConversationApplicationService
 from core.config import settings
 from core.i18n import t
-from core.response import (
-    PaginatedData,
-    Response as ApiResponse,
-    paginated_response,
-    success_response,
-)
+from core.response import PaginatedData
+from core.response import Response as ApiResponse
+from core.response import paginated_response, success_response
 
 # TODO: Add authentication dependency (get_current_user) to all routes
 # when user/auth module is implemented. Currently matches project baseline
@@ -123,6 +120,34 @@ async def list_messages(
     skip = (page - 1) * size
     items, total = await service.list_messages(conversation_id, skip=skip, limit=size)
     return paginated_response(items=items, total=total, page=page, size=size)
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages/{message_public_id}/path",
+    summary="消息树路径",
+    response_model=ApiResponse[list[MessageDTO_Agent]],
+)
+async def get_message_path(
+    conversation_id: int,
+    message_public_id: str,
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    items = await service.get_message_path(conversation_id, message_public_id)
+    return success_response(items, message=t("ok"))
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages/{message_public_id}/children",
+    summary="消息子分支",
+    response_model=ApiResponse[list[MessageDTO_Agent]],
+)
+async def list_message_children(
+    conversation_id: int,
+    message_public_id: str,
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    items = await service.list_message_children(conversation_id, message_public_id)
+    return success_response(items, message=t("ok"))
 
 
 @router.get(

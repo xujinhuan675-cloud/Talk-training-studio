@@ -44,7 +44,21 @@ class MessageRepository(ABC):
     async def create(self, message: Message) -> Message: ...
 
     @abstractmethod
+    async def update(self, message: Message) -> Message: ...
+
+    @abstractmethod
     async def get_by_id(self, message_id: int) -> Optional[Message]: ...
+
+    @abstractmethod
+    async def get_by_public_id(self, public_id: str) -> Optional[Message]: ...
+
+    @abstractmethod
+    async def get_latest_by_conversation(
+        self,
+        conversation_id: int,
+        *,
+        branch_id: Optional[str] = None,
+    ) -> Optional[Message]: ...
 
     @abstractmethod
     async def list_by_conversation(
@@ -53,7 +67,11 @@ class MessageRepository(ABC):
         *,
         skip: int = 0,
         limit: int = 100,
+        branch_id: Optional[str] = None,
     ) -> list[Message]: ...
+
+    @abstractmethod
+    async def list_children(self, parent_message_id: str) -> list[Message]: ...
 
     @abstractmethod
     async def count_by_conversation(self, conversation_id: int) -> int: ...

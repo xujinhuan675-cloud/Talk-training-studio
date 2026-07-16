@@ -25,6 +25,7 @@ from domain.conversation.exceptions import (
     AgentConfigNameExistsException,
     AgentConfigNotFoundException,
     ConversationNotFoundException,
+    MessageNotFoundException,
 )
 
 
@@ -123,6 +124,54 @@ class ConversationApplicationService:
             )
             total = await uow.message_repository.count_by_conversation(conversation_id)
             return [MessageDTO_Agent.model_validate(m) for m in items], total
+
+    async def get_message_path(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        *,
+        limit: int = 200,
+    ) -> list[MessageDTO_Agent]:
+        async with self._uow_factory(readonly=True) as uow:
+            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            if conv is None:
+                raise ConversationNotFoundException(conversation_id)
+
+            messages = []
+            seen: set[str] = set()
+            current_id: str | None = message_public_id
+            while current_id and len(messages) < limit:
+                if current_id in seen:
+                    raise ValueError("Message tree contains a cycle")
+                seen.add(current_id)
+                message = await uow.message_repository.get_by_public_id(current_id)
+                if message is None or message.conversation_id != conversation_id:
+                    raise MessageNotFoundException()
+                if message.status != "deleted":
+                    messages.append(message)
+                current_id = message.parent_message_id
+            messages.reverse()
+            return [MessageDTO_Agent.model_validate(message) for message in messages]
+
+    async def list_message_children(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+    ) -> list[MessageDTO_Agent]:
+        async with self._uow_factory(readonly=True) as uow:
+            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            if conv is None:
+                raise ConversationNotFoundException(conversation_id)
+            parent = await uow.message_repository.get_by_public_id(message_public_id)
+            if parent is None or parent.conversation_id != conversation_id:
+                raise MessageNotFoundException()
+            children = await uow.message_repository.list_children(message_public_id)
+            children = [
+                child
+                for child in children
+                if child.conversation_id == conversation_id and child.status != "deleted"
+            ]
+            return [MessageDTO_Agent.model_validate(child) for child in children]
 
     # ── Runs ───────────────────────────────────────────────────────
 

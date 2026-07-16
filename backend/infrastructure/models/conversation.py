@@ -6,18 +6,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import (
-    Column,
-    DateTime,
-    Float,
-    ForeignKey,
-    Index,
-    Integer,
-    JSON,
-    String,
-    Text,
-    text,
-)
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.sql import func
 
 from .base import Base
@@ -85,6 +74,9 @@ class MessageModel(Base):
     __table_args__ = (
         Index("ix_messages_conversation_id", "conversation_id"),
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+        Index("ix_messages_public_id", "public_id", unique=True),
+        Index("ix_messages_parent_message_id", "parent_message_id"),
+        Index("ix_messages_conversation_branch", "conversation_id", "branch_id", "created_at"),
         {
             "comment": "消息表，记录对话中的消息",
         },
@@ -103,6 +95,38 @@ class MessageModel(Base):
         comment="消息角色：system/user/assistant",
     )
     content = Column(Text, nullable=False, comment="消息内容")
+    public_id = Column(
+        String(64),
+        nullable=False,
+        comment="稳定公开消息ID，用于消息树与客户端定位",
+    )
+    parent_message_id = Column(
+        String(64),
+        nullable=True,
+        comment="父消息公开ID，用于消息树与分支遍历",
+    )
+    branch_id = Column(
+        String(64),
+        nullable=True,
+        server_default=text("'main'"),
+        comment="消息分支ID",
+    )
+    status = Column(
+        String(20),
+        nullable=False,
+        default="active",
+        server_default=text("'active'"),
+        comment="消息生命周期状态",
+    )
+    finish_reason = Column(String(100), nullable=True, comment="LLM 完成原因")
+    provider = Column(String(100), nullable=True, comment="LLM 提供商")
+    model = Column(String(100), nullable=True, comment="LLM 模型")
+    content_parts = Column(
+        JSON,
+        nullable=True,
+        default=list,
+        comment="结构化消息内容片段",
+    )
     run_id = Column(
         Integer,
         ForeignKey("runs.id", ondelete="SET NULL"),
@@ -145,12 +169,14 @@ class RunModel(Base):
     __table_args__ = (
         Index("ix_runs_conversation_id", "conversation_id"),
         Index("ix_runs_status", "status"),
+        Index("ix_runs_public_id", "public_id", unique=True),
         {
             "comment": "Run 表，记录 LLM 调用追踪",
         },
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主键ID")
+    public_id = Column(String(64), nullable=False, comment="稳定公开 Run ID")
     conversation_id = Column(
         Integer,
         ForeignKey("conversations.id", ondelete="CASCADE"),
@@ -164,7 +190,9 @@ class RunModel(Base):
         server_default=text("'running'"),
         comment="Run 状态：running/completed/failed",
     )
+    provider = Column(String(100), nullable=True, comment="LLM 提供商")
     model = Column(String(100), nullable=True, comment="使用的模型")
+    finish_reason = Column(String(100), nullable=True, comment="LLM 完成原因")
     prompt_tokens = Column(
         Integer,
         nullable=False,
@@ -187,6 +215,13 @@ class RunModel(Base):
         comment="总 token 数",
     )
     error_message = Column(Text, nullable=True, comment="错误信息")
+    extra_metadata = Column(
+        "metadata",
+        JSON,
+        nullable=True,
+        default=dict,
+        comment="结构化 Run 元数据",
+    )
     started_at = Column(
         DateTime(timezone=True),
         nullable=True,

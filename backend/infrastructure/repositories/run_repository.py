@@ -27,12 +27,16 @@ class SQLAlchemyRunRepository(RunRepository):
         return Run(
             id=model.id,
             conversation_id=model.conversation_id,
+            public_id=model.public_id,
             status=model.status,
+            provider=model.provider,
             model=model.model,
+            finish_reason=model.finish_reason,
             prompt_tokens=model.prompt_tokens,
             completion_tokens=model.completion_tokens,
             total_tokens=model.total_tokens,
             error_message=model.error_message,
+            metadata=dict(model.extra_metadata or {}),
             started_at=model.started_at,
             completed_at=model.completed_at,
             created_at=model.created_at,
@@ -40,13 +44,17 @@ class SQLAlchemyRunRepository(RunRepository):
 
     async def create(self, run: Run) -> Run:
         model = RunModel(
+            public_id=run.public_id,
             conversation_id=run.conversation_id,
             status=run.status,
+            provider=run.provider,
             model=run.model,
+            finish_reason=run.finish_reason,
             prompt_tokens=run.prompt_tokens,
             completion_tokens=run.completion_tokens,
             total_tokens=run.total_tokens,
             error_message=run.error_message,
+            extra_metadata=run.metadata or {},
             started_at=run.started_at,
             completed_at=run.completed_at,
             created_at=run.created_at,
@@ -62,12 +70,16 @@ class SQLAlchemyRunRepository(RunRepository):
         if model is None:
             raise RunNotFoundException(run.id)
 
+        model.public_id = run.public_id
         model.status = run.status
+        model.provider = run.provider
         model.model = run.model
+        model.finish_reason = run.finish_reason
         model.prompt_tokens = run.prompt_tokens
         model.completion_tokens = run.completion_tokens
         model.total_tokens = run.total_tokens
         model.error_message = run.error_message
+        model.extra_metadata = run.metadata or {}
         model.started_at = run.started_at
         model.completed_at = run.completed_at
 

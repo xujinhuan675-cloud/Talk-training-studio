@@ -2,11 +2,20 @@
 数据传输对象（DTO）- 应用层与表现层之间的数据传输
 """
 
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_serializer, ConfigDict
-from shared.codes import BusinessCode
-from typing import Optional, Any, Literal
 from datetime import datetime, timezone
-from pydantic import model_validator
+from typing import Any, Literal, Optional
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+
+from shared.codes import BusinessCode
 
 
 class DTOBase(BaseModel):
@@ -239,6 +248,14 @@ class MessageDTO_Agent(DTOBase):
     conversation_id: int
     role: str
     content: str
+    public_id: Optional[str] = None
+    parent_message_id: Optional[str] = None
+    branch_id: Optional[str] = None
+    status: str = "active"
+    finish_reason: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    content_parts: list[dict[str, Any]] = Field(default_factory=list)
     run_id: Optional[int] = None
     token_count: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -252,12 +269,16 @@ class RunDTO(DTOBase):
 
     id: int
     conversation_id: int
+    public_id: Optional[str] = None
     status: str
+    provider: Optional[str] = None
     model: Optional[str]
+    finish_reason: Optional[str] = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
     error_message: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
@@ -269,6 +290,8 @@ class ChatRequestDTO(DTOBase):
     """Input for sending a chat message."""
 
     message: str = Field(min_length=1)
+    parent_message_id: Optional[str] = None
+    branch_id: Optional[str] = None
     model: Optional[str] = None
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)

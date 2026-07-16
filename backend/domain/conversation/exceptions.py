@@ -48,6 +48,18 @@ class RunNotFoundException(BusinessException):
         )
 
 
+class MessageNotFoundException(BusinessException):
+    def __init__(self, message_id: Optional[int] = None):
+        details = {"message_id": message_id} if message_id is not None else None
+        super().__init__(
+            code=BusinessCode.MESSAGE_NOT_FOUND,
+            message="Message not found",
+            error_type="MessageNotFound",
+            details=details,
+            message_key="message.not_found",
+        )
+
+
 class AgentConfigNotFoundException(BusinessException):
     def __init__(self, config_id: Optional[int] = None):
         details = {"config_id": config_id} if config_id is not None else None

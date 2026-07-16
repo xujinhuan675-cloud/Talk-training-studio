@@ -1,0 +1,202 @@
+import asyncio
+from collections.abc import AsyncIterator, Mapping
+from typing import Any
+
+import pytest
+
+from application.ports.realtime import (
+    PersistedRealtimeTranscript,
+    RealtimeAudioChunk,
+    RealtimePipelineConfig,
+    RealtimeSessionBinding,
+    RealtimeTranscript,
+    TrainingVoiceContext,
+)
+from application.services.training_studio.realtime_pipeline_runner import (
+    RealtimePipelineSessionRunner,
+)
+
+
+class FakeRealtimePipelineAdapter:
+    def __init__(self) -> None:
+        self.started_context: TrainingVoiceContext | None = None
+        self.started_config: RealtimePipelineConfig | None = None
+        self.appended_chunks: list[RealtimeAudioChunk] = []
+        self.commit_count = 0
+        self.close_count = 0
+        self._events: asyncio.Queue[Mapping[str, Any] | None] = asyncio.Queue()
+
+    async def start(self, context: TrainingVoiceContext, config: RealtimePipelineConfig) -> None:
+        self.started_context = context
+        self.started_config = config
+
+    async def append_audio(self, chunk: RealtimeAudioChunk) -> None:
+        self.appended_chunks.append(chunk)
+
+    async def commit_audio(self) -> None:
+        self.commit_count += 1
+
+    async def events(self) -> AsyncIterator[Mapping[str, Any]]:
+        while True:
+            event = await self._events.get()
+            if event is None:
+                return
+            yield event
+
+    async def close(self) -> None:
+        self.close_count += 1
+        await self._events.put(None)
+
+    async def emit(self, event: Mapping[str, Any]) -> None:
+        await self._events.put(event)
+
+
+class FakeTrainingTranscriptSink:
+    def __init__(self) -> None:
+        self.persisted: list[RealtimeTranscript] = []
+        self._persisted_event = asyncio.Event()
+
+    async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
+        self.persisted.append(transcript)
+        self._persisted_event.set()
+        return PersistedRealtimeTranscript(transcript=transcript, message_id=len(self.persisted))
+
+    async def wait_for_persisted(self, count: int = 1) -> None:
+        async def _wait() -> None:
+            while len(self.persisted) < count:
+                self._persisted_event.clear()
+                await self._persisted_event.wait()
+
+        await asyncio.wait_for(_wait(), timeout=1)
+
+
+def _binding() -> RealtimeSessionBinding:
+    return RealtimeSessionBinding(training_session_id="training-1", room_id=42)
+
+
+async def _started_runner(
+    *,
+    adapter: FakeRealtimePipelineAdapter | None = None,
+    sink: FakeTrainingTranscriptSink | None = None,
+) -> tuple[RealtimePipelineSessionRunner, FakeRealtimePipelineAdapter, FakeTrainingTranscriptSink]:
+    fake_adapter = adapter or FakeRealtimePipelineAdapter()
+    fake_sink = sink or FakeTrainingTranscriptSink()
+    runner = RealtimePipelineSessionRunner(adapter=fake_adapter, transcript_sink=fake_sink)
+    await runner.start(
+        binding=_binding(),
+        provider="pipecat",
+        realtime_session_id="rt-1",
+        task_goal="Practice discovery",
+        rubric={"clarity": 0.6},
+        recent_turns=[{"speaker": "user", "text": "What is the priority?"}],
+        context_metadata={"scenario": "sales"},
+        model="test-model",
+        voice="alloy",
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+        instructions="Keep responses concise.",
+        config_metadata={"sampleRate": 24000},
+    )
+    return runner, fake_adapter, fake_sink
+
+
+@pytest.mark.asyncio
+async def test_runner_start_builds_context_and_config_for_adapter():
+    runner, adapter, _sink = await _started_runner()
+
+    assert adapter.started_context == TrainingVoiceContext(
+        binding=_binding(),
+        task_goal="Practice discovery",
+        rubric={"clarity": 0.6},
+        recent_turns=({"speaker": "user", "text": "What is the priority?"},),
+        metadata={"scenario": "sales"},
+    )
+    assert adapter.started_config == RealtimePipelineConfig(
+        provider="pipecat",
+        model="test-model",
+        voice="alloy",
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+        instructions="Keep responses concise.",
+        metadata={"sampleRate": 24000},
+    )
+    assert runner.context == adapter.started_context
+    assert runner.config == adapter.started_config
+    assert runner.realtime_session_id == "rt-1"
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_append_audio_passes_chunk_through_to_adapter():
+    runner, adapter, _sink = await _started_runner()
+    chunk = RealtimeAudioChunk(
+        data=b"pcm",
+        mime_type="audio/pcm",
+        sequence=3,
+        metadata={"sample_rate": 16000},
+    )
+
+    await runner.append_audio(chunk)
+
+    assert adapter.appended_chunks == [chunk]
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_commit_flushes_adapter_audio():
+    runner, adapter, _sink = await _started_runner()
+
+    await runner.commit()
+
+    assert adapter.commit_count == 1
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_persists_final_transcripts_from_adapter_events():
+    runner, adapter, sink = await _started_runner()
+
+    await adapter.emit(
+        {
+            "type": "transcript.done",
+            "event_id": "evt-1",
+            "text": "  We can start with a pilot.  ",
+        }
+    )
+    await sink.wait_for_persisted()
+
+    assert len(sink.persisted) == 1
+    transcript = sink.persisted[0]
+    assert transcript.text == "We can start with a pilot."
+    assert transcript.binding == _binding()
+    assert transcript.provider == "pipecat"
+    assert transcript.realtime_session_id == "rt-1"
+    assert transcript.event_id == "evt-1"
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_ignores_non_final_transcript_events():
+    runner, adapter, sink = await _started_runner()
+
+    await adapter.emit({"type": "response.created", "text": "draft"})
+    await adapter.emit({"type": "response.audio_transcript.done", "text": "final response"})
+    await sink.wait_for_persisted()
+
+    assert len(sink.persisted) == 1
+    assert sink.persisted[0].text == "final response"
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_close_closes_adapter():
+    runner, adapter, _sink = await _started_runner()
+
+    await runner.close()
+
+    assert adapter.close_count == 1
