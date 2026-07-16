@@ -402,6 +402,7 @@
 
 .scenario-training-admin {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -413,6 +414,7 @@
 }
 
 .scenario-training-admin div {
+  flex: 1 1 420px;
   display: flex;
   min-width: 0;
   flex-direction: column;

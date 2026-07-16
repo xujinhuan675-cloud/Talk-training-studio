@@ -1,22 +1,20 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Swords,
-  MessageSquare,
-  Activity,
-  Users,
   Check,
-  ClipboardList,
-  Lock,
   ChevronRight,
+  ClipboardList,
   FileText,
+  Lock,
+  MessageSquare,
+  Swords,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
+import { useAuthContext } from '../contexts/AuthContext'
 import { fetchRooms, type ChatRoom } from '../services/api'
+import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import { useI18n, type TranslateInline } from '../i18n'
 import './HomePage.css'
-
-/* ---------- helpers ---------- */
 
 const AVATAR_COLORS = ['#8B5226', '#1E3A5F', '#3D2E5C', '#6B4226', '#2E4A3F', '#4A3060']
 
@@ -33,7 +31,7 @@ function timeAgo(dateStr: string | null, tr: TranslateInline): string {
   if (!dateStr) return ''
   const now = Date.now()
   const then = new Date(dateStr).getTime()
-  if (isNaN(then)) return ''
+  if (Number.isNaN(then)) return ''
   const diffMs = now - then
   const minutes = Math.floor(diffMs / 60000)
   if (minutes < 1) return tr('刚刚', 'Just now')
@@ -46,10 +44,9 @@ function timeAgo(dateStr: string | null, tr: TranslateInline): string {
   return tr('{count} 个月前', '{count} months ago', { count: Math.floor(days / 30) })
 }
 
-/* ---------- static data ---------- */
-
 const dailyChallenge = {
-  title: '向上汇报季度成果',
+  titleZh: '向上汇报季度成果',
+  titleEn: 'Report Quarterly Results Upward',
   progress: 0.35,
   xp: 100,
 }
@@ -68,34 +65,32 @@ const skillNodes: SkillNode[] = [
   { labelZh: '危机处理', labelEn: 'Crisis Handling', status: 'locked' },
 ]
 
-/* ---------- component ---------- */
-
 const HomePage: React.FC = () => {
-  const { personaMap, scenarios } = useAppContext()
+  const { personaMap } = useAppContext()
+  const { hasAnySystemRole } = useAuthContext()
   const { tr, t } = useI18n()
   const [rooms, setRooms] = useState<ChatRoom[]>([])
 
   useEffect(() => {
-    fetchRooms().then((data) => {
-      // Sort by last_message_at descending, filter out battle_prep rooms
-      const sorted = data
-        .filter((r) => r.type !== 'battle_prep')
-        .sort((a, b) => {
-          const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0
-          const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0
-          return tb - ta
-        })
-      setRooms(sorted)
-    }).catch(() => {})
+    fetchRooms()
+      .then((data) => {
+        const sorted = data
+          .filter((room) => room.type !== 'battle_prep')
+          .sort((a, b) => {
+            const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0
+            const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0
+            return tb - ta
+          })
+        setRooms(sorted)
+      })
+      .catch(() => {})
   }, [])
 
   const recentRooms = rooms.slice(0, 3)
-  const personaList = Object.values(personaMap)
-  const personaCount = personaList.length
-  const scenarioCount = scenarios?.length ?? 0
+  const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
+
   return (
     <div className="home-page">
-      {/* 1. Daily Challenge Banner */}
       <section className="home-daily-challenge">
         <div className="home-daily-challenge-accent" />
         <div className="home-daily-challenge-body">
@@ -105,7 +100,7 @@ const HomePage: React.FC = () => {
             </span>
             <span className="home-daily-xp">+{dailyChallenge.xp} XP</span>
           </div>
-          <p className="home-daily-title">{tr(dailyChallenge.title, 'Report Quarterly Results Upward')}</p>
+          <p className="home-daily-title">{tr(dailyChallenge.titleZh, dailyChallenge.titleEn)}</p>
           <div className="home-daily-progress-track">
             <div
               className="home-daily-progress-fill"
@@ -116,9 +111,7 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* 2. Quick Action Cards */}
-      <section className="home-actions-grid">
-        {/* Scenario Training */}
+      <section className="home-actions-grid" aria-label={tr('快速开始', 'Quick start')}>
         <Link to="/scenario-training" className="home-action-card home-action-card--green">
           <div className="home-action-icon home-action-icon--green">
             <ClipboardList size={18} />
@@ -134,39 +127,6 @@ const HomePage: React.FC = () => {
           </div>
         </Link>
 
-        {/* Battle Prep */}
-        <Link to="/battle-prep" className="home-action-card home-action-card--amber">
-          <div className="home-action-icon home-action-icon--amber">
-            <Swords size={18} />
-          </div>
-          <div className="home-action-text">
-            <span className="home-action-label home-action-label--amber">
-              {t('nav.battlePrep')}
-            </span>
-            <span className="home-action-title">{tr('30 分钟快速演练', '30-Minute Fast Drill')}</span>
-            <span className="home-action-desc">
-              {tr('针对即将到来的重要会议，进行高强度模拟对练', 'Run an intensive simulation for an upcoming important meeting')}
-            </span>
-          </div>
-        </Link>
-
-        {/* Defense Prep */}
-        <Link to="/defense-prep" className="home-action-card home-action-card--violet">
-          <div className="home-action-icon home-action-icon--violet">
-            <FileText size={18} />
-          </div>
-          <div className="home-action-text">
-            <span className="home-action-label home-action-label--violet">
-              {tr('答辩准备', 'Defense Prep')}
-            </span>
-            <span className="home-action-title">{tr('模拟答辩演练', 'Mock Defense Practice')}</span>
-            <span className="home-action-desc">
-              {tr('上传文档，AI 生成针对性问题并模拟答辩场景', 'Upload a document and let AI generate targeted questions for a mock defense')}
-            </span>
-          </div>
-        </Link>
-
-        {/* Free Practice */}
         <Link to="/chat" className="home-action-card home-action-card--green">
           <div className="home-action-icon home-action-icon--green">
             <MessageSquare size={18} />
@@ -182,64 +142,39 @@ const HomePage: React.FC = () => {
           </div>
         </Link>
 
-        {/* Growth */}
-        <Link to="/growth" className="home-action-card home-action-card--violet">
+        <Link to="/defense-prep" className="home-action-card home-action-card--violet">
           <div className="home-action-icon home-action-icon--violet">
-            <Activity size={18} />
+            <FileText size={18} />
           </div>
           <div className="home-action-text">
             <span className="home-action-label home-action-label--violet">
-              {tr('我的成长', 'My Growth')}
+              {tr('答辩准备', 'Defense Prep')}
             </span>
-            <span className="home-action-title">{tr('沟通力评分', 'Communication Score')}</span>
+            <span className="home-action-title">{tr('模拟答辩演练', 'Mock Defense Practice')}</span>
             <span className="home-action-desc">
-              {tr('追踪你的沟通能力成长轨迹', 'Track your communication growth over time')}
+              {tr('上传文档，AI 生成针对性问题并模拟答辩场景', 'Upload a document and let AI generate targeted questions for a mock defense')}
             </span>
-          </div>
-          <div className="home-action-score-block">
-            <span className="home-action-score-number">82</span>
-            <span className="home-action-score-trend">{tr('+5 本周', '+5 this week')}</span>
           </div>
         </Link>
 
-        {/* Persona Library */}
-        <Link to="/settings" className="home-action-card home-action-card--neutral">
-          <div className="home-action-icon home-action-icon--neutral">
-            <Users size={18} />
-          </div>
-          <div className="home-action-text">
-            <span className="home-action-label home-action-label--neutral">
-              {tr('角色库', 'Persona Library')}
-            </span>
-            <span className="home-action-title">{tr('管理 AI 对手', 'Manage AI Opponents')}</span>
-            <span className="home-action-desc">
-              {tr('{personas} 个角色 · {scenarios} 个场景', '{personas} personas · {scenarios} scenarios', {
-                personas: personaCount,
-                scenarios: scenarioCount,
-              })}
-            </span>
-          </div>
-          <div className="home-action-avatars">
-            {personaList.slice(0, 3).map((p, i) => (
-              <span
-                key={p.id || i}
-                className="home-action-avatar-circle"
-                style={{
-                  backgroundColor: p.avatar_color || getAvatarColor(p.id || i),
-                  zIndex: 3 - i,
-                }}
-              >
-                {getInitial(p.name)}
+        {canUseManagementActions && (
+          <Link to="/battle-prep" className="home-action-card home-action-card--amber">
+            <div className="home-action-icon home-action-icon--amber">
+              <Swords size={18} />
+            </div>
+            <div className="home-action-text">
+              <span className="home-action-label home-action-label--amber">
+                {t('nav.battlePrep')}
               </span>
-            ))}
-            {personaCount > 3 && (
-              <span className="home-action-avatar-more">+{personaCount - 3}</span>
-            )}
-          </div>
-        </Link>
+              <span className="home-action-title">{tr('30 分钟快速演练', '30-Minute Fast Drill')}</span>
+              <span className="home-action-desc">
+                {tr('针对即将到来的重要会议，进行高强度模拟对练', 'Run an intensive simulation for an upcoming important meeting')}
+              </span>
+            </div>
+          </Link>
+        )}
       </section>
 
-      {/* 3. Recent Conversations */}
       <section className="home-recent">
         <div className="home-section-header">
           <span className="home-section-label">{tr('最近对话', 'Recent Conversations')}</span>
@@ -286,7 +221,6 @@ const HomePage: React.FC = () => {
         )}
       </section>
 
-      {/* 4. Skill Path Preview */}
       <section className="home-skill-path">
         <div className="home-section-header">
           <span className="home-section-label">{tr('技能路径', 'Skill Path')}</span>

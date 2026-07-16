@@ -465,6 +465,14 @@ export default function ScenarioTrainingPage() {
             <Settings size={16} />
             {tr('训练配置', 'Training config')}
           </Link>
+          <Link to="/scenario-config">
+            <SlidersHorizontal size={16} />
+            {tr('陪练配置', 'Coach config')}
+          </Link>
+          <Link to="/scenario-leaderboard">
+            <Trophy size={16} />
+            {tr('训练榜单', 'Leaderboard')}
+          </Link>
         </section>
       )}
     </div>

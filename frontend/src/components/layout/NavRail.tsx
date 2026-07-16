@@ -4,15 +4,11 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ClipboardList,
-  Dumbbell,
   History,
   Home,
   MessageSquare,
   Settings,
-  SlidersHorizontal,
-  Swords,
   TrendingUp,
-  Trophy,
 } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n, type TranslationKey } from '../../i18n'
@@ -26,18 +22,20 @@ interface NavItem {
   icon: React.ReactNode
   labelKey: TranslationKey
   exact?: boolean
+  matchPaths?: string[]
   roles?: readonly SystemRole[]
 }
 
 const navItems: NavItem[] = [
   { to: '/', icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
-  { to: '/scenario-training', icon: <ClipboardList size={18} />, labelKey: 'nav.scenarioTraining' },
-  { to: '/training-history', icon: <History size={18} />, labelKey: 'nav.trainingHistory' },
-  { to: '/scenario-leaderboard', icon: <Trophy size={18} />, labelKey: 'nav.scenarioLeaderboard', roles: MANAGEMENT_SYSTEM_ROLES },
-  { to: '/training-studio', icon: <Dumbbell size={18} />, labelKey: 'nav.trainingStudio', roles: MANAGEMENT_SYSTEM_ROLES },
-  { to: '/scenario-config', icon: <SlidersHorizontal size={18} />, labelKey: 'nav.scenarioConfig', roles: MANAGEMENT_SYSTEM_ROLES },
+  {
+    to: '/scenario-training',
+    icon: <ClipboardList size={18} />,
+    labelKey: 'nav.scenarioTraining',
+    matchPaths: ['/training-studio', '/live-coach', '/scenario-config', '/scenario-leaderboard', '/battle-prep', '/defense-prep'],
+  },
   { to: '/chat', icon: <MessageSquare size={18} />, labelKey: 'nav.chat' },
-  { to: '/battle-prep', icon: <Swords size={18} />, labelKey: 'nav.battlePrep', roles: MANAGEMENT_SYSTEM_ROLES },
+  { to: '/training-history', icon: <History size={18} />, labelKey: 'nav.trainingHistory', matchPaths: ['/training-result', '/training/history', '/training/result'] },
   { to: '/growth', icon: <TrendingUp size={18} />, labelKey: 'nav.growth' },
   { to: '/settings', icon: <Settings size={18} />, labelKey: 'nav.settings', roles: MANAGEMENT_SYSTEM_ROLES },
 ]
@@ -58,6 +56,9 @@ const NavRail: React.FC = () => {
 
   const isActive = (item: NavItem) => {
     if (item.exact) return location.pathname === item.to
+    if (item.matchPaths?.some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`))) {
+      return true
+    }
     return location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
   }
 

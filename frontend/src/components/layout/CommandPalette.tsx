@@ -1,5 +1,7 @@
 import React, { useRef, useEffect, useMemo } from 'react'
 import {
+  ClipboardList,
+  Dumbbell,
   Search,
   Swords,
   Plus,
@@ -24,6 +26,8 @@ interface CommandPaletteProps {
 }
 
 const iconMap: Record<string, React.ReactNode> = {
+  ClipboardList: <ClipboardList size={16} />,
+  Dumbbell: <Dumbbell size={16} />,
   Swords: <Swords size={16} />,
   Plus: <Plus size={16} />,
   History: <History size={16} />,

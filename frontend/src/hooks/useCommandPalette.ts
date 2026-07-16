@@ -62,6 +62,27 @@ export function useCommandPalette(
   const actions: CommandAction[] = useMemo(
     () => [
       {
+        id: 'action-scenario-training',
+        type: 'action' as const,
+        label: t('nav.scenarioTraining'),
+        icon: 'ClipboardList',
+        onSelect: () => {
+          close()
+          navigate('/scenario-training')
+        },
+      },
+      {
+        id: 'action-training-studio',
+        type: 'action' as const,
+        label: t('nav.trainingStudio'),
+        icon: 'Dumbbell',
+        roles: MANAGEMENT_SYSTEM_ROLES,
+        onSelect: () => {
+          close()
+          navigate('/training-studio')
+        },
+      },
+      {
         id: 'action-battle-prep',
         type: 'action' as const,
         label: t('command.action.battlePrep'),
