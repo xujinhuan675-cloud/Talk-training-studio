@@ -56,7 +56,7 @@ function App() {
               <Route path="training-studio" element={managementOnly(<TrainingStudioPage />)} />
               <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
               <Route path="scenario-training" element={<ScenarioTrainingPage />} />
-              <Route path="scenario-leaderboard" element={managementOnly(<ScenarioLeaderboardPage />)} />
+              <Route path="scenario-leaderboard" element={<ScenarioLeaderboardPage />} />
               <Route path="scenario-config" element={managementOnly(<ScenarioConfigPage />)} />
               <Route path="training-history" element={<TrainingHistoryPage />} />
               <Route path="training-result" element={<TrainingResultPage />} />

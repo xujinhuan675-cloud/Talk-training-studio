@@ -21,6 +21,9 @@
 }
 
 .settings-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 14px 20px;
   border: none;
   background: none;

@@ -1,18 +1,30 @@
 import React, { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Check,
   ChevronRight,
   ClipboardList,
   FileText,
+  Loader2,
   Lock,
   MessageSquare,
   Swords,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
 import { useAuthContext } from '../contexts/AuthContext'
-import { fetchRooms, type ChatRoom } from '../services/api'
+import { fetchRooms, startBattle, type ChatRoom } from '../services/api'
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
+import { createTrainingSession, startTrainingSession } from '../services/trainingSession'
+import { buildTrainingModeChatPath } from '../services/trainingMode'
+import {
+  buildScenarioTrainingBattlePayload,
+  buildScenarioTrainingRouteState,
+  buildScenarioTrainingTaskConfig,
+  getScenarioTrainingCardById,
+  getScenarioTrainingProgress,
+  markScenarioTrainingStarted,
+  saveScenarioTrainingProgress,
+} from '../data/trainingScenarios'
 import { useI18n, type TranslateInline } from '../i18n'
 import './HomePage.css'
 
@@ -45,7 +57,8 @@ function timeAgo(dateStr: string | null, tr: TranslateInline): string {
 }
 
 const dailyChallenge = {
-  titleZh: '向上汇报季度成果',
+  scenarioId: 'daily-upward-results-report',
+  titleZh: '向上今日成果汇报',
   titleEn: 'Report Quarterly Results Upward',
   progress: 0.35,
   xp: 100,
@@ -66,10 +79,13 @@ const skillNodes: SkillNode[] = [
 ]
 
 const HomePage: React.FC = () => {
+  const navigate = useNavigate()
   const { personaMap } = useAppContext()
-  const { hasAnySystemRole } = useAuthContext()
+  const { currentUser, hasAnySystemRole } = useAuthContext()
   const { tr, t } = useI18n()
   const [rooms, setRooms] = useState<ChatRoom[]>([])
+  const [dailyStarting, setDailyStarting] = useState(false)
+  const [dailyError, setDailyError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchRooms()
@@ -89,6 +105,61 @@ const HomePage: React.FC = () => {
   const recentRooms = rooms.slice(0, 3)
   const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
 
+  const startDailyChallenge = async () => {
+    const scenario = getScenarioTrainingCardById(dailyChallenge.scenarioId)
+    if (!scenario) {
+      setDailyError(tr('今日挑战场景暂不可用', 'Today\'s challenge is unavailable'))
+      return
+    }
+
+    const trainingMode = 'text'
+    const interactionMode = 'turn_based'
+    const progressScope = {
+      userId: currentUser?.userId ?? null,
+      teamId: currentUser?.teamId ?? null,
+    }
+
+    setDailyStarting(true)
+    setDailyError(null)
+    try {
+      const progress = getScenarioTrainingProgress(progressScope)
+      const trainingSession = await createTrainingSession({
+        mode: trainingMode,
+        scenario_template_id: scenario.id,
+        user_id: progressScope.userId,
+        team_id: progressScope.teamId,
+        task_config: buildScenarioTrainingTaskConfig(scenario),
+      })
+      const room = await startBattle(buildScenarioTrainingBattlePayload(scenario, trainingMode))
+      const startedSession = await startTrainingSession(trainingSession.session_id, {
+        room_id: room.id,
+      })
+      const nextProgress = markScenarioTrainingStarted(
+        progress,
+        scenario.id,
+        startedSession.session_id,
+        progressScope,
+      )
+      saveScenarioTrainingProgress(nextProgress, progressScope)
+
+      const roomId = startedSession.room_id || room.id
+      const chatPath = buildTrainingModeChatPath(roomId, trainingMode, startedSession.session_id, interactionMode)
+      const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
+      navigate(`${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`, {
+        state: {
+          ...buildScenarioTrainingRouteState(scenario),
+          trainingMode,
+          interactionMode,
+          trainingSessionId: startedSession.session_id,
+        },
+      })
+    } catch (error) {
+      setDailyError(error instanceof Error ? error.message : tr('启动今日挑战失败', 'Failed to start today\'s challenge'))
+    } finally {
+      setDailyStarting(false)
+    }
+  }
+
   return (
     <div className="home-page">
       <section className="home-daily-challenge">
@@ -107,7 +178,18 @@ const HomePage: React.FC = () => {
               style={{ width: `${dailyChallenge.progress * 100}%` }}
             />
           </div>
-          <button className="home-daily-btn">{tr('开始挑战', 'Start Challenge')}</button>
+          <button
+            type="button"
+            className="home-daily-btn"
+            onClick={() => void startDailyChallenge()}
+            disabled={dailyStarting}
+          >
+            {dailyStarting && <Loader2 size={13} className="home-daily-spin" />}
+            {dailyStarting ? tr('启动中', 'Starting') : tr('开始挑战', 'Start Challenge')}
+          </button>
+          {dailyError && (
+            <p className="home-daily-error" role="alert">{dailyError}</p>
+          )}
         </div>
       </section>
 

@@ -7,10 +7,11 @@ import {
   Users,
   Layers,
   Building2,
+  ClipboardList,
   Volume2,
   Sparkles,
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppContext } from '../contexts/AppContext'
 import Avatar from '../components/Avatar'
 import PersonaEditorDialog from '../components/PersonaEditorDialog'
@@ -69,13 +70,57 @@ function getErrorMessage(error: unknown): string {
 }
 
 type TabKey = 'personas' | 'scenarios' | 'organizations' | 'preferences'
+type SettingsTabKey = TabKey | 'training'
 
-const TABS: { key: TabKey; labelZh: string; labelEn: string; icon: React.ReactNode }[] = [
+const TABS: { key: SettingsTabKey; labelZh: string; labelEn: string; icon: React.ReactNode }[] = [
   { key: 'personas', labelZh: '角色', labelEn: 'Personas', icon: <Users size={14} /> },
   { key: 'scenarios', labelZh: '场景', labelEn: 'Scenarios', icon: <Layers size={14} /> },
   { key: 'organizations', labelZh: '组织', labelEn: 'Organizations', icon: <Building2 size={14} /> },
+  { key: 'training', labelZh: '训练管理', labelEn: 'Training', icon: <ClipboardList size={14} /> },
   { key: 'preferences', labelZh: '偏好', labelEn: 'Preferences', icon: <Volume2 size={14} /> },
 ]
+
+const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'preferences']
+
+export function SettingsShell({
+  activeTab,
+  children,
+}: {
+  activeTab: SettingsTabKey
+  children: React.ReactNode
+}) {
+  const { tr } = useI18n()
+  const navigate = useNavigate()
+
+  const selectTab = (tab: SettingsTabKey) => {
+    if (tab === 'training') {
+      navigate('/scenario-config')
+      return
+    }
+    navigate(`/settings?tab=${tab}`)
+  }
+
+  return (
+    <div className="settings-page">
+      <div className="settings-tab-bar">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            className={`settings-tab${activeTab === tab.key ? ' active' : ''}`}
+            onClick={() => selectTab(tab.key)}
+          >
+            {tab.icon}
+            {tr(tab.labelZh, tab.labelEn)}
+          </button>
+        ))}
+      </div>
+
+      <div className="settings-content">
+        {children}
+      </div>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Personas Tab
@@ -901,30 +946,19 @@ function PreferencesTab() {
 // ---------------------------------------------------------------------------
 
 const SettingsPage: React.FC = () => {
-  const { tr } = useI18n()
-  const [activeTab, setActiveTab] = useState<TabKey>('personas')
+  const [searchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const activeTab = SETTINGS_TAB_KEYS.includes(requestedTab as TabKey)
+    ? requestedTab as TabKey
+    : 'personas'
 
   return (
-    <div className="settings-page">
-      <div className="settings-tab-bar">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            className={`settings-tab${activeTab === tab.key ? ' active' : ''}`}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tr(tab.labelZh, tab.labelEn)}
-          </button>
-        ))}
-      </div>
-
-      <div className="settings-content">
-        {activeTab === 'personas' && <PersonasTab />}
-        {activeTab === 'scenarios' && <ScenariosTab />}
-        {activeTab === 'organizations' && <OrganizationsTab />}
-        {activeTab === 'preferences' && <PreferencesTab />}
-      </div>
-    </div>
+    <SettingsShell activeTab={activeTab}>
+      {activeTab === 'personas' && <PersonasTab />}
+      {activeTab === 'scenarios' && <ScenariosTab />}
+      {activeTab === 'organizations' && <OrganizationsTab />}
+      {activeTab === 'preferences' && <PreferencesTab />}
+    </SettingsShell>
   )
 }
 

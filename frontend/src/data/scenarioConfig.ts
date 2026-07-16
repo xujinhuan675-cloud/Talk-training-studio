@@ -133,9 +133,16 @@ const DEFAULT_WEIGHTS_BY_CATEGORY: Record<ScenarioTrainingCategory, Record<strin
     credibility: 20,
     differentiation: 10,
   },
+  workplace: {
+    substance: 30,
+    structure: 25,
+    relevance: 20,
+    credibility: 15,
+    differentiation: 10,
+  },
 }
 
-const categoryValues: ScenarioTrainingCategory[] = ['sales', 'customer_service', 'negotiation', 'interview']
+const categoryValues: ScenarioTrainingCategory[] = ['sales', 'customer_service', 'negotiation', 'interview', 'workplace']
 const difficultyValues: ScenarioTrainingDifficulty[] = ['easy', 'medium', 'hard', 'expert']
 const frameworkValues: ScenarioConfigFramework[] = ['prep', 'star', 'scqa', 'pyramid']
 
@@ -480,4 +487,3 @@ export function saveScenarioConfigState(state: ScenarioConfigState): void {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(SCENARIO_CONFIG_STORAGE_KEY, JSON.stringify(state))
 }
-

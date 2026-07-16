@@ -7,6 +7,7 @@ import {
   type AnalysisReportSummary,
 } from '../services/api'
 import { useI18n } from '../i18n'
+import { getErrorMessage } from '../utils/errors'
 
 export interface UseAnalysisReturn {
   analysisResult: AnalysisReport | null
@@ -50,7 +51,7 @@ export function useAnalysis(roomId: number | null): UseAnalysisReturn {
         setAnalysisReportList([{ id: report.id, room_id: report.room_id, summary: report.summary, created_at: report.created_at }])
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : tr('分析失败', 'Analysis failed')
+      const msg = getErrorMessage(e, tr('分析失败', 'Analysis failed'))
       if (msg.includes('No messages') || msg.includes('NoMessages')) {
         alert(tr('暂无消息可分析，请先发送消息后再试', 'No messages to analyze yet. Please send a message first.'))
       } else {
@@ -71,7 +72,7 @@ export function useAnalysis(roomId: number | null): UseAnalysisReturn {
       const reports = await listAnalysisReports(roomId)
       setAnalysisReportList(reports)
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : tr('生成失败', 'Generation failed'))
+      alert(getErrorMessage(e, tr('生成失败', 'Generation failed')))
     } finally {
       setAnalyzingRoom(false)
     }

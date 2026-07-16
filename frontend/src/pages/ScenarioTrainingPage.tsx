@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
   CheckCircle2,
@@ -8,7 +8,6 @@ import {
   Loader2,
   Play,
   Search,
-  Settings,
   ShieldCheck,
   SlidersHorizontal,
   Trophy,
@@ -61,6 +60,7 @@ const categoryOptions: Array<{ value: CategoryFilter; label: string }> = [
   { value: 'customer_service', label: '客服' },
   { value: 'negotiation', label: '谈判' },
   { value: 'interview', label: '面试' },
+  { value: 'workplace', label: '职场沟通' },
 ]
 
 const modeOptions: Array<{ value: ScenarioLaunchMode; label: string }> = [
@@ -81,6 +81,7 @@ const categoryLabels: Record<ScenarioTrainingCategory, string> = {
   customer_service: '客服',
   negotiation: '谈判',
   interview: '面试',
+  workplace: '职场沟通',
 }
 
 const statusLabels: Record<ScenarioTrainingStatus, string> = {
@@ -136,16 +137,12 @@ function matchesScenario(
 export default function ScenarioTrainingPage() {
   const navigate = useNavigate()
   const { tr } = useI18n()
-  const { currentUser, isAdmin } = useAuthContext()
+  const { currentUser } = useAuthContext()
   const [mode, setMode] = useState<ScenarioLaunchMode>('text')
   const [query, setQuery] = useState('')
   const [difficulty, setDifficulty] = useState<DifficultyFilter>('all')
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [catalog, setCatalog] = useState<ScenarioTrainingCard[]>(scenarioTrainingCatalog)
-  const [catalogSource, setCatalogSource] = useState<'api' | 'fallback'>('fallback')
-  const [catalogLoading, setCatalogLoading] = useState(true)
-  const [catalogError, setCatalogError] = useState<string | null>(null)
-  const [progressError, setProgressError] = useState<string | null>(null)
   const progressScope = useMemo(() => ({
     userId: currentUser?.userId ?? null,
     teamId: currentUser?.teamId ?? null,
@@ -168,20 +165,12 @@ export default function ScenarioTrainingPage() {
         if (cancelled) return
         if (templates.length > 0) {
           setCatalog(templates)
-          setCatalogSource('api')
         }
-        setCatalogError(null)
       })
       .catch((e: unknown) => {
         if (cancelled) return
+        void e
         setCatalog(scenarioTrainingCatalog)
-        setCatalogSource('fallback')
-        setCatalogError(getErrorMessage(e))
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setCatalogLoading(false)
-        }
       })
 
     return () => {
@@ -200,12 +189,9 @@ export default function ScenarioTrainingPage() {
           saveScenarioTrainingProgress(merged, progressScope)
           return merged
         })
-        setProgressError(null)
       })
       .catch((e: unknown) => {
-        if (!cancelled) {
-          setProgressError(getErrorMessage(e))
-        }
+        void e
       })
 
     return () => {
@@ -233,12 +219,6 @@ export default function ScenarioTrainingPage() {
   const scoreText = averageScore.length
     ? Math.round(averageScore.reduce((sum, score) => sum + score, 0) / averageScore.length)
     : '--'
-  const catalogSourceText = catalogLoading
-    ? tr('正在加载后端场景模板...', 'Loading backend scenario templates...')
-    : catalogSource === 'api'
-      ? tr('当前目录来自后端场景模板 API。', 'Catalog source: backend scenario template API.')
-      : tr('后端模板暂不可用，当前使用本地 MVP 场景目录。', 'Backend templates unavailable; using the local MVP catalog.')
-
   const startScenario = async (scenario: ScenarioTrainingCard) => {
     setStartingScenarioId(scenario.id)
     setError(null)
@@ -448,31 +428,6 @@ export default function ScenarioTrainingPage() {
         <section className="scenario-training-empty">
           <Search size={24} />
           <p>{tr('没有匹配的训练场景', 'No matching scenarios')}</p>
-        </section>
-      )}
-
-      {isAdmin && (
-        <section className="scenario-training-admin">
-          <div>
-            <strong>{tr('管理员入口', 'Admin entry')}</strong>
-            <span>
-              {catalogSourceText}
-              {catalogError ? ` ${catalogError}` : ''}
-              {progressError ? ` ${tr('进度同步失败：', 'Progress sync failed: ')}${progressError}` : ''}
-            </span>
-          </div>
-          <Link to="/training-studio">
-            <Settings size={16} />
-            {tr('训练配置', 'Training config')}
-          </Link>
-          <Link to="/scenario-config">
-            <SlidersHorizontal size={16} />
-            {tr('陪练配置', 'Coach config')}
-          </Link>
-          <Link to="/scenario-leaderboard">
-            <Trophy size={16} />
-            {tr('训练榜单', 'Leaderboard')}
-          </Link>
         </section>
       )}
     </div>

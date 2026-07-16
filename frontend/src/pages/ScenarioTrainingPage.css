@@ -82,8 +82,7 @@
 .scenario-training-toolbar,
 .scenario-training-error,
 .scenario-training-grid,
-.scenario-training-empty,
-.scenario-training-admin {
+.scenario-training-empty {
   max-width: var(--page-max-width);
   margin-left: auto;
   margin-right: auto;
@@ -400,58 +399,6 @@
   font-weight: 700;
 }
 
-.scenario-training-admin {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 18px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  background: var(--bg-card);
-}
-
-.scenario-training-admin div {
-  flex: 1 1 420px;
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.scenario-training-admin strong {
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-.scenario-training-admin span {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.scenario-training-admin a {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 36px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0 12px;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.scenario-training-admin a:hover {
-  border-color: var(--green);
-  color: var(--green);
-}
-
 .scenario-training-spin {
   animation: scenario-training-spin 0.8s linear infinite;
 }
@@ -500,15 +447,13 @@
     flex: 1;
   }
 
-  .scenario-training-card-head,
-  .scenario-training-admin {
+  .scenario-training-card-head {
     align-items: stretch;
     flex-direction: column;
   }
 
   .scenario-training-status,
-  .scenario-training-start,
-  .scenario-training-admin a {
+  .scenario-training-start {
     width: 100%;
   }
 

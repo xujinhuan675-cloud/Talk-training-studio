@@ -3,7 +3,7 @@ import type { TrainingTaskConfigDTO } from '../services/trainingSession'
 import { getDefaultDimensionWeights } from './scenarioConfig'
 
 export type ScenarioTrainingDifficulty = 'easy' | 'medium' | 'hard' | 'expert'
-export type ScenarioTrainingCategory = 'sales' | 'customer_service' | 'negotiation' | 'interview'
+export type ScenarioTrainingCategory = 'sales' | 'customer_service' | 'negotiation' | 'interview' | 'workplace'
 export type ScenarioTrainingStatus = 'not_started' | 'in_progress' | 'completed' | 'failed'
 
 export interface ScenarioTrainingCard {
@@ -252,6 +252,7 @@ const categoryToTrainingStudio: Record<ScenarioTrainingCategory, string> = {
   customer_service: 'workplace',
   negotiation: 'negotiation',
   interview: 'interview',
+  workplace: 'workplace',
 }
 
 const scenarioDifficultyBehavior: Record<ScenarioTrainingDifficulty, string> = {
@@ -262,6 +263,25 @@ const scenarioDifficultyBehavior: Record<ScenarioTrainingDifficulty, string> = {
 }
 
 export const scenarioTrainingCatalog: ScenarioTrainingCard[] = [
+  {
+    id: 'daily-upward-results-report',
+    title: '向上今日成果汇报',
+    description: '向主管用 3 分钟汇报今日关键进展、风险和明日计划，争取清晰反馈与资源支持。',
+    customerProfile: '时间有限的直属主管，关注结果、风险、优先级和是否需要介入。',
+    difficulty: 'medium',
+    category: 'workplace',
+    required: false,
+    status: 'not_started',
+    openingLine: '我现在只有几分钟，你直接说今天最重要的成果、风险，以及你明天准备怎么推进。',
+    persona: {
+      name: '周经理',
+      role: '关注结果的直属主管',
+      style: '节奏快、追问重点，会要求用事实和数字说明影响，不接受泛泛汇报。',
+    },
+    learnerRole: 'Team Member',
+    framework: 'pyramid',
+    trainingPoints: ['先给结论和成果', '用事实说明影响', '暴露风险并提出下一步请求'],
+  },
   {
     id: 'new-customer-discount',
     title: '新客优惠咨询',
@@ -472,6 +492,7 @@ function dimensionForScenario(scenario: ScenarioTrainingCard): string {
   if (scenario.category === 'sales') return '价值表达'
   if (scenario.category === 'customer_service') return '情绪承接'
   if (scenario.category === 'negotiation') return '条件交换'
+  if (scenario.category === 'workplace') return '向上汇报'
   return '结构表达'
 }
 
@@ -610,6 +631,9 @@ function leaderboardDimensionIdsForScenario(scenario: ScenarioTrainingCard): str
   }
   if (scenario.category === 'negotiation') {
     return ['value_clarity', 'objection_handling', 'next_step']
+  }
+  if (scenario.category === 'workplace') {
+    return ['trust_discovery', 'value_clarity', 'next_step']
   }
   return ['trust_discovery', 'value_clarity']
 }

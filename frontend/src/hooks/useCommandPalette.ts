@@ -131,7 +131,6 @@ export function useCommandPalette(
         type: 'action' as const,
         label: t('nav.scenarioLeaderboard'),
         icon: 'Trophy',
-        roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {
           close()
           navigate('/scenario-leaderboard')

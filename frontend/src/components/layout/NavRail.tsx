@@ -4,11 +4,13 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ClipboardList,
+  Dumbbell,
   History,
   Home,
   MessageSquare,
   Settings,
   TrendingUp,
+  Trophy,
 } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n, type TranslationKey } from '../../i18n'
@@ -32,12 +34,19 @@ const navItems: NavItem[] = [
     to: '/scenario-training',
     icon: <ClipboardList size={18} />,
     labelKey: 'nav.scenarioTraining',
-    matchPaths: ['/training-studio', '/live-coach', '/scenario-config', '/scenario-leaderboard', '/battle-prep', '/defense-prep'],
+  },
+  {
+    to: '/training-studio',
+    icon: <Dumbbell size={18} />,
+    labelKey: 'nav.trainingStudio',
+    matchPaths: ['/live-coach', '/battle-prep', '/defense-prep'],
+    roles: MANAGEMENT_SYSTEM_ROLES,
   },
   { to: '/chat', icon: <MessageSquare size={18} />, labelKey: 'nav.chat' },
   { to: '/training-history', icon: <History size={18} />, labelKey: 'nav.trainingHistory', matchPaths: ['/training-result', '/training/history', '/training/result'] },
+  { to: '/scenario-leaderboard', icon: <Trophy size={18} />, labelKey: 'nav.scenarioLeaderboard' },
   { to: '/growth', icon: <TrendingUp size={18} />, labelKey: 'nav.growth' },
-  { to: '/settings', icon: <Settings size={18} />, labelKey: 'nav.settings', roles: MANAGEMENT_SYSTEM_ROLES },
+  { to: '/settings', icon: <Settings size={18} />, labelKey: 'nav.settings', matchPaths: ['/scenario-config'], roles: MANAGEMENT_SYSTEM_ROLES },
 ]
 
 const NavRail: React.FC = () => {

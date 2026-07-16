@@ -178,7 +178,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   const [liveCoachSourceLanguage, setLiveCoachSourceLanguage] = useState('zh-CN')
   const [liveCoachTargetLanguage, setLiveCoachTargetLanguage] = useState('en-US')
   const [goal, setGoal] = useState('')
-  const [starting, setStarting] = useState<'quick' | 'battle' | null>(null)
+  const [starting, setStarting] = useState<'quick' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -345,15 +345,27 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             <h1>{t('training.page.title')}</h1>
             <p>{t('training.page.subtitle')}</p>
           </div>
-          <button
-            className="training-studio-primary"
-            type="button"
-            onClick={startQuickSession}
-            disabled={starting !== null}
-          >
-            {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Wand2 size={16} />}
-            {t('training.page.startRoom')}
-          </button>
+          <div className="training-studio-header-actions" aria-label={t('training.side.aria')}>
+            <button
+              className="training-studio-action"
+              type="button"
+              onClick={startQuickSession}
+              disabled={starting !== null}
+            >
+              {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Wand2 size={16} />}
+              {t('training.page.startRoom')}
+            </button>
+            <button
+              className="training-studio-action secondary"
+              type="button"
+              onClick={startGuidedBattle}
+              disabled={starting !== null}
+            >
+              <Wand2 size={16} />
+              {t('training.launch.openBattlePrep')}
+            </button>
+            {error && <div className="training-studio-error">{error}</div>}
+          </div>
         </header>
 
         <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
@@ -467,42 +479,6 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
 
             <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
           </div>
-
-          <aside className="training-studio-side" aria-label={t('training.side.aria')}>
-            <div className="training-studio-action-block">
-              <h2>{t('training.launch.title')}</h2>
-              <button
-                className="training-studio-action"
-                type="button"
-                onClick={startQuickSession}
-                disabled={starting !== null}
-              >
-                {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Keyboard size={16} />}
-                {t('training.launch.openChat')}
-              </button>
-              <button
-                className="training-studio-action secondary"
-                type="button"
-                onClick={startGuidedBattle}
-                disabled={starting !== null}
-              >
-                <Wand2 size={16} />
-                {t('training.launch.openBattlePrep')}
-              </button>
-              {error && <div className="training-studio-error">{error}</div>}
-            </div>
-
-            <div className="training-studio-action-block">
-              <h2>{t('training.modeEntry.title')}</h2>
-              <div className="training-studio-mode-note">
-                {mode === 'voice' && t('training.modeEntry.voice')}
-                {mode === 'video' && t('training.modeEntry.video')}
-                {mode === 'realtime' && t('training.modeEntry.realtime')}
-                {mode === 'live_coach' && t('training.modeEntry.liveCoach')}
-                {mode === 'text' && t('training.modeEntry.text')}
-              </div>
-            </div>
-          </aside>
         </div>
       </div>
     </div>

@@ -38,6 +38,7 @@ import {
   fetchScenarioConfig,
   saveScenarioConfig as saveRemoteScenarioConfig,
 } from '../services/scenarioConfig'
+import { SettingsShell } from './SettingsPage'
 import './ScenarioConfigPage.css'
 
 type ScenarioConfigTab = 'scenarios' | 'dimensions'
@@ -54,6 +55,7 @@ const categoryOptions: Array<{ value: ScenarioTrainingCategory; label: Localized
   { value: 'customer_service', label: ['客服', 'Customer service'] },
   { value: 'negotiation', label: ['谈判', 'Negotiation'] },
   { value: 'interview', label: ['面试', 'Interview'] },
+  { value: 'workplace', label: ['职场沟通', 'Workplace'] },
 ]
 
 const difficultyOptions: Array<{ value: ScenarioTrainingDifficulty; label: LocalizedText }> = [
@@ -434,7 +436,8 @@ export default function ScenarioConfigPage() {
   const dimensionById = new Map(state.dimensions.map((dimension) => [dimension.id, dimension]))
 
   return (
-    <div className="scenario-config-page">
+    <SettingsShell activeTab="training">
+      <div className="scenario-config-page">
       <header className="scenario-config-header">
         <div>
           <div className="scenario-config-kicker">
@@ -832,6 +835,7 @@ export default function ScenarioConfigPage() {
           </section>
         </main>
       )}
-    </div>
+      </div>
+    </SettingsShell>
   )
 }

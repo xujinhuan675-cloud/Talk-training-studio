@@ -1,3 +1,5 @@
+import { getErrorMessage } from '../utils/errors'
+
 const API_BASE = '/api/v1/stakeholder'
 
 export interface PersonaSummary {
@@ -312,14 +314,20 @@ export interface AnalysisReportSummary {
 
 export async function listAnalysisReports(roomId: number): Promise<AnalysisReportSummary[]> {
   const resp = await fetch(`${API_BASE}/rooms/${roomId}/analysis`)
-  if (!resp.ok) throw new Error(`Failed to list analysis reports: ${resp.status}`)
+  if (!resp.ok) {
+    const json = await resp.json().catch(() => null)
+    throw new Error(getErrorMessage(json, `Failed to list analysis reports: ${resp.status}`))
+  }
   const json: ApiResponse<AnalysisReportSummary[]> = await resp.json()
   return json.data
 }
 
 export async function fetchAnalysisReport(roomId: number, reportId: number): Promise<AnalysisReport> {
   const resp = await fetch(`${API_BASE}/rooms/${roomId}/analysis/${reportId}`)
-  if (!resp.ok) throw new Error(`Failed to fetch analysis report: ${resp.status}`)
+  if (!resp.ok) {
+    const json = await resp.json().catch(() => null)
+    throw new Error(getErrorMessage(json, `Failed to fetch analysis report: ${resp.status}`))
+  }
   const json: ApiResponse<AnalysisReport> = await resp.json()
   return json.data
 }
@@ -375,7 +383,7 @@ export async function createAnalysisReport(roomId: number): Promise<AnalysisRepo
   const resp = await fetch(`${API_BASE}/rooms/${roomId}/analysis`, { method: 'POST' })
   if (!resp.ok) {
     const json = await resp.json().catch(() => null)
-    throw new Error(json?.message || `Failed to create analysis report: ${resp.status}`)
+    throw new Error(getErrorMessage(json, `Failed to create analysis report: ${resp.status}`))
   }
   const json: ApiResponse<AnalysisReport> = await resp.json()
   return json.data

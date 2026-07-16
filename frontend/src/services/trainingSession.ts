@@ -1,5 +1,6 @@
 import type { TrainingMode } from './trainingMode'
 import { getAuthRequestHeaders } from './auth'
+import { getErrorMessage } from '../utils/errors'
 
 export type { TrainingMode } from './trainingMode'
 
@@ -159,8 +160,7 @@ async function readError(resp: Response, fallback: string): Promise<Error> {
     )
   }
   const json = await resp.json().catch(() => null)
-  const detail = typeof json?.detail === 'string' ? json.detail : json?.detail?.message
-  return new Error(json?.error?.details || detail || json?.message || fallback)
+  return new Error(getErrorMessage(json, fallback))
 }
 
 async function requestJson<T>(url: string, init?: RequestInit, errorMessage = 'Training session request failed'): Promise<T> {

@@ -81,6 +81,7 @@ import {
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type TranslateInline } from '../i18n'
+import { getErrorMessage } from '../utils/errors'
 import '../App.css'
 import './ChatPage.css'
 
@@ -137,7 +138,7 @@ function getScenarioDifficultyFromState(state: unknown): ScenarioTrainingDifficu
 
 function getScenarioCategoryFromState(state: unknown): ScenarioTrainingCategory | null {
   const value = getStateStringValue(state, 'scenarioCategory')
-  return value === 'sales' || value === 'customer_service' || value === 'negotiation' || value === 'interview'
+  return value === 'sales' || value === 'customer_service' || value === 'negotiation' || value === 'interview' || value === 'workplace'
     ? value
     : null
 }
@@ -283,6 +284,7 @@ const scenarioCategoryLabels: Record<ScenarioTrainingCategory, string> = {
   customer_service: '服务',
   negotiation: '谈判',
   interview: '面试',
+  workplace: '职场',
 }
 
 const trainingModeLabels: Record<string, string> = {
@@ -496,7 +498,7 @@ function ChatArea() {
       if (!isCurrentStream()) return
       try {
         const data = JSON.parse(event.data)
-        setGuidanceError(String(data.detail || tr('Live guidance stream failed', 'Live guidance stream failed')))
+        setGuidanceError(getErrorMessage(data, tr('Live guidance stream failed', 'Live guidance stream failed')))
       } catch {
         setGuidanceError(tr('Live guidance stream failed', 'Live guidance stream failed'))
       }
@@ -965,6 +967,9 @@ function ChatArea() {
 
   const handleCompleteTrainingSession = React.useCallback(async () => {
     if (!trainingSessionId || trainingSessionCompleting) return
+    const hasMessages = (selectedRoomMessages || []).some((message: { content?: string }) => (
+      typeof message.content === 'string' && message.content.trim().length > 0
+    ))
     setTrainingSessionCompleting(true)
     try {
       if (isLiveCoachSession && guidanceEvents.length > 0) {
@@ -995,7 +1000,7 @@ function ChatArea() {
           }
         }
       }
-      const session = await completeTrainingSession(trainingSessionId, { generate_report: true })
+      const session = await completeTrainingSession(trainingSessionId, { generate_report: hasMessages })
       setTrainingSessionCompleted(true)
       const reportId = Number(session.report_id)
       const scenarioScore = Number.isFinite(reportId) && reportId > 0
@@ -1003,7 +1008,7 @@ function ChatArea() {
           .then(extractTrainingReportScore)
           .catch(() => undefined)
         : undefined
-      if (scenarioTrainingId) {
+      if (hasMessages && scenarioTrainingId) {
         saveScenarioTrainingProgress(
           markScenarioTrainingCompleted(getScenarioTrainingProgress(progressScope), scenarioTrainingId, {
             trainingSessionId: session.session_id || trainingSessionId,
@@ -1019,11 +1024,13 @@ function ChatArea() {
       }
       if (Number.isFinite(reportId) && reportId > 0) {
         await analysis.openReport(reportId)
-      } else {
+      } else if (hasMessages) {
         await analysis.handleAnalyze()
+      } else {
+        navigate(resolvedTrainingBackPath)
       }
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : tr('璁粌瀹屾垚澶辫触', 'Failed to complete training session'))
+      alert(getErrorMessage(e, tr('训练完成失败', 'Failed to complete training session')))
     } finally {
       setTrainingSessionCompleting(false)
     }
@@ -1033,8 +1040,11 @@ function ChatArea() {
     interactionMode,
     isLiveCoachSession,
     liveCoachGuidanceMetadata,
+    navigate,
     progressScope,
+    resolvedTrainingBackPath,
     scenarioTrainingId,
+    selectedRoomMessages,
     trainingMode,
     trainingProfile,
     trainingSessionCompleting,
