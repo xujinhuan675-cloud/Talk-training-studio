@@ -208,7 +208,18 @@ async def test_llm_adapter_json_response_adds_guide_event():
         training_session_id="training-llm-json",
         task_goal="Handle price pressure",
         rubric={"discovery": 0.4},
-        recent_turns=[{"speaker": "counterpart", "text": "What is your plan for pricing?"}],
+        recent_turns=[
+            {
+                "speaker": "counterpart",
+                "text": "What is your plan for pricing?",
+                "metadata": {
+                    "trainingProfile": "live_coach",
+                    "sourceLanguage": "zh-CN",
+                    "targetLanguage": "en-US",
+                    "translationStrategy": "text_first_mvp",
+                },
+            }
+        ],
     )
 
     llm_event = next(event for event in events if event.metadata.get("source") == "llm")
@@ -221,6 +232,10 @@ async def test_llm_adapter_json_response_adds_guide_event():
     prompt_payload = json.loads(llm.messages[1].content)
     assert prompt_payload["task_goal"] == "Handle price pressure"
     assert prompt_payload["recent_turns"][0]["speaker"] == "counterpart"
+    assert prompt_payload["recent_turns"][0]["metadata"]["trainingProfile"] == "live_coach"
+    assert prompt_payload["recent_turns"][0]["metadata"]["sourceLanguage"] == "zh-CN"
+    assert prompt_payload["recent_turns"][0]["metadata"]["targetLanguage"] == "en-US"
+    assert prompt_payload["recent_turns"][0]["metadata"]["translationStrategy"] == "text_first_mvp"
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,7 @@ import { getUserDisplayRoleName } from '../services/auth'
 import { useI18n } from '../i18n'
 import {
   buildScenarioTrainingBattlePayload,
+  buildScenarioTrainingRouteState,
   buildScenarioTrainingTaskConfig,
   getScenarioTrainingProgress,
   markScenarioTrainingStarted,
@@ -86,6 +87,7 @@ const statusLabels: Record<ScenarioTrainingStatus, string> = {
   not_started: '未开始',
   in_progress: '练习中',
   completed: '已完成',
+  failed: '失败',
 }
 
 function getErrorMessage(error: unknown): string {
@@ -268,10 +270,7 @@ export default function ScenarioTrainingPage() {
       const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
       navigate(`${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`, {
         state: {
-          source: 'scenario-training',
-          scenarioTrainingId: scenario.id,
-          scenarioTitle: scenario.title,
-          scenarioOpeningLine: scenario.openingLine,
+          ...buildScenarioTrainingRouteState(scenario),
           trainingMode,
           interactionMode,
           trainingSessionId: startedSession.session_id,

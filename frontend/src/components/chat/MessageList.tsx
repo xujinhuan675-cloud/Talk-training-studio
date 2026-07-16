@@ -232,6 +232,13 @@ export default function MessageList({
   const { tr, locale } = useI18n()
   const isEmpty = messages.length === 0 && streamingEntries.length === 0
 
+  React.useEffect(() => {
+    if (!typingPersona && !playingPersonaId && streamingEntries.length === 0) return
+    const el = listRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [listRef, playingPersonaId, streamingEntries.length, typingPersona])
+
   return (
     <div className="message-list" ref={listRef} onClick={onClick}>
       {isEmpty ? (
@@ -365,9 +372,13 @@ export default function MessageList({
       )}
 
       {typingPersona && streamingEntries.length === 0 && (
-        <div className="typing-indicator">
-          <div className="typing-dots"><span /><span /><span /></div>
+        <div className="message persona typing-message" data-sender="persona" aria-live="polite">
+          <div className="message-bubble typing-bubble">
+            <span className="typing-dots" aria-hidden="true"><span /><span /><span /></span>
+            <span className="typing-label">
           {tr('{name} 正在回复', '{name} is replying', { name: personaMap[typingPersona]?.name || typingPersona })}
+            </span>
+          </div>
         </div>
       )}
 

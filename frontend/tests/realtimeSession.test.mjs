@@ -9,18 +9,32 @@ import ts from 'typescript'
 async function loadRealtimeSessionModule() {
   const sourcePath = path.resolve('src/services/realtimeSession.ts')
   const source = fs.readFileSync(sourcePath, 'utf8')
-  const output = ts.transpileModule(source, {
+  let outputText = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
       target: ts.ScriptTarget.ES2022,
     },
-  })
+  }).outputText
   const outputPath = path.join(os.tmpdir(), `realtime-session-${process.pid}-${Date.now()}.mjs`)
-  fs.writeFileSync(outputPath, output.outputText)
+  const cleanupPaths = [outputPath]
+  if (outputText.includes("from './auth'")) {
+    const authSource = fs.readFileSync(path.resolve('src/services/auth.ts'), 'utf8')
+    const authOutput = ts.transpileModule(authSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const authPath = path.join(os.tmpdir(), `auth-service-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(authPath, authOutput)
+    cleanupPaths.push(authPath)
+    outputText = outputText.replace("from './auth'", `from '${pathToFileURL(authPath).href}'`)
+  }
+  fs.writeFileSync(outputPath, outputText)
   try {
     return await import(pathToFileURL(outputPath).href)
   } finally {
-    fs.rmSync(outputPath, { force: true })
+    cleanupPaths.forEach((item) => fs.rmSync(item, { force: true }))
   }
 }
 
@@ -66,6 +80,12 @@ globalThis.window = {
 globalThis.WebSocket = FakeWebSocket
 
 const realtimeSession = await loadRealtimeSessionModule()
+const expectedAuthHeaders = {
+  'X-Mock-User': 'admin',
+  'X-User-Id': 'user-admin-001',
+  'X-System-Role': 'admin',
+  'X-Team-Id': 'team-ops',
+}
 
 test('getTrainingRealtimeWebSocketUrl builds a bound training realtime endpoint', () => {
   const url = realtimeSession.getTrainingRealtimeWebSocketUrl({
@@ -93,6 +113,29 @@ test('getTrainingRealtimeSdpPath builds a bound SDP proxy path', () => {
   )
 })
 
+test('createTrainingRealtimeSdpAnswer surfaces JSON error messages', async () => {
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return {
+    ok: false,
+    status: 502,
+    text: async () => JSON.stringify({ code: 30001, message: 'Realtime provider unavailable' }),
+    }
+  }
+
+  await assert.rejects(
+    realtimeSession.createTrainingRealtimeSdpAnswer({
+      offerSdp: 'v=0',
+      sessionId: 'session-1',
+      roomId: 42,
+    }),
+    /Realtime provider unavailable/,
+  )
+  assert.equal(calls[0].url, '/api/v1/training-studio/realtime/sdp?session_id=session-1&room_id=42')
+  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/sdp' })
+})
+
 test('persistTrainingRealtimeTranscripts posts normalized payload', async () => {
   const calls = []
   globalThis.fetch = async (url, init) => {
@@ -111,12 +154,19 @@ test('persistTrainingRealtimeTranscripts posts normalized payload', async () => 
         role: 'assistant',
         content: 'That is a useful next step.',
         event_id: 'evt-1',
+        metadata: {
+          trainingProfile: 'live_coach',
+          sourceLanguage: 'zh-CN',
+          targetLanguage: 'en-US',
+          translationStrategy: 'text_first_mvp',
+        },
       },
     ],
   })
 
   assert.equal(calls[0].url, '/api/v1/training-studio/realtime/transcripts')
   assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/json' })
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     session_id: 'session-1',
     room_id: 42,
@@ -125,6 +175,12 @@ test('persistTrainingRealtimeTranscripts posts normalized payload', async () => 
         role: 'assistant',
         content: 'That is a useful next step.',
         event_id: 'evt-1',
+        metadata: {
+          trainingProfile: 'live_coach',
+          sourceLanguage: 'zh-CN',
+          targetLanguage: 'en-US',
+          translationStrategy: 'text_first_mvp',
+        },
       },
     ],
   })

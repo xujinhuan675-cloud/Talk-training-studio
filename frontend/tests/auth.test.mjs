@@ -41,6 +41,50 @@ function createStorage(initialEntries = {}) {
   }
 }
 
+test('mock users expose admin, leader, and staff role capabilities', async () => {
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-roles')
+
+  const admin = auth.getMockUser('admin')
+  const leader = auth.getMockUser('leader')
+  const sales = auth.getMockUser('sales')
+  const customerService = auth.getMockUser('customer_service')
+
+  assert.equal(admin.systemRole, 'admin')
+  assert.equal(leader.systemRole, 'leader')
+  assert.equal(sales.systemRole, 'staff')
+  assert.equal(customerService.systemRole, 'staff')
+  assert.equal(auth.canAccessManagementFeatures(admin), true)
+  assert.equal(auth.canAccessManagementFeatures(leader), true)
+  assert.equal(auth.canAccessManagementFeatures(sales), false)
+  assert.equal(auth.canAccessTeamLeaderboard(leader), true)
+  assert.equal(auth.canAccessTeamLeaderboard(customerService), false)
+  assert.equal(auth.canAccessMemberWorkspace(sales), true)
+  assert.equal(auth.hasAnySystemRole(customerService, ['staff']), true)
+})
+
+test('stored leader mock user is restored', async () => {
+  const localStorage = createStorage({
+    'talkwise.auth.state': JSON.stringify({ status: 'authenticated', userId: 'leader' }),
+  })
+  const sessionStorage = createStorage()
+  globalThis.window = { localStorage, sessionStorage }
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-leader')
+  const initialState = auth.loadInitialAuthState()
+
+  assert.equal(initialState.status, 'authenticated')
+  assert.equal(initialState.user.id, 'leader')
+  assert.equal(initialState.user.systemRole, 'leader')
+  assert.equal(auth.canAccessManagementFeatures(initialState.user), true)
+  assert.deepEqual(auth.getAuthRequestHeaders(initialState), {
+    'X-Mock-User': 'leader',
+    'X-User-Id': 'user-leader-001',
+    'X-System-Role': 'leader',
+    'X-Team-Id': 'team-revenue',
+  })
+  assert.deepEqual(auth.getAuthRequestHeaders(auth.createSignedOutState()), {})
+})
+
 test('legacy mock user ids are cleared instead of mapped', async () => {
   const localStorage = createStorage({
     'talkwise.auth.state': JSON.stringify({ status: 'authenticated', userId: 'salesperson' }),

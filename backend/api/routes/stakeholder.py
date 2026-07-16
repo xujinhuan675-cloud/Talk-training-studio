@@ -589,7 +589,10 @@ async def send_message(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
 ):
     await _ensure_room_accepts_user_message(room_id, chatroom_svc)
-    msg, room = await svc.send_message(room_id, body.content)
+    if body.metadata:
+        msg, room = await svc.send_message(room_id, body.content, metadata=body.metadata)
+    else:
+        msg, room = await svc.send_message(room_id, body.content)
     background_tasks.add_task(svc.generate_replies, room_id, room)
     return success_response(data=msg.model_dump())
 

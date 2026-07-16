@@ -567,25 +567,34 @@ $Command
 function New-BackendCommand {
     param([int]$Port)
 
-    if (-not (Test-CommandExists "uv")) {
-        throw "uv was not found. Install uv or add it to PATH before starting the backend."
-    }
+    $backendPython = Join-Path $BackendVenvDir "Scripts\python.exe"
 
-    if ($SkipInstall) {
-        return @"
+    if (Test-CommandExists "uv") {
+        if ($SkipInstall) {
+            return @"
 `$env:UV_PROJECT_ENVIRONMENT = "$BackendVenvDir"
 `$env:UV_LINK_MODE = "copy"
 uv run --no-sync --python 3.11 --default-index https://pypi.org/simple uvicorn main:app --host 127.0.0.1 --port $Port --reload
 "@
-    }
+        }
 
-    return @"
+        return @"
 `$env:UV_PROJECT_ENVIRONMENT = "$BackendVenvDir"
 `$env:UV_LINK_MODE = "copy"
 uv sync --python 3.11 --all-extras --default-index https://pypi.org/simple
 if (`$LASTEXITCODE -ne 0) { throw "uv sync failed." }
 uv run --no-sync --python 3.11 --default-index https://pypi.org/simple uvicorn main:app --host 127.0.0.1 --port $Port --reload
 "@
+    }
+
+    if (Test-Path -LiteralPath $backendPython) {
+        return @"
+Write-Host "uv was not found on PATH; using existing backend environment: $backendPython"
+& "$backendPython" -m uvicorn main:app --host 127.0.0.1 --port $Port --reload
+"@
+    }
+
+    throw "uv was not found and $backendPython does not exist. Install uv or run backend dependency sync before starting the backend."
 }
 
 function New-FrontendCommand {
@@ -595,14 +604,20 @@ function New-FrontendCommand {
         throw "npm was not found. Install Node.js first."
     }
 
+    $viteBin = Join-Path $FrontendDir "node_modules\vite\bin\vite.js"
+    $runVite = @"
+if (-not (Test-Path -LiteralPath "$viteBin")) { throw "Vite binary not found at $viteBin. Run npm install in $FrontendDir." }
+node "$viteBin" --host 127.0.0.1 --port $Port --strictPort
+"@
+
     if ($SkipInstall) {
-        return "npm run dev -- --host=127.0.0.1 --port=$Port --strictPort"
+        return $runVite
     }
 
     return @"
 npm install
 if (`$LASTEXITCODE -ne 0) { throw "npm install failed." }
-npm run dev -- --host=127.0.0.1 --port=$Port --strictPort
+$runVite
 "@
 }
 
@@ -642,6 +657,7 @@ $frontendLogPath = Join-Path $LogDir "frontend-dev.log"
 Set-EnvValue $BackendEnvPath "SECRET_KEY" "dev-secret-change-me"
 Set-EnvValue $BackendEnvPath "DEBUG" "true"
 Set-EnvValue $BackendEnvPath "RELOAD" "true"
+Set-EnvValue $BackendEnvPath "AUTO_RUN_MIGRATIONS" "true"
 Set-EnvValue $BackendEnvPath "PORT" "$backendPort"
 Set-EnvValue $BackendEnvPath "DATABASE__URL" $databaseUrl
 Set-EnvValue $BackendEnvPath "CORS_ORIGINS" "[`"$frontendUrl`",`"$backendUrl`"]"
@@ -675,15 +691,15 @@ if ($UsePostgres) {
     Write-Host "Pass -UsePostgres to run against the local Docker Postgres database."
 }
 
-Write-Step "Starting backend locally with uv + Python 3.11 FastAPI on port $backendPort"
+Write-Step "Starting backend locally with FastAPI on port $backendPort"
 Start-DevWindow `
-    -Title "Talk Training Studio - Backend (uv Python 3.11)" `
+    -Title "Talk Training Studio - Backend" `
     -WorkingDirectory $BackendDir `
     -Command (New-BackendCommand -Port $backendPort) `
     -LogPath $backendLogPath `
     -ShowWindow:$ShowServiceWindows
 
-Write-Step "Starting frontend locally with npm run dev on port $frontendPort"
+Write-Step "Starting frontend locally with Vite on port $frontendPort"
 Start-DevWindow `
     -Title "Talk Training Studio - Frontend" `
     -WorkingDirectory $FrontendDir `

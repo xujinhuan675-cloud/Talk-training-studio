@@ -27,6 +27,7 @@ export interface RealtimeVoiceRecorderProps {
   disabled?: boolean
   personaId?: string | null
   counterpartName?: string
+  transcriptMetadata?: Record<string, unknown>
   onPersistedTranscript?: (text: string, role: RealtimeTranscriptRole) => void
 }
 
@@ -36,12 +37,12 @@ function statusLabel(
   tr: (zhText: string, enText: string) => string,
 ): string {
   if (error) return error
-  if (status === 'connecting' || status === 'preparing') return tr('Connecting realtime voice agent', 'Connecting realtime voice agent')
-  if (status === 'speaking') return tr('AI is speaking', 'AI is speaking')
-  if (status === 'listening' || status === 'connected') return tr('Realtime voice agent connected', 'Realtime voice agent connected')
-  if (status === 'error') return tr('Realtime voice agent error', 'Realtime voice agent error')
-  if (status === 'closed') return tr('Realtime voice agent stopped', 'Realtime voice agent stopped')
-  return tr('Realtime voice agent ready', 'Realtime voice agent ready')
+  if (status === 'connecting' || status === 'preparing') return tr('正在连接实时语音教练', 'Connecting realtime voice agent')
+  if (status === 'speaking') return tr('AI 正在说话', 'AI is speaking')
+  if (status === 'listening' || status === 'connected') return tr('实时语音教练已连接', 'Realtime voice agent connected')
+  if (status === 'error') return tr('实时语音教练出错', 'Realtime voice agent error')
+  if (status === 'closed') return tr('实时语音教练已停止', 'Realtime voice agent stopped')
+  return tr('实时语音教练已就绪', 'Realtime voice agent ready')
 }
 
 function eventText(event: OpenAIRealtimeEvent): string {
@@ -78,6 +79,7 @@ export default function RealtimeVoiceRecorder({
   disabled,
   personaId,
   counterpartName,
+  transcriptMetadata,
   onPersistedTranscript,
 }: RealtimeVoiceRecorderProps) {
   const { tr } = useI18n()
@@ -131,6 +133,7 @@ export default function RealtimeVoiceRecorder({
           response_id: event.response_id || event.response?.id,
           sender_id: role === 'assistant' ? personaId || 'assistant' : undefined,
           metadata: {
+            ...(transcriptMetadata || {}),
             eventType: event.type,
           },
         }],
@@ -138,9 +141,9 @@ export default function RealtimeVoiceRecorder({
       setPreview(content)
       onPersistedTranscript?.(content, role)
     } catch (err) {
-      setError(err instanceof Error ? err.message : tr('Failed to save realtime transcript', 'Failed to save realtime transcript'))
+      setError(err instanceof Error ? err.message : tr('保存实时转写失败', 'Failed to save realtime transcript'))
     }
-  }, [onPersistedTranscript, personaId, roomId, trainingSessionId, tr])
+  }, [onPersistedTranscript, personaId, roomId, trainingSessionId, transcriptMetadata, tr])
 
   const handleRealtimeEvent = useCallback((raw: string) => {
     let event: OpenAIRealtimeEvent
@@ -151,14 +154,14 @@ export default function RealtimeVoiceRecorder({
     }
 
     if (event.type === 'error') {
-      const message = typeof event.message === 'string' ? event.message : tr('OpenAI realtime error', 'OpenAI realtime error')
+      const message = typeof event.message === 'string' ? event.message : tr('OpenAI 实时通道错误', 'OpenAI realtime error')
       setError(message)
       setStatus('error')
       return
     }
     if (event.type === 'input_audio_buffer.speech_started') {
       setStatus('listening')
-      setPreview(tr('Listening...', 'Listening...'))
+      setPreview(tr('正在聆听...', 'Listening...'))
     }
     if (event.type === 'response.created') {
       setStatus('speaking')
@@ -191,12 +194,12 @@ export default function RealtimeVoiceRecorder({
     closeRealtime('closed')
     transcriptKeysRef.current.clear()
     setError(null)
-    setPreview(counterpartName ? tr('Connecting to {name}', 'Connecting to {name}', { name: counterpartName }) : '')
+    setPreview(counterpartName ? tr('正在连接 {name}', 'Connecting to {name}', { name: counterpartName }) : '')
     setStatus('connecting')
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('getUserMedia unavailable')
+        throw new Error(tr('当前浏览器不可用麦克风录音', 'getUserMedia unavailable'))
       }
 
       const peer = new RTCPeerConnection()
@@ -218,7 +221,7 @@ export default function RealtimeVoiceRecorder({
       dataChannelRef.current = dataChannel
       dataChannel.onopen = () => {
         setStatus('listening')
-        setPreview(tr('Realtime voice agent connected', 'Realtime voice agent connected'))
+        setPreview(tr('实时语音教练已连接', 'Realtime voice agent connected'))
       }
       dataChannel.onmessage = (message) => {
         if (typeof message.data === 'string') {
@@ -226,7 +229,7 @@ export default function RealtimeVoiceRecorder({
         }
       }
       dataChannel.onerror = () => {
-        setError(tr('Realtime data channel error', 'Realtime data channel error'))
+        setError(tr('实时数据通道错误', 'Realtime data channel error'))
         setStatus('error')
       }
 
@@ -241,7 +244,7 @@ export default function RealtimeVoiceRecorder({
       setStatus('connected')
     } catch (err) {
       closeRealtime('error')
-      setError(err instanceof Error ? err.message : tr('Failed to start realtime voice agent', 'Failed to start realtime voice agent'))
+      setError(err instanceof Error ? err.message : tr('启动实时语音教练失败', 'Failed to start realtime voice agent'))
     }
   }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, roomId, trainingSessionId, tr])
 
@@ -259,14 +262,14 @@ export default function RealtimeVoiceRecorder({
         type="button"
         onClick={active ? () => closeRealtime('closed') : startRealtime}
         disabled={disabled || !roomId || !trainingSessionId || status === 'connecting'}
-        title={active ? tr('Stop realtime voice agent', 'Stop realtime voice agent') : tr('Start realtime voice agent', 'Start realtime voice agent')}
+        title={active ? tr('停止实时语音教练', 'Stop realtime voice agent') : tr('启动实时语音教练', 'Start realtime voice agent')}
       >
         {status === 'connecting'
           ? <Loader2 size={14} className="spin" />
           : active
             ? <Square size={14} />
             : <Mic size={14} />}
-        {active ? tr('Stop', 'Stop') : tr('Start', 'Start')}
+        {active ? tr('停止', 'Stop') : tr('开始', 'Start')}
       </button>
     </div>
   )

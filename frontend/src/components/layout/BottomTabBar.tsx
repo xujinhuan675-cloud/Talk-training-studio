@@ -1,7 +1,9 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { ClipboardList, Home, MessageSquare, TrendingUp, User } from 'lucide-react'
+import { ClipboardList, History, Home, SlidersHorizontal, TrendingUp } from 'lucide-react'
+import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n, type TranslationKey } from '../../i18n'
+import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from '../../services/auth'
 import './BottomTabBar.css'
 
 interface TabItem {
@@ -10,11 +12,11 @@ interface TabItem {
   labelKey: TranslationKey
   elevated?: boolean
   matchPrefix?: string
+  roles?: readonly SystemRole[]
 }
 
 const tabs: TabItem[] = [
   { to: '/', icon: <Home size={20} />, labelKey: 'nav.home' },
-  { to: '/chat', icon: <MessageSquare size={20} />, labelKey: 'nav.chat', matchPrefix: '/chat' },
   {
     to: '/scenario-training',
     icon: <ClipboardList size={20} />,
@@ -22,13 +24,26 @@ const tabs: TabItem[] = [
     elevated: true,
     matchPrefix: '/scenario-training',
   },
+  { to: '/training-history', icon: <History size={20} />, labelKey: 'nav.trainingHistory', matchPrefix: '/training-history' },
   { to: '/growth', icon: <TrendingUp size={20} />, labelKey: 'nav.growth', matchPrefix: '/growth' },
-  { to: '/settings', icon: <User size={20} />, labelKey: 'nav.me', matchPrefix: '/settings' },
+  {
+    to: '/scenario-config',
+    icon: <SlidersHorizontal size={20} />,
+    labelKey: 'nav.scenarioConfig',
+    matchPrefix: '/scenario-config',
+    roles: MANAGEMENT_SYSTEM_ROLES,
+  },
 ]
 
 const BottomTabBar: React.FC = () => {
   const location = useLocation()
   const { t } = useI18n()
+  const { hasAnySystemRole } = useAuthContext()
+
+  const visibleTabs = tabs.filter((tab) => {
+    if (!tab.roles) return true
+    return hasAnySystemRole(tab.roles)
+  })
 
   const isActive = (tab: TabItem) => {
     if (tab.to === '/') return location.pathname === '/'
@@ -38,7 +53,7 @@ const BottomTabBar: React.FC = () => {
 
   return (
     <nav className="bottom-tab-bar">
-      {tabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         const active = isActive(tab)
         return (
           <Link

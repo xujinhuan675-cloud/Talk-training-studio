@@ -91,7 +91,7 @@
 .chat-page-training-banner {
   flex-shrink: 0;
   border-bottom: 1px solid var(--border, #e5e7eb);
-  background: var(--bg-card, #fff);
+  background: #f8fafc;
 }
 
 .chat-page-training-top {
@@ -99,7 +99,7 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 10px 20px 8px;
+  padding: 12px 20px 10px;
 }
 
 .chat-page-training-back,
@@ -155,10 +155,15 @@
 }
 
 .chat-page-training-copy strong {
-  display: block;
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 12px;
+  border: 1px solid #e0e7ff;
+  border-radius: 999px;
+  background: #fff;
   overflow: hidden;
   color: var(--text-primary, #1f2937);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -184,37 +189,83 @@
 
 .chat-page-training-tags span {
   padding: 2px 7px;
-  border: 1px solid #bfdbfe;
+  border: 1px solid #c7d2fe;
   border-radius: 6px;
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: #eef2ff;
+  color: #3730a3;
   font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
 }
 
+.chat-page-training-tags .tone-category {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.chat-page-training-tags .tone-difficulty {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.chat-page-training-tags .tone-required {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.chat-page-training-tags .tone-optional {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.chat-page-training-tags .tone-mode {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.chat-page-training-tags .tone-live {
+  border-color: #bae6fd;
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.chat-page-training-details-toggle {
+  display: none;
+}
+
 .chat-page-training-scene {
   display: grid;
-  gap: 5px;
-  padding: 9px 20px 11px;
-  border-top: 1px solid var(--border-light, #f3f4f6);
-  background: #fbfdff;
+  gap: 7px;
+  margin: 0 20px 14px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-left: 4px solid var(--green, #2D9C6F);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .chat-page-training-scene p {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
   min-width: 0;
   margin: 0;
   color: var(--text-secondary, #6b7280);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .chat-page-training-scene strong {
-  flex: 0 0 auto;
+  align-self: start;
   color: var(--text-primary, #1f2937);
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .chat-page-training-scene span {
@@ -432,6 +483,56 @@
 .guidance-action:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.chat-page-live-coach-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 20px;
+  border-bottom: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  flex-shrink: 0;
+}
+
+.live-coach-strip-main,
+.live-coach-strip-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.live-coach-strip-main {
+  flex: 1;
+}
+
+.live-coach-strip-main svg {
+  flex: 0 0 auto;
+}
+
+.live-coach-strip-main strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-coach-strip-main span,
+.live-coach-strip-meta span {
+  color: #4f46e5;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.live-coach-strip-meta span {
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: #fff;
+  font-weight: 800;
 }
 
 .chat-page-guidance-panel {
@@ -1101,6 +1202,17 @@
     width: 100%;
   }
 
+  .chat-page-center.training-session {
+    height: 100dvh;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .chat-page-center.training-session .message-input-shell {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--bg-elevated);
+  }
+
   /* Hide right panel entirely on mobile */
   .chat-page-right {
     display: none !important;
@@ -1160,21 +1272,52 @@
     justify-content: flex-start;
   }
 
+  .chat-page-training-details-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: fit-content;
+    margin-top: 6px;
+    padding: 4px 8px;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 6px;
+    background: var(--bg-card, #fff);
+    color: var(--text-secondary, #6b7280);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .chat-page-training-details-toggle svg {
+    transition: transform 0.16s ease;
+  }
+
+  .chat-page-training-details-toggle.expanded svg {
+    transform: rotate(180deg);
+  }
+
   .chat-page-training-complete {
     grid-column: 1 / -1;
     width: 100%;
   }
 
   .chat-page-training-scene {
-    padding: 8px 12px 10px;
+    margin: 0 12px 12px;
+    padding: 10px 12px;
+  }
+
+  .chat-page-training-scene.collapsed {
+    display: none;
   }
 
   .chat-page-training-scene p {
-    display: block;
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 
   .chat-page-training-scene strong {
-    margin-right: 4px;
+    margin-right: 0;
   }
 
   /* Mobile pill buttons */
@@ -1297,6 +1440,23 @@
   .guidance-action {
     min-height: 30px;
     padding: 0 9px;
+  }
+
+  .chat-page-live-coach-strip {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+    padding: 7px 12px;
+  }
+
+  .live-coach-strip-main,
+  .live-coach-strip-meta {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .live-coach-strip-main strong {
+    white-space: normal;
   }
 
   .chat-page-guidance-panel {

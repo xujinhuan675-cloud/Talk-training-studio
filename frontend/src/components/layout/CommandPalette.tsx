@@ -3,7 +3,10 @@ import {
   Search,
   Swords,
   Plus,
+  History,
+  SlidersHorizontal,
   TrendingUp,
+  Trophy,
   MessageSquare,
   User,
 } from 'lucide-react'
@@ -23,7 +26,10 @@ interface CommandPaletteProps {
 const iconMap: Record<string, React.ReactNode> = {
   Swords: <Swords size={16} />,
   Plus: <Plus size={16} />,
+  History: <History size={16} />,
+  SlidersHorizontal: <SlidersHorizontal size={16} />,
   TrendingUp: <TrendingUp size={16} />,
+  Trophy: <Trophy size={16} />,
   MessageSquare: <MessageSquare size={16} />,
   User: <User size={16} />,
 }

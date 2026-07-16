@@ -247,6 +247,20 @@ def test_realtime_transcript_persistence_endpoint_stores_voice_realtime_messages
                     "role": "user",
                     "content": "Can we start with a low-risk pilot?",
                     "event_id": "evt_user_1",
+                    "metadata": {
+                        "source": "live_coach_realtime_voice",
+                        "trainingProfile": "live_coach",
+                        "sourceLanguage": "zh-CN",
+                        "targetLanguage": "en-US",
+                        "translationStrategy": "text_first_mvp",
+                        "translation": {
+                            "mode": "text_first_mvp",
+                            "sourceLanguage": "zh-CN",
+                            "targetLanguage": "en-US",
+                            "preserveTone": True,
+                            "extensionPoints": ["virtual_microphone"],
+                        },
+                    },
                 },
                 {
                     "role": "assistant",
@@ -272,12 +286,78 @@ def test_realtime_transcript_persistence_endpoint_stores_voice_realtime_messages
     assert state.messages[0].sender_id == "user"
     assert state.messages[1].sender_type == "persona"
     assert state.messages[1].sender_id == "assistant"
-    for message in state.messages:
-        assert message.metadata["source"] == "realtime_voice"
+    for index, message in enumerate(state.messages):
+        assert message.metadata["source"] == ("live_coach_realtime_voice" if index == 0 else "realtime_voice")
         assert message.metadata["trainingMode"] == "voice"
         assert message.metadata["interactionMode"] == "realtime"
         assert message.metadata["realtime"]["trainingSessionId"] == "session-1"
         assert message.metadata["realtime"]["roomId"] == 42
+    assert state.messages[0].metadata["trainingProfile"] == "live_coach"
+    assert state.messages[0].metadata["sourceLanguage"] == "zh-CN"
+    assert state.messages[0].metadata["targetLanguage"] == "en-US"
+    assert state.messages[0].metadata["translationStrategy"] == "text_first_mvp"
+    assert state.messages[0].metadata["translation"] == {
+        "mode": "text_first_mvp",
+        "sourceLanguage": "zh-CN",
+        "targetLanguage": "en-US",
+        "preserveTone": True,
+    }
+    assert state.messages[0].metadata["realtime"]["sourceLanguage"] == "zh-CN"
+    assert state.messages[0].metadata["realtime"]["targetLanguage"] == "en-US"
+    assert state.messages[0].metadata["realtime"]["translationIntent"] == "text_first_mvp"
+    session_response = client.get("/api/v1/training-studio/sessions/session-1")
+    assert session_response.status_code == 200
+    assert session_response.json()["data"]["message_count"] == 2
+
+
+def test_guidance_event_persistence_endpoint_stores_system_coach_messages_without_turn_count() -> None:
+    app, state = _make_bound_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/training-studio/sessions/session-1/guidance-events",
+        json={
+            "reason": "session_complete",
+            "source": "client",
+            "window_size": 2,
+            "total_turn_count": 2,
+            "events": [
+                {
+                    "event_type": "risk",
+                    "severity": "warning",
+                    "title": "Objection surfaced",
+                    "message": "The counterpart just signaled resistance.",
+                    "suggested_text": "That concern makes sense.",
+                    "metadata": {"risk_type": "objection"},
+                    "created_at": "2026-07-15T12:00:00Z",
+                }
+            ],
+            "metadata": {
+                "trainingProfile": "live_coach",
+                "sourceLanguage": "zh-CN",
+                "targetLanguage": "en-US",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert data["saved_count"] == 1
+    assert data["messages"][0]["sender_type"] == "system"
+    assert data["messages"][0]["sender_id"] == "training_coach"
+    assert "Objection surfaced" in data["messages"][0]["content"]
+    assert state.messages[0].sender_type == "system"
+    assert state.messages[0].sender_id == "training_coach"
+    assert state.messages[0].metadata["source"] == "training_live_guidance"
+    assert state.messages[0].metadata["eventKind"] == "guidance"
+    assert state.messages[0].metadata["trainingSessionId"] == "session-1"
+    assert state.messages[0].metadata["roomId"] == 42
+    assert state.messages[0].metadata["guidance"]["event_type"] == "risk"
+    assert state.messages[0].metadata["guidance"]["metadata"]["risk_type"] == "objection"
+    assert state.messages[0].metadata["clientMetadata"]["trainingProfile"] == "live_coach"
+    session_response = client.get("/api/v1/training-studio/sessions/session-1")
+    assert session_response.status_code == 200
+    assert session_response.json()["data"]["message_count"] == 0
 
 
 def test_realtime_websocket_accepts_audio_lifecycle() -> None:
@@ -371,13 +451,28 @@ def test_realtime_websocket_configure_binding_persists_final_transcript() -> Non
             "roomId": 42,
         }
 
-        ws.send_json({"type": "transcript.done", "text": "Configured binding path."})
+        ws.send_json(
+            {
+                "type": "transcript.done",
+                "text": "Configured binding path.",
+                "metadata": {
+                    "trainingProfile": "live_coach",
+                    "sourceLanguage": "ja",
+                    "targetLanguage": "en-US",
+                    "translationIntent": "text_first_mvp",
+                },
+            }
+        )
         persisted = ws.receive_json()
         assert persisted["type"] == "transcript.persisted"
         assert persisted["payload"]["message"]["content"] == "Configured binding path."
 
     assert [message.content for message in state.messages] == ["Configured binding path."]
     assert state.messages[0].metadata["realtime"]["eventType"] == "transcript.done"
+    assert state.messages[0].metadata["trainingProfile"] == "live_coach"
+    assert state.messages[0].metadata["sourceLanguage"] == "ja"
+    assert state.messages[0].metadata["targetLanguage"] == "en-US"
+    assert state.messages[0].metadata["realtime"]["translationIntent"] == "text_first_mvp"
 
 
 def test_realtime_websocket_binding_requires_active_training_session() -> None:

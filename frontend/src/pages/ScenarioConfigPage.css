@@ -1,0 +1,676 @@
+.scenario-config-page {
+  min-height: 100%;
+  padding: 28px 28px 44px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.scenario-config-header,
+.scenario-config-stats,
+.scenario-config-api-note,
+.scenario-config-notice,
+.scenario-config-tabbar,
+.scenario-config-workspace {
+  width: min(1180px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.scenario-config-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.scenario-config-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scenario-config-header h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.18;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.scenario-config-header p {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.scenario-config-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.scenario-config-header-actions button,
+.scenario-config-save,
+.scenario-config-tabs button,
+.scenario-config-weight-head button,
+.scenario-config-switch-row button,
+.scenario-config-dimension-footer button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.scenario-config-header-actions button:hover,
+.scenario-config-save:hover,
+.scenario-config-tabs button:hover,
+.scenario-config-weight-head button:hover:not(:disabled),
+.scenario-config-switch-row button:hover,
+.scenario-config-dimension-footer button:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.scenario-config-header-actions .primary,
+.scenario-config-save {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
+.scenario-config-header-actions .primary:hover,
+.scenario-config-save:hover {
+  border-color: var(--green-hover);
+  background: var(--green-hover);
+  color: #fff;
+}
+
+.scenario-config-header-actions button:disabled,
+.scenario-config-save:disabled,
+.scenario-config-dimension-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.scenario-config-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.scenario-config-stats div {
+  min-height: 68px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+}
+
+.scenario-config-stats strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-config-stats span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scenario-config-stats .ok strong {
+  color: var(--green);
+}
+
+.scenario-config-stats .warning strong {
+  color: var(--rose);
+}
+
+.scenario-config-api-note,
+.scenario-config-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.scenario-config-api-note {
+  margin-bottom: 12px;
+}
+
+.scenario-config-api-note svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--violet);
+}
+
+.scenario-config-api-note code {
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 1px 5px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.scenario-config-notice {
+  margin-bottom: 12px;
+  border-color: var(--border-accent);
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 700;
+}
+
+.scenario-config-notice.info {
+  border-color: var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.scenario-config-notice.warning {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.scenario-config-notice.error {
+  border-color: var(--rose);
+  background: var(--rose-soft);
+  color: var(--rose);
+}
+
+.scenario-config-tabbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.scenario-config-tabs {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.scenario-config-tabs button {
+  min-width: 0;
+  border-color: transparent;
+  min-height: 34px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.scenario-config-tabs button span {
+  min-width: 22px;
+  min-height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 6px;
+  background: var(--bg-base);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.scenario-config-tabs button.selected {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.scenario-config-tabs button.selected span {
+  background: #fff;
+  color: var(--green);
+}
+
+.scenario-config-workspace {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.scenario-config-list,
+.scenario-config-editor {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.scenario-config-list {
+  position: sticky;
+  top: 18px;
+  padding: 12px;
+}
+
+.scenario-config-search {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 11px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+}
+
+.scenario-config-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.scenario-config-list-items {
+  display: grid;
+  gap: 7px;
+  max-height: calc(100vh - 286px);
+  min-height: 260px;
+  margin-top: 10px;
+  overflow: auto;
+}
+
+.scenario-config-list-items > button {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.scenario-config-list-items > button:hover,
+.scenario-config-list-items > button.selected {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.scenario-config-row-title,
+.scenario-config-row-meta,
+.scenario-config-row-alert {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-config-row-title {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.scenario-config-row-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.scenario-config-row-alert {
+  color: var(--rose);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.scenario-config-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.scenario-config-editor-head,
+.scenario-config-weight-head,
+.scenario-config-dimension-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.scenario-config-editor-head h2,
+.scenario-config-weight-head h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.scenario-config-editor-head p,
+.scenario-config-weight-head p,
+.scenario-config-dimension-footer span {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.scenario-config-weight-head p.ok {
+  color: var(--green);
+}
+
+.scenario-config-weight-head p.warning {
+  color: var(--rose);
+}
+
+.scenario-config-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scenario-config-form-grid label,
+.scenario-config-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.scenario-config-form-grid span,
+.scenario-config-field span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scenario-config-form-grid input,
+.scenario-config-form-grid select,
+.scenario-config-field textarea,
+.scenario-config-weight-table input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: 0;
+}
+
+.scenario-config-form-grid input,
+.scenario-config-form-grid select,
+.scenario-config-weight-table input {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.scenario-config-form-grid input:focus,
+.scenario-config-form-grid select:focus,
+.scenario-config-field textarea:focus,
+.scenario-config-weight-table input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
+}
+
+.scenario-config-form-grid input:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.scenario-config-field textarea {
+  min-height: 78px;
+  resize: vertical;
+  padding: 10px 11px;
+  line-height: 1.5;
+}
+
+.scenario-config-switch-row > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scenario-config-switch-row button {
+  min-height: 38px;
+  flex: 1 1 110px;
+}
+
+.scenario-config-switch-row button.selected {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.scenario-config-weight-editor {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--bg-base);
+}
+
+.scenario-config-weight-head > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.scenario-config-weight-head button:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.scenario-config-weight-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border-light);
+  overflow: hidden;
+}
+
+.scenario-config-weight-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--green), var(--amber));
+  transition: width var(--transition-normal);
+}
+
+.scenario-config-weight-table {
+  display: grid;
+  gap: 8px;
+}
+
+.scenario-config-weight-table > div {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(0, 1fr) 92px;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--bg-card);
+}
+
+.scenario-config-weight-table > div.disabled {
+  opacity: 0.66;
+}
+
+.scenario-config-weight-table button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scenario-config-weight-table button.selected {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.scenario-config-weight-table button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.scenario-config-weight-table p {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.scenario-config-weight-table label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.scenario-config-weight-table input {
+  padding: 0 7px;
+  text-align: right;
+}
+
+.scenario-config-weight-table label span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scenario-config-dimension-footer {
+  border-top: 1px solid var(--border-light);
+  padding-top: 12px;
+}
+
+.scenario-config-dimension-footer button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 980px) {
+  .scenario-config-page {
+    padding: 22px 18px 38px;
+  }
+
+  .scenario-config-header,
+  .scenario-config-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-config-header {
+    flex-direction: column;
+  }
+
+  .scenario-config-header-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .scenario-config-header-actions button {
+    flex: 1;
+  }
+
+  .scenario-config-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .scenario-config-list {
+    position: static;
+  }
+
+  .scenario-config-list-items {
+    max-height: 320px;
+  }
+}
+
+@media (max-width: 720px) {
+  .scenario-config-page {
+    padding: 18px 12px 88px;
+  }
+
+  .scenario-config-header h1 {
+    font-size: 23px;
+  }
+
+  .scenario-config-stats,
+  .scenario-config-form-grid,
+  .scenario-config-weight-table > div {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-config-tabbar {
+    align-items: stretch;
+  }
+
+  .scenario-config-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .scenario-config-editor-head,
+  .scenario-config-weight-head,
+  .scenario-config-dimension-footer {
+    flex-direction: column;
+  }
+
+  .scenario-config-save,
+  .scenario-config-weight-head button,
+  .scenario-config-dimension-footer button {
+    width: 100%;
+  }
+}

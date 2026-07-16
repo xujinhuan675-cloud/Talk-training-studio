@@ -8,8 +8,8 @@ import './ChatInput.css'
 
 export interface ChatInputProps {
   value: string
-  onInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  onKeyDown: (e: React.KeyboardEvent) => void
+  onInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   onSend: () => void
   sending: boolean
   placeholder?: string
@@ -26,6 +26,7 @@ export interface ChatInputProps {
   videoActive?: boolean
   onLiveCoachClick: () => void
   coachingSending: boolean
+  sendError?: string | null
 }
 
 export default function ChatInput({
@@ -48,12 +49,31 @@ export default function ChatInput({
   videoActive,
   onLiveCoachClick,
   coachingSending,
+  sendError,
 }: ChatInputProps) {
   const { tr } = useI18n()
   const inputPlaceholder = placeholder ?? tr('输入消息...', 'Type a message...')
 
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+
+  const resizeTextarea = React.useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 112)}px`
+  }, [])
+
+  React.useEffect(() => {
+    resizeTextarea()
+  }, [resizeTextarea, value])
+
   return (
     <div className="message-input-shell">
+      {sendError && (
+        <div className="message-input-error" role="alert">
+          {sendError}
+        </div>
+      )}
       <div className="message-input-bar">
         {mentionQuery !== null && mentionResults.length > 0 && (
           <div className="mention-dropdown">
@@ -70,13 +90,18 @@ export default function ChatInput({
             ))}
           </div>
         )}
-        <input
-          type="text"
+        <textarea
+          ref={textareaRef}
+          className="message-input-textarea"
           value={value}
-          onChange={onInputChange}
+          onChange={(e) => {
+            onInputChange(e)
+            resizeTextarea()
+          }}
           onKeyDown={onKeyDown}
           placeholder={inputPlaceholder}
           disabled={sending}
+          rows={1}
         />
         {voiceEnabled && roomId && (
           <VoiceRecorder

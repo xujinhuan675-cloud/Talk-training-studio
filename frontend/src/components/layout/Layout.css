@@ -19,6 +19,20 @@
 
 /* ---- Responsive: mobile < 768px ---- */
 @media (max-width: 767px) {
+  .app-layout-shell.immersive-chat-layout {
+    height: 100dvh;
+  }
+
+  .app-layout-shell.immersive-chat-layout .topbar,
+  .app-layout-shell.immersive-chat-layout .bottom-tab-bar {
+    display: none;
+  }
+
+  .app-layout-shell.immersive-chat-layout .app-content {
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
   .app-content {
     /* Account for fixed BottomTabBar */
     padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));

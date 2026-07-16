@@ -148,12 +148,24 @@ async def client(session_factory):
 async def test_send_message(client: AsyncClient):
     resp = await client.post(
         "/api/v1/stakeholder/rooms/1/messages",
-        json={"content": "Hello, what do you think?"},
+        json={
+            "content": "Hello, what do you think?",
+            "metadata": {
+                "source": "live_coach_text_input",
+                "trainingProfile": "live_coach",
+                "sourceLanguage": "zh-CN",
+                "targetLanguage": "en-US",
+            },
+        },
     )
     assert resp.status_code == 201
     data = resp.json()["data"]
     assert data["sender_type"] == "user"
     assert data["content"] == "Hello, what do you think?"
+    assert data["metadata"]["source"] == "live_coach_text_input"
+    assert data["metadata"]["trainingProfile"] == "live_coach"
+    assert data["metadata"]["sourceLanguage"] == "zh-CN"
+    assert data["metadata"]["targetLanguage"] == "en-US"
 
 
 # ---------------------------------------------------------------------------

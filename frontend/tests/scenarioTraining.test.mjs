@@ -6,25 +6,81 @@ import { test } from 'node:test'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
-async function loadTsModule(sourcePath, prefix) {
-  const source = fs.readFileSync(path.resolve(sourcePath), 'utf8')
-  const output = ts.transpileModule(source, {
+async function loadTsModule(sourcePath, prefix, transformSource = (source) => source) {
+  const source = transformSource(fs.readFileSync(path.resolve(sourcePath), 'utf8'))
+  let outputText = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
       target: ts.ScriptTarget.ES2022,
     },
-  })
+  }).outputText
   const outputPath = path.join(os.tmpdir(), `${prefix}-${process.pid}-${Date.now()}.mjs`)
-  fs.writeFileSync(outputPath, output.outputText)
+  const cleanupPaths = [outputPath]
+
+  if (outputText.includes("from './scenarioConfig'")) {
+    const dependencySource = fs.readFileSync(path.resolve('src/data/scenarioConfig.ts'), 'utf8')
+    const dependencyOutput = ts.transpileModule(dependencySource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const dependencyPath = path.join(os.tmpdir(), `scenario-config-dependency-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(dependencyPath, dependencyOutput)
+    cleanupPaths.push(dependencyPath)
+    outputText = outputText.replace(
+      "from './scenarioConfig'",
+      `from '${pathToFileURL(dependencyPath).href}'`,
+    )
+  }
+  if (outputText.includes("from '../data/scenarioConfig'")) {
+    const dependencySource = fs.readFileSync(path.resolve('src/data/scenarioConfig.ts'), 'utf8')
+    const dependencyOutput = ts.transpileModule(dependencySource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const dependencyPath = path.join(os.tmpdir(), `scenario-config-service-dependency-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(dependencyPath, dependencyOutput)
+    cleanupPaths.push(dependencyPath)
+    outputText = outputText.replace(
+      "from '../data/scenarioConfig'",
+      `from '${pathToFileURL(dependencyPath).href}'`,
+    )
+  }
+  if (outputText.includes("from './auth'")) {
+    const authSource = fs.readFileSync(path.resolve('src/services/auth.ts'), 'utf8')
+    const authOutput = ts.transpileModule(authSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const authPath = path.join(os.tmpdir(), `auth-service-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(authPath, authOutput)
+    cleanupPaths.push(authPath)
+    outputText = outputText.replace("from './auth'", `from '${pathToFileURL(authPath).href}'`)
+  }
+
+  fs.writeFileSync(outputPath, outputText)
   try {
     return await import(pathToFileURL(outputPath).href)
   } finally {
-    fs.rmSync(outputPath, { force: true })
+    cleanupPaths.forEach((item) => fs.rmSync(item, { force: true }))
   }
 }
 
 const scenarioTrainingService = await loadTsModule('src/services/scenarioTraining.ts', 'scenario-training-service')
+const scenarioConfigService = await loadTsModule('src/services/scenarioConfig.ts', 'scenario-config-service')
 const scenarioTrainingData = await loadTsModule('src/data/trainingScenarios.ts', 'scenario-training-data')
+const scenarioConfigData = await loadTsModule('src/data/scenarioConfig.ts', 'scenario-config-data')
+const expectedAuthHeaders = {
+  'X-Mock-User': 'admin',
+  'X-User-Id': 'user-admin-001',
+  'X-System-Role': 'admin',
+  'X-Team-Id': 'team-ops',
+}
 
 test('fetchScenarioTrainingCatalog reads backend templates and maps card fields', async () => {
   const calls = []
@@ -65,7 +121,7 @@ test('fetchScenarioTrainingCatalog reads backend templates and maps card fields'
   const result = await scenarioTrainingService.fetchScenarioTrainingCatalog()
 
   assert.equal(calls[0].url, '/api/v1/training-studio/scenario-templates')
-  assert.deepEqual(calls[0].init, {})
+  assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
   assert.deepEqual(result, [
     {
       id: 'new-customer-discount',
@@ -127,6 +183,7 @@ test('fetchScenarioTrainingProgress reads backend progress and maps card status'
             training_session_id: 'session-1',
             report_id: '9001',
             score_id: null,
+            failure_reason: null,
           },
         ],
       }),
@@ -139,6 +196,7 @@ test('fetchScenarioTrainingProgress reads backend progress and maps card status'
   })
 
   assert.equal(calls[0].url, '/api/v1/training-studio/scenario-progress?user_id=user-sales-001&team_id=team-revenue')
+  assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
   assert.deepEqual(result, {
     'new-customer-discount': {
       status: 'completed',
@@ -152,8 +210,174 @@ test('fetchScenarioTrainingProgress reads backend progress and maps card status'
       trainingSessionId: 'session-1',
       reportId: '9001',
       scoreId: undefined,
+      failureReason: undefined,
     },
   })
+})
+
+test('fetchScenarioTrainingProgress maps failed progress failure reason', async () => {
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      code: 0,
+      message: 'ok',
+      data: [
+        {
+          scenario_id: 'refund-service-recovery',
+          status: 'failed',
+          score: null,
+          score_status: 'pending',
+          overall_score: null,
+          evaluation_id: null,
+          last_practiced_at: '2026-07-15T05:00:00Z',
+          training_session_id: 'session-failed',
+          report_id: null,
+          score_id: null,
+          failure_reason: 'report generation timed out',
+        },
+      ],
+    }),
+  })
+
+  const result = await scenarioTrainingService.fetchScenarioTrainingProgress()
+
+  assert.deepEqual(result['refund-service-recovery'], {
+    status: 'failed',
+    score: undefined,
+    scoreStatus: 'pending',
+    overallScore: undefined,
+    evaluationId: undefined,
+    lastPracticedAt: '2026-07-15T05:00:00Z',
+    userId: undefined,
+    teamId: undefined,
+    trainingSessionId: 'session-failed',
+    reportId: undefined,
+    scoreId: undefined,
+    failureReason: 'report generation timed out',
+  })
+})
+
+test('fetchScenarioConfig reads backend config and sends auth headers', async () => {
+  const calls = []
+  const remoteScenario = {
+    id: 'remote-sales',
+    title: 'Remote sales drill',
+    description: 'Handle a concrete buyer objection.',
+    customerProfile: 'Budget-sensitive buyer',
+    difficulty: 'medium',
+    category: 'sales',
+    required: true,
+    enabled: true,
+    openingLine: 'Why is this worth the price?',
+    persona: {
+      name: 'Buyer',
+      role: 'Decision maker',
+      style: 'Direct and skeptical.',
+    },
+    learnerRole: 'Salesperson',
+    framework: 'prep',
+    trainingPoints: ['Listen first', 'Explain trade-offs'],
+    dimensionWeights: [
+      { dimensionId: 'substance', weight: 60 },
+      { dimensionId: 'structure', weight: 40 },
+    ],
+    updatedAt: '2026-07-15T02:00:00.000Z',
+  }
+  const remoteDimension = {
+    id: 'custom-tone',
+    name: 'Tone',
+    description: 'Keeps the answer direct without sounding defensive.',
+    enabled: false,
+    source: 'local',
+    updatedAt: '2026-07-15T02:00:00.000Z',
+  }
+
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      json: async () => ({
+        code: 0,
+        message: 'ok',
+        data: {
+          scenarios: [remoteScenario],
+          dimensions: [remoteDimension],
+          selectedScenarioId: 'remote-sales',
+          selectedDimensionId: 'custom-tone',
+          updated_at: '2026-07-15T03:00:00.000Z',
+        },
+      }),
+    }
+  }
+
+  const result = await scenarioConfigService.fetchScenarioConfig([], {
+    version: 1,
+    scenarios: [],
+    dimensions: [],
+    selectedScenarioId: 'remote-sales',
+    selectedDimensionId: 'custom-tone',
+    updatedAt: '2026-07-15T01:00:00.000Z',
+  })
+
+  assert.equal(calls[0].url, '/api/v1/training-studio/scenario-config')
+  assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
+  assert.equal(result.updatedAt, '2026-07-15T03:00:00.000Z')
+  assert.equal(result.selectedScenarioId, 'remote-sales')
+  assert.equal(result.selectedDimensionId, 'custom-tone')
+  assert.equal(result.scenarios[0].customerProfile, 'Budget-sensitive buyer')
+  assert.deepEqual(result.scenarios[0].dimensionWeights, [
+    { dimensionId: 'substance', weight: 60 },
+    { dimensionId: 'structure', weight: 40 },
+  ])
+  assert.equal(result.dimensions.find((dimension) => dimension.id === 'custom-tone').enabled, false)
+})
+
+test('saveScenarioConfig puts backend config document with auth headers', async () => {
+  const draft = scenarioConfigData.createBlankScenarioDraft({
+    id: 'local-objection-handling',
+    title: 'Objection handling',
+    dimensionWeights: [
+      { dimensionId: 'substance', weight: 60 },
+      { dimensionId: 'structure', weight: 40 },
+    ],
+  })
+  const state = scenarioConfigData.upsertScenarioConfigDraft(
+    scenarioConfigData.createScenarioConfigState([]),
+    draft,
+  )
+  const calls = []
+
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      json: async () => ({
+        scenarios: state.scenarios,
+        dimensions: state.dimensions,
+        selectedScenarioId: state.selectedScenarioId,
+        selectedDimensionId: state.selectedDimensionId,
+        updated_at: '2026-07-15T04:00:00.000Z',
+      }),
+    }
+  }
+
+  const result = await scenarioConfigService.saveScenarioConfig(state, [])
+  const body = JSON.parse(calls[0].init.body)
+
+  assert.equal(calls[0].url, '/api/v1/training-studio/scenario-config')
+  assert.equal(calls[0].init.method, 'PUT')
+  assert.deepEqual(calls[0].init.headers, {
+    ...expectedAuthHeaders,
+    'Content-Type': 'application/json',
+  })
+  assert.deepEqual(Object.keys(body).sort(), ['dimensions', 'scenarios', 'selectedDimensionId', 'selectedScenarioId', 'updated_at'])
+  assert.deepEqual(body.scenarios, JSON.parse(JSON.stringify(state.scenarios)))
+  assert.deepEqual(body.dimensions, JSON.parse(JSON.stringify(state.dimensions)))
+  assert.equal(body.selectedScenarioId, state.selectedScenarioId)
+  assert.equal(body.selectedDimensionId, state.selectedDimensionId)
+  assert.equal(body.updated_at, state.updatedAt)
+  assert.equal(result.updatedAt, '2026-07-15T04:00:00.000Z')
+  assert.equal(result.selectedScenarioId, state.selectedScenarioId)
 })
 
 test('scenario task config maps MVP card values to Training Studio enums', () => {
@@ -175,6 +399,20 @@ test('scenario task config maps MVP card values to Training Studio enums', () =>
   assert.equal(expertConfig.category, 'negotiation')
   assert.equal(expertConfig.metadata.source, 'scenario_training')
   assert.equal(expertConfig.metadata.scenario_training.id, expertScenario.id)
+  assert.deepEqual(serviceConfig.rubric_weights, {
+    substance: 0.25,
+    structure: 0.2,
+    relevance: 0.25,
+    credibility: 0.2,
+    differentiation: 0.1,
+  })
+  assert.deepEqual(serviceConfig.metadata.scenario_training.dimension_weights, [
+    { dimensionId: 'substance', weight: 25 },
+    { dimensionId: 'structure', weight: 20 },
+    { dimensionId: 'relevance', weight: 25 },
+    { dimensionId: 'credibility', weight: 20 },
+    { dimensionId: 'differentiation', weight: 10 },
+  ])
 })
 
 test('scenario prompts carry realistic customer simulation rules', () => {
@@ -217,6 +455,32 @@ test('scenario context helpers find catalog cards and session-linked progress', 
   assert.equal(scenarioTrainingData.findScenarioTrainingIdBySession(progress, ' session-2 '), 'enterprise-demo-objection')
   assert.equal(scenarioTrainingData.findScenarioTrainingIdBySession(progress, 'missing-session'), null)
   assert.equal(scenarioTrainingData.findScenarioTrainingIdBySession(progress, null), null)
+})
+
+test('scenario route state carries full chat context without sharing mutable arrays', () => {
+  const scenario = scenarioTrainingData.scenarioTrainingCatalog.find(
+    (item) => item.id === 'new-customer-discount',
+  )
+
+  assert.ok(scenario)
+
+  const state = scenarioTrainingData.buildScenarioTrainingRouteState(scenario)
+
+  assert.equal(state.source, 'scenario-training')
+  assert.equal(state.scenarioTrainingId, scenario.id)
+  assert.equal(state.scenarioTitle, scenario.title)
+  assert.equal(state.scenarioDescription, scenario.description)
+  assert.equal(state.scenarioCustomerProfile, scenario.customerProfile)
+  assert.equal(state.scenarioOpeningLine, scenario.openingLine)
+  assert.equal(state.scenarioPersonaName, scenario.persona.name)
+  assert.equal(state.scenarioPersonaRole, scenario.persona.role)
+  assert.equal(state.scenarioPersonaStyle, scenario.persona.style)
+  assert.equal(state.scenarioLearnerRole, scenario.learnerRole)
+  assert.equal(state.scenarioDifficulty, scenario.difficulty)
+  assert.equal(state.scenarioCategory, scenario.category)
+  assert.equal(state.scenarioRequired, scenario.required)
+  assert.deepEqual(state.scenarioTrainingPoints, scenario.trainingPoints)
+  assert.notEqual(state.scenarioTrainingPoints, scenario.trainingPoints)
 })
 
 test('scenario progress helpers persist completion metadata', () => {
@@ -294,5 +558,249 @@ test('scenario progress helpers keep session ids and do not erase existing score
     trainingSessionId: 'session-1',
     reportId: '9001',
     scoreId: undefined,
+    failureReason: undefined,
   })
+})
+
+test('scenario progress helpers preserve failure reasons while merging metadata', () => {
+  const merged = scenarioTrainingData.mergeScenarioTrainingProgressRecords(
+    {
+      'refund-service-recovery': {
+        status: 'failed',
+        failureReason: 'report generation timed out',
+        lastPracticedAt: '2026-07-15T05:00:00Z',
+        trainingSessionId: 'session-failed',
+      },
+    },
+    {
+      'refund-service-recovery': {
+        status: 'failed',
+        scoreStatus: 'pending',
+        lastPracticedAt: '2026-07-15T05:05:00Z',
+      },
+    },
+  )
+
+  assert.equal(merged['refund-service-recovery'].failureReason, 'report generation timed out')
+  assert.equal(merged['refund-service-recovery'].scoreStatus, 'pending')
+})
+
+test('scenario leaderboard summary ranks only fully completed required drills', () => {
+  const catalog = scenarioTrainingData.scenarioTrainingCatalog
+  const required = catalog.filter((scenario) => scenario.required)
+  const [firstRequired, secondRequired, thirdRequired] = required
+
+  const completedProgress = Object.fromEntries(
+    required.map((scenario, index) => [
+      scenario.id,
+      {
+        status: 'completed',
+        score: [90, 80, 70][index] ?? 75,
+        lastPracticedAt: `2026-07-${10 + index}T05:00:00Z`,
+      },
+    ]),
+  )
+  const summary = scenarioTrainingData.buildScenarioLeaderboardSummary(
+    catalog,
+    [
+      {
+        userId: 'u-ranked',
+        name: 'Ranked User',
+        teamId: 'team-revenue',
+        teamName: 'Revenue Team',
+        progress: completedProgress,
+      },
+      {
+        userId: 'u-partial',
+        name: 'Partial User',
+        teamId: 'team-revenue',
+        teamName: 'Revenue Team',
+        progress: {
+          [firstRequired.id]: {
+            status: 'completed',
+            score: 60,
+            lastPracticedAt: '2026-07-12T05:00:00Z',
+          },
+          [secondRequired.id]: {
+            status: 'in_progress',
+            scoreStatus: 'pending',
+            lastPracticedAt: '2026-07-13T05:00:00Z',
+          },
+        },
+      },
+      {
+        userId: 'u-idle',
+        name: 'Idle User',
+        teamId: 'team-revenue',
+        teamName: 'Revenue Team',
+        progress: {},
+      },
+    ],
+    'u-partial',
+  )
+
+  assert.equal(summary.totalRequired, required.length)
+  assert.equal(summary.team.ranked, 1)
+  assert.equal(summary.team.ranks[0].userId, 'u-ranked')
+  assert.equal(summary.team.ranks[0].averageScore, 80)
+  assert.equal(summary.team.unfinishedAll, 2)
+  assert.equal(summary.team.unfinishedActive, 1)
+
+  const partial = summary.team.unfinished.find((row) => row.userId === 'u-partial')
+  assert.ok(partial)
+  assert.equal(partial.completedRequired, 1)
+  assert.deepEqual(
+    partial.unfinishedRequired.map((scenario) => scenario.scenarioId).sort(),
+    [secondRequired.id, thirdRequired.id].sort(),
+  )
+  assert.equal(summary.personal.status, 'partial')
+  assert.equal(summary.personal.completedRequired, 1)
+})
+
+test('scenario leaderboard ability dimensions use scored scenario aggregates', () => {
+  const catalog = scenarioTrainingData.scenarioTrainingCatalog
+  const required = catalog.filter((scenario) => scenario.required)
+  const summary = scenarioTrainingData.buildScenarioLeaderboardSummary(
+    catalog,
+    [
+      {
+        userId: 'u-ranked',
+        name: 'Ranked User',
+        teamId: 'team-revenue',
+        teamName: 'Revenue Team',
+        progress: Object.fromEntries(
+          required.map((scenario, index) => [
+            scenario.id,
+            {
+              status: 'completed',
+              score: [65, 75, 85][index] ?? 80,
+              lastPracticedAt: `2026-07-${12 + index}T05:00:00Z`,
+            },
+          ]),
+        ),
+      },
+    ],
+    'u-ranked',
+  )
+
+  assert.ok(summary.team.weakDimensions.length > 0)
+  const valueDimension = summary.team.weakDimensions.find((dimension) => dimension.dimensionId === 'value_clarity')
+  assert.ok(valueDimension)
+  assert.equal(valueDimension.sampleCount >= 1, true)
+  assert.equal(valueDimension.scenarioTitles.length >= 1, true)
+  assert.equal(summary.personal.abilityProfile.length > 0, true)
+})
+
+test('scenario leaderboard catalog fallback stays scoped to the opted-in user', () => {
+  const [first, second] = scenarioTrainingData.scenarioTrainingCatalog
+  const catalog = [
+    { ...first, id: 'required-a', required: true, status: 'completed', score: 91 },
+    { ...second, id: 'required-b', required: true, status: 'completed', score: 81 },
+  ]
+
+  const summary = scenarioTrainingData.buildScenarioLeaderboardSummary(
+    catalog,
+    [
+      {
+        userId: 'u-current',
+        name: 'Current User',
+        teamId: 'team-revenue',
+        teamName: 'Revenue Team',
+        progress: {},
+        useCatalogFallback: true,
+      },
+      {
+        userId: 'u-other',
+        name: 'Other User',
+        teamId: 'team-revenue',
+        teamName: 'Revenue Team',
+        progress: {},
+      },
+    ],
+    'u-current',
+  )
+
+  assert.equal(summary.team.ranked, 1)
+  assert.equal(summary.team.ranks[0].userId, 'u-current')
+  assert.equal(summary.team.ranks[0].averageScore, 86)
+  assert.equal(summary.team.unfinished[0].userId, 'u-other')
+  assert.equal(summary.team.unfinished[0].completedRequired, 0)
+  assert.equal(summary.personal.status, 'ranked')
+})
+
+test('scenario config default weights validate to 100 percent by category', () => {
+  for (const category of ['sales', 'customer_service', 'negotiation', 'interview']) {
+    const weights = scenarioConfigData.getDefaultDimensionWeights(category)
+    const validation = scenarioConfigData.validateScenarioWeightTotal(weights)
+
+    assert.equal(validation.valid, true)
+    assert.equal(validation.total, 100)
+  }
+})
+
+test('scenario config seeds local drafts from the scenario catalog', () => {
+  const state = scenarioConfigData.createScenarioConfigState(scenarioTrainingData.scenarioTrainingCatalog)
+
+  assert.equal(state.scenarios.length, scenarioTrainingData.scenarioTrainingCatalog.length)
+  assert.equal(state.dimensions.length >= 5, true)
+  assert.equal(state.selectedScenarioId, scenarioTrainingData.scenarioTrainingCatalog[0].id)
+
+  for (const scenario of state.scenarios) {
+    assert.equal(scenarioConfigData.validateScenarioWeightTotal(scenario.dimensionWeights).valid, true)
+  }
+})
+
+test('scenario config weight helpers sanitize input and distribute evenly', () => {
+  assert.equal(scenarioConfigData.normalizeScenarioWeight('140'), 100)
+  assert.equal(scenarioConfigData.normalizeScenarioWeight('-2'), 0)
+  assert.equal(scenarioConfigData.normalizeScenarioWeight('abc'), 0)
+
+  const weights = scenarioConfigData.distributeScenarioWeights(['a', 'b', 'c'])
+  assert.deepEqual(weights, [
+    { dimensionId: 'a', weight: 34 },
+    { dimensionId: 'b', weight: 33 },
+    { dimensionId: 'c', weight: 33 },
+  ])
+  assert.equal(scenarioConfigData.validateScenarioWeightTotal(weights).valid, true)
+
+  const invalid = scenarioConfigData.validateScenarioWeightTotal([
+    { dimensionId: 'a', weight: 50 },
+    { dimensionId: 'b', weight: 40 },
+  ])
+  assert.equal(invalid.valid, false)
+  assert.match(invalid.message, /100%/)
+})
+
+test('scenario config dimension updates keep existing scenario references', () => {
+  const state = scenarioConfigData.createScenarioConfigState(scenarioTrainingData.scenarioTrainingCatalog)
+  const firstDimension = state.dimensions[0]
+  const nextState = scenarioConfigData.upsertScenarioDimension(state, {
+    ...firstDimension,
+    enabled: false,
+  })
+
+  assert.equal(nextState.dimensions.find((dimension) => dimension.id === firstDimension.id).enabled, false)
+  assert.equal(
+    nextState.scenarios.some((scenario) => (
+      scenario.dimensionWeights.some((item) => item.dimensionId === firstDimension.id)
+    )),
+    true,
+  )
+})
+
+test('scenario config upserts local scenario drafts with normalized weight values', () => {
+  const state = scenarioConfigData.createScenarioConfigState([])
+  const draft = scenarioConfigData.createBlankScenarioDraft({
+    id: 'local-objection-handling',
+    title: 'Objection handling',
+    dimensionWeights: [
+      { dimensionId: 'substance', weight: 60 },
+      { dimensionId: 'structure', weight: 40 },
+    ],
+  })
+  const nextState = scenarioConfigData.upsertScenarioConfigDraft(state, draft)
+
+  assert.equal(nextState.selectedScenarioId, 'local-objection-handling')
+  assert.equal(nextState.scenarios[0].title, 'Objection handling')
+  assert.equal(scenarioConfigData.validateScenarioWeightTotal(nextState.scenarios[0].dimensionWeights).valid, true)
 })

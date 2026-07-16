@@ -8,6 +8,7 @@ import {
   type PersonaSummary,
   type RoundEndData,
 } from '../services/api'
+import { useI18n } from '../i18n'
 
 const API_BASE = '/api/v1/stakeholder'
 const LOCAL_VIDEO_PREFIX = '[video-answer]'
@@ -37,6 +38,7 @@ export interface UseChatReturn {
   dispatchExpanded: boolean
   setDispatchExpanded: React.Dispatch<React.SetStateAction<boolean>>
   sending: boolean
+  sendError: string | null
   inputValue: string
   setInputValue: React.Dispatch<React.SetStateAction<string>>
   mentionQuery: string | null
@@ -46,10 +48,10 @@ export interface UseChatReturn {
   typingPersona: string | null
   streamingEntries: [string, string][]
   messageListRef: React.RefObject<HTMLDivElement | null>
-  handleSend: () => Promise<boolean>
+  handleSend: (metadata?: Record<string, unknown>) => Promise<boolean>
   handleKeyDown: (e: React.KeyboardEvent) => void
   handleInputChange: (
-    e: React.ChangeEvent<HTMLInputElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     personaMap: Record<string, PersonaSummary>,
     roomType?: string,
     roomPersonaIds?: string[],
@@ -114,11 +116,13 @@ export function useChat(
     audioPlayerRef?: React.RefObject<{ stop: () => void; isMuted: () => boolean; enqueue: (personaId: string, data: string, replyId?: string, sentenceIndex?: number) => void } | null>
   },
 ): UseChatReturn {
+  const { tr } = useI18n()
   const [selectedRoom, setSelectedRoom] = useState<ChatRoomDetail | null>(null)
   const [streamingContent, setStreamingContent] = useState<Record<string, string>>({})
   const [dispatchSummary, setDispatchSummary] = useState<DispatchPhase[] | null>(null)
   const [dispatchExpanded, setDispatchExpanded] = useState(false)
   const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [typingPersona, setTypingPersona] = useState<string | null>(null)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
@@ -127,10 +131,26 @@ export function useChat(
   const messageListRef = useRef<HTMLDivElement | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const eventSourceVersionRef = useRef(0)
+  const pendingTypingPersonaRef = useRef<string | null>(null)
 
   const scrollToBottom = useCallback(() => {
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+    }
+  }, [])
+
+  const setFallbackTyping = useCallback(() => {
+    const fallbackPersonaId = selectedRoom?.room.persona_ids[0] || 'AI'
+    pendingTypingPersonaRef.current = fallbackPersonaId
+    setTypingPersona(fallbackPersonaId)
+    setTimeout(scrollToBottom, 30)
+  }, [scrollToBottom, selectedRoom])
+
+  const clearPendingTyping = useCallback((personaId?: string) => {
+    const pendingPersonaId = pendingTypingPersonaRef.current
+    if (pendingPersonaId && (!personaId || pendingPersonaId === personaId)) {
+      pendingTypingPersonaRef.current = null
+      setTypingPersona((prev) => (prev === pendingPersonaId ? null : prev))
     }
   }, [])
 
@@ -156,6 +176,8 @@ export function useChat(
       const msg: Message = hydrateLocalVideoMessage(JSON.parse(e.data))
       // Clear streaming content for this persona -- the final message replaces it
       if (msg.sender_type === 'persona') {
+        clearPendingTyping(msg.sender_id)
+        setTypingPersona((prev) => (prev === msg.sender_id ? null : prev))
         setStreamingContent((prev) => {
           const next = { ...prev }
           delete next[msg.sender_id]
@@ -175,6 +197,8 @@ export function useChat(
     es.addEventListener('streaming_delta', (e) => {
       if (!isCurrentStream()) return
       const data: { persona_id: string; delta: string } = JSON.parse(e.data)
+      clearPendingTyping()
+      setTypingPersona((prev) => (prev === data.persona_id ? null : prev))
       setStreamingContent((prev) => ({
         ...prev,
         [data.persona_id]: (prev[data.persona_id] || '') + data.delta,
@@ -185,6 +209,7 @@ export function useChat(
     es.addEventListener('typing', (e) => {
       if (!isCurrentStream()) return
       const data = JSON.parse(e.data)
+      clearPendingTyping()
       if (data.status === 'start') {
         setTypingPersona(data.persona_id)
       } else {
@@ -213,6 +238,7 @@ export function useChat(
 
     es.addEventListener('round_end', (e) => {
       if (!isCurrentStream()) return
+      pendingTypingPersonaRef.current = null
       setTypingPersona(null)
       setStreamingContent({})
       try {
@@ -228,6 +254,7 @@ export function useChat(
 
     es.onerror = () => {
       if (!isCurrentStream()) return
+      pendingTypingPersonaRef.current = null
       setTypingPersona(null)
     }
 
@@ -237,6 +264,7 @@ export function useChat(
       if (eventSourceRef.current === es) {
         eventSourceRef.current = null
       }
+      pendingTypingPersonaRef.current = null
       setTypingPersona(null)
       setStreamingContent({})
     }
@@ -256,7 +284,7 @@ export function useChat(
     }
   }, [scrollToBottom])
 
-  const handleSend = useCallback(async (): Promise<boolean> => {
+  const handleSend = useCallback(async (metadata?: Record<string, unknown>): Promise<boolean> => {
     const content = inputValue.trim()
     if (!content || !roomId || sending) return false
 
@@ -264,29 +292,37 @@ export function useChat(
     options?.audioPlayerRef?.current?.stop()
 
     setSending(true)
+    setSendError(null)
     setInputValue('')
     setMentionQuery(null)
     setMentionResults([])
     setDispatchSummary(null)
 
     try {
-      await apiSendMessage(roomId, content)
+      await apiSendMessage(roomId, content, metadata)
+      setFallbackTyping()
       setTimeout(scrollToBottom, 100)
       return true
     } catch (e) {
       console.error('Send failed:', e)
+      setInputValue(content)
+      setSendError(tr('消息发送失败，请稍后重试。', 'Message failed to send. Please try again.'))
       // Fallback: refresh room detail
       if (roomId) {
-        const detail = await fetchRoomDetail(roomId)
-        setSelectedRoom(hydrateLocalVideoMessages(detail))
-        setTimeout(scrollToBottom, 50)
+        try {
+          const detail = await fetchRoomDetail(roomId)
+          setSelectedRoom(hydrateLocalVideoMessages(detail))
+          setTimeout(scrollToBottom, 50)
+        } catch (refreshError) {
+          console.error('Refresh after send failure failed:', refreshError)
+        }
       }
       return false
     } finally {
       setSending(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValue, roomId, sending, scrollToBottom])
+  }, [inputValue, roomId, sending, scrollToBottom, setFallbackTyping, tr])
 
   const sendVideoAnswer = useCallback(async (
     attachment: LocalVideoAttachment,
@@ -295,23 +331,31 @@ export function useChat(
     if (!roomId || sending) return false
     options?.audioPlayerRef?.current?.stop()
     setSending(true)
+    setSendError(null)
     setInputValue('')
     setMentionQuery(null)
     setMentionResults([])
     setDispatchSummary(null)
     try {
       await apiSendMessage(roomId, serializeVideoMessage(attachment, caption))
-      const detail = await fetchRoomDetail(roomId)
-      setSelectedRoom(hydrateLocalVideoMessages(detail))
+      setFallbackTyping()
+      try {
+        const detail = await fetchRoomDetail(roomId)
+        setSelectedRoom(hydrateLocalVideoMessages(detail))
+      } catch (refreshError) {
+        console.error('Refresh after video send failed:', refreshError)
+      }
       setTimeout(scrollToBottom, 100)
       return true
     } catch (e) {
       console.error('Video send failed:', e)
+      setInputValue(caption)
+      setSendError(tr('视频消息发送失败，请稍后重试。', 'Video message failed to send. Please try again.'))
       return false
     } finally {
       setSending(false)
     }
-  }, [inputValue, options?.audioPlayerRef, roomId, scrollToBottom, sending])
+  }, [inputValue, options?.audioPlayerRef, roomId, scrollToBottom, sending, setFallbackTyping, tr])
 
   const insertMention = useCallback((persona: PersonaSummary) => {
     setInputValue((prev) =>
@@ -335,13 +379,14 @@ export function useChat(
   }, [mentionQuery, mentionResults, insertMention, handleSend])
 
   const handleInputChange = useCallback((
-    e: React.ChangeEvent<HTMLInputElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     personaMap: Record<string, PersonaSummary>,
     roomType?: string,
     roomPersonaIds?: string[],
   ) => {
     const val = e.target.value
     setInputValue(val)
+    if (sendError) setSendError(null)
 
     const atMatch = val.match(/@([\w\u4e00-\u9fff]*)$/)
     if (atMatch && roomType === 'group') {
@@ -359,7 +404,7 @@ export function useChat(
       setMentionQuery(null)
       setMentionResults([])
     }
-  }, [])
+  }, [sendError])
 
   const streamingEntries = Object.entries(streamingContent) as [string, string][]
 
@@ -372,6 +417,7 @@ export function useChat(
     dispatchExpanded,
     setDispatchExpanded,
     sending,
+    sendError,
     inputValue,
     setInputValue,
     mentionQuery,

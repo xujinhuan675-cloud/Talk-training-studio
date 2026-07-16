@@ -169,6 +169,22 @@ test('getLiveCoachLanguagePairFromLocation reads query first and falls back to s
   )
 })
 
+test('live coach language helpers preserve complex BCP-47 tags', () => {
+  const path = trainingMode.buildTrainingModeChatPath(42, 'voice', 'training-session-1', 'realtime', {
+    trainingProfile: 'live_coach',
+    sourceLanguage: 'zh-Hant-TW',
+    targetLanguage: 'pt-BR',
+  })
+  const url = new URL(path, 'http://localhost')
+
+  assert.equal(url.searchParams.get('sourceLanguage'), 'zh-Hant-TW')
+  assert.equal(url.searchParams.get('targetLanguage'), 'pt-BR')
+  assert.deepEqual(
+    trainingMode.getLiveCoachLanguagePairFromLocation('?sourceLanguage=ar-SA&targetLanguage=es-419', null),
+    { sourceLanguage: 'ar-SA', targetLanguage: 'es-419' },
+  )
+})
+
 test('isTrainingModeBattlePrep gates voice and video battle prep modes', () => {
   assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'voice', 'voice'), true)
   assert.equal(trainingMode.isTrainingModeBattlePrep('battle_prep', 'video', 'video'), true)

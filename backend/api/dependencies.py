@@ -2,7 +2,10 @@
 API 依赖项
 """
 
-from fastapi import Depends
+import time
+from dataclasses import dataclass
+
+from fastapi import Depends, Header, HTTPException, Query, Request
 
 from application.services.file_asset_service import FileAssetApplicationService
 from application.services.idempotency_service import IdempotencyService
@@ -26,6 +29,187 @@ from infrastructure.external.voice import get_tts_client, get_stt_client
 from infrastructure.adapters.storage_port import StorageProviderPortAdapter
 from infrastructure.adapters.idempotency_store import RedisIdempotencyStore
 from core.config import settings
+
+
+@dataclass(frozen=True)
+class CurrentUser:
+    user_id: str
+    system_role: str
+    team_id: str | None = None
+    username: str | None = None
+    business_role: str | None = None
+
+    @property
+    def is_admin(self) -> bool:
+        return self.system_role == "admin"
+
+    @property
+    def is_leader(self) -> bool:
+        return self.system_role == "leader"
+
+    @property
+    def is_staff(self) -> bool:
+        return self.system_role == "staff"
+
+
+@dataclass(frozen=True)
+class TrainingScope:
+    user_id: str | None = None
+    team_id: str | None = None
+
+
+_MOCK_USERS: dict[str, CurrentUser] = {
+    "admin": CurrentUser(
+        user_id="user-admin-001",
+        username="admin",
+        system_role="admin",
+        business_role="operations",
+        team_id="team-ops",
+    ),
+    "leader": CurrentUser(
+        user_id="user-leader-001",
+        username="leader",
+        system_role="leader",
+        business_role="sales",
+        team_id="team-revenue",
+    ),
+    "sales": CurrentUser(
+        user_id="user-sales-001",
+        username="sales",
+        system_role="staff",
+        business_role="sales",
+        team_id="team-revenue",
+    ),
+    "customer_service": CurrentUser(
+        user_id="user-cs-001",
+        username="customer_service",
+        system_role="staff",
+        business_role="customer_service",
+        team_id="team-service",
+    ),
+}
+_MOCK_USERS_BY_USER_ID = {user.user_id: user for user in _MOCK_USERS.values()}
+_SYSTEM_ROLES = {"admin", "leader", "staff"}
+_AI_RATE_WINDOWS: dict[str, tuple[int, int]] = {}
+
+
+def _coerce_optional_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+async def get_current_user(
+    x_mock_user: str | None = Header(default=None, alias="X-Mock-User"),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
+    x_system_role: str | None = Header(default=None, alias="X-System-Role"),
+    x_role: str | None = Header(default=None, alias="X-Role"),
+    x_team_id: str | None = Header(default=None, alias="X-Team-Id"),
+    q_mock_user: str | None = Query(default=None, alias="mock_user"),
+    q_user_id: str | None = Query(default=None, alias="auth_user_id"),
+    q_system_role: str | None = Query(default=None, alias="auth_role"),
+    q_team_id: str | None = Query(default=None, alias="auth_team_id"),
+) -> CurrentUser:
+    mock_key = (
+        _coerce_optional_text(x_mock_user)
+        or _coerce_optional_text(q_mock_user)
+        or _coerce_optional_text(x_user_id)
+        or _coerce_optional_text(q_user_id)
+    )
+    if mock_key in _MOCK_USERS:
+        return _MOCK_USERS[mock_key]
+    if mock_key in _MOCK_USERS_BY_USER_ID:
+        base = _MOCK_USERS_BY_USER_ID[mock_key]
+        return CurrentUser(
+            user_id=base.user_id,
+            username=base.username,
+            system_role=base.system_role,
+            business_role=base.business_role,
+            team_id=_coerce_optional_text(x_team_id) or _coerce_optional_text(q_team_id) or base.team_id,
+        )
+
+    role = (
+        _coerce_optional_text(x_system_role)
+        or _coerce_optional_text(q_system_role)
+        or _coerce_optional_text(x_user_role)
+        or _coerce_optional_text(x_role)
+    )
+    role = role.lower() if role else None
+    if role in {"sales", "customer_service", "operations"}:
+        business_role = role
+        role = "staff"
+    else:
+        business_role = None
+    if role is not None and role not in _SYSTEM_ROLES:
+        raise HTTPException(status_code=401, detail="Unsupported mock user role")
+
+    user_id = _coerce_optional_text(x_user_id) or _coerce_optional_text(q_user_id)
+    if user_id:
+        return CurrentUser(
+            user_id=user_id,
+            username=user_id,
+            system_role=role or "staff",
+            business_role=business_role,
+            team_id=_coerce_optional_text(x_team_id) or _coerce_optional_text(q_team_id),
+        )
+
+    # Local development default: keep existing tests and no-auth workflows working.
+    return _MOCK_USERS["admin"]
+
+
+def require_system_roles(*roles: str):
+    allowed = {role.lower() for role in roles}
+
+    async def _dependency(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if current_user.system_role not in allowed:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return current_user
+
+    return _dependency
+
+
+def training_scope_for(
+    current_user: CurrentUser,
+    *,
+    requested_user_id: str | None = None,
+    requested_team_id: str | None = None,
+) -> TrainingScope:
+    user_id = _coerce_optional_text(requested_user_id)
+    team_id = _coerce_optional_text(requested_team_id)
+    if current_user.is_admin:
+        return TrainingScope(user_id=user_id, team_id=team_id)
+    if current_user.is_leader:
+        return TrainingScope(user_id=user_id, team_id=current_user.team_id)
+    return TrainingScope(user_id=current_user.user_id, team_id=current_user.team_id)
+
+
+def reset_ai_rate_limit_state() -> None:
+    _AI_RATE_WINDOWS.clear()
+
+
+async def enforce_ai_rate_limit(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
+    limit = int(settings.RATE_LIMIT_PER_MINUTE or 0)
+    if limit <= 0:
+        return
+
+    client_host = request.client.host if request.client else "unknown"
+    if current_user.user_id:
+        bucket = f"user:{current_user.system_role}:{current_user.user_id}"
+    else:
+        bucket = f"ip:{client_host}"
+    window = int(time.time() // 60)
+    current_window, count = _AI_RATE_WINDOWS.get(bucket, (window, 0))
+    if current_window != window:
+        current_window, count = window, 0
+    count += 1
+    _AI_RATE_WINDOWS[bucket] = (current_window, count)
+    if count > limit:
+        raise HTTPException(status_code=429, detail="AI rate limit exceeded")
 
 
 async def get_storage_port(provider=Depends(get_storage)) -> StoragePort:

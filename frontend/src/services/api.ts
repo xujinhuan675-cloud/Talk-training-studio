@@ -101,11 +101,15 @@ export async function fetchRoomDetail(roomId: number): Promise<ChatRoomDetail> {
   return json.data
 }
 
-export async function sendMessage(roomId: number, content: string): Promise<Message> {
+export async function sendMessage(
+  roomId: number,
+  content: string,
+  metadata?: Record<string, unknown>,
+): Promise<Message> {
   const resp = await fetch(`${API_BASE}/rooms/${roomId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(metadata ? { content, metadata } : { content }),
   })
   if (!resp.ok) throw new Error(`Failed to send message: ${resp.status}`)
   const json: ApiResponse<Message> = await resp.json()

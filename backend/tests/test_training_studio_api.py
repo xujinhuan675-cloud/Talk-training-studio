@@ -17,16 +17,23 @@ from api.dependencies import (
     get_analysis_service,
     get_chatroom_service,
     get_growth_service,
+    reset_ai_rate_limit_state,
 )
 from api.routes.training_studio import (
     get_live_guidance_service,
+    get_training_scenario_config_service,
     get_storybank_service,
     get_training_session_service,
     router,
 )
 from application.services.stakeholder.dto import ChatRoomDTO, ChatRoomDetailDTO, MessageDTO
 from application.services.training_studio.live_guidance_service import TrainingLiveGuidanceService
+from application.services.training_studio.scenario_config_service import (
+    JsonFileScenarioConfigStore,
+    TrainingScenarioConfigService,
+)
 from application.services.training_studio.session_service import TrainingSessionService
+from core.config import settings
 from core.exceptions import register_exception_handlers
 from domain.training_studio.storybank import StoryBankService
 
@@ -81,11 +88,15 @@ class FakeChatroomService:
 
 
 @pytest.fixture
-def app():
+def app(tmp_path):
+    reset_ai_rate_limit_state()
     test_app = FastAPI()
     register_exception_handlers(test_app)
     test_app.include_router(router, prefix="/api/v1")
     storybank = StoryBankService()
+    scenario_config_service = TrainingScenarioConfigService(
+        JsonFileScenarioConfigStore(tmp_path / "scenario_config.json")
+    )
     session_ids = count(1)
     session_service = TrainingSessionService(id_factory=lambda: f"session-{next(session_ids)}")
     analysis_service = FakeAnalysisService()
@@ -94,12 +105,14 @@ def app():
     chatroom_service = FakeChatroomService()
     guidance_service = TrainingLiveGuidanceService(monologue_word_threshold=20)
     test_app.dependency_overrides[get_storybank_service] = lambda: storybank
+    test_app.dependency_overrides[get_training_scenario_config_service] = lambda: scenario_config_service
     test_app.dependency_overrides[get_training_session_service] = lambda: session_service
     test_app.dependency_overrides[get_live_guidance_service] = lambda: guidance_service
     test_app.dependency_overrides[get_analysis_service] = lambda: analysis_service
     test_app.dependency_overrides[get_analysis_reader_service] = lambda: reader_service
     test_app.dependency_overrides[get_growth_service] = lambda: growth_service
     test_app.dependency_overrides[get_chatroom_service] = lambda: chatroom_service
+    test_app.state.scenario_config_service = scenario_config_service
     test_app.state.training_session_service = session_service
     test_app.state.guidance_service = guidance_service
     test_app.state.analysis_service = analysis_service
@@ -157,6 +170,88 @@ async def test_scenario_templates_expose_business_training_cards(client: AsyncCl
 
     assert any(item["category"] == "customer_service" for item in data)
     assert by_id["renewal-price-negotiation"]["difficulty"] == "expert"
+
+
+async def read_scenario_config_state(client: AsyncClient, headers: dict | None = None) -> dict:
+    resp = await client.get("/api/v1/training-studio/scenario-config", headers=headers)
+    assert resp.status_code == 200
+    return resp.json()["data"]
+
+
+def scenario_dimension_weights() -> list[dict]:
+    return [
+        {"dimensionId": "substance", "weight": 40},
+        {"dimensionId": "structure", "weight": 20},
+        {"dimensionId": "relevance", "weight": 20},
+        {"dimensionId": "credibility", "weight": 10},
+        {"dimensionId": "differentiation", "weight": 10},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scenario_config_reads_default_state(client: AsyncClient) -> None:
+    data = await read_scenario_config_state(client, headers={"X-Mock-User": "sales"})
+
+    assert data["version"] == 1
+    assert len(data["dimensions"]) >= 5
+    assert {item["id"] for item in data["dimensions"]} >= {
+        "substance",
+        "structure",
+        "relevance",
+        "credibility",
+        "differentiation",
+    }
+    by_id = {item["id"]: item for item in data["scenarios"]}
+    assert "new-customer-discount" in by_id
+    assert by_id["new-customer-discount"]["sourceScenarioId"] == "new-customer-discount"
+    assert sum(item["weight"] for item in by_id["new-customer-discount"]["dimensionWeights"]) == pytest.approx(100)
+
+
+@pytest.mark.asyncio
+async def test_scenario_config_admin_and_leader_can_save(client: AsyncClient) -> None:
+    for mock_user in ("admin", "leader"):
+        payload = await read_scenario_config_state(client)
+        payload["scenarios"][0]["dimensionWeights"] = scenario_dimension_weights()
+
+        resp = await client.put(
+            "/api/v1/training-studio/scenario-config",
+            headers={"X-Mock-User": mock_user},
+            json=payload,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["scenarios"][0]["dimensionWeights"] == scenario_dimension_weights()
+
+
+@pytest.mark.asyncio
+async def test_scenario_config_staff_cannot_save(client: AsyncClient) -> None:
+    payload = await read_scenario_config_state(client)
+
+    resp = await client.put(
+        "/api/v1/training-studio/scenario-config",
+        headers={"X-Mock-User": "sales"},
+        json=payload,
+    )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_scenario_config_persists_dimension_weights(client: AsyncClient) -> None:
+    payload = await read_scenario_config_state(client)
+    scenario_id = payload["scenarios"][0]["id"]
+    payload["scenarios"][0]["dimensionWeights"] = scenario_dimension_weights()
+
+    save_resp = await client.put(
+        "/api/v1/training-studio/scenario-config",
+        headers={"X-Mock-User": "admin"},
+        json=payload,
+    )
+    assert save_resp.status_code == 200
+
+    data = await read_scenario_config_state(client, headers={"X-Mock-User": "leader"})
+    saved = next(item for item in data["scenarios"] if item["id"] == scenario_id)
+    assert saved["dimensionWeights"] == scenario_dimension_weights()
 
 
 @pytest.mark.asyncio
@@ -341,6 +436,7 @@ async def test_scenario_training_progress_aggregates_sessions(client: AsyncClien
             "user_id": "user-sales-001",
             "team_id": "team-revenue",
             "status": "completed",
+            "failure_reason": None,
             "score": None,
             "score_status": "pending",
             "overall_score": None,
@@ -362,6 +458,41 @@ async def test_scenario_training_progress_aggregates_sessions(client: AsyncClien
 
 
 @pytest.mark.asyncio
+async def test_scenario_training_progress_reports_failed_session_reason(client: AsyncClient) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            scenario_template_id="new-customer-discount",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    fail_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/fail",
+        json={"reason": "analysis service unavailable"},
+    )
+    assert fail_resp.status_code == 200
+
+    progress_resp = await client.get(
+        "/api/v1/training-studio/scenario-progress",
+        params={"user_id": "user-sales-001", "team_id": "team-revenue"},
+    )
+
+    assert progress_resp.status_code == 200
+    data = progress_resp.json()["data"]
+    assert data[0]["training_session_id"] == session_id
+    assert data[0]["status"] == "failed"
+    assert data[0]["failure_reason"] == "analysis service unavailable"
+    assert data[0]["score_status"] == "pending"
+
+
+@pytest.mark.asyncio
 async def test_training_session_list_supports_skip_and_limit(client: AsyncClient) -> None:
     for mode in ["text", "voice", "video"]:
         create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload(mode))
@@ -372,6 +503,143 @@ async def test_training_session_list_supports_skip_and_limit(client: AsyncClient
     assert list_resp.status_code == 200
     data = list_resp.json()["data"]
     assert [item["session_id"] for item in data] == ["session-2"]
+
+
+@pytest.mark.asyncio
+async def test_staff_session_list_ignores_forged_user_filter(client: AsyncClient) -> None:
+    await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-sales-001", team_id="team-revenue"),
+    )
+    await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+    )
+
+    resp = await client.get(
+        "/api/v1/training-studio/sessions",
+        params={"user_id": "user-cs-001"},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert [item["user_id"] for item in data] == ["user-sales-001"]
+
+
+@pytest.mark.asyncio
+async def test_leader_scenario_progress_is_limited_to_own_team(client: AsyncClient) -> None:
+    revenue_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            scenario_template_id="revenue-scenario",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+    )
+    service_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            scenario_template_id="service-scenario",
+            user_id="user-cs-001",
+            team_id="team-service",
+        ),
+    )
+    await client.post(
+        f"/api/v1/training-studio/sessions/{revenue_resp.json()['data']['session_id']}/start",
+        json={"room_id": 201},
+    )
+    await client.post(
+        f"/api/v1/training-studio/sessions/{service_resp.json()['data']['session_id']}/start",
+        json={"room_id": 202},
+    )
+
+    resp = await client.get(
+        "/api/v1/training-studio/scenario-progress",
+        params={"team_id": "team-service"},
+        headers={"X-Mock-User": "leader"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert [item["team_id"] for item in data] == ["team-revenue"]
+    assert [item["scenario_id"] for item in data] == ["revenue-scenario"]
+
+
+@pytest.mark.asyncio
+async def test_admin_session_list_can_filter_by_user_and_team(client: AsyncClient) -> None:
+    await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-sales-001", team_id="team-revenue"),
+    )
+    await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+    )
+
+    resp = await client.get(
+        "/api/v1/training-studio/sessions",
+        params={"user_id": "user-cs-001", "team_id": "team-service"},
+        headers={"X-Mock-User": "admin"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert [item["user_id"] for item in data] == ["user-cs-001"]
+
+
+@pytest.mark.asyncio
+async def test_staff_create_session_uses_current_user_scope(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+    assert data["user_id"] == "user-sales-001"
+    assert data["team_id"] == "team-revenue"
+
+
+@pytest.mark.asyncio
+async def test_staff_cannot_access_other_user_training_session(client: AsyncClient) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+
+    get_resp = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}",
+        headers={"X-Mock-User": "sales"},
+    )
+    fail_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/fail",
+        json={"reason": "should not be allowed"},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert get_resp.status_code == 403
+    assert fail_resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_leader_cannot_read_other_team_training_session(client: AsyncClient) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+
+    resp = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}",
+        headers={"X-Mock-User": "leader"},
+    )
+
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -410,6 +678,23 @@ async def test_training_session_start_can_create_room(client: AsyncClient) -> No
     started = start_resp.json()["data"]
     assert started["status"] == "active"
     assert started["room_id"] == "701"
+
+
+@pytest.mark.asyncio
+async def test_training_session_fail_endpoint(client: AsyncClient) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    session_id = create_resp.json()["data"]["session_id"]
+
+    fail_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/fail",
+        json={"reason": "user stopped the practice"},
+    )
+
+    assert fail_resp.status_code == 200
+    failed = fail_resp.json()["data"]
+    assert failed["status"] == "failed"
+    assert failed["failure_reason"] == "user stopped the practice"
+    assert failed["completed_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -586,6 +871,46 @@ async def test_training_session_guidance_accepts_request_turns(client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_training_guidance_rate_limit_returns_429(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reset_ai_rate_limit_state()
+    monkeypatch.setattr(settings, "RATE_LIMIT_PER_MINUTE", 1)
+    headers = {"X-Mock-User": "customer_service"}
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text"),
+        headers=headers,
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+        headers=headers,
+    )
+    payload = {
+        "recent_turns": [
+            {"speaker": "user", "text": "This is a long enough practice answer to coach."},
+        ],
+    }
+
+    first_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        json=payload,
+        headers=headers,
+    )
+    second_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        json=payload,
+        headers=headers,
+    )
+
+    assert first_resp.status_code == 200
+    assert second_resp.status_code == 429
+
+
+@pytest.mark.asyncio
 async def test_training_session_guidance_parses_video_answer_marker(
     client: AsyncClient,
     app: FastAPI,
@@ -640,6 +965,46 @@ async def test_training_session_guidance_parses_video_answer_marker(
     assert turn.metadata["source"] == "video_answer"
     assert turn.metadata["videoUrl"] == video_attachment["url"]
     assert turn.metadata["trainingEvent"] == video_attachment["trainingEvent"]
+
+
+@pytest.mark.asyncio
+async def test_training_guidance_accepts_eventsource_mock_user_scope(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-sales-001", team_id="team-revenue"),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    app.state.chatroom_service.details[42] = chat_detail(
+        42,
+        [
+            MessageDTO(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="me",
+                content="Can we start with a low-risk pilot?",
+            ),
+        ],
+    )
+
+    own_resp = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        params={"mock_user": "sales"},
+    )
+    other_resp = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        params={"mock_user": "customer_service"},
+    )
+
+    assert own_resp.status_code == 200
+    assert other_resp.status_code == 403
 
 
 @pytest.mark.asyncio

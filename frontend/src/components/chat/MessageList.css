@@ -31,3 +31,43 @@
 .message.user .message-video {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
+
+.typing-message {
+  align-self: flex-start;
+  max-width: 78%;
+}
+
+.typing-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--text-secondary);
+}
+
+.typing-bubble .typing-dots {
+  flex: 0 0 auto;
+}
+
+.typing-bubble .typing-dots span {
+  background: var(--green);
+}
+
+.typing-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@media (max-width: 767px) {
+  .chat-page-chat-column .message-list {
+    padding: 14px 12px;
+  }
+
+  .chat-page-chat-column .message,
+  .chat-page-chat-column .message.persona,
+  .chat-page-chat-column .message.system,
+  .chat-page-chat-column .typing-message {
+    max-width: 86%;
+  }
+}

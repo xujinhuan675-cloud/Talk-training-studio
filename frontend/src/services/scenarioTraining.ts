@@ -1,4 +1,5 @@
 import type { ScenarioTrainingCard, ScenarioTrainingProgress } from '../data/trainingScenarios'
+import { getAuthRequestHeaders } from './auth'
 
 interface ApiResponse<T> {
   code: number
@@ -41,6 +42,7 @@ interface ScenarioTrainingProgressDTO {
   training_session_id: string
   report_id?: string | null
   score_id?: string | null
+  failure_reason?: string | null
 }
 
 const SCENARIO_TEMPLATE_API = '/api/v1/training-studio/scenario-templates'
@@ -89,6 +91,7 @@ function toScenarioTrainingProgress(items: ScenarioTrainingProgressDTO[]): Scena
       trainingSessionId: item.training_session_id,
       reportId: item.report_id ?? undefined,
       scoreId: item.score_id ?? undefined,
+      failureReason: item.failure_reason ?? undefined,
     }
     return progress
   }, {})
@@ -109,7 +112,7 @@ async function readError(resp: Response, fallback: string): Promise<Error> {
 }
 
 export async function fetchScenarioTrainingCatalog(): Promise<ScenarioTrainingCard[]> {
-  const resp = await fetch(SCENARIO_TEMPLATE_API)
+  const resp = await fetch(SCENARIO_TEMPLATE_API, { headers: getAuthRequestHeaders() })
   if (!resp.ok) {
     throw await readError(resp, 'Failed to fetch scenario templates')
   }
@@ -120,7 +123,7 @@ export async function fetchScenarioTrainingCatalog(): Promise<ScenarioTrainingCa
 export async function fetchScenarioTrainingProgress(
   scope: ScenarioTrainingProgressScope = {},
 ): Promise<ScenarioTrainingProgress> {
-  const resp = await fetch(progressUrl(scope))
+  const resp = await fetch(progressUrl(scope), { headers: getAuthRequestHeaders() })
   if (!resp.ok) {
     throw await readError(resp, 'Failed to fetch scenario progress')
   }

@@ -63,6 +63,7 @@ class SendMessageDTO(BaseModel):
     """Input DTO for sending a message to a chat room."""
 
     content: str = Field(..., min_length=1, max_length=10000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreatePersonaDTO(BaseModel):

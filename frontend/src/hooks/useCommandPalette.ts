@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ChatRoom, PersonaSummary } from '../services/api'
+import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n } from '../i18n'
+import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from '../services/auth'
 
 export interface CommandResult {
   id: string
@@ -11,6 +13,10 @@ export interface CommandResult {
   icon?: string
   shortcut?: string
   onSelect: () => void
+}
+
+interface CommandAction extends CommandResult {
+  roles?: readonly SystemRole[]
 }
 
 export interface UseCommandPaletteReturn {
@@ -32,6 +38,8 @@ export function useCommandPalette(
   const [selectedIndex, setSelectedIndex] = useState(0)
   const navigate = useNavigate()
   const { t } = useI18n()
+  const { hasAnySystemRole } = useAuthContext()
+  const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
 
   const setQuery = useCallback((nextQuery: string) => {
     setQueryState(nextQuery)
@@ -51,7 +59,7 @@ export function useCommandPalette(
   }, [])
 
   // Static action items
-  const actions: CommandResult[] = useMemo(
+  const actions: CommandAction[] = useMemo(
     () => [
       {
         id: 'action-battle-prep',
@@ -59,6 +67,7 @@ export function useCommandPalette(
         label: t('command.action.battlePrep'),
         icon: 'Swords',
         shortcut: '\u2318B',
+        roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {
           close()
           navigate('/battle-prep')
@@ -84,6 +93,38 @@ export function useCommandPalette(
         onSelect: () => {
           close()
           navigate('/growth')
+        },
+      },
+      {
+        id: 'action-training-history',
+        type: 'action' as const,
+        label: t('nav.trainingHistory'),
+        icon: 'History',
+        onSelect: () => {
+          close()
+          navigate('/training-history')
+        },
+      },
+      {
+        id: 'action-scenario-leaderboard',
+        type: 'action' as const,
+        label: t('nav.scenarioLeaderboard'),
+        icon: 'Trophy',
+        roles: MANAGEMENT_SYSTEM_ROLES,
+        onSelect: () => {
+          close()
+          navigate('/scenario-leaderboard')
+        },
+      },
+      {
+        id: 'action-scenario-config',
+        type: 'action' as const,
+        label: t('nav.scenarioConfig'),
+        icon: 'SlidersHorizontal',
+        roles: MANAGEMENT_SYSTEM_ROLES,
+        onSelect: () => {
+          close()
+          navigate('/scenario-config')
         },
       },
     ],
@@ -120,9 +161,13 @@ export function useCommandPalette(
     }
 
     // Filter actions
+    const visibleActions = actions.filter((action) => {
+      if (!action.roles) return true
+      return hasAnySystemRole(action.roles)
+    })
     const matchingActions = q
-      ? actions.filter((a) => a.label.toLowerCase().includes(q))
-      : actions
+      ? visibleActions.filter((a) => a.label.toLowerCase().includes(q))
+      : visibleActions
 
     items.push(...matchingActions)
 
@@ -147,7 +192,7 @@ export function useCommandPalette(
     }
 
     return items
-  }, [query, rooms, personaMap, actions, close, navigate, t])
+  }, [query, rooms, personaMap, actions, close, navigate, t, hasAnySystemRole])
 
   const currentSelectedIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : 0
 
@@ -175,7 +220,7 @@ export function useCommandPalette(
       // Global shortcuts (only when palette is NOT open)
       if (!isOpen) {
         // Cmd+B -> battle prep
-        if (meta && e.key === 'b') {
+        if (meta && e.key === 'b' && canUseManagementActions) {
           e.preventDefault()
           navigate('/battle-prep')
           return
@@ -222,7 +267,7 @@ export function useCommandPalette(
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, results, currentSelectedIndex, navigate, close])
+  }, [isOpen, results, currentSelectedIndex, navigate, close, canUseManagementActions])
 
   return {
     isOpen,

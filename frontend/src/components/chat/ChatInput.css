@@ -10,6 +10,51 @@
   gap: 10px;
 }
 
+.message-input-error {
+  margin: 0 14px;
+  padding: 8px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.message-input-bar .message-input-textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  max-height: 112px;
+  padding: 9px 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.message-input-bar .message-input-textarea:focus {
+  border-color: var(--green);
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+}
+
+.message-input-bar .message-input-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.message-input-bar .message-input-textarea:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .video-toggle-btn {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -36,4 +81,35 @@
 .video-toggle-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+@media (max-width: 767px) {
+  .message-input-shell .message-input-bar {
+    align-items: flex-end;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .message-input-error {
+    margin: 0 12px;
+  }
+
+  .message-input-bar .message-input-textarea {
+    min-height: 38px;
+    max-height: 96px;
+    padding: 8px 12px;
+    border-radius: 19px;
+  }
+
+  .message-input-bar .send-btn,
+  .message-input-bar .live-coach-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  .message-input-bar .voice-toggle-btn,
+  .message-input-bar .video-toggle-btn {
+    width: 36px;
+    height: 36px;
+  }
 }

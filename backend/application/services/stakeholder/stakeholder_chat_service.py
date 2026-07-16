@@ -102,7 +102,12 @@ class StakeholderChatService:
         self._compression = compression_service
         self._tts = tts  # Optional TTSPort for voice synthesis
 
-    async def send_message(self, room_id: int, content: str) -> tuple[MessageDTO, ChatRoom]:
+    async def send_message(
+        self,
+        room_id: int,
+        content: str,
+        metadata: dict[str, object] | None = None,
+    ) -> tuple[MessageDTO, ChatRoom]:
         """Save user message (committed immediately). Returns (dto, room) for background reply generation."""
 
         async with self._uow_factory() as uow:
@@ -121,6 +126,7 @@ class StakeholderChatService:
                 sender_type="user",
                 sender_id="user",
                 content=content,
+                metadata=metadata or {},
             )
             saved_user_msg = await uow.stakeholder_message_repository.create(user_msg)
             await uow.chat_room_repository.update_last_message_at(room_id, saved_user_msg.timestamp)

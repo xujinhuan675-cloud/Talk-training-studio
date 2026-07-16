@@ -4,6 +4,7 @@ import { Keyboard, Languages, Loader2, Mic2, Radio, Video, Wand2 } from 'lucide-
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { startBattle } from '../services/api'
 import { createTrainingSession, startTrainingSession } from '../services/trainingSession'
+import { LIVE_COACH_LANGUAGE_OPTIONS, getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import {
   buildTrainingModeChatPath,
   type InteractionMode,
@@ -33,15 +34,6 @@ const supportsRealtimeVideo = false
 interface TrainingStudioPageProps {
   initialProfile?: TrainingProfile
 }
-
-const liveCoachLanguageOptions: Array<{ value: string; labelKey: TranslationKey }> = [
-  { value: 'zh-CN', labelKey: 'training.liveCoach.language.zhCn' },
-  { value: 'en-US', labelKey: 'training.liveCoach.language.enUs' },
-  { value: 'ja-JP', labelKey: 'training.liveCoach.language.jaJp' },
-  { value: 'ko-KR', labelKey: 'training.liveCoach.language.koKr' },
-  { value: 'es-ES', labelKey: 'training.liveCoach.language.esEs' },
-  { value: 'fr-FR', labelKey: 'training.liveCoach.language.frFr' },
-]
 
 const modeOptions: Array<{
   value: TopLevelMode
@@ -177,14 +169,9 @@ function splitTechStack(value: string, fallback: string): string[] {
   return items.length > 0 ? items : [fallback]
 }
 
-function getLiveCoachLanguageLabel(value: string, t: Translate): string {
-  const option = liveCoachLanguageOptions.find((item) => item.value === value)
-  return option ? t(option.labelKey) : value
-}
-
 export default function TrainingStudioPage({ initialProfile = 'practice' }: TrainingStudioPageProps) {
   const navigate = useNavigate()
-  const { t } = useI18n()
+  const { locale, t } = useI18n()
   const [config, setConfig] = useState<TrainingStudioConfig>(() => getDefaultTrainingStudioConfig(t))
   const previousDefaultsRef = useRef(getDefaultTrainingStudioConfig(t))
   const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : 'voice')
@@ -233,8 +220,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       const modeLabel = getModeLabel(mode, t)
       const trainingProfile: TrainingProfile = mode === 'live_coach' ? 'live_coach' : 'practice'
       const isLiveCoachMode = trainingProfile === 'live_coach'
-      const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachSourceLanguage, t)
-      const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachTargetLanguage, t)
+      const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachSourceLanguage, locale)
+      const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachTargetLanguage, locale)
       const interviewScenarioPreset = getInterviewScenarioPreset(config.interviewScenarioPreset)
       const productScenarioPreset = getProductScenarioPreset(config.productScenarioPreset)
       const interviewStakeholder = config.scenario === 'interview' ? interviewScenarioPreset : undefined
@@ -450,9 +437,9 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                     onChange={(event) => setLiveCoachSourceLanguage(event.target.value)}
                     disabled={starting !== null}
                   >
-                    {liveCoachLanguageOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {t(option.labelKey)}
+                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {getLiveCoachLanguageLabel(option.code, locale)}
                       </option>
                     ))}
                   </select>
@@ -464,9 +451,9 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                     onChange={(event) => setLiveCoachTargetLanguage(event.target.value)}
                     disabled={starting !== null}
                   >
-                    {liveCoachLanguageOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {t(option.labelKey)}
+                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {getLiveCoachLanguageLabel(option.code, locale)}
                       </option>
                     ))}
                   </select>

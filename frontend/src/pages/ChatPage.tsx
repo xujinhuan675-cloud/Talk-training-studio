@@ -14,6 +14,7 @@ import {
   Flag,
   Loader2,
   CheckCircle2,
+  ChevronDown,
   ArrowLeft,
   PhoneCall,
   Volume2,
@@ -22,6 +23,7 @@ import {
   X,
   Lightbulb,
   Radio,
+  Languages,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
 import { ChatProvider, useChatContext } from '../contexts/ChatContext'
@@ -50,6 +52,7 @@ import {
   completeTrainingSession,
   getTrainingGuidanceStreamUrl,
   getTrainingSessionReport,
+  persistTrainingGuidanceEvents,
   requestTrainingGuidance,
   type GuideEventDTO,
   type TrainingSessionReportDTO,
@@ -75,8 +78,9 @@ import {
   type ScenarioTrainingDifficulty,
   type ScenarioTrainingProgressScope,
 } from '../data/trainingScenarios'
+import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useAuthContext } from '../contexts/AuthContext'
-import { useI18n } from '../i18n'
+import { useI18n, type TranslateInline } from '../i18n'
 import '../App.css'
 import './ChatPage.css'
 
@@ -115,8 +119,42 @@ function getStateStringValue(state: unknown, key: string): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function getStateStringArrayValue(state: unknown, key: string): string[] {
+  const value = asRecord(state)?.[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+}
+
+function getStateBooleanValue(state: unknown, key: string): boolean | null {
+  const value = asRecord(state)?.[key]
+  return typeof value === 'boolean' ? value : null
+}
+
+function getScenarioDifficultyFromState(state: unknown): ScenarioTrainingDifficulty | null {
+  const value = getStateStringValue(state, 'scenarioDifficulty')
+  return value === 'easy' || value === 'medium' || value === 'hard' || value === 'expert' ? value : null
+}
+
+function getScenarioCategoryFromState(state: unknown): ScenarioTrainingCategory | null {
+  const value = getStateStringValue(state, 'scenarioCategory')
+  return value === 'sales' || value === 'customer_service' || value === 'negotiation' || value === 'interview'
+    ? value
+    : null
+}
+
 function compactStrings(values: Array<string | null | undefined | false>): string[] {
   return values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+}
+
+type TrainingContextTag = {
+  label: string
+  tone?: 'category' | 'difficulty' | 'required' | 'optional' | 'mode' | 'live'
+}
+
+function compactTags(values: Array<TrainingContextTag | null | undefined | false>): TrainingContextTag[] {
+  return values.filter((value): value is TrainingContextTag => (
+    Boolean(value && typeof value === 'object' && value.label.trim())
+  ))
 }
 
 function coercePercentScore(value: unknown): number | undefined {
@@ -138,6 +176,100 @@ function extractTrainingReportScore(report: TrainingSessionReportDTO): number | 
 const GUIDANCE_TURN_WINDOW = 8
 const GUIDANCE_AUTO_DELAY_MS = 900
 const GUIDANCE_AUTO_MIN_INTERVAL_MS = 1200
+
+const GUIDE_EVENT_TEXTS: Record<string, [string, string]> = {
+  'Ask a calibration question': ['追问校准问题', 'Ask a calibration question'],
+  'Discovery gap': ['发现信息缺口', 'Discovery gap'],
+  'Objection surfaced': ['异议浮现', 'Objection surfaced'],
+  'Next reply candidate': ['下一句候选', 'Next reply candidate'],
+  'Risk surfaced': ['风险浮现', 'Risk surfaced'],
+  'Tighten the delivery': ['收紧表达', 'Tighten the delivery'],
+  'Delivery nudge': ['表达提醒', 'Delivery nudge'],
+  'You have not asked a question in the recent window. Pull out the counterpart\'s priority before continuing.': [
+    '最近几轮你还没有提问。继续推进前，先问出对方真正优先级。',
+    'You have not asked a question in the recent window. Pull out the counterpart\'s priority before continuing.',
+  ],
+  'The recent exchange is light on discovery. Add one focused question before pitching or defending.': [
+    '最近对话的信息探索偏少。在陈述或防守前，先补一个聚焦问题。',
+    'The recent exchange is light on discovery. Add one focused question before pitching or defending.',
+  ],
+  'The counterpart just signaled resistance. Acknowledge it before adding more evidence.': [
+    '对方刚释放出阻力信号。先承认这一点，再补充证据。',
+    'The counterpart just signaled resistance. Acknowledge it before adding more evidence.',
+  ],
+  'A compact next move based on the current bounded transcript window.': [
+    '基于当前对话窗口生成的简短下一步建议。',
+    'A compact next move based on the current bounded transcript window.',
+  ],
+  'Your last answer is running long. Land the point, pause, and invite the other side in.': [
+    '你上一段回答偏长。先落到重点，停顿一下，把对方带回来。',
+    'Your last answer is running long. Land the point, pause, and invite the other side in.',
+  ],
+  'Before I go further, what matters most to you in this situation?': [
+    '在继续之前，我想先确认：这个场景里你最在意什么？',
+    'Before I go further, what matters most to you in this situation?',
+  ],
+  'What constraint or success metric should I optimize for?': [
+    '我应该优先满足哪个约束或成功指标？',
+    'What constraint or success metric should I optimize for?',
+  ],
+  'That concern makes sense. Can I check whether the main issue is impact, cost, or timing?': [
+    '这个担心有道理。我可以确认一下，核心问题是影响、成本还是时间吗？',
+    'That concern makes sense. Can I check whether the main issue is impact, cost, or timing?',
+  ],
+  'Start by clarifying the goal and asking what the other side cares about most.': [
+    '先确认目标，再问对方最在意什么。',
+    'Start by clarifying the goal and asking what the other side cares about most.',
+  ],
+  'Acknowledge their point, ask one clarifying question, then give a concise answer.': [
+    '先承认对方观点，追问一个澄清问题，再给出简洁回应。',
+    'Acknowledge their point, ask one clarifying question, then give a concise answer.',
+  ],
+  'Give the short answer first, support it with one example, then pause.': [
+    '先给短答案，用一个例子支撑，然后停顿。',
+    'Give the short answer first, support it with one example, then pause.',
+  ],
+  'Let me pause there. Which part would you like me to go deeper on?': [
+    '我先停在这里。你希望我在哪一部分展开？',
+    'Let me pause there. Which part would you like me to go deeper on?',
+  ],
+}
+
+const GUIDE_EVENT_TYPE_LABELS: Record<string, [string, string]> = {
+  next_reply: ['下一句', 'Next reply'],
+  risk: ['风险', 'Risk'],
+  omission: ['缺口', 'Omission'],
+  ask_back: ['追问', 'Ask back'],
+  delivery_nudge: ['表达', 'Delivery'],
+}
+
+type LocalizedGuideEvent = GuideEventDTO & {
+  displayTitle: string
+  displayMessage: string
+  displaySuggestedText?: string
+  displayType: string
+}
+
+function localizeKnownGuideText(text: string | undefined, tr: TranslateInline): string | undefined {
+  if (!text) return text
+  const mapped = GUIDE_EVENT_TEXTS[text.trim()]
+  return mapped ? tr(mapped[0], mapped[1]) : text
+}
+
+function localizeGuideEvent(event: GuideEventDTO, tr: TranslateInline): LocalizedGuideEvent {
+  const type = GUIDE_EVENT_TYPE_LABELS[event.event_type]
+  return {
+    ...event,
+    displayTitle: localizeKnownGuideText(event.title, tr) || event.title,
+    displayMessage: localizeKnownGuideText(event.message, tr) || event.message,
+    displaySuggestedText: localizeKnownGuideText(event.suggested_text, tr),
+    displayType: type ? tr(type[0], type[1]) : event.event_type.replace(/_/g, ' '),
+  }
+}
+
+function guidanceEventsSignature(events: GuideEventDTO[]): string {
+  return JSON.stringify(events.map(({ created_at: _createdAt, ...event }) => event))
+}
 
 const scenarioDifficultyLabels: Record<ScenarioTrainingDifficulty, string> = {
   easy: '简单',
@@ -181,7 +313,7 @@ function ChatArea() {
   const { currentUser } = useAuthContext()
   const navigate = useNavigate()
   const location = useLocation()
-  const { tr } = useI18n()
+  const { locale, tr } = useI18n()
   const preparedVoiceRoomRef = React.useRef<number | null>(null)
   const guidanceTurnsRef = React.useRef<TranscriptTurnDTO[]>([])
   const guidanceTimerRef = React.useRef<number | null>(null)
@@ -189,6 +321,7 @@ function ChatArea() {
   const guidanceRequestSeqRef = React.useRef(0)
   const guidanceLastRequestedAtRef = React.useRef(0)
   const lastAutoGuidanceMessageKeyRef = React.useRef<string | null>(null)
+  const persistedGuidanceSignatureRef = React.useRef<string | null>(null)
   const guidanceEventSourceRef = React.useRef<EventSource | null>(null)
   const guidanceStreamVersionRef = React.useRef(0)
   const trainingMode = getTrainingModeFromLocation(location.search, location.state)
@@ -204,6 +337,11 @@ function ChatArea() {
   const scenarioTrainingId = getScenarioTrainingIdFromLocation(location.search, location.state)
     ?? getScenarioTrainingIdFromProgress(trainingSessionId, progressScope)
   const scenarioTrainingCard = getScenarioTrainingCardById(scenarioTrainingId)
+  const hasScenarioTrainingContext = Boolean(
+    scenarioTrainingCard
+    || scenarioTrainingId
+    || getStateStringValue(location.state, 'source') === 'scenario-training',
+  )
 
   const [showEmotionSidebar, setShowEmotionSidebar] = useState(false)
   const [showEmotionCurve, setShowEmotionCurve] = useState(false)
@@ -228,20 +366,71 @@ function ChatArea() {
   const [guidanceError, setGuidanceError] = useState<string | null>(null)
   const [guidanceEvents, setGuidanceEvents] = useState<GuideEventDTO[]>([])
   const [guidanceStreamConnected, setGuidanceStreamConnected] = useState(false)
+  const localizedGuidanceEvents = React.useMemo(
+    () => guidanceEvents.map((event) => localizeGuideEvent(event, tr)),
+    [guidanceEvents, tr],
+  )
   const [cheatSheetData, setCheatSheetData] = useState<CheatSheetData | null>(null)
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
+  const [trainingSceneExpanded, setTrainingSceneExpanded] = useState(false)
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
   const sendChatMessage = chat.handleSend
+  const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.sourceLanguage, locale)
+  const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.targetLanguage, locale)
+  const liveCoachGuidanceMetadata = React.useMemo(() => {
+    if (!isLiveCoachSession) return undefined
+    return {
+      source: 'live_coach_bilingual_mvp',
+      trainingProfile,
+      liveCoach: {
+        sourceLanguage: liveCoachLanguagePair.sourceLanguage,
+        targetLanguage: liveCoachLanguagePair.targetLanguage,
+        sourceLanguageLabel,
+        targetLanguageLabel,
+      },
+      translation: {
+        mode: 'text_first_mvp',
+        sourceLanguage: liveCoachLanguagePair.sourceLanguage,
+        targetLanguage: liveCoachLanguagePair.targetLanguage,
+        sourceLanguageLabel,
+        targetLanguageLabel,
+        preserveTone: true,
+        supportedLanguages: '70_plus',
+        extensionPoints: [
+          'speech_to_speech_translation',
+          'virtual_microphone',
+          'prosody_preservation',
+        ],
+      },
+    }
+  }, [
+    isLiveCoachSession,
+    liveCoachLanguagePair.sourceLanguage,
+    liveCoachLanguagePair.targetLanguage,
+    sourceLanguageLabel,
+    targetLanguageLabel,
+    trainingProfile,
+  ])
+  const liveCoachRealtimeTranscriptMetadata = React.useMemo(() => (
+    liveCoachGuidanceMetadata
+      ? {
+          ...liveCoachGuidanceMetadata,
+          source: 'live_coach_realtime_voice',
+        }
+      : undefined
+  ), [liveCoachGuidanceMetadata])
 
   useEffect(() => {
     setTrainingSessionCompleted(false)
+    setTrainingSceneExpanded(false)
     setGuidanceOpen(false)
     setGuidanceError(null)
     setGuidanceEvents([])
     setGuidanceStreamConnected(false)
     guidanceRequestSeqRef.current += 1
     lastAutoGuidanceMessageKeyRef.current = null
+    persistedGuidanceSignatureRef.current = null
     if (guidanceTimerRef.current !== null) {
       window.clearTimeout(guidanceTimerRef.current)
       guidanceTimerRef.current = null
@@ -354,6 +543,8 @@ function ChatArea() {
         text: message.content.trim(),
         turn_id: String(message.id),
         metadata: {
+          ...(liveCoachGuidanceMetadata || {}),
+          ...((message as { metadata?: Record<string, unknown> }).metadata || {}),
           room_id: message.room_id,
           sender_id: message.sender_id,
           sender_type: message.sender_type,
@@ -361,7 +552,7 @@ function ChatArea() {
           emotion_label: message.emotion_label,
         },
       }))
-  }, [selectedRoomMessages])
+  }, [liveCoachGuidanceMetadata, selectedRoomMessages])
 
   useEffect(() => {
     guidanceTurnsRef.current = guidanceTurns
@@ -459,10 +650,22 @@ function ChatArea() {
 
   const handleSend = React.useCallback(async () => {
     const outgoingText = chat.inputValue.trim()
-    const success = await sendChatMessage()
+    const success = await sendChatMessage(liveCoachGuidanceMetadata)
     if (!success) return
     if (trainingSessionId && outgoingText) {
       scheduleGuidanceRefresh({
+        extraTurn: isLiveCoachSession
+          ? {
+              speaker: 'user',
+              text: outgoingText,
+              metadata: {
+                ...(liveCoachGuidanceMetadata || {}),
+                source: 'live_coach_text_input',
+                trainingMode,
+                interactionMode,
+              },
+            }
+          : undefined,
         minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
       })
     }
@@ -478,13 +681,17 @@ function ChatArea() {
     battlePrepRoundCount,
     chat.inputValue,
     handleEndBattle,
+    interactionMode,
+    isLiveCoachSession,
+    liveCoachGuidanceMetadata,
     scheduleGuidanceRefresh,
     selectedRoomType,
     sendChatMessage,
+    trainingMode,
     trainingSessionId,
   ])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       if (chat.mentionQuery !== null && chat.mentionResults.length > 0) {
         e.preventDefault()
@@ -496,7 +703,7 @@ function ChatArea() {
     }
   }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     chat.handleInputChange(
       e,
       personaMap,
@@ -542,80 +749,106 @@ function ChatArea() {
     return messages[messages.length - 1] || null
   }, [selectedRoomMessages])
   const scenarioTitleFromState = getStateStringValue(location.state, 'scenarioTitle')
+  const scenarioDescriptionFromState = getStateStringValue(location.state, 'scenarioDescription')
+  const scenarioCustomerProfileFromState = getStateStringValue(location.state, 'scenarioCustomerProfile')
   const scenarioOpeningLineFromState = getStateStringValue(location.state, 'scenarioOpeningLine')
+  const scenarioPersonaRoleFromState = getStateStringValue(location.state, 'scenarioPersonaRole')
+  const scenarioPersonaStyleFromState = getStateStringValue(location.state, 'scenarioPersonaStyle')
+  const scenarioLearnerRoleFromState = getStateStringValue(location.state, 'scenarioLearnerRole')
+  const scenarioTrainingPointsFromState = getStateStringArrayValue(location.state, 'scenarioTrainingPoints')
+  const scenarioDifficultyFromState = getScenarioDifficultyFromState(location.state)
+  const scenarioCategoryFromState = getScenarioCategoryFromState(location.state)
+  const scenarioRequiredFromState = getStateBooleanValue(location.state, 'scenarioRequired')
+  const scenarioPersonaRole = scenarioTrainingCard?.persona.role || scenarioPersonaRoleFromState
+  const scenarioLearnerRole = scenarioTrainingCard?.learnerRole || scenarioLearnerRoleFromState
+  const scenarioCategory = scenarioTrainingCard?.category || scenarioCategoryFromState
+  const scenarioDifficulty = scenarioTrainingCard?.difficulty || scenarioDifficultyFromState
+  const scenarioRequired = scenarioTrainingCard ? scenarioTrainingCard.required : scenarioRequiredFromState
+  const scenarioTrainingPoints = scenarioTrainingCard?.trainingPoints.length
+    ? scenarioTrainingCard.trainingPoints
+    : scenarioTrainingPointsFromState
   const trainingBackPath = scenarioTrainingId ? '/scenario-training' : '/training-studio'
   const trainingContextTitle = scenarioTrainingCard?.title
     || scenarioTitleFromState
     || chat.selectedRoom?.room.name
     || tr('训练会话', 'Training session')
-  const trainingContextSubtitle = scenarioTrainingCard
+  const trainingContextSubtitle = hasScenarioTrainingContext
     ? compactStrings([
-      scenarioTrainingCard.persona.role,
-      scenarioTrainingCard.learnerRole ? `${tr('你扮演', 'You play')}: ${scenarioTrainingCard.learnerRole}` : null,
+      scenarioPersonaRole,
+      scenarioLearnerRole ? `${tr('你扮演', 'You play')}: ${scenarioLearnerRole}` : null,
     ]).join(' · ')
     : compactStrings([
       counterpartName,
       trainingMode ? trainingModeLabels[trainingMode] : null,
       interactionModeLabels[interactionMode],
     ]).join(' · ')
-  const trainingContextTags = compactStrings([
-    scenarioTrainingCard ? scenarioCategoryLabels[scenarioTrainingCard.category] : null,
-    scenarioTrainingCard ? scenarioDifficultyLabels[scenarioTrainingCard.difficulty] : null,
-    scenarioTrainingCard?.required ? tr('必练', 'Required') : scenarioTrainingCard ? tr('选练', 'Optional') : null,
-    trainingMode ? trainingModeLabels[trainingMode] : null,
-    interactionModeLabels[interactionMode],
+  const trainingContextTags = compactTags([
+    scenarioCategory ? { label: scenarioCategoryLabels[scenarioCategory], tone: 'category' } : null,
+    scenarioDifficulty ? { label: scenarioDifficultyLabels[scenarioDifficulty], tone: 'difficulty' } : null,
+    scenarioRequired === true
+      ? { label: tr('必练', 'Required'), tone: 'required' }
+      : scenarioRequired === false
+        ? { label: tr('选练', 'Optional'), tone: 'optional' }
+        : null,
+    trainingMode ? { label: trainingModeLabels[trainingMode], tone: 'mode' } : null,
+    { label: interactionModeLabels[interactionMode], tone: 'mode' },
   ])
   const trainingContextDescription = scenarioTrainingCard?.description
+    || scenarioDescriptionFromState
     || scenarioOpeningLineFromState
     || tr('本轮训练已连接 AI 陪练，完成对话后可结束练习并生成复盘。', 'This training session is connected to an AI coach. End the practice when you are ready for review.')
   const trainingContextOpeningLine = scenarioTrainingCard?.openingLine || scenarioOpeningLineFromState
-  const trainingContextPoints = scenarioTrainingCard?.trainingPoints.slice(0, 3).join(' / ')
-  const trainingInputPlaceholder = scenarioTrainingCard?.category === 'sales' || scenarioTrainingCard?.category === 'customer_service'
+  const trainingContextCustomerProfile = scenarioTrainingCard?.customerProfile || scenarioCustomerProfileFromState
+  const trainingContextPersonaStyle = scenarioTrainingCard?.persona.style || scenarioPersonaStyleFromState
+  const trainingContextPoints = scenarioTrainingPoints.slice(0, 3).join(' / ')
+  const trainingInputPlaceholder = scenarioCategory === 'sales' || scenarioCategory === 'customer_service'
     ? tr('输入你想对客户说的话，Enter 发送', 'Type what you want to say to the customer. Enter to send')
     : tr('输入你的回应，Enter 发送', 'Type your response. Enter to send')
 
   const liveCoachLanguageSummary = compactStrings([
-    liveCoachLanguagePair.sourceLanguage,
-    liveCoachLanguagePair.targetLanguage,
+    sourceLanguageLabel || liveCoachLanguagePair.sourceLanguage,
+    targetLanguageLabel || liveCoachLanguagePair.targetLanguage,
   ]).join(' -> ')
   const resolvedTrainingBackPath = isLiveCoachSession ? '/live-coach' : trainingBackPath
-  const resolvedTrainingContextTitle = isLiveCoachSession ? tr('Live coach', 'Live coach') : trainingContextTitle
+  const resolvedTrainingContextTitle = isLiveCoachSession ? tr('实时教练', 'Live coach') : trainingContextTitle
   const resolvedTrainingContextSubtitle = isLiveCoachSession
     ? compactStrings([
-      tr('Real conversation', 'Real conversation'),
+      tr('真实对话', 'Real conversation'),
       liveCoachLanguageSummary || null,
       interactionModeLabels[interactionMode],
     ]).join(' / ')
     : trainingContextSubtitle
   const resolvedTrainingContextTags = isLiveCoachSession
-    ? compactStrings([
-      tr('Live coach', 'Live coach'),
-      liveCoachLanguagePair.sourceLanguage,
-      liveCoachLanguagePair.targetLanguage,
-      interactionModeLabels[interactionMode],
+    ? compactTags([
+      { label: tr('实时教练', 'Live coach'), tone: 'live' },
+      sourceLanguageLabel ? { label: sourceLanguageLabel, tone: 'live' } : null,
+      targetLanguageLabel ? { label: targetLanguageLabel, tone: 'live' } : null,
+      { label: interactionModeLabels[interactionMode], tone: 'mode' },
     ])
     : trainingContextTags
   const resolvedTrainingContextDescription = isLiveCoachSession
-    ? tr('Private AI coaching is connected to the live transcript and review loop.', 'Private AI coaching is connected to the live transcript and review loop.')
+    ? tr('私人 AI 教练已连接实时转写和复盘流程。', 'Private AI coaching is connected to the live transcript and review loop.')
     : trainingContextDescription
+  const resolvedTrainingContextCustomerProfile = isLiveCoachSession ? null : trainingContextCustomerProfile
+  const resolvedTrainingContextPersonaStyle = isLiveCoachSession ? null : trainingContextPersonaStyle
   const resolvedTrainingContextOpeningLine = isLiveCoachSession ? null : trainingContextOpeningLine
   const resolvedTrainingContextPoints = isLiveCoachSession ? null : trainingContextPoints
   const resolvedTrainingInputPlaceholder = isLiveCoachSession
-    ? tr('Type a meeting line or your next reply. Enter to send', 'Type a meeting line or your next reply. Enter to send')
+    ? tr('输入会议现场内容或你的下一句，回车发送', 'Type a meeting line or your next reply. Enter to send')
     : trainingInputPlaceholder
-  const guidanceBarTitle = isLiveCoachSession ? tr('Live coach', 'Live coach') : tr('Realtime guidance', 'Realtime guidance')
+  const guidanceBarTitle = isLiveCoachSession ? tr('实时教练', 'Live coach') : tr('实时指导', 'Realtime guidance')
   const guidanceReadyText = isLiveCoachSession
-    ? tr('Ready to coach this conversation', 'Ready to coach this conversation')
+    ? tr('已准备好为这场对话提供教练建议', 'Ready to coach this conversation')
     : tr('Ready during this training session', 'Ready during this training session')
   const guidanceStreamingText = isLiveCoachSession
-    ? tr('Watching the live transcript', 'Watching the live transcript')
+    ? tr('正在观察实时转写', 'Watching the live transcript')
     : tr('Streaming during this training session', 'Streaming during this training session')
-  const guidanceActionText = isLiveCoachSession ? tr('Ask coach', 'Ask coach') : tr('Guide me', 'Guide me')
+  const guidanceActionText = isLiveCoachSession ? tr('问教练', 'Ask coach') : tr('给我指导', 'Guide me')
   const realtimeBarTitle = isLiveCoachSession
-    ? tr('Live conversation coach', 'Live conversation coach')
+    ? tr('真实对话教练', 'Live conversation coach')
     : tr('实时语音训练', 'Realtime voice practice')
   const realtimeBarCopy = isLiveCoachSession
-    ? liveCoachLanguageSummary || tr('Realtime channel is bound to live coaching', 'Realtime channel is bound to live coaching')
+    ? liveCoachLanguageSummary || tr('实时通道已绑定真实对话教练', 'Realtime channel is bound to live coaching')
     : latestPersonaPrompt || tr('实时通道已绑定当前训练房间', 'Realtime channel is bound to this training room')
 
   useEffect(() => {
@@ -710,18 +943,12 @@ function ChatArea() {
         speaker: role === 'assistant' ? 'counterpart' : 'user',
         text: transcript,
         metadata: {
+          ...(liveCoachRealtimeTranscriptMetadata || {}),
           source: isLiveCoachSession ? 'live_coach_realtime_voice' : 'realtime_voice',
           trainingMode: 'voice',
           interactionMode: 'realtime',
           trainingProfile,
           realtimeRole: role,
-          ...(isLiveCoachSession
-            ? {
-                sourceLanguage: liveCoachLanguagePair.sourceLanguage,
-                targetLanguage: liveCoachLanguagePair.targetLanguage,
-                translationStrategy: 'text_first_mvp',
-              }
-            : {}),
         },
       },
       autoOpenOnSignal: true,
@@ -731,8 +958,7 @@ function ChatArea() {
   }, [
     chat.scrollToBottom,
     isLiveCoachSession,
-    liveCoachLanguagePair.sourceLanguage,
-    liveCoachLanguagePair.targetLanguage,
+    liveCoachRealtimeTranscriptMetadata,
     scheduleGuidanceRefresh,
     trainingProfile,
   ])
@@ -741,6 +967,34 @@ function ChatArea() {
     if (!trainingSessionId || trainingSessionCompleting) return
     setTrainingSessionCompleting(true)
     try {
+      if (isLiveCoachSession && guidanceEvents.length > 0) {
+        const signature = guidanceEventsSignature(guidanceEvents)
+        if (persistedGuidanceSignatureRef.current !== signature) {
+          try {
+            await persistTrainingGuidanceEvents(trainingSessionId, {
+              events: guidanceEvents,
+              reason: 'session_complete',
+              source: 'client',
+              window_size: guidanceTurnsRef.current.length,
+              total_turn_count: guidanceTurnsRef.current.length,
+              metadata: {
+                ...(liveCoachGuidanceMetadata || {}),
+                trainingMode,
+                interactionMode,
+                trainingProfile,
+              },
+            })
+            persistedGuidanceSignatureRef.current = signature
+          } catch (saveError: unknown) {
+            setGuidanceOpen(true)
+            setGuidanceError(
+              saveError instanceof Error
+                ? saveError.message
+                : tr('会话教练建议未能保存', 'Coach events could not be saved'),
+            )
+          }
+        }
+      }
       const session = await completeTrainingSession(trainingSessionId, { generate_report: true })
       setTrainingSessionCompleted(true)
       const reportId = Number(session.report_id)
@@ -773,7 +1027,20 @@ function ChatArea() {
     } finally {
       setTrainingSessionCompleting(false)
     }
-  }, [analysis, progressScope, scenarioTrainingId, trainingSessionCompleting, trainingSessionId, tr])
+  }, [
+    analysis,
+    guidanceEvents,
+    interactionMode,
+    isLiveCoachSession,
+    liveCoachGuidanceMetadata,
+    progressScope,
+    scenarioTrainingId,
+    trainingMode,
+    trainingProfile,
+    trainingSessionCompleting,
+    trainingSessionId,
+    tr,
+  ])
 
   const handleRequestGuidance = React.useCallback(async () => {
     if (guidanceLoading) return
@@ -871,7 +1138,7 @@ function ChatArea() {
 
   return (
     <>
-      <div className="chat-page-center">
+      <div className={`chat-page-center${isTrainingSession ? ' training-session' : ''}`}>
       {/* Chat header */}
       <div className="chat-page-header">
         <div className="chat-page-header-left">
@@ -983,9 +1250,21 @@ function ChatArea() {
               {resolvedTrainingContextSubtitle && <span>{resolvedTrainingContextSubtitle}</span>}
               <div className="chat-page-training-tags" aria-label={tr('练习标签', 'Practice tags')}>
                 {resolvedTrainingContextTags.map((tag) => (
-                  <span key={tag}>{tag}</span>
+                  <span className={tag.tone ? `tone-${tag.tone}` : undefined} key={`${tag.tone || 'tag'}:${tag.label}`}>
+                    {tag.label}
+                  </span>
                 ))}
               </div>
+              <button
+                className={`chat-page-training-details-toggle${trainingSceneExpanded ? ' expanded' : ''}`}
+                type="button"
+                aria-expanded={trainingSceneExpanded}
+                aria-controls="training-scene-details"
+                onClick={() => setTrainingSceneExpanded((v) => !v)}
+              >
+                <span>{trainingSceneExpanded ? tr('Hide details', 'Hide details') : tr('Details', 'Details')}</span>
+                <ChevronDown size={14} />
+              </button>
             </div>
 
             <button
@@ -999,17 +1278,26 @@ function ChatArea() {
             </button>
           </div>
 
-          <div className="chat-page-training-scene">
-            {scenarioTrainingCard?.customerProfile && (
+          <div
+            id="training-scene-details"
+            className={`chat-page-training-scene${trainingSceneExpanded ? ' expanded' : ' collapsed'}`}
+          >
+            {resolvedTrainingContextCustomerProfile && (
               <p>
                 <strong>{tr('客户画像', 'Customer profile')}:</strong>
-                <span>{scenarioTrainingCard.customerProfile}</span>
+                <span>{resolvedTrainingContextCustomerProfile}</span>
               </p>
             )}
             <p>
               <strong>{tr('场景描述', 'Scenario')}:</strong>
               <span>{resolvedTrainingContextDescription}</span>
             </p>
+            {resolvedTrainingContextPersonaStyle && (
+              <p>
+                <strong>{tr('角色状态', 'Persona stance')}:</strong>
+                <span>{resolvedTrainingContextPersonaStyle}</span>
+              </p>
+            )}
             {resolvedTrainingContextOpeningLine && resolvedTrainingContextOpeningLine !== resolvedTrainingContextDescription && (
               <p>
                 <strong>{tr('客户开场', 'Opening line')}:</strong>
@@ -1034,7 +1322,7 @@ function ChatArea() {
             <span>
               {guidanceError
                 ? guidanceError
-                : guidanceEvents[0]?.message || (
+                : localizedGuidanceEvents[0]?.displayMessage || (
                   guidanceStreamConnected
                     ? guidanceStreamingText
                     : guidanceReadyText
@@ -1048,46 +1336,60 @@ function ChatArea() {
             disabled={guidanceLoading}
           >
             {guidanceLoading ? <Loader2 size={14} className="spin" /> : <Lightbulb size={14} />}
-            {guidanceLoading ? tr('Thinking', 'Thinking') : guidanceActionText}
+            {guidanceLoading ? tr('思考中', 'Thinking') : guidanceActionText}
           </button>
+        </section>
+      )}
+
+      {trainingSessionId && isLiveCoachSession && (
+        <section className="chat-page-live-coach-strip" data-testid="live-coach-language-strip">
+          <div className="live-coach-strip-main">
+            <Languages size={15} />
+            <strong>{liveCoachLanguageSummary || tr('双语辅助', 'Bilingual assist')}</strong>
+            <span>{tr('文本优先双语教练', 'Text-first bilingual coaching')}</span>
+          </div>
+          <div className="live-coach-strip-meta">
+            <span>{tr('支持 70+ 语言', '70+ languages')}</span>
+            <span>{tr('保留语气意图', 'Tone intent preserved')}</span>
+          </div>
         </section>
       )}
 
       {trainingSessionId && guidanceOpen && (
         <section className="chat-page-guidance-panel" data-testid="training-guidance-panel">
           <div className="guidance-panel-header">
-            <strong>{tr('Live coach', 'Live coach')}</strong>
+            <strong>{isLiveCoachSession ? tr('实时教练', 'Live coach') : tr('实时指导', 'Realtime guidance')}</strong>
             <button
               type="button"
               onClick={() => setGuidanceOpen(false)}
-              title={tr('Close guidance', 'Close guidance')}
-              aria-label={tr('Close guidance', 'Close guidance')}
+              title={tr('关闭指导', 'Close guidance')}
+              aria-label={tr('关闭指导', 'Close guidance')}
             >
               <X size={14} />
             </button>
           </div>
           {guidanceLoading && guidanceEvents.length === 0 && (
-            <div className="guidance-empty">{tr('Reading the latest turn', 'Reading the latest turn')}</div>
+            <div className="guidance-empty">{tr('正在读取最新一轮对话', 'Reading the latest turn')}</div>
           )}
           {!guidanceLoading && guidanceEvents.length === 0 && !guidanceError && (
-            <div className="guidance-empty">{tr('No guidance yet', 'No guidance yet')}</div>
+            <div className="guidance-empty">{tr('暂无指导', 'No guidance yet')}</div>
           )}
           {guidanceError && (
             <div className="guidance-error">{guidanceError}</div>
           )}
           {guidanceEvents.length > 0 && (
             <div className="guidance-event-list">
-              {guidanceEvents.map((event, index) => (
+              {localizedGuidanceEvents.map((event, index) => (
                 <article
                   className={`guidance-card ${event.severity || 'info'}`}
                   key={`${event.event_type}-${index}`}
                 >
                   <div className="guidance-card-header">
-                    <span>{event.title}</span>
-                    <small>{event.event_type.replace(/_/g, ' ')}</small>
+                    <span>{event.displayTitle}</span>
+                    <small>{event.displayType}</small>
                   </div>
-                  <p>{event.message}</p>
-                  {event.suggested_text && <blockquote>{event.suggested_text}</blockquote>}
+                  <p>{event.displayMessage}</p>
+                  {event.displaySuggestedText && <blockquote>{event.displaySuggestedText}</blockquote>}
                 </article>
               ))}
             </div>
@@ -1157,6 +1459,7 @@ function ChatArea() {
             disabled={chat.sending}
             personaId={primaryPersona?.id || null}
             counterpartName={counterpartName}
+            transcriptMetadata={liveCoachRealtimeTranscriptMetadata}
             onPersistedTranscript={handleRealtimeTranscriptPersisted}
           />
         </div>
@@ -1309,7 +1612,8 @@ function ChatArea() {
                   speaker: 'user',
                   text: transcript,
                   metadata: {
-                    source: 'voice_transcription',
+                    ...(liveCoachGuidanceMetadata || {}),
+                    source: isLiveCoachSession ? 'live_coach_voice_transcription' : 'voice_transcription',
                     trainingMode: 'voice',
                     interactionMode: 'turn_based',
                   },
@@ -1324,6 +1628,7 @@ function ChatArea() {
             videoActive={videoRecorderOpen}
             onLiveCoachClick={isLiveCoachSession ? handleRequestGuidance : coaching.handleStartLiveCoaching}
             coachingSending={isLiveCoachSession ? guidanceLoading : coaching.coachingSending}
+            sendError={chat.sendError}
           />
         </div>
 

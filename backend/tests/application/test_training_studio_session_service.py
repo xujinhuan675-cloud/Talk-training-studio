@@ -71,10 +71,56 @@ async def test_session_service_tracks_scenario_progress():
     assert progress[0].user_id == "user-sales-001"
     assert progress[0].team_id == "team-revenue"
     assert progress[0].status == "completed"
+    assert progress[0].failure_reason is None
     assert progress[0].score is None
     assert progress[0].score_status == "pending"
     assert progress[0].training_session_id == "session-1"
     assert progress[0].report_id == "report-1"
+
+
+async def test_session_service_can_fail_session():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+
+    session = await service.create_session(make_payload())
+    failed = await service.fail_session(session.session_id, "room creation failed")
+
+    assert failed.status == TrainingSessionStatus.FAILED
+    assert failed.failure_reason == "room creation failed"
+    assert failed.completed_at is not None
+    assert await service.get_session("session-1") is failed
+
+
+async def test_session_service_records_turn_count():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+
+    session = await service.create_session(make_payload())
+    await service.start_session(session.session_id, room_id="42")
+    updated = await service.record_turns(session.session_id, 3)
+
+    assert updated.message_count == 3
+    assert (await service.get_session("session-1")).message_count == 3
+
+
+async def test_session_service_progress_preserves_failed_status_and_reason():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+            "user_id": "user-sales-001",
+            "team_id": "team-revenue",
+        }
+    )
+    await service.start_session(session.session_id, room_id="42")
+    await service.fail_session(session.session_id, "analysis failed")
+
+    progress = await service.list_scenario_progress(user_id="user-sales-001", team_id="team-revenue")
+
+    assert len(progress) == 1
+    assert progress[0].status == "failed"
+    assert progress[0].failure_reason == "analysis failed"
+    assert progress[0].score_status == "pending"
 
 
 class FakeTrainingUow:

@@ -5,15 +5,18 @@ import {
   ChevronsRight,
   ClipboardList,
   Dumbbell,
+  History,
   Home,
   MessageSquare,
   Settings,
+  SlidersHorizontal,
   Swords,
   TrendingUp,
+  Trophy,
 } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n, type TranslationKey } from '../../i18n'
-import { type SystemRole } from '../../services/auth'
+import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from '../../services/auth'
 import './NavRail.css'
 
 const STORAGE_KEY = 'talkwise.navrail.collapsed'
@@ -23,23 +26,26 @@ interface NavItem {
   icon: React.ReactNode
   labelKey: TranslationKey
   exact?: boolean
-  roles?: SystemRole[]
+  roles?: readonly SystemRole[]
 }
 
 const navItems: NavItem[] = [
   { to: '/', icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
   { to: '/scenario-training', icon: <ClipboardList size={18} />, labelKey: 'nav.scenarioTraining' },
-  { to: '/training-studio', icon: <Dumbbell size={18} />, labelKey: 'nav.trainingStudio' },
+  { to: '/training-history', icon: <History size={18} />, labelKey: 'nav.trainingHistory' },
+  { to: '/scenario-leaderboard', icon: <Trophy size={18} />, labelKey: 'nav.scenarioLeaderboard', roles: MANAGEMENT_SYSTEM_ROLES },
+  { to: '/training-studio', icon: <Dumbbell size={18} />, labelKey: 'nav.trainingStudio', roles: MANAGEMENT_SYSTEM_ROLES },
+  { to: '/scenario-config', icon: <SlidersHorizontal size={18} />, labelKey: 'nav.scenarioConfig', roles: MANAGEMENT_SYSTEM_ROLES },
   { to: '/chat', icon: <MessageSquare size={18} />, labelKey: 'nav.chat' },
-  { to: '/battle-prep', icon: <Swords size={18} />, labelKey: 'nav.battlePrep', roles: ['admin'] },
+  { to: '/battle-prep', icon: <Swords size={18} />, labelKey: 'nav.battlePrep', roles: MANAGEMENT_SYSTEM_ROLES },
   { to: '/growth', icon: <TrendingUp size={18} />, labelKey: 'nav.growth' },
-  { to: '/settings', icon: <Settings size={18} />, labelKey: 'nav.settings', roles: ['admin'] },
+  { to: '/settings', icon: <Settings size={18} />, labelKey: 'nav.settings', roles: MANAGEMENT_SYSTEM_ROLES },
 ]
 
 const NavRail: React.FC = () => {
   const location = useLocation()
   const { t, tr } = useI18n()
-  const { currentUser } = useAuthContext()
+  const { hasAnySystemRole } = useAuthContext()
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(STORAGE_KEY) === 'true'
@@ -47,8 +53,7 @@ const NavRail: React.FC = () => {
 
   const visibleNavItems = navItems.filter((item) => {
     if (!item.roles) return true
-    if (!currentUser) return false
-    return currentUser.systemRole ? item.roles.includes(currentUser.systemRole) : false
+    return hasAnySystemRole(item.roles)
   })
 
   const isActive = (item: NavItem) => {

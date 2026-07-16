@@ -1,3 +1,5 @@
+import { getAuthRequestHeaders } from './auth'
+
 export type RealtimeSessionStatus =
   | 'idle'
   | 'connecting'
@@ -280,6 +282,18 @@ export function getTrainingRealtimeSdpPath({
   return `/api/v1/training-studio/realtime/sdp${buildTrainingRealtimeQuery({ sessionId, roomId })}`
 }
 
+async function readRealtimeError(response: Response, fallback: string): Promise<string> {
+  const raw = await response.text().catch(() => '')
+  if (!raw) return fallback
+  try {
+    const body = JSON.parse(raw)
+    const detail = typeof body?.detail === 'string' ? body.detail : body?.detail?.message
+    return body?.error?.details || detail || body?.message || fallback
+  } catch {
+    return raw
+  }
+}
+
 export async function createTrainingRealtimeSdpAnswer({
   offerSdp,
   sessionId,
@@ -291,12 +305,12 @@ export async function createTrainingRealtimeSdpAnswer({
 }): Promise<string> {
   const response = await fetch(getTrainingRealtimeSdpPath({ sessionId, roomId }), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/sdp' },
+    headers: { ...getAuthRequestHeaders(), 'Content-Type': 'application/sdp' },
     body: offerSdp,
   })
   if (!response.ok) {
-    const message = await response.text().catch(() => '')
-    throw new Error(message || `Realtime SDP request failed (${response.status})`)
+    const message = await readRealtimeError(response, `Realtime SDP request failed (${response.status})`)
+    throw new Error(message)
   }
   return response.text()
 }
@@ -312,7 +326,7 @@ export async function persistTrainingRealtimeTranscripts({
 }): Promise<PersistRealtimeTranscriptsResult> {
   const response = await fetch('/api/v1/training-studio/realtime/transcripts', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...getAuthRequestHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
       session_id: String(sessionId),
       room_id: Number(roomId),

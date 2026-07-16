@@ -73,6 +73,7 @@ class ScenarioTrainingProgressDTO(BaseModel):
     user_id: str | None = None
     team_id: str | None = None
     status: str
+    failure_reason: str | None = None
     score: int | None = None
     score_status: Literal["ready", "pending"] = "pending"
     overall_score: float | None = None
@@ -170,6 +171,16 @@ class TrainingSessionService:
     ) -> TrainingSession:
         session = await self._require_session(session_id)
         session.complete(report_id=report_id, score_id=score_id)
+        return await self._save(session)
+
+    async def fail_session(self, session_id: str, reason: str) -> TrainingSession:
+        session = await self._require_session(session_id)
+        session.fail(reason)
+        return await self._save(session)
+
+    async def record_turns(self, session_id: str, count: int = 1) -> TrainingSession:
+        session = await self._require_session(session_id)
+        session.record_turn(count)
         return await self._save(session)
 
     async def get_session(self, session_id: str) -> TrainingSession:
@@ -273,6 +284,7 @@ class TrainingSessionService:
             user_id=session.user_id,
             team_id=session.team_id,
             status=self._scenario_training_status(session),
+            failure_reason=session.failure_reason,
             score=score_data["score"],
             score_status=score_data["score_status"],
             overall_score=score_data["overall_score"],
@@ -339,6 +351,8 @@ class TrainingSessionService:
     def _scenario_training_status(self, session: TrainingSession) -> str:
         if session.status == TrainingSessionStatus.COMPLETED:
             return "completed"
+        if session.status == TrainingSessionStatus.FAILED:
+            return "failed"
         if session.status == TrainingSessionStatus.CREATED:
             return "not_started"
         return "in_progress"

@@ -9,22 +9,42 @@ import ts from 'typescript'
 async function loadTrainingSessionModule() {
   const sourcePath = path.resolve('src/services/trainingSession.ts')
   const source = fs.readFileSync(sourcePath, 'utf8')
-  const output = ts.transpileModule(source, {
+  let outputText = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
       target: ts.ScriptTarget.ES2022,
     },
-  })
+  }).outputText
   const outputPath = path.join(os.tmpdir(), `training-session-${process.pid}-${Date.now()}.mjs`)
-  fs.writeFileSync(outputPath, output.outputText)
+  const cleanupPaths = [outputPath]
+  if (outputText.includes("from './auth'")) {
+    const authSource = fs.readFileSync(path.resolve('src/services/auth.ts'), 'utf8')
+    const authOutput = ts.transpileModule(authSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const authPath = path.join(os.tmpdir(), `auth-service-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(authPath, authOutput)
+    cleanupPaths.push(authPath)
+    outputText = outputText.replace("from './auth'", `from '${pathToFileURL(authPath).href}'`)
+  }
+  fs.writeFileSync(outputPath, outputText)
   try {
     return await import(pathToFileURL(outputPath).href)
   } finally {
-    fs.rmSync(outputPath, { force: true })
+    cleanupPaths.forEach((item) => fs.rmSync(item, { force: true }))
   }
 }
 
 const trainingSession = await loadTrainingSessionModule()
+const expectedAuthHeaders = {
+  'X-Mock-User': 'admin',
+  'X-User-Id': 'user-admin-001',
+  'X-System-Role': 'admin',
+  'X-Team-Id': 'team-ops',
+}
 
 function installFetchStub(data = { session_id: 'session-1', mode: 'voice', status: 'created' }) {
   const calls = []
@@ -65,7 +85,7 @@ test('createTrainingSession posts to the sessions collection with JSON body', as
 
   assert.equal(calls[0].url, '/api/v1/training-studio/sessions')
   assert.equal(calls[0].init.method, 'POST')
-  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
+  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/json' })
   assert.deepEqual(JSON.parse(calls[0].init.body), body)
 })
 
@@ -98,7 +118,7 @@ test('completeTrainingSession posts an empty JSON body by default', async () => 
 
   assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session-1/complete')
   assert.equal(calls[0].init.method, 'POST')
-  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
+  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/json' })
   assert.deepEqual(JSON.parse(calls[0].init.body), {})
 })
 
@@ -112,6 +132,33 @@ test('training session requests surface FastAPI detail string errors', async () 
   await assert.rejects(
     trainingSession.completeTrainingSession('session-1'),
     /training session already completed/,
+  )
+})
+
+test('training session requests explain backend proxy failures', async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 502,
+    json: async () => {
+      throw new Error('proxy response is not JSON')
+    },
+  })
+
+  await assert.rejects(
+    trainingSession.createTrainingSession({
+      mode: 'voice',
+      task_config: {
+        role: 'Sales Associate',
+        level: 'Senior',
+        tech_stack: ['discovery'],
+        question_type_ratios: { behavioral: 30, craft: 50, pressure: 20 },
+        question_count: 5,
+        framework: 'prep',
+        difficulty: 'medium',
+        category: 'sales',
+      },
+    }),
+    /backend service unavailable/,
   )
 })
 
@@ -135,7 +182,21 @@ test('requestTrainingGuidance posts guidance context and returns response data',
     task_goal: 'Practice discovery calls',
     rubric: { impact: 0.4, clarity: 0.6 },
     recent_turns: [
-      { speaker: 'candidate', text: 'I improved conversion.', turn_id: 'turn-1' },
+      {
+        speaker: 'candidate',
+        text: 'I improved conversion.',
+        turn_id: 'turn-1',
+        metadata: {
+          source: 'live_coach_text_input',
+          trainingProfile: 'live_coach',
+          translation: {
+            mode: 'text_first_mvp',
+            sourceLanguage: 'zh-CN',
+            targetLanguage: 'en-US',
+            preserveTone: true,
+          },
+        },
+      },
       { speaker: 'coach', text: 'What changed after that?' },
     ],
   }
@@ -144,7 +205,7 @@ test('requestTrainingGuidance posts guidance context and returns response data',
 
   assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session%201/guidance')
   assert.equal(calls[0].init.method, 'POST')
-  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
+  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/json' })
   assert.deepEqual(JSON.parse(calls[0].init.body), body)
   assert.deepEqual(result, data)
 })
@@ -157,8 +218,46 @@ test('getTrainingGuidanceStreamUrl builds an EventSource endpoint', () => {
 
   assert.equal(
     url,
-    '/api/v1/training-studio/sessions/session%201/guidance/stream?message_limit=25&poll_interval_ms=750',
+    '/api/v1/training-studio/sessions/session%201/guidance/stream?mock_user=admin&message_limit=25&poll_interval_ms=750',
   )
+})
+
+test('persistTrainingGuidanceEvents posts structured coach events', async () => {
+  const data = {
+    batch_id: 'batch-1',
+    saved_count: 1,
+    messages: [],
+  }
+  const calls = installFetchStub(data)
+  const body = {
+    reason: 'session_complete',
+    source: 'client',
+    window_size: 2,
+    total_turn_count: 2,
+    events: [
+      {
+        event_type: 'risk',
+        severity: 'warning',
+        title: 'Objection surfaced',
+        message: 'The counterpart signaled resistance.',
+        suggested_text: 'That concern makes sense.',
+        metadata: { risk_type: 'objection' },
+      },
+    ],
+    metadata: {
+      trainingProfile: 'live_coach',
+      sourceLanguage: 'zh-CN',
+      targetLanguage: 'en-US',
+    },
+  }
+
+  const result = await trainingSession.persistTrainingGuidanceEvents('session 1', body)
+
+  assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session%201/guidance-events')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/json' })
+  assert.deepEqual(JSON.parse(calls[0].init.body), body)
+  assert.deepEqual(result, data)
 })
 
 test('getTrainingSession and report use GET endpoints without request init', async () => {
@@ -168,9 +267,34 @@ test('getTrainingSession and report use GET endpoints without request init', asy
   await trainingSession.getTrainingSessionReport('session-1')
 
   assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session%201')
-  assert.deepEqual(calls[0].init, {})
+  assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
   assert.equal(calls[1].url, '/api/v1/training-studio/sessions/session-1/report')
-  assert.deepEqual(calls[1].init, {})
+  assert.deepEqual(calls[1].init, { headers: expectedAuthHeaders })
+})
+
+test('getTrainingSession preserves failed status failure reason from backend', async () => {
+  installFetchStub({
+    session_id: 'session-failed',
+    mode: 'voice',
+    status: 'failed',
+    task_config: {
+      role: 'Sales Associate',
+      level: 'Senior',
+      tech_stack: ['discovery'],
+      question_type_ratios: { behavioral: 30, craft: 50, pressure: 20 },
+      question_count: 5,
+      framework: 'prep',
+      difficulty: 'medium',
+      category: 'sales',
+    },
+    message_count: 4,
+    failure_reason: 'report generation timed out',
+  })
+
+  const result = await trainingSession.getTrainingSession('session-failed')
+
+  assert.equal(result.status, 'failed')
+  assert.equal(result.failure_reason, 'report generation timed out')
 })
 
 test('listTrainingSessions uses the sessions collection endpoint', async () => {
@@ -179,5 +303,23 @@ test('listTrainingSessions uses the sessions collection endpoint', async () => {
   await trainingSession.listTrainingSessions()
 
   assert.equal(calls[0].url, '/api/v1/training-studio/sessions')
-  assert.deepEqual(calls[0].init, {})
+  assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
+})
+
+test('listTrainingSessions appends optional filters', async () => {
+  const calls = installFetchStub([])
+
+  await trainingSession.listTrainingSessions({
+    skip: 10,
+    limit: 20,
+    userId: 'user-sales-001',
+    teamId: 'team-revenue',
+    scenarioTemplateId: 'enterprise-demo-objection',
+  })
+
+  assert.equal(
+    calls[0].url,
+    '/api/v1/training-studio/sessions?skip=10&limit=20&user_id=user-sales-001&team_id=team-revenue&scenario_template_id=enterprise-demo-objection',
+  )
+  assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
 })
