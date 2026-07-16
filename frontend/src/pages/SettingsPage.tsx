@@ -10,6 +10,12 @@ import {
   ClipboardList,
   Volume2,
   Sparkles,
+  Mic,
+  Radio,
+  RefreshCw,
+  Save,
+  KeyRound,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppContext } from '../contexts/AppContext'
@@ -39,6 +45,11 @@ import {
   type Team,
   type PersonaRelationship,
 } from '../services/api'
+import {
+  fetchVoiceConfig,
+  saveVoiceConfig,
+  type VoicePreferenceConfig,
+} from '../services/voiceConfig'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
 import { useI18n } from '../i18n'
 import './SettingsPage.css'
@@ -69,7 +80,7 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-type TabKey = 'personas' | 'scenarios' | 'organizations' | 'preferences'
+type TabKey = 'personas' | 'scenarios' | 'organizations' | 'config' | 'preferences'
 type SettingsTabKey = TabKey | 'training'
 
 const TABS: { key: SettingsTabKey; labelZh: string; labelEn: string; icon: React.ReactNode }[] = [
@@ -77,10 +88,11 @@ const TABS: { key: SettingsTabKey; labelZh: string; labelEn: string; icon: React
   { key: 'scenarios', labelZh: '场景', labelEn: 'Scenarios', icon: <Layers size={14} /> },
   { key: 'organizations', labelZh: '组织', labelEn: 'Organizations', icon: <Building2 size={14} /> },
   { key: 'training', labelZh: '训练管理', labelEn: 'Training', icon: <ClipboardList size={14} /> },
+  { key: 'config', labelZh: '配置', labelEn: 'Config', icon: <KeyRound size={14} /> },
   { key: 'preferences', labelZh: '偏好', labelEn: 'Preferences', icon: <Volume2 size={14} /> },
 ]
 
-const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'preferences']
+const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'config', 'preferences']
 
 export function SettingsShell({
   activeTab,
@@ -927,16 +939,358 @@ function OrganizationsTab() {
 // Preferences Tab
 // ---------------------------------------------------------------------------
 
+interface VoicePreferenceForm {
+  llmBaseUrl: string
+  llmDefaultModel: string
+  llmWireApi: string
+  llmApiKey: string
+  ttsProvider: string
+  ttsBaseUrl: string
+  ttsModel: string
+  ttsApiKey: string
+  sttProvider: string
+  sttBaseUrl: string
+  sttModel: string
+  sttUseTtsApiKey: boolean
+  sttApiKey: string
+  realtimeApiKey: string
+  realtimeModel: string
+  realtimeVoice: string
+  realtimeTranscriptionModel: string
+  realtimeCallUrl: string
+}
+
+const DEFAULT_VOICE_FORM: VoicePreferenceForm = {
+  llmBaseUrl: 'https://ai.flowguide.cc',
+  llmDefaultModel: 'gpt-5.5',
+  llmWireApi: 'responses',
+  llmApiKey: '',
+  ttsProvider: 'openrouter',
+  ttsBaseUrl: 'https://openrouter.ai/api/v1',
+  ttsModel: 'mistralai/voxtral-mini-tts-2603',
+  ttsApiKey: '',
+  sttProvider: 'whisper',
+  sttBaseUrl: 'https://openrouter.ai/api/v1',
+  sttModel: 'openai/whisper-1',
+  sttUseTtsApiKey: true,
+  sttApiKey: '',
+  realtimeApiKey: '',
+  realtimeModel: 'gpt-realtime',
+  realtimeVoice: 'marin',
+  realtimeTranscriptionModel: 'gpt-realtime-whisper',
+  realtimeCallUrl: 'https://api.openai.com/v1/realtime/calls',
+}
+
+function toVoiceForm(config: VoicePreferenceConfig): VoicePreferenceForm {
+  return {
+    llmBaseUrl: config.llm_base_url || DEFAULT_VOICE_FORM.llmBaseUrl,
+    llmDefaultModel: config.llm_default_model || DEFAULT_VOICE_FORM.llmDefaultModel,
+    llmWireApi: config.llm_wire_api || DEFAULT_VOICE_FORM.llmWireApi,
+    llmApiKey: '',
+    ttsProvider: config.tts_provider || DEFAULT_VOICE_FORM.ttsProvider,
+    ttsBaseUrl: config.tts_base_url || DEFAULT_VOICE_FORM.ttsBaseUrl,
+    ttsModel: config.tts_model || DEFAULT_VOICE_FORM.ttsModel,
+    ttsApiKey: '',
+    sttProvider: config.stt_provider || DEFAULT_VOICE_FORM.sttProvider,
+    sttBaseUrl: config.stt_base_url || DEFAULT_VOICE_FORM.sttBaseUrl,
+    sttModel: config.stt_model || DEFAULT_VOICE_FORM.sttModel,
+    sttUseTtsApiKey: config.stt_use_tts_api_key || config.stt_api_key_source !== 'stt',
+    sttApiKey: '',
+    realtimeApiKey: '',
+    realtimeModel: config.realtime_model || DEFAULT_VOICE_FORM.realtimeModel,
+    realtimeVoice: config.realtime_voice || DEFAULT_VOICE_FORM.realtimeVoice,
+    realtimeTranscriptionModel: config.realtime_transcription_model || DEFAULT_VOICE_FORM.realtimeTranscriptionModel,
+    realtimeCallUrl: config.realtime_call_url || DEFAULT_VOICE_FORM.realtimeCallUrl,
+  }
+}
+
+function ConfigTab() {
+  const { tr } = useI18n()
+  const [config, setConfig] = useState<VoicePreferenceConfig | null>(null)
+  const [form, setForm] = useState<VoicePreferenceForm>(DEFAULT_VOICE_FORM)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+
+  const updateForm = (patch: Partial<VoicePreferenceForm>) => {
+    setForm((current) => ({ ...current, ...patch }))
+  }
+
+  const loadConfig = useCallback(async () => {
+    setLoading(true)
+    setNotice(null)
+    try {
+      const next = await fetchVoiceConfig()
+      setConfig(next)
+      setForm(toVoiceForm(next))
+    } catch (err) {
+      setNotice({ tone: 'error', text: getErrorMessage(err) })
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadConfig()
+  }, [loadConfig])
+
+  const keyText = (configured: boolean, preview: string | null) => (
+    configured
+      ? tr('已配置 {preview}', 'Configured {preview}', { preview: preview || '' })
+      : tr('未配置', 'Not configured')
+  )
+
+  const sourceText = (source: string) => {
+    if (source === 'tts') return tr('复用 TTS key', 'Reuses TTS key')
+    if (source === 'llm') return tr('回退到 LLM key', 'Falls back to LLM key')
+    if (source === 'realtime') return tr('使用 Realtime 专用 key', 'Uses dedicated Realtime key')
+    if (source === 'stt') return tr('使用 STT 专用 key', 'Uses dedicated STT key')
+    return tr('未配置', 'Not configured')
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setNotice(null)
+    try {
+      const payload = {
+        llm_base_url: form.llmBaseUrl,
+        llm_default_model: form.llmDefaultModel,
+        llm_wire_api: form.llmWireApi,
+        ...(form.llmApiKey.trim() ? { llm_api_key: form.llmApiKey.trim() } : {}),
+        tts_provider: form.ttsProvider,
+        tts_base_url: form.ttsBaseUrl,
+        tts_model: form.ttsModel,
+        ...(form.ttsApiKey.trim() ? { tts_api_key: form.ttsApiKey.trim() } : {}),
+        stt_provider: form.sttProvider,
+        stt_base_url: form.sttBaseUrl,
+        stt_model: form.sttModel,
+        stt_use_tts_api_key: form.sttUseTtsApiKey,
+        ...(!form.sttUseTtsApiKey && form.sttApiKey.trim() ? { stt_api_key: form.sttApiKey.trim() } : {}),
+        realtime_model: form.realtimeModel,
+        realtime_voice: form.realtimeVoice,
+        realtime_transcription_model: form.realtimeTranscriptionModel,
+        realtime_call_url: form.realtimeCallUrl,
+        ...(form.realtimeApiKey.trim() ? { realtime_api_key: form.realtimeApiKey.trim() } : {}),
+      }
+      const next = await saveVoiceConfig(payload)
+      setConfig(next)
+      setForm(toVoiceForm(next))
+      setNotice({ tone: 'success', text: tr('AI 配置已保存并重新加载', 'AI configuration saved and reloaded') })
+    } catch (err) {
+      setNotice({ tone: 'error', text: getErrorMessage(err) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <h3 className="settings-section-title">{tr('AI 配置', 'AI Config')}</h3>
+        <button className="settings-create-btn" onClick={loadConfig} disabled={loading || saving}>
+          <RefreshCw size={14} />
+          {loading ? tr('加载中...', 'Loading...') : tr('刷新', 'Refresh')}
+        </button>
+      </div>
+
+      <div className="settings-voice-status">
+        <div className="settings-voice-status-item">
+          <KeyRound size={18} />
+          <span>{tr('LLM', 'LLM')}</span>
+          <strong>{config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : tr('读取中', 'Reading')}</strong>
+        </div>
+        <div className="settings-voice-status-item">
+          <Volume2 size={18} />
+          <span>{tr('TTS', 'TTS')}</span>
+          <strong>{config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : tr('读取中', 'Reading')}</strong>
+        </div>
+        <div className="settings-voice-status-item">
+          <Mic size={18} />
+          <span>{tr('STT', 'STT')}</span>
+          <strong>{config ? sourceText(config.stt_api_key_source) : tr('读取中', 'Reading')}</strong>
+        </div>
+        <div className="settings-voice-status-item">
+          <Radio size={18} />
+          <span>{tr('Realtime', 'Realtime')}</span>
+          <strong>{config ? sourceText(config.realtime_api_key_source) : tr('读取中', 'Reading')}</strong>
+        </div>
+      </div>
+
+      {notice && (
+        <div className={notice.tone === 'error' ? 'settings-error' : 'settings-success'}>
+          {notice.text}
+        </div>
+      )}
+
+      <div className="settings-voice-grid">
+        <section className="settings-form-panel settings-voice-panel">
+          <div className="settings-voice-panel-title">
+            <KeyRound size={18} />
+            <h4>{tr('LLM 文本模型', 'LLM Text Model')}</h4>
+          </div>
+          <label className="field-label">
+            {tr('Base URL', 'Base URL')}
+            <input value={form.llmBaseUrl} onChange={(e) => updateForm({ llmBaseUrl: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('模型', 'Model')}
+            <input value={form.llmDefaultModel} onChange={(e) => updateForm({ llmDefaultModel: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('调用模式', 'Wire API')}
+            <select value={form.llmWireApi} onChange={(e) => updateForm({ llmWireApi: e.target.value })}>
+              <option value="responses">Responses</option>
+              <option value="chat_completions">Chat Completions</option>
+            </select>
+          </label>
+          <label className="field-label">
+            {tr('API Key', 'API Key')}
+            <input
+              type="password"
+              value={form.llmApiKey}
+              onChange={(e) => updateForm({ llmApiKey: e.target.value })}
+              placeholder={config?.llm_api_key_configured ? keyText(true, config.llm_api_key_preview) : tr('填写后保存', 'Enter a key to save')}
+              autoComplete="off"
+            />
+          </label>
+        </section>
+
+        <section className="settings-form-panel settings-voice-panel">
+          <div className="settings-voice-panel-title">
+            <Volume2 size={18} />
+            <h4>{tr('AI 语音回复 TTS', 'AI Speech Reply TTS')}</h4>
+          </div>
+          <label className="field-label">
+            {tr('服务商', 'Provider')}
+            <select value={form.ttsProvider} onChange={(e) => updateForm({ ttsProvider: e.target.value })}>
+              <option value="openrouter">OpenRouter</option>
+              <option value="minimax">MiniMax</option>
+              <option value="elevenlabs">ElevenLabs</option>
+            </select>
+          </label>
+          <label className="field-label">
+            {tr('Base URL', 'Base URL')}
+            <input value={form.ttsBaseUrl} onChange={(e) => updateForm({ ttsBaseUrl: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('模型', 'Model')}
+            <input value={form.ttsModel} onChange={(e) => updateForm({ ttsModel: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('API Key', 'API Key')}
+            <input
+              type="password"
+              value={form.ttsApiKey}
+              onChange={(e) => updateForm({ ttsApiKey: e.target.value })}
+              placeholder={config?.tts_api_key_configured ? keyText(true, config.tts_api_key_preview) : tr('填写后保存', 'Enter a key to save')}
+              autoComplete="off"
+            />
+          </label>
+        </section>
+
+        <section className="settings-form-panel settings-voice-panel">
+          <div className="settings-voice-panel-title">
+            <Mic size={18} />
+            <h4>{tr('语音转写 STT', 'Speech Transcription STT')}</h4>
+          </div>
+          <label className="field-label">
+            {tr('服务商', 'Provider')}
+            <select value={form.sttProvider} onChange={(e) => updateForm({ sttProvider: e.target.value })}>
+              <option value="whisper">Whisper-compatible</option>
+              <option value="minimax">MiniMax</option>
+            </select>
+          </label>
+          <label className="field-label">
+            {tr('Base URL', 'Base URL')}
+            <input value={form.sttBaseUrl} onChange={(e) => updateForm({ sttBaseUrl: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('模型', 'Model')}
+            <input value={form.sttModel} onChange={(e) => updateForm({ sttModel: e.target.value })} />
+          </label>
+          <label className="settings-checkbox-item settings-voice-check">
+            <input
+              type="checkbox"
+              checked={form.sttUseTtsApiKey}
+              onChange={(e) => updateForm({ sttUseTtsApiKey: e.target.checked })}
+            />
+            <span>{tr('复用 TTS API Key', 'Reuse TTS API key')}</span>
+          </label>
+          {!form.sttUseTtsApiKey && (
+            <label className="field-label">
+              {tr('STT API Key', 'STT API Key')}
+              <input
+                type="password"
+                value={form.sttApiKey}
+                onChange={(e) => updateForm({ sttApiKey: e.target.value })}
+                placeholder={config?.stt_api_key_configured ? keyText(true, config.stt_api_key_preview) : tr('填写后保存', 'Enter a key to save')}
+                autoComplete="off"
+              />
+            </label>
+          )}
+        </section>
+
+        <section className="settings-form-panel settings-voice-panel">
+          <div className="settings-voice-panel-title">
+            <Radio size={18} />
+            <h4>{tr('实时 WebRTC 语音', 'Realtime WebRTC Voice')}</h4>
+          </div>
+          <label className="field-label">
+            {tr('Realtime API Key', 'Realtime API Key')}
+            <input
+              type="password"
+              value={form.realtimeApiKey}
+              onChange={(e) => updateForm({ realtimeApiKey: e.target.value })}
+              placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('填写 OpenAI Realtime key', 'Enter an OpenAI Realtime key')}
+              autoComplete="off"
+            />
+          </label>
+          <label className="field-label">
+            {tr('模型', 'Model')}
+            <input value={form.realtimeModel} onChange={(e) => updateForm({ realtimeModel: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('声音', 'Voice')}
+            <input value={form.realtimeVoice} onChange={(e) => updateForm({ realtimeVoice: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('转写模型', 'Transcription Model')}
+            <input value={form.realtimeTranscriptionModel} onChange={(e) => updateForm({ realtimeTranscriptionModel: e.target.value })} />
+          </label>
+          <label className="field-label">
+            {tr('Call URL', 'Call URL')}
+            <input value={form.realtimeCallUrl} onChange={(e) => updateForm({ realtimeCallUrl: e.target.value })} />
+          </label>
+          <p className="settings-voice-note">
+            {tr('Realtime WebRTC 目前使用 OpenAI Realtime 接口；OpenRouter 配置仅应用于逐轮 STT/TTS。', 'Realtime WebRTC currently uses the OpenAI Realtime API; OpenRouter settings apply to turn-based STT/TTS only.')}
+          </p>
+        </section>
+      </div>
+
+      <div className="settings-form-actions settings-voice-actions">
+        <button className="btn-cancel" onClick={loadConfig} disabled={loading || saving}>
+          <RefreshCw size={14} />
+          {tr('还原', 'Reset')}
+        </button>
+        <button className="btn-submit" onClick={handleSave} disabled={loading || saving}>
+          <Save size={14} />
+          {saving ? tr('保存中...', 'Saving...') : tr('保存并应用', 'Save and Apply')}
+        </button>
+      </div>
+    </>
+  )
+}
+
 function PreferencesTab() {
   const { tr } = useI18n()
 
   return (
     <div className="settings-placeholder">
       <div className="settings-placeholder-icon">
-        <Volume2 size={28} />
+        <SlidersHorizontal size={28} />
       </div>
-      <h3>{tr('语音设置即将推出', 'Voice Settings Coming Soon')}</h3>
-      <p>{tr('TTS 语音合成、角色专属音色等功能正在开发中', 'TTS synthesis, persona-specific voices, and related features are in development.')}</p>
+      <h3>{tr('偏好配置预留', 'Preferences Placeholder')}</h3>
+      <p>{tr('这里后续用于音色选择、角色专属声音、角色默认语气和对话偏好。API Key、Base URL 和模型请在“配置”中管理。', 'This area is reserved for voice selection, persona-specific voices, default persona tone, and conversation preferences. Manage API keys, base URLs, and models in Config.')}</p>
     </div>
   )
 }
@@ -957,6 +1311,7 @@ const SettingsPage: React.FC = () => {
       {activeTab === 'personas' && <PersonasTab />}
       {activeTab === 'scenarios' && <ScenariosTab />}
       {activeTab === 'organizations' && <OrganizationsTab />}
+      {activeTab === 'config' && <ConfigTab />}
       {activeTab === 'preferences' && <PreferencesTab />}
     </SettingsShell>
   )

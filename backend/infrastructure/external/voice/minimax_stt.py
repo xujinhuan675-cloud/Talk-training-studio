@@ -110,9 +110,9 @@ class MinimaxSTTProvider:
 
         if response.status_code != 200:
             logger.error(
-                "stt_transcribe_error",
-                status=response.status_code,
-                body=response.text[:500],
+                "stt_transcribe_error status=%s body=%s",
+                response.status_code,
+                response.text[:500],
             )
             raise RuntimeError(
                 f"STT transcription failed with status {response.status_code}: "

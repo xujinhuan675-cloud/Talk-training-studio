@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from itertools import count
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ from api.dependencies import (
     get_growth_service,
     reset_ai_rate_limit_state,
 )
+import api.routes.training_studio as training_studio_routes
 from api.routes.training_studio import (
     get_live_guidance_service,
     get_training_scenario_config_service,
@@ -33,7 +35,7 @@ from application.services.training_studio.scenario_config_service import (
     TrainingScenarioConfigService,
 )
 from application.services.training_studio.session_service import TrainingSessionService
-from core.config import settings
+from core.config import VoiceSettings, settings
 from core.exceptions import register_exception_handlers
 from domain.training_studio.storybank import StoryBankService
 
@@ -252,6 +254,136 @@ async def test_scenario_config_persists_dimension_weights(client: AsyncClient) -
     data = await read_scenario_config_state(client, headers={"X-Mock-User": "leader"})
     saved = next(item for item in data["scenarios"] if item["id"] == scenario_id)
     assert saved["dimensionWeights"] == scenario_dimension_weights()
+
+
+@pytest.mark.asyncio
+async def test_voice_config_save_writes_env_and_reloads_clients(
+    client: AsyncClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("SECRET_KEY=test-secret\nVOICE__TTS_PROVIDER=minimax\n", encoding="utf-8")
+    voice_env_keys = [
+        "VOICE__TTS_PROVIDER",
+        "VOICE__TTS_BASE_URL",
+        "VOICE__TTS_MODEL",
+        "VOICE__TTS_API_KEY",
+        "VOICE__STT_PROVIDER",
+        "VOICE__STT_BASE_URL",
+        "VOICE__STT_MODEL",
+        "VOICE__STT_API_KEY",
+        "REALTIME_OPENAI_API_KEY",
+        "REALTIME_OPENAI_MODEL",
+        "REALTIME_OPENAI_VOICE",
+        "REALTIME_OPENAI_TRANSCRIPTION_MODEL",
+        "REALTIME_OPENAI_CALL_URL",
+    ]
+    old_env = {key: os.environ.get(key) for key in voice_env_keys}
+    original_llm = settings.llm.model_copy(deep=True)
+    original_voice = settings.voice.model_copy(deep=True)
+    original_realtime = {
+        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
+        "REALTIME_OPENAI_MODEL": settings.REALTIME_OPENAI_MODEL,
+        "REALTIME_OPENAI_VOICE": settings.REALTIME_OPENAI_VOICE,
+        "REALTIME_OPENAI_TRANSCRIPTION_MODEL": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+        "REALTIME_OPENAI_CALL_URL": settings.REALTIME_OPENAI_CALL_URL,
+    }
+    reloads: list[bool] = []
+
+    async def fake_reload_voice_clients() -> None:
+        reloads.append(True)
+
+    async def fake_reload_llm_client() -> None:
+        reloads.append(True)
+
+    try:
+        monkeypatch.setattr(training_studio_routes, "_settings_env_file_path", lambda: env_file)
+        monkeypatch.setattr(training_studio_routes, "_reload_voice_clients", fake_reload_voice_clients)
+        monkeypatch.setattr(training_studio_routes, "_reload_llm_client", fake_reload_llm_client)
+        settings.llm.api_key = "sk-llm-old"
+        settings.llm.base_url = "https://old-llm.example.com/v1"
+        settings.llm.default_model = "old-model"
+        settings.llm.wire_api = "chat_completions"
+        settings.voice = VoiceSettings(
+            tts_provider="minimax",
+            tts_api_key=None,
+            tts_base_url=None,
+            tts_model="speech-2.8-hd",
+            stt_provider="whisper",
+            stt_api_key=None,
+            stt_base_url=None,
+            stt_model="whisper-1",
+        )
+        settings.REALTIME_OPENAI_API_KEY = None
+        settings.REALTIME_OPENAI_MODEL = "gpt-realtime"
+        settings.REALTIME_OPENAI_VOICE = "marin"
+        settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
+        settings.REALTIME_OPENAI_CALL_URL = "https://api.openai.com/v1/realtime/calls"
+
+        resp = await client.put(
+            "/api/v1/training-studio/voice-config",
+            headers={"X-Mock-User": "admin"},
+            json={
+                "llm_base_url": "https://ai.flowguide.cc",
+                "llm_default_model": "gpt-5.5",
+                "llm_wire_api": "responses",
+                "llm_api_key": "sk-flowguide-9999",
+                "tts_provider": "openrouter",
+                "tts_base_url": "https://openrouter.ai/api/v1",
+                "tts_model": "mistralai/voxtral-mini-tts-2603",
+                "tts_api_key": "sk-openrouter-1234",
+                "stt_provider": "whisper",
+                "stt_base_url": "https://openrouter.ai/api/v1",
+                "stt_model": "openai/whisper-1",
+                "stt_use_tts_api_key": True,
+                "realtime_api_key": "sk-realtime-5678",
+                "realtime_model": "gpt-realtime",
+                "realtime_voice": "marin",
+                "realtime_transcription_model": "gpt-realtime-whisper",
+                "realtime_call_url": "https://api.openai.com/v1/realtime/calls",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["llm_base_url"] == "https://ai.flowguide.cc"
+        assert data["llm_default_model"] == "gpt-5.5"
+        assert data["llm_api_key_preview"] == "***9999"
+        assert data["tts_provider"] == "openrouter"
+        assert data["tts_api_key_preview"] == "***1234"
+        assert data["stt_api_key_source"] == "tts"
+        assert data["realtime_api_key_preview"] == "***5678"
+        assert "sk-openrouter-1234" not in resp.text
+        assert "sk-realtime-5678" not in resp.text
+        assert "sk-flowguide-9999" not in resp.text
+        assert reloads == [True, True]
+
+        env_text = env_file.read_text(encoding="utf-8")
+        assert "LLM__BASE_URL=https://ai.flowguide.cc" in env_text
+        assert "LLM__DEFAULT_MODEL=gpt-5.5" in env_text
+        assert "LLM__WIRE_API=responses" in env_text
+        assert "LLM__API_KEY=sk-flowguide-9999" in env_text
+        assert "VOICE__TTS_PROVIDER=openrouter" in env_text
+        assert "VOICE__TTS_API_KEY=sk-openrouter-1234" in env_text
+        assert "VOICE__STT_API_KEY=" in env_text
+        assert "REALTIME_OPENAI_API_KEY=sk-realtime-5678" in env_text
+        assert settings.llm.api_key == "sk-flowguide-9999"
+        assert settings.llm.base_url == "https://ai.flowguide.cc"
+        assert settings.llm.default_model == "gpt-5.5"
+        assert settings.voice.tts_provider == "openrouter"
+        assert settings.voice.stt_api_key == "sk-openrouter-1234"
+        assert settings.REALTIME_OPENAI_API_KEY == "sk-realtime-5678"
+    finally:
+        settings.llm = original_llm
+        settings.voice = original_voice
+        for key, value in original_realtime.items():
+            setattr(settings, key, value)
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 @pytest.mark.asyncio

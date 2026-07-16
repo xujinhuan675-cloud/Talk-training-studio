@@ -1,5 +1,5 @@
 import React from 'react'
-import { Send, Lightbulb, Volume2, VolumeX, Video } from 'lucide-react'
+import { Send, Lightbulb, Video } from 'lucide-react'
 import Avatar from '../Avatar'
 import VoiceRecorder, { type VoiceRecorderState } from '../VoiceRecorder'
 import type { PersonaSummary } from '../../services/api'
@@ -16,9 +16,6 @@ export interface ChatInputProps {
   mentionQuery: string | null
   mentionResults: PersonaSummary[]
   onInsertMention: (persona: PersonaSummary) => void
-  voiceEnabled: boolean
-  voiceMuted: boolean
-  onToggleVoice: () => void
   roomId: number | null
   onVoiceTranscription?: (text: string) => void
   onVoiceRecorderStateChange?: (state: VoiceRecorderState, error: string | null) => void
@@ -39,9 +36,6 @@ export default function ChatInput({
   mentionQuery,
   mentionResults,
   onInsertMention,
-  voiceEnabled,
-  voiceMuted,
-  onToggleVoice,
   roomId,
   onVoiceTranscription,
   onVoiceRecorderStateChange,
@@ -103,7 +97,7 @@ export default function ChatInput({
           disabled={sending}
           rows={1}
         />
-        {voiceEnabled && roomId && (
+        {roomId && (
           <VoiceRecorder
             roomId={roomId}
             disabled={sending}
@@ -119,14 +113,6 @@ export default function ChatInput({
           disabled={sending}
         >
           <Video size={18} />
-        </button>
-        <button
-          className={`voice-toggle-btn ${voiceMuted ? 'muted' : ''}`}
-          onClick={onToggleVoice}
-          title={!voiceEnabled ? tr('启用语音', 'Enable voice') : voiceMuted ? tr('关闭语音模式', 'Disable voice mode') : tr('静音语音', 'Mute voice')}
-          type="button"
-        >
-          {voiceEnabled && !voiceMuted ? <Volume2 size={18} /> : <VolumeX size={18} />}
         </button>
         <button
           className="live-coach-btn"

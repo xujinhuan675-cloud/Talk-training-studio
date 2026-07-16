@@ -55,6 +55,14 @@ async def init_tts_client() -> None:
                 model=voice_cfg.tts_model or "eleven_multilingual_v2",
                 **({"base_url": voice_cfg.tts_base_url} if voice_cfg.tts_base_url else {}),
             )
+        elif voice_cfg.tts_provider == "openrouter":
+            from .openrouter_tts import OpenRouterTTSProvider
+
+            _tts_client = OpenRouterTTSProvider(
+                api_key=voice_cfg.tts_api_key,
+                model=voice_cfg.tts_model,
+                **({"base_url": voice_cfg.tts_base_url} if voice_cfg.tts_base_url else {}),
+            )
         else:
             raise ValueError(f"Unknown TTS provider: {voice_cfg.tts_provider}")
 

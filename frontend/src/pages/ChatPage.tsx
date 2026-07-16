@@ -1604,9 +1604,6 @@ function ChatArea() {
             mentionQuery={chat.mentionQuery}
             mentionResults={chat.mentionResults}
             onInsertMention={chat.insertMention}
-            voiceEnabled={voice.voiceEnabled}
-            voiceMuted={voice.voiceMuted}
-            onToggleVoice={voice.toggleVoice}
             roomId={chat.selectedRoom?.room.id ?? null}
             onVoiceTranscription={(text) => {
               const transcript = text.trim()

@@ -6,6 +6,8 @@ import asyncio
 import base64
 import json
 import mimetypes
+import os
+import re
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -64,7 +66,7 @@ from application.services.training_studio.session_service import (
     TrainingSessionDTO,
     TrainingSessionService,
 )
-from core.config import settings
+from core.config import LLMSettings, VoiceSettings, settings
 from core.response import success_response
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
@@ -98,6 +100,261 @@ _VIDEO_EXTENSIONS = {
 }
 _TRAINING_GUIDANCE_MESSAGE_SOURCE = "training_live_guidance"
 _TRAINING_GUIDANCE_SENDER_ID = "training_coach"
+_ENV_ASSIGNMENT_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+_VOICE_TTS_PROVIDERS = {"minimax", "elevenlabs", "openrouter"}
+_VOICE_STT_PROVIDERS = {"minimax", "whisper"}
+
+
+class VoicePreferenceConfigDTO(BaseModel):
+    llm_base_url: str | None = None
+    llm_default_model: str
+    llm_wire_api: str
+    llm_api_key_configured: bool
+    llm_api_key_preview: str | None = None
+    tts_provider: str
+    tts_base_url: str | None = None
+    tts_model: str
+    tts_api_key_configured: bool
+    tts_api_key_preview: str | None = None
+    stt_provider: str
+    stt_base_url: str | None = None
+    stt_model: str
+    stt_api_key_configured: bool
+    stt_api_key_preview: str | None = None
+    stt_api_key_source: str
+    stt_use_tts_api_key: bool
+    realtime_api_key_configured: bool
+    realtime_effective_api_key_configured: bool
+    realtime_api_key_preview: str | None = None
+    realtime_api_key_source: str
+    realtime_model: str
+    realtime_voice: str
+    realtime_transcription_model: str | None = None
+    realtime_call_url: str
+    updated_at: str
+
+
+class VoicePreferenceUpdateDTO(BaseModel):
+    llm_base_url: str | None = None
+    llm_default_model: str | None = None
+    llm_wire_api: str | None = None
+    llm_api_key: str | None = None
+    clear_llm_api_key: bool = False
+    tts_provider: str | None = None
+    tts_base_url: str | None = None
+    tts_model: str | None = None
+    tts_api_key: str | None = None
+    clear_tts_api_key: bool = False
+    stt_provider: str | None = None
+    stt_base_url: str | None = None
+    stt_model: str | None = None
+    stt_api_key: str | None = None
+    clear_stt_api_key: bool = False
+    stt_use_tts_api_key: bool = True
+    realtime_api_key: str | None = None
+    clear_realtime_api_key: bool = False
+    realtime_model: str | None = None
+    realtime_voice: str | None = None
+    realtime_transcription_model: str | None = None
+    realtime_call_url: str | None = None
+
+
+def _openai_realtime_api_key() -> str | None:
+    return settings.REALTIME_OPENAI_API_KEY or settings.llm.api_key
+
+
+def _settings_env_file_path() -> Path:
+    env_file = settings.model_config.get("env_file")
+    if isinstance(env_file, (list, tuple)):
+        env_file = env_file[0] if env_file else ".env"
+    return Path(env_file or ".env").resolve()
+
+
+def _clean_config_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if "\n" in text or "\r" in text:
+        raise HTTPException(status_code=400, detail="Configuration values cannot contain line breaks")
+    return text or None
+
+
+def _required_config_text(value: str | None, fallback: str | None, field_name: str) -> str:
+    text = _clean_config_text(value) or _clean_config_text(fallback)
+    if not text:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    return text
+
+
+def _normalized_provider(
+    value: str | None,
+    fallback: str,
+    *,
+    allowed: set[str],
+    field_name: str,
+) -> str:
+    provider = (_clean_config_text(value) or fallback).lower()
+    if provider not in allowed:
+        allowed_values = ", ".join(sorted(allowed))
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} must be one of: {allowed_values}",
+        )
+    return provider
+
+
+def _secret_preview(secret: str | None) -> str | None:
+    if not secret:
+        return None
+    return f"***{secret[-4:]}" if len(secret) > 4 else "***"
+
+
+def _parse_env_value(raw: str) -> str:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return value
+
+
+def _read_env_file_values(path: Path | None = None) -> dict[str, str]:
+    env_path = path or _settings_env_file_path()
+    if not env_path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        if key:
+            values[key] = _parse_env_value(value)
+    return values
+
+
+def _explicit_config_value(key: str, env_values: dict[str, str]) -> str | None:
+    if key in os.environ:
+        return os.environ[key] or None
+    return env_values.get(key) or None
+
+
+def _format_env_value(value: str | None) -> str:
+    if not value:
+        return ""
+    if "\n" in value or "\r" in value:
+        raise HTTPException(status_code=400, detail="Configuration values cannot contain line breaks")
+    if any(ch.isspace() for ch in value) or "#" in value:
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
+
+
+def _write_env_file_values(updates: dict[str, str | None]) -> None:
+    env_path = _settings_env_file_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True) if env_path.exists() else []
+    pending = dict(updates)
+
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        match = _ENV_ASSIGNMENT_RE.match(line)
+        if not match:
+            continue
+        key = match.group(1)
+        if key in pending:
+            lines[index] = f"{key}={_format_env_value(pending.pop(key))}\n"
+
+    if pending:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] = f"{lines[-1]}\n"
+        for key, value in pending.items():
+            lines.append(f"{key}={_format_env_value(value)}\n")
+
+    env_path.write_text("".join(lines), encoding="utf-8")
+    for key, value in updates.items():
+        os.environ[key] = value or ""
+
+
+def _voice_config_response() -> VoicePreferenceConfigDTO:
+    env_values = _read_env_file_values()
+    llm_key = settings.llm.api_key
+    tts_key = settings.voice.tts_api_key
+    stt_key = settings.voice.stt_api_key
+    realtime_key = settings.REALTIME_OPENAI_API_KEY
+    effective_realtime_key = _openai_realtime_api_key()
+
+    explicit_stt_key = _explicit_config_value("VOICE__STT_API_KEY", env_values)
+    if explicit_stt_key:
+        stt_key_source = "stt"
+    elif tts_key:
+        stt_key_source = "tts"
+    elif settings.llm.api_key:
+        stt_key_source = "llm"
+    else:
+        stt_key_source = "missing"
+
+    explicit_realtime_key = _explicit_config_value("REALTIME_OPENAI_API_KEY", env_values)
+    if explicit_realtime_key:
+        realtime_key_source = "realtime"
+    elif settings.llm.api_key:
+        realtime_key_source = "llm"
+    else:
+        realtime_key_source = "missing"
+
+    return VoicePreferenceConfigDTO(
+        llm_base_url=settings.llm.base_url,
+        llm_default_model=settings.llm.default_model,
+        llm_wire_api=settings.llm.wire_api,
+        llm_api_key_configured=bool(llm_key),
+        llm_api_key_preview=_secret_preview(llm_key),
+        tts_provider=settings.voice.tts_provider,
+        tts_base_url=settings.voice.tts_base_url,
+        tts_model=settings.voice.tts_model,
+        tts_api_key_configured=bool(tts_key),
+        tts_api_key_preview=_secret_preview(tts_key),
+        stt_provider=settings.voice.stt_provider,
+        stt_base_url=settings.voice.stt_base_url,
+        stt_model=settings.voice.stt_model,
+        stt_api_key_configured=bool(stt_key),
+        stt_api_key_preview=_secret_preview(stt_key),
+        stt_api_key_source=stt_key_source,
+        stt_use_tts_api_key=stt_key_source == "tts",
+        realtime_api_key_configured=bool(realtime_key),
+        realtime_effective_api_key_configured=bool(effective_realtime_key),
+        realtime_api_key_preview=_secret_preview(effective_realtime_key),
+        realtime_api_key_source=realtime_key_source,
+        realtime_model=settings.REALTIME_OPENAI_MODEL,
+        realtime_voice=settings.REALTIME_OPENAI_VOICE,
+        realtime_transcription_model=settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+        realtime_call_url=settings.REALTIME_OPENAI_CALL_URL,
+        updated_at=datetime.now(UTC).isoformat(),
+    )
+
+
+async def _reload_voice_clients() -> None:
+    from infrastructure.external.voice import (
+        init_stt_client,
+        init_tts_client,
+        shutdown_stt_client,
+        shutdown_tts_client,
+    )
+
+    await shutdown_stt_client()
+    await shutdown_tts_client()
+    await init_tts_client()
+    await init_stt_client()
+
+
+async def _reload_llm_client() -> None:
+    from infrastructure.external.llm import init_llm_client, shutdown_llm_client
+
+    await shutdown_llm_client()
+    await init_llm_client()
 
 
 def get_training_catalog_service() -> TrainingCatalogService:
@@ -136,11 +393,11 @@ def get_training_realtime_uow_factory() -> Callable[..., AbstractUnitOfWork]:
 
 def get_training_realtime_openai_factory() -> Callable[[], OpenAIRealtimeTranscriptionClient]:
     def _factory() -> OpenAIRealtimeTranscriptionClient:
-        api_key = settings.llm.api_key
+        api_key = _openai_realtime_api_key()
         if not api_key:
             raise HTTPException(
                 status_code=503,
-                detail="OpenAI Realtime is not configured; set LLM__API_KEY or OPENAI_API_KEY",
+                detail="OpenAI Realtime is not configured; set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY",
             )
         return OpenAIRealtimeTranscriptionClient(
             OpenAIRealtimeConfig(
@@ -1146,11 +1403,11 @@ async def create_realtime_sdp_call(
     uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_realtime_uow_factory),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    api_key = settings.llm.api_key
+    api_key = _openai_realtime_api_key()
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="OpenAI Realtime is not configured; set LLM__API_KEY or OPENAI_API_KEY",
+            detail="OpenAI Realtime is not configured; set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY",
         )
 
     offer_sdp = (await request.body()).decode("utf-8", errors="ignore").strip()
@@ -1434,6 +1691,174 @@ async def get_scenario_templates(
 ):
     templates = svc.get_scenario_templates()
     return success_response(data=[template.model_dump(mode="json") for template in templates])
+
+
+@router.get("/voice-config", summary="Get voice preference configuration")
+async def get_voice_config(
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+):
+    return success_response(data=_voice_config_response().model_dump(mode="json"))
+
+
+@router.put("/voice-config", summary="Save voice preference configuration")
+async def save_voice_config(
+    body: VoicePreferenceUpdateDTO,
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader")),
+):
+    current_llm = settings.llm
+    llm_api_key = current_llm.api_key
+    new_llm_key = _clean_config_text(body.llm_api_key)
+    if body.clear_llm_api_key:
+        llm_api_key = None
+    elif new_llm_key:
+        llm_api_key = new_llm_key
+    llm_base_url = _clean_config_text(body.llm_base_url) or current_llm.base_url
+    llm_default_model = _required_config_text(
+        body.llm_default_model,
+        current_llm.default_model,
+        "llm_default_model",
+    )
+    llm_wire_api = _normalized_provider(
+        body.llm_wire_api,
+        current_llm.wire_api,
+        allowed={"chat_completions", "responses"},
+        field_name="llm_wire_api",
+    )
+
+    current_voice = settings.voice
+    tts_provider = _normalized_provider(
+        body.tts_provider,
+        current_voice.tts_provider,
+        allowed=_VOICE_TTS_PROVIDERS,
+        field_name="tts_provider",
+    )
+    stt_provider = _normalized_provider(
+        body.stt_provider,
+        current_voice.stt_provider,
+        allowed=_VOICE_STT_PROVIDERS,
+        field_name="stt_provider",
+    )
+
+    tts_base_url = _clean_config_text(body.tts_base_url) or current_voice.tts_base_url
+    stt_base_url = _clean_config_text(body.stt_base_url) or current_voice.stt_base_url
+    tts_model = _required_config_text(body.tts_model, current_voice.tts_model, "tts_model")
+    stt_model = _required_config_text(body.stt_model, current_voice.stt_model, "stt_model")
+
+    tts_api_key = current_voice.tts_api_key
+    new_tts_key = _clean_config_text(body.tts_api_key)
+    if body.clear_tts_api_key:
+        tts_api_key = None
+    elif new_tts_key:
+        tts_api_key = new_tts_key
+
+    stt_api_key = current_voice.stt_api_key
+    new_stt_key = _clean_config_text(body.stt_api_key)
+    if body.stt_use_tts_api_key:
+        stt_api_key = tts_api_key or llm_api_key
+    elif body.clear_stt_api_key:
+        stt_api_key = None
+    elif new_stt_key:
+        stt_api_key = new_stt_key
+
+    realtime_api_key = settings.REALTIME_OPENAI_API_KEY
+    new_realtime_key = _clean_config_text(body.realtime_api_key)
+    if body.clear_realtime_api_key:
+        realtime_api_key = None
+    elif new_realtime_key:
+        realtime_api_key = new_realtime_key
+
+    realtime_model = _required_config_text(
+        body.realtime_model,
+        settings.REALTIME_OPENAI_MODEL,
+        "realtime_model",
+    )
+    realtime_voice = _required_config_text(
+        body.realtime_voice,
+        settings.REALTIME_OPENAI_VOICE,
+        "realtime_voice",
+    )
+    realtime_transcription_model = (
+        _clean_config_text(body.realtime_transcription_model)
+        if body.realtime_transcription_model is not None
+        else settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
+    )
+    realtime_call_url = _required_config_text(
+        body.realtime_call_url,
+        settings.REALTIME_OPENAI_CALL_URL,
+        "realtime_call_url",
+    )
+
+    env_updates: dict[str, str | None] = {
+        "LLM__BASE_URL": llm_base_url,
+        "LLM__DEFAULT_MODEL": llm_default_model,
+        "LLM__WIRE_API": llm_wire_api,
+        "VOICE__TTS_PROVIDER": tts_provider,
+        "VOICE__TTS_BASE_URL": tts_base_url,
+        "VOICE__TTS_MODEL": tts_model,
+        "VOICE__STT_PROVIDER": stt_provider,
+        "VOICE__STT_BASE_URL": stt_base_url,
+        "VOICE__STT_MODEL": stt_model,
+        "REALTIME_OPENAI_MODEL": realtime_model,
+        "REALTIME_OPENAI_VOICE": realtime_voice,
+        "REALTIME_OPENAI_TRANSCRIPTION_MODEL": realtime_transcription_model,
+        "REALTIME_OPENAI_CALL_URL": realtime_call_url,
+    }
+    if body.clear_llm_api_key or new_llm_key:
+        env_updates["LLM__API_KEY"] = llm_api_key
+    if body.clear_tts_api_key or new_tts_key:
+        env_updates["VOICE__TTS_API_KEY"] = tts_api_key
+    if body.stt_use_tts_api_key or body.clear_stt_api_key or new_stt_key:
+        env_updates["VOICE__STT_API_KEY"] = "" if body.stt_use_tts_api_key else stt_api_key
+    if body.clear_realtime_api_key or new_realtime_key:
+        env_updates["REALTIME_OPENAI_API_KEY"] = realtime_api_key
+
+    try:
+        _write_env_file_values(env_updates)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to write backend .env: {exc}") from exc
+
+    settings.llm = LLMSettings(
+        provider=current_llm.provider,
+        api_key=llm_api_key,
+        base_url=llm_base_url,
+        wire_api=llm_wire_api,
+        default_model=llm_default_model,
+        temperature=current_llm.temperature,
+        max_tokens=current_llm.max_tokens,
+        timeout=current_llm.timeout,
+        max_retries=current_llm.max_retries,
+        user_agent=current_llm.user_agent,
+    )
+    settings.voice = VoiceSettings(
+        tts_provider=tts_provider,
+        tts_api_key=tts_api_key,
+        tts_base_url=tts_base_url,
+        tts_model=tts_model,
+        stt_provider=stt_provider,
+        stt_api_key=stt_api_key,
+        stt_base_url=stt_base_url,
+        stt_model=stt_model,
+    )
+    if not settings.voice.stt_api_key:
+        settings.voice.stt_api_key = settings.voice.tts_api_key or settings.llm.api_key
+    if not settings.voice.stt_base_url:
+        settings.voice.stt_base_url = settings.llm.base_url
+    settings.REALTIME_OPENAI_API_KEY = realtime_api_key
+    settings.REALTIME_OPENAI_MODEL = realtime_model
+    settings.REALTIME_OPENAI_VOICE = realtime_voice
+    settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL = realtime_transcription_model
+    settings.REALTIME_OPENAI_CALL_URL = realtime_call_url
+
+    try:
+        await _reload_llm_client()
+        await _reload_voice_clients()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Configuration saved but reload failed: {exc}") from exc
+
+    return success_response(
+        data=_voice_config_response().model_dump(mode="json"),
+        message="Configuration saved",
+    )
 
 
 @router.get("/scenario-config", summary="Get scenario configuration state")

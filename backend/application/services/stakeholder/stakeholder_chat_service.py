@@ -315,7 +315,7 @@ class StakeholderChatService:
                     chunks: list[str] = []
 
                     # Set up TTS pipeline if voice is enabled for this persona
-                    tts_enabled = self._tts is not None and persona.voice_id is not None
+                    tts_enabled = self._tts is not None
                     sentence_buf = None
                     tts_tasks: list[asyncio.Task] = []
                     audio_index = 0
@@ -470,7 +470,7 @@ class StakeholderChatService:
 
         try:
             config = TTSConfig(
-                voice_id=persona.voice_id,
+                voice_id=persona.voice_id or "",
                 speed=persona.voice_speed,
             )
             # Accumulate all streaming chunks into a complete mp3 per sentence.

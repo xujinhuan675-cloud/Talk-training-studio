@@ -310,6 +310,9 @@ class Settings(BaseSettings):
     REALTIME_OPENAI_WS_URL: Optional[str] = Field(
         default=None, validation_alias=AliasChoices("REALTIME_OPENAI_WS_URL")
     )
+    REALTIME_OPENAI_API_KEY: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("REALTIME_OPENAI_API_KEY")
+    )
     REALTIME_OPENAI_MODEL: str = Field(
         default="gpt-realtime", validation_alias=AliasChoices("REALTIME_OPENAI_MODEL")
     )
@@ -419,7 +422,7 @@ class Settings(BaseSettings):
                 self.OPENAI_COMPATIBLE_WIRE_API or self.OPENAI_WIRE_API or self.llm.wire_api
             )
         if not self.voice.stt_api_key:
-            self.voice.stt_api_key = self.llm.api_key
+            self.voice.stt_api_key = self.voice.tts_api_key or self.llm.api_key
         if not self.voice.stt_base_url:
             self.voice.stt_base_url = self.llm.base_url
         return self

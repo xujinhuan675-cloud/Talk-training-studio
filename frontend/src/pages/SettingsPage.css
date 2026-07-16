@@ -442,6 +442,122 @@
   margin: 0;
 }
 
+.settings-voice-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.settings-voice-status-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.settings-voice-status-item svg {
+  flex-shrink: 0;
+  color: var(--green);
+}
+
+.settings-voice-status-item span {
+  flex-shrink: 0;
+}
+
+.settings-voice-status-item strong {
+  min-width: 0;
+  margin-left: auto;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-voice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.settings-form-panel.settings-voice-panel {
+  margin-top: 0;
+}
+
+.settings-voice-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  color: var(--green);
+}
+
+.settings-voice-panel-title h4 {
+  margin: 0;
+}
+
+.settings-voice-check {
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.settings-voice-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.settings-success {
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: var(--green-soft);
+  color: var(--green);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.settings-voice-actions {
+  justify-content: flex-end;
+}
+
+.settings-voice-actions button,
+.settings-section-header .settings-create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 1100px) {
+  .settings-voice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-voice-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .settings-section-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .settings-voice-status {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Organization tab styling - reuse org dialog patterns */
 .settings-org-layout {
   display: flex;
