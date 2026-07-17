@@ -66,6 +66,12 @@ def register_exception_handlers(app: FastAPI):
             BusinessCode.SERVICE_UNAVAILABLE: http_status.HTTP_503_SERVICE_UNAVAILABLE,
             BusinessCode.RATE_LIMIT_ERROR: http_status.HTTP_429_TOO_MANY_REQUESTS,
             BusinessCode.TOO_MANY_REQUESTS: http_status.HTTP_429_TOO_MANY_REQUESTS,
+            BusinessCode.CONVERSATION_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
+            BusinessCode.RUN_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
+            BusinessCode.AGENT_CONFIG_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
+            BusinessCode.MESSAGE_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
+            BusinessCode.CONVERSATION_ARCHIVED: http_status.HTTP_409_CONFLICT,
+            BusinessCode.AGENT_CONFIG_NAME_EXISTS: http_status.HTTP_409_CONFLICT,
             BusinessCode.CHATROOM_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
             BusinessCode.SCENARIO_NOT_FOUND: http_status.HTTP_404_NOT_FOUND,
         }

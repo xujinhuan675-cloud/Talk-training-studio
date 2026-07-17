@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import pytest
 
+from application.dto import EditMessageDTO, ForkConversationDTO, RetryMessageDTO
+from application.services.conversation_service import ConversationApplicationService
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
 from application.services.training_studio.session_service import (
     CreateTrainingSessionDTO,
@@ -20,6 +23,10 @@ from infrastructure.adapters.training_conversation import (
     ConversationTrainingConversationAdapter,
     StakeholderRoomTrainingConversationAdapter,
 )
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -108,6 +115,7 @@ class _ConversationRepository:
         self._state = state
 
     async def create(self, conversation: ConversationEntity) -> ConversationEntity:
+        now = _utcnow()
         saved = ConversationEntity(
             id=len(self._state.conversations) + 1,
             title=conversation.title,
@@ -115,12 +123,15 @@ class _ConversationRepository:
             model=conversation.model,
             status=conversation.status,
             metadata=conversation.metadata,
-            created_at=conversation.created_at,
-            updated_at=conversation.updated_at,
+            created_at=conversation.created_at or now,
+            updated_at=conversation.updated_at or now,
             deleted_at=conversation.deleted_at,
         )
         self._state.conversations[saved.id] = saved
         return saved
+
+    async def get_by_id(self, conversation_id: int) -> ConversationEntity | None:
+        return self._state.conversations.get(conversation_id)
 
 
 class _ConversationMessageRepository:
@@ -144,10 +155,23 @@ class _ConversationMessageRepository:
             run_id=message.run_id,
             token_count=message.token_count,
             metadata=message.metadata,
-            created_at=message.created_at,
+            created_at=message.created_at or _utcnow(),
         )
         self._state.messages.append(saved)
         return saved
+
+    async def get_by_public_id(self, public_id: str) -> ConversationMessage | None:
+        return next(
+            (message for message in self._state.messages if message.public_id == public_id),
+            None,
+        )
+
+    async def update(self, message: ConversationMessage) -> ConversationMessage:
+        for index, current in enumerate(self._state.messages):
+            if current.public_id == message.public_id:
+                self._state.messages[index] = message
+                return message
+        raise AssertionError(f"Message {message.public_id} was not seeded")
 
     async def list_by_conversation(
         self,
@@ -156,12 +180,20 @@ class _ConversationMessageRepository:
         skip: int = 0,
         limit: int = 100,
         branch_id: str | None = None,
+        statuses: list[str] | None = None,
+        include_deleted: bool = False,
     ) -> list[ConversationMessage]:
+        allowed_statuses = set(statuses or [])
         messages = [
             message
             for message in self._state.messages
             if message.conversation_id == conversation_id
             and (branch_id is None or message.branch_id == branch_id)
+            and (
+                message.status in allowed_statuses
+                if allowed_statuses
+                else include_deleted or message.status != "deleted"
+            )
         ]
         return messages[skip : skip + limit]
 
@@ -198,6 +230,22 @@ def _task_config() -> TrainingTaskConfigDTO:
             "live_guidance": {"enabled": True},
         },
     )
+
+
+def _training_semantics(metadata: dict[str, object]) -> dict[str, object]:
+    keys = (
+        "runtime",
+        "trainingSessionId",
+        "mode",
+        "category",
+        "personaIds",
+        "scenarioId",
+        "dispatcher",
+        "evaluation",
+        "growthReport",
+        "liveGuidance",
+    )
+    return {key: metadata[key] for key in keys}
 
 
 @pytest.mark.asyncio
@@ -338,3 +386,101 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
         "Yes, if we define a measurable success metric first.",
     ]
     assert recent_turns[1].metadata["parent_message_id"] == state.messages[0].public_id
+
+
+@pytest.mark.asyncio
+async def test_conversation_adapter_preserves_training_semantics_across_tree_edit_retry_fork(
+) -> None:
+    state = _ConversationState()
+    adapter = ConversationTrainingConversationAdapter(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs),
+        default_model="gpt-training",
+    )
+    orchestrator = TrainingCoreOrchestrator(
+        session_service=TrainingSessionService(id_factory=lambda: "training-text-2"),
+        conversation_adapter=adapter,
+    )
+    message_tree = ConversationApplicationService(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs)
+    )
+
+    started = await orchestrator.start_session(
+        CreateTrainingSessionDTO(task_config=_task_config(), mode="text")
+    )
+    user_ref = await orchestrator.record_turn(
+        training_session_id=started.session.session_id,
+        conversation=started.conversation,
+        turn=TrainingTurn(
+            speaker="user",
+            text="Can we restart from the risk objection?",
+            metadata={
+                "source": "text",
+                "branch_id": "branch-risk",
+                "provider": "openai",
+                "model": "gpt-test",
+                "status": "draft",
+            },
+        ),
+    )
+    assistant_ref = await orchestrator.record_turn(
+        training_session_id=started.session.session_id,
+        conversation=user_ref,
+        turn=TrainingTurn(
+            speaker="assistant",
+            text="Yes, frame the pilot as a reversible decision.",
+            metadata={"source": "text", "branch_id": "branch-risk"},
+        ),
+    )
+    original_user = state.messages[0]
+    original_assistant = state.messages[1]
+    expected_semantics = _training_semantics(state.conversations[1].metadata)
+
+    edited = await message_tree.edit_message(
+        1,
+        original_user.public_id,
+        EditMessageDTO(
+            content="Can we restart from the budget objection?",
+            metadata={"reason": "clarity", "message_tree_status": "edited"},
+        ),
+    )
+    retry = await message_tree.retry_message(
+        1,
+        original_assistant.public_id,
+        RetryMessageDTO(
+            content="Retry the counterpart answer with a sharper metric.",
+            metadata={"temperature": 0.1, "message_tree_status": "retry"},
+        ),
+    )
+    forked = await message_tree.fork_conversation(
+        1,
+        retry.public_id,
+        ForkConversationDTO(
+            title="Risk objection review",
+            option="directPath",
+            statuses=["active", "superseded"],
+            metadata={
+                "fork_reason": "manager review",
+                "message_tree_status": "forked",
+                "status": "review-draft",
+            },
+        ),
+    )
+
+    assert _training_semantics(state.conversations[1].metadata) == expected_semantics
+    assert _training_semantics(started.conversation.metadata) == expected_semantics
+    assert _training_semantics(assistant_ref.metadata) == expected_semantics
+    assert state.messages[0].status == "superseded"
+    assert state.messages[1].status == "superseded"
+    assert edited.metadata["edit_of"] == original_user.public_id
+    assert retry.metadata["retry_of"] == original_assistant.public_id
+    assert state.messages[0].metadata["status"] == "draft"
+    assert state.messages[0].status != state.messages[0].metadata["status"]
+
+    assert _training_semantics(forked.conversation.metadata) == expected_semantics
+    assert forked.conversation.metadata["forked_from_conversation_id"] == 1
+    assert forked.conversation.metadata["forked_from_message_id"] == retry.public_id
+    assert forked.conversation.metadata["fork_reason"] == "manager review"
+    assert forked.conversation.metadata["message_tree_status"] == "forked"
+    assert forked.conversation.metadata["status"] == "review-draft"
+    assert forked.conversation.status == "active"
+    assert forked.messages[-1].metadata["forked_from_message_id"] == retry.public_id

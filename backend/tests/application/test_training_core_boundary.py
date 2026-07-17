@@ -255,6 +255,61 @@ async def test_training_core_records_turns_and_preserves_branch_tail():
 
 
 @pytest.mark.asyncio
+async def test_training_core_keeps_message_tree_metadata_out_of_training_semantics():
+    training_metadata = {
+        "runtime": "conversation_message_tree",
+        "trainingSessionId": "session-1",
+        "mode": "text",
+        "personaIds": ["buyer", "cfo"],
+        "scenarioId": 9,
+        "dispatcher": {"policy": "stakeholder_turns"},
+        "evaluation": {"rubric_id": "sales-v1"},
+        "growthReport": {"report_id": "growth-1"},
+        "liveGuidance": {"enabled": True},
+        "branchId": "main",
+    }
+    adapter = FakeConversationAdapter(
+        provider="talkwise-conversation",
+        legacy_room_id=None,
+        metadata=training_metadata,
+    )
+    session_service = TrainingSessionService(id_factory=lambda: "session-1")
+    orchestrator = TrainingCoreOrchestrator(
+        session_service=session_service,
+        conversation_adapter=adapter,
+    )
+    started = await orchestrator.start_session(_task_config())
+
+    updated = await orchestrator.record_turn(
+        training_session_id="session-1",
+        conversation=started.conversation,
+        turn=TrainingTurn(
+            speaker="user",
+            text="Let's retry this from the pricing branch.",
+            turn_id="msg-training-edit-1",
+            metadata={
+                "branch_id": "branch-pricing",
+                "edit_of": "msg-original",
+                "retry_of": "msg-failed",
+                "forked_from_message_id": "msg-fork-source",
+                "status": "superseded",
+                "personaIds": ["message-tree-shadow"],
+                "scenarioId": 404,
+                "dispatcher": {"policy": "generic-chat"},
+                "evaluation": {"rubric_id": "generic"},
+                "growthReport": {"report_id": "generic"},
+                "liveGuidance": {"enabled": False},
+            },
+        ),
+    )
+
+    assert updated.metadata == training_metadata
+    assert adapter.appended_conversations[0].metadata == training_metadata
+    assert adapter.turns[0].metadata["branch_id"] == "branch-pricing"
+    assert adapter.turns[0].metadata["personaIds"] == ["message-tree-shadow"]
+
+
+@pytest.mark.asyncio
 async def test_training_core_guidance_preserves_turn_metadata_for_shared_evaluation():
     captured_states = []
 

@@ -1,8 +1,12 @@
 import React from 'react'
 import Markdown from 'react-markdown'
-import { MessageCircle, ClipboardList, Volume2, Video } from 'lucide-react'
+import { ListTree, MapPin, MessageCircle, ClipboardList, Route, Search, Volume2, Video } from 'lucide-react'
 import Avatar from '../Avatar'
 import type { Message, DispatchPhase, PersonaSummary } from '../../services/api'
+import {
+  buildConversationTreeMessageActionContext,
+  type ConversationTreeMessageActionContext,
+} from '../../services/trainingConversation'
 import { useI18n } from '../../i18n'
 import './MessageList.css'
 
@@ -190,6 +194,108 @@ function renderVideoAttachment(attachment: VideoAttachment | null) {
   )
 }
 
+type MessageTreeActionLabels = {
+  group: string
+  locate: string
+  path: string
+  children: string
+  search: string
+}
+
+function appendQuery(
+  endpoint: string,
+  params: Array<[string, string | number | boolean | null | undefined]>,
+): string {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of params) {
+    if (value === null || value === undefined || value === '') continue
+    searchParams.set(key, String(value))
+  }
+  const query = searchParams.toString()
+  return query ? `${endpoint}?${query}` : endpoint
+}
+
+function messageSearchQuery(message: Message, context: ConversationTreeMessageActionContext): string {
+  const text = message.content
+    .replace(/\[video-answer\]\s*\{[\s\S]*$/u, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return text.slice(0, 80) || context.messagePublicId
+}
+
+function getMessageTreeActionContext(message: Message): ConversationTreeMessageActionContext | null {
+  return buildConversationTreeMessageActionContext({ metadata: message.metadata ?? null })
+}
+
+function renderMessageTreeActions(
+  message: Message,
+  context: ConversationTreeMessageActionContext,
+  labels: MessageTreeActionLabels,
+) {
+  const branchQuery: [string, string | null] = ['branch_id', context.branchId]
+  const actions = [
+    {
+      key: 'locate',
+      href: appendQuery(context.endpoints.locate, [
+        ['before', 2],
+        ['after', 2],
+      ]),
+      label: labels.locate,
+      icon: <MapPin size={13} />,
+    },
+    {
+      key: 'path',
+      href: appendQuery(context.endpoints.path, [['limit', 200]]),
+      label: labels.path,
+      icon: <Route size={13} />,
+    },
+    {
+      key: 'children',
+      href: context.endpoints.children,
+      label: labels.children,
+      icon: <ListTree size={13} />,
+    },
+    {
+      key: 'search',
+      href: appendQuery(context.endpoints.search, [
+        ['q', messageSearchQuery(message, context)],
+        ['limit', 20],
+        ['include_path', true],
+        ['context_before', 2],
+        ['context_after', 2],
+        branchQuery,
+      ]),
+      label: labels.search,
+      icon: <Search size={13} />,
+    },
+  ] satisfies Array<{
+    key: 'locate' | 'path' | 'children' | 'search'
+    href: string
+    label: string
+    icon: React.ReactNode
+  }>
+
+  return (
+    <div className="message-tree-actions" role="group" aria-label={labels.group}>
+      {actions.map((action) => (
+        <a
+          key={action.key}
+          className="message-tree-action"
+          href={action.href}
+          target="_blank"
+          rel="noreferrer"
+          title={action.label}
+          aria-label={action.label}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {action.icon}
+        </a>
+      ))}
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
 /* ------------------------------------------------------------------ */
@@ -229,8 +335,15 @@ export default function MessageList({
   playingPersonaId,
   onClick,
 }: MessageListProps) {
-  const { tr, locale } = useI18n()
+  const { t, tr, locale } = useI18n()
   const isEmpty = messages.length === 0 && streamingEntries.length === 0
+  const messageTreeActionLabels: MessageTreeActionLabels = {
+    group: t('messageTree.actions.group'),
+    locate: t('messageTree.actions.locate'),
+    path: t('messageTree.actions.path'),
+    children: t('messageTree.actions.children'),
+    search: t('messageTree.actions.search'),
+  }
 
   React.useEffect(() => {
     if (!typingPersona && !playingPersonaId && streamingEntries.length === 0) return
@@ -252,6 +365,7 @@ export default function MessageList({
             const persona = msg.sender_type === 'persona' ? personaMap[msg.sender_id] : null
             const borderColor = persona?.avatar_color || undefined
             const videoAttachment = findVideoAttachment(msg)
+            const messageTreeActionContext = getMessageTreeActionContext(msg)
             return (
               <div
                 key={msg.id}
@@ -278,6 +392,7 @@ export default function MessageList({
                         {renderContent(msg.content)}
                         {renderVideoAttachment(videoAttachment)}
                       </div>
+                      {messageTreeActionContext && renderMessageTreeActions(msg, messageTreeActionContext, messageTreeActionLabels)}
                       <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
                     </div>
                   </div>
@@ -288,14 +403,18 @@ export default function MessageList({
                       {renderContent(msg.content)}
                       {renderVideoAttachment(videoAttachment)}
                     </div>
+                    {messageTreeActionContext && renderMessageTreeActions(msg, messageTreeActionContext, messageTreeActionLabels)}
                     <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
                   </>
                 )}
                 {msg.sender_type === 'system' && (
-                  <div className="message-bubble">
-                    {renderContent(msg.content)}
-                    {renderVideoAttachment(videoAttachment)}
-                  </div>
+                  <>
+                    <div className="message-bubble">
+                      {renderContent(msg.content)}
+                      {renderVideoAttachment(videoAttachment)}
+                    </div>
+                    {messageTreeActionContext && renderMessageTreeActions(msg, messageTreeActionContext, messageTreeActionLabels)}
+                  </>
                 )}
               </div>
             )

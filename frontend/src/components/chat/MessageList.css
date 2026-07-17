@@ -32,6 +32,63 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
+.message-tree-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  opacity: 0.78;
+  transition: opacity var(--transition-fast);
+}
+
+.message:hover .message-tree-actions,
+.message:focus-within .message-tree-actions {
+  opacity: 1;
+}
+
+.message.user .message-tree-actions {
+  justify-content: flex-end;
+}
+
+.message.persona .message-tree-actions,
+.message.system .message-tree-actions {
+  justify-content: flex-start;
+}
+
+.message-tree-action {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.message-tree-action:hover,
+.message-tree-action:focus-visible {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-soft);
+  outline: none;
+}
+
+.message.user .message-tree-action {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-muted);
+}
+
+.message.user .message-tree-action:hover,
+.message.user .message-tree-action:focus-visible {
+  color: var(--green);
+}
+
 .typing-message {
   align-self: flex-start;
   max-width: 78%;

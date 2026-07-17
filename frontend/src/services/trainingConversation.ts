@@ -98,6 +98,47 @@ export interface TrainingConversationPayload {
   metadata: Record<string, unknown>
 }
 
+export type ConversationTreeActionKind =
+  | 'locate'
+  | 'path'
+  | 'children'
+  | 'fork'
+  | 'edit'
+  | 'retry'
+  | 'search'
+
+export interface ConversationTreeMessageActionEndpoints {
+  locate: string
+  path: string
+  children: string
+  fork: string
+  edit: string
+  retry: string
+  search: string
+}
+
+export interface ConversationTreeMessageActionContextInput {
+  provider?: string | null
+  conversation?: ConversationRefInput | null
+  conversationId?: string | number | null
+  conversation_id?: string | number | null
+  messagePublicId?: string | number | null
+  message_public_id?: string | number | null
+  branchId?: string | number | null
+  branch_id?: string | number | null
+  metadata?: Record<string, unknown> | null
+  turn?: TrainingTurnInput | null
+}
+
+export interface ConversationTreeMessageActionContext {
+  provider: string
+  conversationId: string
+  messagePublicId: string
+  branchId: string | null
+  endpoints: ConversationTreeMessageActionEndpoints
+  availableActions: ConversationTreeActionKind[]
+}
+
 const TRAINING_RUNTIME_MODES = new Set<TrainingRuntimeMode>(['text', 'voice', 'video', 'realtime'])
 const STAKEHOLDER_API_BASE = '/api/v1/stakeholder'
 const TRAINING_STUDIO_API_BASE = '/api/v1/training-studio'
@@ -177,6 +218,77 @@ export function buildTrainingConversationPayload(
     conversation,
     turns,
     metadata: cloneMetadata(input.metadata),
+  }
+}
+
+export function buildConversationTreeMessageActionContext(
+  input: ConversationTreeMessageActionContextInput,
+): ConversationTreeMessageActionContext | null {
+  const metadata = cloneMetadata(input.metadata)
+  const metadataConversation = recordValue(metadata.conversation)
+    ?? recordValue(metadata.conversationRef)
+    ?? recordValue(metadata.conversation_ref)
+  const metadataMessage = recordValue(metadata.message)
+    ?? recordValue(metadata.messageRef)
+    ?? recordValue(metadata.message_ref)
+  const turnMetadata = cloneMetadata(input.turn?.metadata)
+
+  const provider = cleanText(
+    input.provider
+      ?? input.conversation?.provider
+      ?? metadataText(metadata, 'provider')
+      ?? metadataRecordText(metadataConversation, 'provider'),
+  )
+  if (!provider || !isConversationTreeProvider(provider)) return null
+
+  const conversationId = cleanText(
+    input.conversationId
+      ?? input.conversation_id
+      ?? input.conversation?.conversationId
+      ?? input.conversation?.conversation_id
+      ?? metadataText(metadata, 'conversationId', 'conversation_id')
+      ?? metadataRecordText(metadataConversation, 'conversationId', 'conversation_id'),
+  )
+  if (!conversationId) return null
+
+  const branchId = cleanText(
+    input.branchId
+      ?? input.branch_id
+      ?? input.turn?.branchId
+      ?? input.turn?.branch_id
+      ?? metadataText(metadata, 'branchId', 'branch_id')
+      ?? metadataRecordText(metadataConversation, 'branchId', 'branch_id')
+      ?? metadataText(turnMetadata, 'branchId', 'branch_id'),
+  )
+  const messagePublicId = cleanPublicMessageId(
+    input.messagePublicId
+      ?? input.message_public_id
+      ?? metadataText(metadata, 'messagePublicId', 'message_public_id', 'publicId', 'public_id')
+      ?? metadataRecordText(metadataMessage, 'messagePublicId', 'message_public_id', 'publicId', 'public_id')
+      ?? metadataText(turnMetadata, 'messagePublicId', 'message_public_id', 'publicId', 'public_id')
+      ?? input.conversation?.branchTailMessageId
+      ?? input.conversation?.branch_tail_message_id
+      ?? metadataRecordText(metadataConversation, 'branchTailMessageId', 'branch_tail_message_id'),
+  )
+  if (!messagePublicId) return null
+
+  const conversationPath = `${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}`
+  const messagePath = `${conversationPath}/messages/${encodeURIComponent(messagePublicId)}`
+  return {
+    provider,
+    conversationId,
+    messagePublicId,
+    branchId,
+    endpoints: {
+      locate: `${messagePath}/locate`,
+      path: `${messagePath}/path`,
+      children: `${messagePath}/children`,
+      fork: `${messagePath}/fork`,
+      edit: `${messagePath}/edit`,
+      retry: `${messagePath}/retry`,
+      search: `${conversationPath}/messages/search`,
+    },
+    availableActions: ['locate', 'path', 'children', 'fork', 'edit', 'retry', 'search'],
   }
 }
 
@@ -345,6 +457,12 @@ function cleanText(value: unknown): string | null {
   return text || null
 }
 
+function cleanPublicMessageId(value: unknown): string | null {
+  const text = cleanText(value)
+  if (!text || /^\d+$/.test(text)) return null
+  return text
+}
+
 function cloneMetadata(value: Record<string, unknown> | null | undefined): Record<string, unknown> {
   return value ? { ...value } : {}
 }
@@ -355,4 +473,14 @@ function metadataText(metadata: Record<string, unknown>, ...keys: string[]): str
     if (value) return value
   }
   return null
+}
+
+function metadataRecordText(metadata: Record<string, unknown> | null, ...keys: string[]): string | null {
+  return metadata ? metadataText(metadata, ...keys) : null
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }

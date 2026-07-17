@@ -545,6 +545,8 @@ class ConversationApplicationService:
         normalized_query = _clean_optional_text(query)
         if normalized_query is None:
             return []
+        cleaned_statuses = _clean_statuses(statuses)
+        include_deleted_locators = bool(cleaned_statuses and "deleted" in cleaned_statuses)
 
         async with self._uow_factory(readonly=True) as uow:
             conv = await uow.conversation_repository.get_by_id(conversation_id)
@@ -558,24 +560,29 @@ class ConversationApplicationService:
                 limit=max(1, limit),
                 branch_id=_clean_optional_text(branch_id),
                 roles=roles,
-                statuses=_clean_statuses(statuses),
+                statuses=cleaned_statuses,
                 provider=_clean_optional_text(provider),
                 model=_clean_optional_text(model),
             )
 
             results: list[MessageSearchResultDTO] = []
             for match in matches:
+                include_deleted_for_match = (
+                    include_deleted_locators or match.status == "deleted"
+                )
                 path: list[Message] = []
                 if include_path:
                     path = await uow.message_repository.list_path_to_message(
                         conversation_id,
                         match.public_id,
+                        include_deleted=include_deleted_for_match,
                     )
                 context = await uow.message_repository.list_context_window(
                     conversation_id,
                     match.public_id,
                     before=max(0, context_before),
                     after=max(0, context_after),
+                    include_deleted=include_deleted_for_match,
                 )
                 results.append(
                     MessageSearchResultDTO(

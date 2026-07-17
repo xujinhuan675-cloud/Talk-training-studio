@@ -124,6 +124,65 @@ test('buildTrainingConversationPayload maps branch tail to chat parent message',
   assert.equal(payload.turns[0].branchId, 'branch-selected')
 })
 
+test('buildConversationTreeMessageActionContext exposes generic conversation action endpoints', () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 42,
+    messagePublicId: 'msg_leaf',
+    branchId: 'branch-selected',
+  })
+
+  assert.equal(context.provider, 'talkwise-conversation')
+  assert.equal(context.conversationId, '42')
+  assert.equal(context.messagePublicId, 'msg_leaf')
+  assert.equal(context.branchId, 'branch-selected')
+  assert.deepEqual(context.availableActions, [
+    'locate',
+    'path',
+    'children',
+    'fork',
+    'edit',
+    'retry',
+    'search',
+  ])
+  assert.equal(context.endpoints.locate, '/api/v1/conversations/42/messages/msg_leaf/locate')
+  assert.equal(context.endpoints.path, '/api/v1/conversations/42/messages/msg_leaf/path')
+  assert.equal(context.endpoints.children, '/api/v1/conversations/42/messages/msg_leaf/children')
+  assert.equal(context.endpoints.fork, '/api/v1/conversations/42/messages/msg_leaf/fork')
+  assert.equal(context.endpoints.edit, '/api/v1/conversations/42/messages/msg_leaf/edit')
+  assert.equal(context.endpoints.retry, '/api/v1/conversations/42/messages/msg_leaf/retry')
+  assert.equal(context.endpoints.search, '/api/v1/conversations/42/messages/search')
+})
+
+test('buildConversationTreeMessageActionContext reads nested training metadata refs', () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    metadata: {
+      conversation: {
+        provider: 'message-tree',
+        conversation_id: 'conv 9',
+        branch_tail_message_id: 'msg_tail',
+        branch_id: 'branch-from-metadata',
+      },
+    },
+  })
+
+  assert.equal(context.provider, 'message-tree')
+  assert.equal(context.conversationId, 'conv 9')
+  assert.equal(context.messagePublicId, 'msg_tail')
+  assert.equal(context.branchId, 'branch-from-metadata')
+  assert.equal(context.endpoints.path, '/api/v1/conversations/conv%209/messages/msg_tail/path')
+})
+
+test('buildConversationTreeMessageActionContext ignores stakeholder room local message ids', () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 42,
+    messagePublicId: 17,
+  })
+
+  assert.equal(context, null)
+})
+
 test('resolveRuntimeEndpoint keeps OpenAI WebRTC on SDP endpoint', () => {
   const endpoint = trainingConversation.resolveRuntimeEndpoint({
     mode: 'realtime',
