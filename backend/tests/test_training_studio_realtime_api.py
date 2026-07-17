@@ -431,6 +431,50 @@ def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch)
     assert data["error"] == "Pipecat capability check failed: Pipecat capability crashed"
 
 
+def test_realtime_capabilities_omits_pipecat_source_snapshot_when_snapshot_fails(
+    monkeypatch,
+) -> None:
+    capability = SimpleNamespace(
+        available=True,
+        core_available=True,
+        websocket_available=True,
+        vad_available=True,
+        stt_available=True,
+        tts_available=True,
+        llm_available=True,
+        turn_detection_available=True,
+        missing_modules=(),
+        optional_missing_modules=(),
+        error=None,
+    )
+    adapter = _fake_pipecat_adapter(capability)
+
+    def _raise_snapshot_failure():
+        raise RuntimeError("Pipecat source snapshot failed")
+
+    adapter.pipecat_source_snapshot = _raise_snapshot_failure
+    monkeypatch.setattr(
+        training_studio_routes,
+        "_load_pipecat_realtime_adapter",
+        lambda: adapter,
+    )
+    client = TestClient(_make_realtime_capability_app())
+
+    response = client.get("/api/v1/training-studio/realtime/capabilities")
+
+    assert response.status_code == 200
+    data = response.json()["data"]["pipecat"]
+    assert data["available"] is True
+    assert data["coreAvailable"] is True
+    assert data["websocketAvailable"] is True
+    assert data["missingModules"] == []
+    assert data["optionalMissingModules"] == []
+    assert data["error"] is None
+    assert "sourceSnapshot" not in data
+    assert "Pipecat source snapshot failed" not in response.text
+    assert adapter.calls["require_websocket"] is True
+
+
 def test_realtime_sdp_proxy_returns_sdp_answer_when_openai_call_succeeds(monkeypatch) -> None:
     app, _ = _make_bound_app()
     client = TestClient(app)

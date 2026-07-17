@@ -1,5 +1,6 @@
 import ast
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,22 @@ from application.services.training_studio.training_core import (
     training_core_metadata_for_session,
 )
 from domain.training_studio.session import TrainingSession
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+CORE_BOUNDARY_SCAN_ROOTS = (
+    BACKEND_ROOT / "domain",
+    BACKEND_ROOT / "application",
+)
+PIPECAT_IMPORT_SCAN_ROOTS = (
+    BACKEND_ROOT / "api",
+    BACKEND_ROOT / "application",
+    BACKEND_ROOT / "core",
+    BACKEND_ROOT / "domain",
+    BACKEND_ROOT / "infrastructure",
+    BACKEND_ROOT / "shared",
+)
+ALLOWED_PIPECAT_IMPORT_ROOTS = (BACKEND_ROOT / "infrastructure" / "external" / "pipecat",)
 
 
 class FakeConversationAdapter:
@@ -95,19 +112,61 @@ def _task_config() -> TrainingTaskConfigDTO:
     )
 
 
-def test_training_core_module_does_not_own_conversation_or_voice_runtimes():
-    tree = ast.parse(inspect.getsource(training_core_module))
-    imported_modules = {
-        node.module
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
+def _imported_modules_from_source(source: str) -> set[str]:
+    return {
+        module
+        for module, _line_number in _walk_imported_modules(ast.parse(source))
     }
-    imported_modules.update(
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    )
+
+
+def _walk_imported_modules(tree: ast.AST):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            yield node.module, node.lineno
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                yield alias.name, node.lineno
+
+
+def _python_files_under(roots: tuple[Path, ...]):
+    for root in roots:
+        yield from root.rglob("*.py")
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _import_matches_prefix(module: str, prefix: str) -> bool:
+    module = module.lower()
+    prefix = prefix.lower()
+    return module == prefix or module.startswith(f"{prefix}.")
+
+
+def _find_import_violations(
+    *,
+    roots: tuple[Path, ...],
+    banned_prefixes: tuple[str, ...],
+    allowed_roots: tuple[Path, ...] = (),
+) -> list[str]:
+    violations: list[str] = []
+    for path in _python_files_under(roots):
+        if any(_is_relative_to(path, allowed_root) for allowed_root in allowed_roots):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for module, line_number in _walk_imported_modules(tree):
+            if any(_import_matches_prefix(module, prefix) for prefix in banned_prefixes):
+                relative_path = path.relative_to(BACKEND_ROOT)
+                violations.append(f"{relative_path}:{line_number} imports {module}")
+    return violations
+
+
+def test_training_core_module_does_not_own_conversation_or_voice_runtimes():
+    imported_modules = _imported_modules_from_source(inspect.getsource(training_core_module))
 
     assert not any(module.startswith("domain.conversation") for module in imported_modules)
     assert not any(module.startswith("domain.stakeholder") for module in imported_modules)
@@ -117,24 +176,36 @@ def test_training_core_module_does_not_own_conversation_or_voice_runtimes():
 
 
 def test_realtime_ports_do_not_import_runtime_or_infrastructure_modules():
-    tree = ast.parse(inspect.getsource(realtime_ports_module))
-    imported_modules = {
-        node.module
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
-    imported_modules.update(
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    )
+    imported_modules = _imported_modules_from_source(inspect.getsource(realtime_ports_module))
 
     assert not any(module.startswith("infrastructure") for module in imported_modules)
     assert not any(module.startswith("domain.conversation") for module in imported_modules)
     assert not any(module.startswith("domain.stakeholder") for module in imported_modules)
     assert not any(module.lower().startswith("pipecat") for module in imported_modules)
     assert not any(module.lower().startswith("librechat") for module in imported_modules)
+
+
+def test_domain_and_application_core_do_not_import_runtime_or_infra_adapters():
+    violations = _find_import_violations(
+        roots=CORE_BOUNDARY_SCAN_ROOTS,
+        banned_prefixes=(
+            "infrastructure",
+            "librechat",
+            "pipecat",
+        ),
+    )
+
+    assert violations == []
+
+
+def test_direct_pipecat_imports_stay_in_external_adapter_layer():
+    violations = _find_import_violations(
+        roots=PIPECAT_IMPORT_SCAN_ROOTS,
+        banned_prefixes=("pipecat",),
+        allowed_roots=ALLOWED_PIPECAT_IMPORT_ROOTS,
+    )
+
+    assert violations == []
 
 
 @pytest.mark.asyncio
@@ -211,6 +282,9 @@ async def test_training_core_metadata_keeps_core_fields_when_extra_collides():
         extra={
             "runtime": "pipecat-runtime-shadow",
             "trainingSessionId": "shadow-session",
+            "mode": "voice",
+            "scenarioTemplateId": "shadow-template",
+            "category": "shadow-category",
             "personaIds": ["adapter-shadow"],
             "scenarioId": 404,
             "dispatcher": {"policy": "adapter-shadow"},
@@ -218,11 +292,17 @@ async def test_training_core_metadata_keeps_core_fields_when_extra_collides():
             "growthReport": {"report_id": "adapter-shadow"},
             "liveGuidance": {"enabled": False},
             "provider": "pipecat",
+            "model": "gpt-shadow",
+            "model_registry": {"selected": "shadow-registry"},
+            "model_spec": {"id": "shadow-spec"},
         },
     )
 
     assert metadata["runtime"] == "voice_pipeline"
     assert metadata["trainingSessionId"] == "session-semantic-2"
+    assert metadata["mode"] == "text"
+    assert metadata["scenarioTemplateId"] == "enterprise-renewal"
+    assert metadata["category"] == "sales"
     assert metadata["personaIds"] == ["buyer"]
     assert metadata["scenarioId"] == 9
     assert metadata["dispatcher"] == {"policy": "round_robin"}
@@ -230,6 +310,9 @@ async def test_training_core_metadata_keeps_core_fields_when_extra_collides():
     assert metadata["growthReport"] == {"report_id": "growth-1"}
     assert metadata["liveGuidance"] == {"enabled": True}
     assert metadata["provider"] == "pipecat"
+    assert metadata["model"] == "gpt-shadow"
+    assert metadata["model_registry"] == {"selected": "shadow-registry"}
+    assert metadata["model_spec"] == {"id": "shadow-spec"}
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import pytest
 
@@ -82,6 +83,10 @@ class FakeTextFrame:
 
 
 class FakeOpenAIRealtimeSTTService:
+    class Settings:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
@@ -102,6 +107,10 @@ class FakeVADProcessor:
 
 
 class FakeOpenAITTSService:
+    class Settings:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
@@ -166,6 +175,10 @@ class FakeLLMContextAggregatorPair:
 class FakeUserTurnProcessor:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+
+
+class FakeUserTurnStrategies:
+    pass
 
 
 class FakeExternalUserTurnStrategies:
@@ -265,6 +278,7 @@ def fake_runtime(websocket=True):
         LLMUserAggregatorParams=FakeLLMUserAggregatorParams,
         LLMAssistantAggregatorParams=FakeLLMAssistantAggregatorParams,
         UserTurnProcessor=FakeUserTurnProcessor,
+        UserTurnStrategies=FakeUserTurnStrategies,
         ExternalUserTurnStrategies=FakeExternalUserTurnStrategies,
         FilterIncompleteUserTurnStrategies=FakeFilterIncompleteUserTurnStrategies,
         UserTurnCompletionConfig=FakeUserTurnCompletionConfig,
@@ -313,6 +327,11 @@ def test_pipecat_capability_reports_optional_voice_feature_modules(monkeypatch):
     )
     monkeypatch.setattr(
         pipecat_adapter,
+        "_missing_required_pipecat_entries",
+        lambda require_websocket=False: (),
+    )
+    monkeypatch.setattr(
+        pipecat_adapter,
         "import_pipecat_runtime",
         lambda require_websocket=False: fake_runtime(websocket=require_websocket),
     )
@@ -332,6 +351,11 @@ def test_pipecat_capability_reports_optional_voice_feature_modules(monkeypatch):
 
 def test_pipecat_capability_uses_runtime_symbols_for_optional_voice_features(monkeypatch):
     monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "_missing_required_pipecat_entries",
+        lambda require_websocket=False: (),
+    )
     runtime = pipecat_adapter.PipecatRuntime(
         **{
             **fake_runtime(websocket=True).__dict__,
@@ -355,11 +379,56 @@ def test_pipecat_capability_uses_runtime_symbols_for_optional_voice_features(mon
     assert capability.stt_available is False
     assert capability.tts_available is True
     assert capability.turn_detection_available is False
-    assert capability.optional_missing_modules == ()
+    assert (
+        "pipecat.processors.audio.vad_processor.VADProcessor" in capability.optional_missing_modules
+    )
+    assert (
+        "pipecat.services.openai.stt.OpenAIRealtimeSTTService"
+        in capability.optional_missing_modules
+    )
+    assert (
+        "pipecat.turns.user_turn_processor.UserTurnProcessor" in capability.optional_missing_modules
+    )
+
+
+def test_pipecat_capability_requires_service_settings_symbols(monkeypatch):
+    class FakeOpenAIRealtimeSTTServiceWithoutSettings:
+        pass
+
+    monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "_missing_required_pipecat_entries",
+        lambda require_websocket=False: (),
+    )
+    runtime = pipecat_adapter.PipecatRuntime(
+        **{
+            **fake_runtime(websocket=True).__dict__,
+            "OpenAIRealtimeSTTService": FakeOpenAIRealtimeSTTServiceWithoutSettings,
+        }
+    )
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "import_pipecat_runtime",
+        lambda require_websocket=False: runtime,
+    )
+
+    capability = pipecat_adapter.get_pipecat_capability()
+
+    assert capability.stt_available is False
+    assert (
+        "pipecat.services.openai.stt.OpenAIRealtimeSTTService.Settings"
+        in capability.optional_missing_modules
+    )
 
 
 def test_pipecat_capability_preserves_core_when_websocket_extra_import_fails(monkeypatch):
     monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "_missing_required_pipecat_entries",
+        lambda require_websocket=False: (),
+    )
 
     def import_runtime(*, require_websocket: bool = False):
         raise ImportError("Pipecat websocket transport is unavailable; install websocket extras")
@@ -372,6 +441,82 @@ def test_pipecat_capability_preserves_core_when_websocket_extra_import_fails(mon
     assert capability.core_available is True
     assert capability.websocket_available is False
     assert capability.missing_modules == (pipecat_adapter.WEBSOCKET_PIPECAT_MODULE,)
+
+
+def test_pipecat_capability_reports_missing_core_symbol(monkeypatch):
+    modules = {
+        "pipecat.pipeline.pipeline": SimpleNamespace(Pipeline=object),
+        "pipecat.pipeline.worker": SimpleNamespace(PipelineParams=object),
+        "pipecat.workers.base_worker": SimpleNamespace(WorkerParams=object),
+        "pipecat.workers.runner": SimpleNamespace(WorkerRunner=object),
+        "pipecat.frames.frames": SimpleNamespace(
+            InputAudioRawFrame=object,
+            EndFrame=object,
+            TextFrame=object,
+            TranscriptionFrame=object,
+            LLMContextAssistantTurnFrame=object,
+        ),
+        "pipecat.processors.frame_processor": SimpleNamespace(
+            FrameProcessor=object,
+            FrameDirection=object,
+        ),
+    }
+
+    monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        pipecat_adapter.importlib,
+        "import_module",
+        lambda name: modules[name],
+    )
+
+    capability = pipecat_adapter.get_pipecat_capability()
+
+    assert capability.available is False
+    assert capability.core_available is False
+    assert capability.websocket_available is True
+    assert capability.missing_modules == ("pipecat.pipeline.worker.PipelineWorker",)
+    assert "Missing Pipecat runtime symbol" in capability.error
+
+
+def test_pipecat_capability_reports_core_symbol_import_exception(monkeypatch):
+    def import_module(name):
+        if name == "pipecat.frames.frames":
+            raise RuntimeError("bad pipecat frame import")
+        return SimpleNamespace(
+            **{symbol: object for symbol in pipecat_adapter.CORE_PIPECAT_SYMBOLS[name]}
+        )
+
+    monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(pipecat_adapter.importlib, "import_module", import_module)
+
+    capability = pipecat_adapter.get_pipecat_capability()
+
+    assert capability.available is False
+    assert capability.core_available is False
+    assert capability.websocket_available is False
+    assert capability.missing_modules == ()
+    assert "Pipecat module import failed while checking pipecat.frames.frames" in capability.error
+    assert "bad pipecat frame import" in capability.error
+
+
+def test_pipecat_capability_preserves_core_when_websocket_symbol_import_fails(monkeypatch):
+    def import_module(name):
+        if name == pipecat_adapter.WEBSOCKET_PIPECAT_MODULE:
+            raise ImportError("websocket dependency failed")
+        return SimpleNamespace(
+            **{symbol: object for symbol in pipecat_adapter.CORE_PIPECAT_SYMBOLS[name]}
+        )
+
+    monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(pipecat_adapter.importlib, "import_module", import_module)
+
+    capability = pipecat_adapter.get_pipecat_capability(require_websocket=True)
+
+    assert capability.available is False
+    assert capability.core_available is True
+    assert capability.websocket_available is False
+    assert capability.missing_modules == (pipecat_adapter.WEBSOCKET_PIPECAT_MODULE,)
+    assert "Missing Pipecat runtime symbol" in capability.error
 
 
 def test_factory_returns_none_when_optional_pipecat_dependency_is_missing(monkeypatch):
@@ -524,23 +669,19 @@ def test_build_pipecat_voice_processors_uses_pipecat_stt_tts_and_turn_processors
     ]
     assert isinstance(processors[0].kwargs["vad_analyzer"], FakeSileroVADAnalyzer)
     assert processors[0].kwargs["vad_analyzer"].kwargs == {"sample_rate": None}
-    assert processors[1].kwargs == {
-        "api_key": "sk-test",
-        "model": "gpt-realtime-whisper",
-        "base_url": "wss://api.openai.com/v1/realtime",
-        "language": None,
-        "prompt": None,
-        "turn_detection": False,
-        "noise_reduction": None,
-        "should_interrupt": True,
-    }
+    assert processors[1].kwargs["api_key"] == "sk-test"
+    assert processors[1].kwargs["base_url"] == "wss://api.openai.com/v1/realtime"
+    assert processors[1].kwargs["turn_detection"] is False
+    assert processors[1].kwargs["should_interrupt"] is True
+    assert processors[1].kwargs["settings"].kwargs == {"model": "gpt-realtime-whisper"}
     assert processors[3].kwargs["api_key"] == "sk-test"
     assert processors[3].kwargs["base_url"] is None
-    assert processors[3].kwargs["model"] == "gpt-4o-mini-tts"
-    assert processors[3].kwargs["voice"] == "alloy"
-    assert processors[3].kwargs["instructions"] == "Speak concisely."
     assert processors[3].kwargs["sample_rate"] == 24000
-    assert processors[3].kwargs["speed"] is None
+    assert processors[3].kwargs["settings"].kwargs == {
+        "model": "gpt-4o-mini-tts",
+        "voice": "alloy",
+        "instructions": "Speak concisely.",
+    }
 
 
 def test_build_pipecat_voice_processors_supports_nested_feature_config():
@@ -603,22 +744,26 @@ def test_build_pipecat_voice_processors_supports_nested_feature_config():
     }
     assert processors[0].kwargs["speech_activity_period"] == 0.1
     assert processors[0].kwargs["audio_idle_timeout"] == 0.8
-    assert processors[1].kwargs["model"] == "gpt-4o-mini-transcribe"
     assert processors[1].kwargs["base_url"] == "wss://example.test/realtime"
-    assert processors[1].kwargs["language"] == "zh"
-    assert processors[1].kwargs["prompt"] == "Sales coaching vocabulary."
     assert processors[1].kwargs["turn_detection"] is False
-    assert processors[1].kwargs["noise_reduction"] == "near_field"
     assert processors[1].kwargs["should_interrupt"] is False
+    assert processors[1].kwargs["settings"].kwargs == {
+        "model": "gpt-4o-mini-transcribe",
+        "language": "zh",
+        "prompt": "Sales coaching vocabulary.",
+        "noise_reduction": "near_field",
+    }
     assert processors[2].kwargs == {
         "user_turn_stop_timeout": 3.0,
         "user_idle_timeout": 10.0,
     }
-    assert processors[3].kwargs["model"] == "gpt-4o-mini-tts"
-    assert processors[3].kwargs["voice"] == "fallback"
-    assert processors[3].kwargs["instructions"] == "Warm and concise."
     assert processors[3].kwargs["sample_rate"] == 24000
-    assert processors[3].kwargs["speed"] == 1.2
+    assert processors[3].kwargs["settings"].kwargs == {
+        "model": "gpt-4o-mini-tts",
+        "voice": "fallback",
+        "instructions": "Warm and concise.",
+        "speed": 1.2,
+    }
 
 
 def test_build_pipecat_voice_processors_supports_external_user_turn_strategy_metadata():
@@ -715,6 +860,14 @@ def test_build_pipecat_voice_processors_validates_supported_options():
             RealtimePipelineConfig(
                 provider="pipecat",
                 metadata={"tts": {"provider": "openai", "speed": 5.0}},
+            )
+        )
+
+    with pytest.raises(ValueError, match="OpenAI realtime STT noise reduction"):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={"stt": {"provider": "openai", "noiseReduction": "studio"}},
             )
         )
 
@@ -1075,6 +1228,9 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     snapshot = pipecat_adapter.pipecat_source_snapshot()
 
     assert "pipecat.pipeline.pipeline.Pipeline" in snapshot["coreEntrypoints"]
+    assert "pipecat.pipeline.worker.PipelineParams" in snapshot["coreEntrypoints"]
+    assert "pipecat.workers.base_worker.WorkerParams" in snapshot["coreEntrypoints"]
+    assert "pipecat.processors.frame_processor.FrameProcessor" in snapshot["coreEntrypoints"]
     assert (
         "pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport"
         == snapshot["websocketEntrypoint"]
@@ -1085,23 +1241,45 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     )
     assert "interim transcript frame mirroring" in snapshot["talkwiseResponsibilities"]
     assert (
-        "TrainingVoiceContext to LLMContext seed adaptation"
+        "TrainingVoiceContext to LLMContext seed adaptation" in snapshot["talkwiseResponsibilities"]
+    )
+    assert (
+        "optional import and Pipecat symbol capability detection"
         in snapshot["talkwiseResponsibilities"]
     )
     assert "pipecat.frames.frames.InterimTranscriptionFrame" in snapshot["frameEntrypoints"]
     assert "pipecat.audio.vad.silero.SileroVADAnalyzer" == snapshot["vadEntrypoint"]
     assert (
-        "pipecat.processors.audio.vad_processor.VADProcessor"
-        == snapshot["vadProcessorEntrypoint"]
+        "pipecat.processors.audio.vad_processor.VADProcessor" == snapshot["vadProcessorEntrypoint"]
     )
     assert "pipecat.services.openai.stt.OpenAIRealtimeSTTService" == snapshot["sttEntrypoint"]
+    assert (
+        "pipecat.services.openai.stt.OpenAIRealtimeSTTService.Settings"
+        == snapshot["sttSettingsEntrypoint"]
+    )
     assert "pipecat.services.openai.tts.OpenAITTSService" == snapshot["ttsEntrypoint"]
+    assert (
+        "pipecat.services.openai.tts.OpenAITTSService.Settings"
+        == snapshot["ttsSettingsEntrypoint"]
+    )
     assert "pipecat.services.openai.llm.OpenAILLMService" == snapshot["llmEntrypoint"]
+    assert (
+        "pipecat.services.openai.llm.OpenAILLMService.Settings"
+        == snapshot["llmSettingsEntrypoint"]
+    )
     assert (
         "pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair"
         in snapshot["llmContextEntrypoints"]
     )
     assert (
+        "pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams"
+        in snapshot["llmContextEntrypoints"]
+    )
+    assert (
         "pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies"
+        in snapshot["turnStrategyEntrypoints"]
+    )
+    assert (
+        "pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig"
         in snapshot["turnStrategyEntrypoints"]
     )

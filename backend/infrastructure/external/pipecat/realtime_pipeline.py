@@ -46,6 +46,50 @@ LLM_RESPONSE_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_response_unive
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
+CORE_PIPECAT_SYMBOLS: Mapping[str, tuple[str, ...]] = {
+    "pipecat.pipeline.pipeline": ("Pipeline",),
+    "pipecat.pipeline.worker": ("PipelineParams", "PipelineWorker"),
+    "pipecat.workers.base_worker": ("WorkerParams",),
+    "pipecat.workers.runner": ("WorkerRunner",),
+    "pipecat.frames.frames": (
+        "InputAudioRawFrame",
+        "EndFrame",
+        "TextFrame",
+        "TranscriptionFrame",
+        "LLMContextAssistantTurnFrame",
+    ),
+    "pipecat.processors.frame_processor": ("FrameProcessor", "FrameDirection"),
+}
+WEBSOCKET_PIPECAT_SYMBOLS: Mapping[str, tuple[str, ...]] = {
+    WEBSOCKET_PIPECAT_MODULE: ("FastAPIWebsocketParams", "FastAPIWebsocketTransport")
+}
+OPTIONAL_PIPECAT_FEATURE_SYMBOLS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
+    "vad": {
+        SILERO_VAD_PIPECAT_MODULE: ("SileroVADAnalyzer",),
+        VAD_ANALYZER_PIPECAT_MODULE: ("VADParams",),
+        VAD_PROCESSOR_PIPECAT_MODULE: ("VADProcessor",),
+    },
+    "stt": {OPENAI_STT_PIPECAT_MODULE: ("OpenAIRealtimeSTTService",)},
+    "tts": {OPENAI_TTS_PIPECAT_MODULE: ("OpenAITTSService",)},
+    "llm": {
+        OPENAI_LLM_PIPECAT_MODULE: ("OpenAILLMService",),
+        LLM_CONTEXT_PIPECAT_MODULE: ("LLMContext",),
+        LLM_RESPONSE_PIPECAT_MODULE: (
+            "LLMContextAggregatorPair",
+            "LLMUserAggregatorParams",
+            "LLMAssistantAggregatorParams",
+        ),
+    },
+    "turn_detection": {
+        USER_TURN_PROCESSOR_PIPECAT_MODULE: ("UserTurnProcessor",),
+        USER_TURN_STRATEGIES_PIPECAT_MODULE: (
+            "UserTurnStrategies",
+            "ExternalUserTurnStrategies",
+            "FilterIncompleteUserTurnStrategies",
+        ),
+        USER_TURN_COMPLETION_PIPECAT_MODULE: ("UserTurnCompletionConfig",),
+    },
+}
 OPTIONAL_PIPECAT_FEATURE_MODULES = {
     "vad": (
         SILERO_VAD_PIPECAT_MODULE,
@@ -149,25 +193,37 @@ def is_pipecat_available() -> bool:
 def get_pipecat_capability(*, require_websocket: bool = False) -> PipecatCapability:
     """Return a dependency-safe capability report without importing Pipecat eagerly."""
 
-    modules = [*CORE_PIPECAT_MODULES]
-    if require_websocket:
-        modules.append(WEBSOCKET_PIPECAT_MODULE)
-
     optional_status = _optional_feature_status()
-    missing = tuple(module for module in modules if not _module_spec_exists(module))
-    if missing:
+    try:
+        missing = _missing_required_pipecat_entries(require_websocket=require_websocket)
+    except ImportError as exc:
         return PipecatCapability(
             available=False,
-            core_available=not any(module in CORE_PIPECAT_MODULES for module in missing),
-            websocket_available=WEBSOCKET_PIPECAT_MODULE not in missing,
+            core_available=False,
+            websocket_available=False,
+            **optional_status,
+            error=str(exc),
+        )
+
+    if missing:
+        core_missing = any(
+            _entry_belongs_to_modules(entry, CORE_PIPECAT_MODULES) for entry in missing
+        )
+        websocket_missing = any(
+            _entry_belongs_to_modules(entry, (WEBSOCKET_PIPECAT_MODULE,)) for entry in missing
+        )
+        return PipecatCapability(
+            available=False,
+            core_available=not core_missing,
+            websocket_available=not websocket_missing,
             missing_modules=missing,
             **optional_status,
-            error=f"Missing optional Pipecat module(s): {', '.join(missing)}",
+            error=f"Missing Pipecat runtime symbol(s): {', '.join(missing)}",
         )
 
     try:
         runtime = import_pipecat_runtime(require_websocket=require_websocket)
-    except ImportError as exc:
+    except Exception as exc:
         websocket_error = "websocket transport" in str(exc).lower()
         return PipecatCapability(
             available=False,
@@ -193,6 +249,60 @@ def _module_spec_exists(module: str) -> bool:
         return False
 
 
+def _missing_required_pipecat_entries(*, require_websocket: bool) -> tuple[str, ...]:
+    missing = tuple(module for module in CORE_PIPECAT_SYMBOLS if not _module_spec_exists(module))
+    if missing:
+        return missing
+
+    core_missing = _missing_pipecat_symbols(
+        CORE_PIPECAT_SYMBOLS,
+        strict_import_errors=True,
+    )
+    if core_missing or not require_websocket:
+        return core_missing
+
+    websocket_missing = tuple(
+        module for module in WEBSOCKET_PIPECAT_SYMBOLS if not _module_spec_exists(module)
+    )
+    if websocket_missing:
+        return websocket_missing
+    return _missing_pipecat_symbols(
+        WEBSOCKET_PIPECAT_SYMBOLS,
+        strict_import_errors=False,
+    )
+
+
+def _missing_pipecat_symbols(
+    symbol_map: Mapping[str, Sequence[str]],
+    *,
+    strict_import_errors: bool = False,
+) -> tuple[str, ...]:
+    missing: list[str] = []
+    for module_name, symbol_names in symbol_map.items():
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as exc:
+            if strict_import_errors:
+                raise ImportError(
+                    f"Pipecat module import failed while checking {module_name}: {exc}"
+                ) from exc
+            missing.append(module_name)
+            continue
+
+        for symbol_name in symbol_names:
+            if getattr(module, symbol_name, None) is None:
+                missing.append(_entrypoint(module_name, symbol_name))
+    return tuple(missing)
+
+
+def _entrypoint(module_name: str, symbol_name: str) -> str:
+    return f"{module_name}.{symbol_name}"
+
+
+def _entry_belongs_to_modules(entry: str, modules: Sequence[str]) -> bool:
+    return any(entry == module or entry.startswith(f"{module}.") for module in modules)
+
+
 def _optional_feature_status() -> dict[str, bool | tuple[str, ...]]:
     missing_by_feature = {
         feature: tuple(module for module in modules if not _module_spec_exists(module))
@@ -214,6 +324,8 @@ def _runtime_feature_status(
     runtime: PipecatRuntime,
     module_status: Mapping[str, bool | tuple[str, ...]],
 ) -> dict[str, bool | tuple[str, ...]]:
+    optional_missing = list(module_status.get("optional_missing_modules", ()))
+    optional_missing.extend(_runtime_missing_optional_symbols(runtime, optional_missing))
     return {
         "vad_available": bool(module_status.get("vad_available"))
         and (
@@ -222,21 +334,56 @@ def _runtime_feature_status(
             and runtime.VADProcessor is not None
         ),
         "stt_available": bool(module_status.get("stt_available"))
-        and runtime.OpenAIRealtimeSTTService is not None,
+        and runtime.OpenAIRealtimeSTTService is not None
+        and getattr(runtime.OpenAIRealtimeSTTService, "Settings", None) is not None,
         "tts_available": bool(module_status.get("tts_available"))
-        and runtime.OpenAITTSService is not None,
+        and runtime.OpenAITTSService is not None
+        and getattr(runtime.OpenAITTSService, "Settings", None) is not None,
         "llm_available": bool(module_status.get("llm_available"))
         and runtime.OpenAILLMService is not None
+        and getattr(runtime.OpenAILLMService, "Settings", None) is not None
         and runtime.LLMContext is not None
         and runtime.LLMContextAggregatorPair is not None
         and runtime.LLMUserAggregatorParams is not None
         and runtime.LLMAssistantAggregatorParams is not None,
         "turn_detection_available": bool(module_status.get("turn_detection_available"))
-        and (
-            runtime.UserTurnProcessor is not None and runtime.UserTurnStrategies is not None
-        ),
-        "optional_missing_modules": tuple(module_status.get("optional_missing_modules", ())),
+        and (runtime.UserTurnProcessor is not None and runtime.UserTurnStrategies is not None),
+        "optional_missing_modules": tuple(dict.fromkeys(optional_missing)),
     }
+
+
+def _runtime_missing_optional_symbols(
+    runtime: PipecatRuntime,
+    known_missing: Sequence[str],
+) -> tuple[str, ...]:
+    missing_modules = set(known_missing)
+    missing: list[str] = []
+    for symbol_map in OPTIONAL_PIPECAT_FEATURE_SYMBOLS.values():
+        for module_name, symbol_names in symbol_map.items():
+            if module_name in missing_modules:
+                continue
+            for symbol_name in symbol_names:
+                if getattr(runtime, symbol_name, None) is None:
+                    missing.append(_entrypoint(module_name, symbol_name))
+    if runtime.OpenAIRealtimeSTTService is not None and getattr(
+        runtime.OpenAIRealtimeSTTService,
+        "Settings",
+        None,
+    ) is None:
+        missing.append(_entrypoint(OPENAI_STT_PIPECAT_MODULE, "OpenAIRealtimeSTTService.Settings"))
+    if runtime.OpenAITTSService is not None and getattr(
+        runtime.OpenAITTSService,
+        "Settings",
+        None,
+    ) is None:
+        missing.append(_entrypoint(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService.Settings"))
+    if runtime.OpenAILLMService is not None and getattr(
+        runtime.OpenAILLMService,
+        "Settings",
+        None,
+    ) is None:
+        missing.append(_entrypoint(OPENAI_LLM_PIPECAT_MODULE, "OpenAILLMService.Settings"))
+    return tuple(missing)
 
 
 def create_pipecat_realtime_pipeline(
@@ -270,30 +417,32 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     """Import Pipecat symbols lazily so normal application startup stays optional."""
 
     try:
-        pipeline_module = importlib.import_module("pipecat.pipeline.pipeline")
-        worker_module = importlib.import_module("pipecat.pipeline.worker")
-        worker_params_module = importlib.import_module("pipecat.workers.base_worker")
-        runner_module = importlib.import_module("pipecat.workers.runner")
-        frames_module = importlib.import_module("pipecat.frames.frames")
-        processor_module = importlib.import_module("pipecat.processors.frame_processor")
-    except ModuleNotFoundError as exc:
-        raise ImportError(f"Pipecat core is not installed: {exc.name}") from exc
+        pipeline_module = _import_pipecat_module("pipecat.pipeline.pipeline")
+        worker_module = _import_pipecat_module("pipecat.pipeline.worker")
+        worker_params_module = _import_pipecat_module("pipecat.workers.base_worker")
+        runner_module = _import_pipecat_module("pipecat.workers.runner")
+        frames_module = _import_pipecat_module("pipecat.frames.frames")
+        processor_module = _import_pipecat_module("pipecat.processors.frame_processor")
+    except ImportError as exc:
+        raise ImportError(f"Pipecat core is unavailable: {exc}") from exc
 
     websocket_params = None
     websocket_transport = None
     try:
-        websocket_module = importlib.import_module(WEBSOCKET_PIPECAT_MODULE)
-        websocket_params = websocket_module.FastAPIWebsocketParams
-        websocket_transport = websocket_module.FastAPIWebsocketTransport
-    except (ImportError, ModuleNotFoundError) as exc:
+        websocket_module = _import_pipecat_module(WEBSOCKET_PIPECAT_MODULE)
+        websocket_params = _required_pipecat_symbol(
+            websocket_module, WEBSOCKET_PIPECAT_MODULE, "FastAPIWebsocketParams"
+        )
+        websocket_transport = _required_pipecat_symbol(
+            websocket_module, WEBSOCKET_PIPECAT_MODULE, "FastAPIWebsocketTransport"
+        )
+    except ImportError as exc:
         if require_websocket:
             raise ImportError(
                 "Pipecat websocket transport is unavailable; install pipecat with websocket extras"
             ) from exc
 
-    silero_vad_analyzer = _optional_pipecat_symbol(
-        SILERO_VAD_PIPECAT_MODULE, "SileroVADAnalyzer"
-    )
+    silero_vad_analyzer = _optional_pipecat_symbol(SILERO_VAD_PIPECAT_MODULE, "SileroVADAnalyzer")
     vad_params = _optional_pipecat_symbol(VAD_ANALYZER_PIPECAT_MODULE, "VADParams")
     vad_processor = _optional_pipecat_symbol(VAD_PROCESSOR_PIPECAT_MODULE, "VADProcessor")
     openai_realtime_stt = _optional_pipecat_symbol(
@@ -328,18 +477,36 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     )
 
     return PipecatRuntime(
-        Pipeline=pipeline_module.Pipeline,
-        PipelineParams=worker_module.PipelineParams,
-        PipelineWorker=worker_module.PipelineWorker,
-        WorkerParams=worker_params_module.WorkerParams,
-        WorkerRunner=runner_module.WorkerRunner,
-        InputAudioRawFrame=frames_module.InputAudioRawFrame,
-        EndFrame=frames_module.EndFrame,
-        TextFrame=frames_module.TextFrame,
-        TranscriptionFrame=frames_module.TranscriptionFrame,
-        LLMContextAssistantTurnFrame=frames_module.LLMContextAssistantTurnFrame,
-        FrameProcessor=processor_module.FrameProcessor,
-        FrameDirection=processor_module.FrameDirection,
+        Pipeline=_required_pipecat_symbol(pipeline_module, "pipecat.pipeline.pipeline", "Pipeline"),
+        PipelineParams=_required_pipecat_symbol(
+            worker_module, "pipecat.pipeline.worker", "PipelineParams"
+        ),
+        PipelineWorker=_required_pipecat_symbol(
+            worker_module, "pipecat.pipeline.worker", "PipelineWorker"
+        ),
+        WorkerParams=_required_pipecat_symbol(
+            worker_params_module, "pipecat.workers.base_worker", "WorkerParams"
+        ),
+        WorkerRunner=_required_pipecat_symbol(
+            runner_module, "pipecat.workers.runner", "WorkerRunner"
+        ),
+        InputAudioRawFrame=_required_pipecat_symbol(
+            frames_module, "pipecat.frames.frames", "InputAudioRawFrame"
+        ),
+        EndFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "EndFrame"),
+        TextFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "TextFrame"),
+        TranscriptionFrame=_required_pipecat_symbol(
+            frames_module, "pipecat.frames.frames", "TranscriptionFrame"
+        ),
+        LLMContextAssistantTurnFrame=_required_pipecat_symbol(
+            frames_module, "pipecat.frames.frames", "LLMContextAssistantTurnFrame"
+        ),
+        FrameProcessor=_required_pipecat_symbol(
+            processor_module, "pipecat.processors.frame_processor", "FrameProcessor"
+        ),
+        FrameDirection=_required_pipecat_symbol(
+            processor_module, "pipecat.processors.frame_processor", "FrameDirection"
+        ),
         InterimTranscriptionFrame=getattr(frames_module, "InterimTranscriptionFrame", None),
         FastAPIWebsocketParams=websocket_params,
         FastAPIWebsocketTransport=websocket_transport,
@@ -361,10 +528,37 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     )
 
 
+def _import_pipecat_module(module_name: str) -> Any:
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        raise ImportError(f"{module_name} is not importable: {exc.name}") from exc
+    except ImportError as exc:
+        raise ImportError(f"{module_name} import failed: {exc}") from exc
+
+
+def _required_pipecat_symbol(module: Any, module_name: str, symbol_name: str) -> type:
+    symbol = getattr(module, symbol_name, None)
+    if symbol is None:
+        raise ImportError(f"Pipecat symbol is unavailable: {_entrypoint(module_name, symbol_name)}")
+    return symbol
+
+
+def _service_settings(
+    service: type,
+    service_entrypoint: str,
+    settings_kwargs: Mapping[str, Any],
+) -> Any:
+    settings_factory = getattr(service, "Settings", None)
+    if settings_factory is None:
+        raise RuntimeError(f"Pipecat settings class is unavailable: {service_entrypoint}.Settings")
+    return settings_factory(**settings_kwargs)
+
+
 def _optional_pipecat_symbol(module_name: str, symbol_name: str) -> type | None:
     try:
         module = importlib.import_module(module_name)
-    except (ImportError, ModuleNotFoundError):
+    except Exception:
         return None
     return getattr(module, symbol_name, None)
 
@@ -600,28 +794,41 @@ def build_pipecat_voice_processors(
         api_key = _openai_api_key(metadata)
         if not api_key:
             raise RuntimeError("OpenAI API key is required for Pipecat OpenAI STT")
+        stt_settings_kwargs: dict[str, Any] = {}
+        stt_model = (
+            _metadata_text(stt_config, "model")
+            or _metadata_text(metadata, "sttModel", "stt_model")
+            or config.model
+        )
+        if stt_model:
+            stt_settings_kwargs["model"] = stt_model
+        if language := _metadata_text(stt_config, "language"):
+            stt_settings_kwargs["language"] = language
+        if prompt := _metadata_text(stt_config, "prompt"):
+            stt_settings_kwargs["prompt"] = prompt
+        noise_reduction = _metadata_text(
+            stt_config,
+            "noiseReduction",
+            "noise_reduction",
+        ) or _metadata_text(metadata, "noiseReduction", "noise_reduction")
+        if noise_reduction:
+            stt_settings_kwargs["noise_reduction"] = noise_reduction
         processors.append(
             runtime.OpenAIRealtimeSTTService(
                 api_key=api_key,
-                model=_metadata_text(stt_config, "model")
-                or _metadata_text(metadata, "sttModel", "stt_model")
-                or config.model,
                 base_url=_metadata_text(stt_config, "baseUrl", "base_url")
                 or "wss://api.openai.com/v1/realtime",
-                language=_metadata_text(stt_config, "language"),
-                prompt=_metadata_text(stt_config, "prompt"),
                 turn_detection=_turn_detection_config(metadata),
-                noise_reduction=_metadata_text(
-                    stt_config,
-                    "noiseReduction",
-                    "noise_reduction",
-                )
-                or _metadata_text(metadata, "noiseReduction", "noise_reduction"),
                 should_interrupt=_metadata_bool(
                     stt_config,
                     "shouldInterrupt",
                     "should_interrupt",
                     default=True,
+                ),
+                settings=_service_settings(
+                    runtime.OpenAIRealtimeSTTService,
+                    _entrypoint(OPENAI_STT_PIPECAT_MODULE, "OpenAIRealtimeSTTService"),
+                    stt_settings_kwargs,
                 ),
             )
         )
@@ -670,19 +877,35 @@ def build_pipecat_voice_processors(
         api_key = _openai_api_key(metadata)
         if not api_key:
             raise RuntimeError("OpenAI API key is required for Pipecat OpenAI TTS")
+        tts_settings_kwargs: dict[str, Any] = {}
+        if tts_model := (
+            _metadata_text(tts_config, "model")
+            or _metadata_text(metadata, "ttsModel", "tts_model")
+        ):
+            tts_settings_kwargs["model"] = tts_model
+        if voice := (
+            config.voice
+            or _metadata_text(tts_config, "voice")
+            or _metadata_text(metadata, "voice")
+        ):
+            tts_settings_kwargs["voice"] = voice
+        if instructions := (
+            config.instructions or _metadata_text(tts_config, "instructions")
+        ):
+            tts_settings_kwargs["instructions"] = instructions
+        if (speed := _metadata_float(tts_config, "speed")) is not None:
+            tts_settings_kwargs["speed"] = speed
         processors.append(
             runtime.OpenAITTSService(
                 api_key=api_key,
                 base_url=_metadata_text(tts_config, "baseUrl", "base_url"),
-                model=_metadata_text(tts_config, "model")
-                or _metadata_text(metadata, "ttsModel", "tts_model"),
-                voice=config.voice
-                or _metadata_text(tts_config, "voice")
-                or _metadata_text(metadata, "voice"),
-                instructions=config.instructions or _metadata_text(tts_config, "instructions"),
                 sample_rate=_metadata_int(tts_config, "sampleRate", "sample_rate")
                 or _metadata_int(metadata, "outputSampleRate", "output_sample_rate"),
-                speed=_metadata_float(tts_config, "speed"),
+                settings=_service_settings(
+                    runtime.OpenAITTSService,
+                    _entrypoint(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService"),
+                    tts_settings_kwargs,
+                ),
             )
         )
 
@@ -712,10 +935,9 @@ def build_pipecat_llm_processors(
 
     metadata = dict(config.metadata)
     llm_config = _feature_config(metadata, "llm")
-    api_key = (
-        _metadata_text(llm_config, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
-        or _openai_api_key(metadata)
-    )
+    api_key = _metadata_text(
+        llm_config, "openaiApiKey", "openai_api_key", "apiKey", "api_key"
+    ) or _openai_api_key(metadata)
     if not api_key:
         raise RuntimeError("OpenAI API key is required for Pipecat OpenAI LLM")
 
@@ -1506,8 +1728,12 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         "checkedAt": datetime.now(UTC).isoformat(),
         "coreEntrypoints": (
             "pipecat.pipeline.pipeline.Pipeline",
+            "pipecat.pipeline.worker.PipelineParams",
             "pipecat.pipeline.worker.PipelineWorker",
+            "pipecat.workers.base_worker.WorkerParams",
             "pipecat.workers.runner.WorkerRunner",
+            "pipecat.processors.frame_processor.FrameProcessor",
+            "pipecat.processors.frame_processor.FrameDirection",
         ),
         "frameEntrypoints": (
             "pipecat.frames.frames.InputAudioRawFrame",
@@ -1522,19 +1748,28 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         "vadEntrypoint": ("pipecat.audio.vad.silero.SileroVADAnalyzer"),
         "vadProcessorEntrypoint": ("pipecat.processors.audio.vad_processor.VADProcessor"),
         "sttEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService"),
+        "sttSettingsEntrypoint": (
+            "pipecat.services.openai.stt.OpenAIRealtimeSTTService.Settings"
+        ),
         "ttsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService"),
+        "ttsSettingsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService.Settings"),
         "llmEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService"),
+        "llmSettingsEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService.Settings"),
         "llmContextEntrypoints": (
             "pipecat.processors.aggregators.llm_context.LLMContext",
             "pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair",
+            "pipecat.processors.aggregators.llm_response_universal.LLMUserAggregatorParams",
+            "pipecat.processors.aggregators.llm_response_universal.LLMAssistantAggregatorParams",
         ),
         "turnDetectionEntrypoint": ("pipecat.turns.user_turn_processor.UserTurnProcessor"),
         "turnStrategyEntrypoints": (
+            "pipecat.turns.user_turn_strategies.UserTurnStrategies",
             "pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies",
             "pipecat.turns.user_turn_strategies.FilterIncompleteUserTurnStrategies",
+            "pipecat.turns.user_turn_completion_mixin.UserTurnCompletionConfig",
         ),
         "talkwiseResponsibilities": (
-            "optional import and capability detection",
+            "optional import and Pipecat symbol capability detection",
             "pipeline factory configuration",
             "RealtimeAudioChunk to InputAudioRawFrame adaptation",
             "TrainingVoiceContext to LLMContext seed adaptation",
