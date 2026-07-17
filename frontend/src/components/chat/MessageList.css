@@ -191,6 +191,7 @@
 }
 
 .message-tree-selection-context em,
+.message-tree-selection-context small,
 .message-tree-write-target em,
 .message-tree-write-target small {
   min-width: 0;
@@ -202,6 +203,10 @@
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.message-tree-selection-context small {
+  color: var(--text-secondary);
 }
 
 .message-tree-write-target em {
@@ -638,6 +643,7 @@
 .message-tree-section-title {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 5px;
   color: var(--text-primary);
   font-size: 11px;
@@ -851,6 +857,7 @@
   }
 
   .message-tree-selection-context em,
+  .message-tree-selection-context small,
   .message-tree-write-target em,
   .message-tree-write-target small {
     white-space: normal;

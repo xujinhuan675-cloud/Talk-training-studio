@@ -84,8 +84,10 @@ export interface TrainingConversationBranchInfo {
   pathCount?: number
   pathSummary?: string
   lastReplyPreview?: string
+  pathTextState: 'with_text' | 'id_only' | 'reference_only'
   selectedPath: TrainingConversationBranchPathItem[]
   source: 'session' | 'report' | 'progress'
+  sourceDetail?: string
 }
 
 export interface TrainingConversationBranchInfoSources {
@@ -161,6 +163,7 @@ type BranchInfoSource = TrainingConversationBranchInfo['source']
 
 interface BranchMetadataCandidate {
   source: BranchInfoSource
+  sourceDetail: string
   metadata: Record<string, unknown>
 }
 
@@ -266,17 +269,17 @@ function collectBranchMetadataCandidates(
   sources: TrainingConversationBranchInfoSources,
 ): BranchMetadataCandidate[] {
   const candidates: BranchMetadataCandidate[] = []
-  const add = (source: BranchInfoSource, metadata: unknown) => {
+  const add = (source: BranchInfoSource, sourceDetail: string, metadata: unknown) => {
     const record = asRecord(metadata)
-    if (record) candidates.push({ source, metadata: record })
+    if (record) candidates.push({ source, sourceDetail, metadata: record })
   }
 
-  add('session', sources.session?.metadata)
-  add('session', sources.session?.task_config?.metadata)
-  add('report', sources.report?.metadata)
-  add('report', asRecord(sources.report?.content)?.metadata)
-  add('report', sources.report?.content)
-  add('progress', asRecord(sources.progress)?.metadata)
+  add('session', 'session.metadata', sources.session?.metadata)
+  add('session', 'session.task_config.metadata', sources.session?.task_config?.metadata)
+  add('report', 'report.metadata', sources.report?.metadata)
+  add('report', 'report.content.metadata', asRecord(sources.report?.content)?.metadata)
+  add('report', 'report.content', sources.report?.content)
+  add('progress', 'progress.metadata', asRecord(sources.progress)?.metadata)
 
   return candidates
 }
@@ -534,6 +537,12 @@ function branchInfoFromCandidate(
     ?? undefined
   const explicitPathCount = records.map((record) => firstNumber(record, pathCountKeys)).find(Boolean)
   const pathCount = selectedPath.length > 0 ? selectedPath.length : explicitPathCount
+  const hasPathText = selectedPath.some((item) => item.content.trim())
+  const pathTextState = selectedPath.length === 0
+    ? 'reference_only'
+    : hasPathText
+      ? 'with_text'
+      : 'id_only'
   const pathSummary = records.map((record) => firstText(record, pathSummaryKeys)).find(Boolean)
     ?? compactPathSummary(selectedPath)
   const lastReplyPreview = firstPreview(records, lastReplyKeys) ?? lastReplyFromPath(selectedPath)
@@ -550,8 +559,10 @@ function branchInfoFromCandidate(
     pathCount,
     pathSummary,
     lastReplyPreview,
+    pathTextState,
     selectedPath,
     source: candidate.source,
+    sourceDetail: candidate.sourceDetail,
   }
 }
 

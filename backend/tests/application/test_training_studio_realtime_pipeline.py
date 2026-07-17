@@ -1,6 +1,9 @@
 import pytest
 
-from application.ports.realtime import RealtimeSessionBinding
+from application.ports.realtime import (
+    RealtimeSessionBinding,
+    build_openai_realtime_capability_response,
+)
 from application.services.training_studio.realtime_pipeline import (
     MemoryTrainingTranscriptSink,
     RealtimeTranscriptPersistenceSink,
@@ -108,6 +111,53 @@ def test_build_realtime_transcript_maps_openai_user_event_to_provider_neutral_dt
         "preserveTone": True,
     }
     assert transcript.metadata["realtime"]["translationIntent"] == "text_first_mvp"
+
+
+def test_openai_realtime_capability_response_exposes_structured_readiness():
+    missing = build_openai_realtime_capability_response(
+        configured=False,
+        effective_key=False,
+        model="gpt-realtime",
+        voice="marin",
+    )
+
+    assert missing["configured"] is False
+    assert missing["effectiveKey"] is False
+    assert missing["readyForCall"] is False
+    assert missing["readiness"]["ready"] is False
+    assert missing["readiness"]["status"] == "blocked"
+    assert missing["errors"] == missing["readiness"]["blockingReasons"]
+    assert missing["errors"][0]["code"] == "MISSING_OPENAI_API_KEY"
+    assert missing["errors"][0]["provider"] == "openaiRealtime"
+    assert missing["errors"][0]["missingEnv"] == [
+        "REALTIME_OPENAI_API_KEY",
+        "LLM__API_KEY",
+        "OPENAI_API_KEY",
+    ]
+
+    incomplete = build_openai_realtime_capability_response(
+        configured=False,
+        effective_key=True,
+        model=None,
+        voice=None,
+    )
+
+    assert incomplete["readyForCall"] is False
+    assert [error["code"] for error in incomplete["errors"]] == [
+        "MISSING_OPENAI_REALTIME_MODEL",
+        "MISSING_OPENAI_REALTIME_VOICE",
+    ]
+
+    ready = build_openai_realtime_capability_response(
+        configured=True,
+        effective_key=True,
+        model="gpt-realtime",
+        voice="marin",
+    )
+
+    assert ready["readyForCall"] is True
+    assert ready["readiness"]["status"] == "ready"
+    assert ready["errors"] == []
 
 
 def test_build_realtime_transcript_maps_response_events_to_assistant_role():

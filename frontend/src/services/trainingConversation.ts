@@ -526,7 +526,7 @@ function normalizeRuntimeMode(mode: TrainingRuntimeMode): TrainingRuntimeMode {
 async function fetchConversationTreeData(endpoint: string, signal?: AbortSignal): Promise<unknown> {
   const resp = await fetch(endpoint, { signal })
   if (!resp.ok) {
-    throw new Error(`Failed to fetch conversation tree data: ${resp.status}`)
+    throw new Error(await conversationTreeErrorMessage(resp, 'Failed to fetch conversation tree data'))
   }
   const json = await resp.json() as { data?: unknown }
   return json.data
@@ -544,10 +544,37 @@ async function postConversationTreeData(
     signal,
   })
   if (!resp.ok) {
-    throw new Error(`Failed to apply conversation tree action: ${resp.status}`)
+    throw new Error(await conversationTreeErrorMessage(resp, 'Failed to apply conversation tree action'))
   }
   const json = await resp.json() as { data?: unknown }
   return json.data
+}
+
+async function conversationTreeErrorMessage(resp: Response, fallback: string): Promise<string> {
+  const statusFallback = `${fallback}: ${resp.status}`
+  try {
+    const text = await resp.text()
+    if (!text) return statusFallback
+    try {
+      const detail = errorMessageFromPayload(JSON.parse(text))
+      return detail ? `${statusFallback} - ${detail}` : statusFallback
+    } catch {
+      return `${statusFallback} - ${text.slice(0, 240)}`
+    }
+  } catch {
+    return statusFallback
+  }
+}
+
+function errorMessageFromPayload(value: unknown): string | null {
+  const data = recordValue(value)
+  if (!data) return cleanText(value)
+
+  const error = data.error
+  const errorRecord = recordValue(error)
+  const plainError = typeof error === 'string' || typeof error === 'number' ? error : null
+  return cleanText(errorRecord?.message ?? errorRecord?.detail ?? errorRecord?.error)
+    ?? cleanText(data.message ?? data.detail ?? plainError)
 }
 
 function buildConversationTreeMessageActionPayload(

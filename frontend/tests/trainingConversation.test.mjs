@@ -35,6 +35,7 @@ async function withMockFetch(handler, testBody) {
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), init })
     const response = handler(String(url), init)
+    if (response instanceof Response) return response
     return new Response(JSON.stringify({ data: response }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -529,6 +530,42 @@ test('applyConversationTreeMessageAction normalizes fork action result', async (
       assert.equal(result.conversation.title, 'Forked path')
       assert.deepEqual(result.sourceToForkedId, { msg_selected: 'msg_forked' })
       assert.deepEqual(result.messages.map((item) => item.publicId), ['msg_forked'])
+    },
+  )
+})
+
+test('applyConversationTreeMessageAction preserves server error detail with status fallback', async () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 7,
+    messagePublicId: 'msg_selected',
+  })
+
+  await withMockFetch(
+    (url, init) => {
+      assert.equal(url, '/api/v1/conversations/7/messages/msg_selected/actions')
+      assert.equal(init.method, 'POST')
+      assert.deepEqual(JSON.parse(init.body), {
+        action: 'edit',
+        content: 'Edited answer',
+        metadata: { source: 'message_tree_panel' },
+      })
+      return new Response(JSON.stringify({
+        error: { message: 'selected path is stale; reload before editing' },
+      }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    },
+    async () => {
+      await assert.rejects(
+        () => trainingConversation.applyConversationTreeMessageAction(context, {
+          action: 'edit',
+          content: ' Edited answer ',
+          metadata: { source: 'message_tree_panel' },
+        }),
+        /Failed to apply conversation tree action: 409 - selected path is stale; reload before editing/,
+      )
     },
   )
 })

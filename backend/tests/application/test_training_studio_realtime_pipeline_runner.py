@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -402,3 +403,44 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
     assert exc_info.value.metadata["eventType"] == provider_event["type"]
     await runner.close()
     assert event_sink.events == []
+
+
+@pytest.mark.asyncio
+async def test_runner_sanitizes_provider_error_events_before_rethrowing():
+    runner, adapter, _sink = await _started_runner()
+
+    await adapter.emit(
+        {
+            "type": "pipeline.error",
+            "error": {
+                "message": "provider failed with api_key=sk-secret-should-not-appear",
+                "code": "bad_request",
+            },
+            "metadata": {
+                "apiKey": "sk-secret-should-not-appear",
+                "Authorization": "Bearer secret-should-not-appear",
+                "safe": "kept",
+            },
+        }
+    )
+
+    async def _wait_for_error() -> None:
+        while runner.events_error is None:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_wait_for_error(), timeout=1)
+
+    with pytest.raises(RealtimePipelineRunnerStateError) as exc_info:
+        await runner.commit_audio()
+
+    error = exc_info.value.to_realtime_error()
+    assert error["code"] == "bad_request"
+    assert error["phase"] == "provider_event"
+    assert error["eventType"] == "pipeline.error"
+    assert error["sourceCode"] == "bad_request"
+    assert error["metadata"] == {"safe": "kept"}
+    serialized = json.dumps(error)
+    assert "secret-should-not-appear" not in serialized
+    assert "apiKey" not in serialized
+    assert "Authorization" not in serialized
+    await runner.close()

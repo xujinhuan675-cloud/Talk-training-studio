@@ -374,6 +374,20 @@ function branchSourceLabel(source: TrainingConversationBranchInfo['source'], tr:
   return tr('来自本地进度', 'from local progress')
 }
 
+function branchSourceDetailText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  const source = branchSourceLabel(info.source, tr)
+  return info.sourceDetail ? `${source} · ${info.sourceDetail}` : source
+}
+
+function branchPathTextStateLabel(
+  state: TrainingConversationBranchInfo['pathTextState'],
+  tr: TranslateInline,
+): string {
+  if (state === 'with_text') return tr('包含路径正文', 'Path text included')
+  if (state === 'id_only') return tr('只有节点 ID', 'Node IDs only')
+  return tr('只有引用', 'References only')
+}
+
 function branchConversationRefText(info: TrainingConversationBranchInfo): string {
   return [info.provider, info.conversationId].filter(Boolean).join(' · ')
 }
@@ -386,10 +400,10 @@ function branchPathStatusText(info: TrainingConversationBranchInfo, tr: Translat
 }
 
 function branchPathNoticeText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
-  if (info.selectedPath.length === 0) {
+  if (info.pathTextState === 'reference_only') {
     return tr('metadata 只保存了分支或尾节点引用，暂时没有可预览的路径正文。', 'Only branch or tail references were saved in metadata; no path text is available to preview.')
   }
-  if (!info.selectedPath.some((item) => item.content.trim())) {
+  if (info.pathTextState === 'id_only') {
     return tr('metadata 只保存了路径节点 ID，没有保存消息正文。', 'Only path node IDs were saved in metadata; message text was not included.')
   }
   return ''
@@ -401,7 +415,7 @@ function branchPathDetailText(info: TrainingConversationBranchInfo, tr: Translat
 }
 
 function branchLastReplyEmptyText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
-  if (info.selectedPath.length > 0 && !info.selectedPath.some((item) => item.content.trim())) {
+  if (info.pathTextState === 'id_only') {
     return tr('metadata 中只有消息 ID，无法显示最后回复正文。', 'Only message IDs are present in metadata, so the last reply text cannot be shown.')
   }
   return tr('metadata 中没有最后回复正文。', 'No last reply text was saved in metadata.')
@@ -708,7 +722,7 @@ export default function TrainingResultPage() {
               <GitBranch size={15} />
               {tr('路径上下文', 'Path context')}
             </h2>
-            <span>{branchSourceLabel(branchInfo.source, tr)}</span>
+            <span>{branchSourceDetailText(branchInfo, tr)}</span>
           </div>
           <div className="training-result-branch-grid">
             <div className="training-result-branch-item wide">
@@ -725,7 +739,11 @@ export default function TrainingResultPage() {
             </div>
             <div className="training-result-branch-item">
               <span>{tr('metadata 来源', 'Metadata source')}</span>
-              <strong>{branchSourceLabel(branchInfo.source, tr)}</strong>
+              <strong title={branchInfo.sourceDetail}>{branchSourceDetailText(branchInfo, tr)}</strong>
+            </div>
+            <div className="training-result-branch-item">
+              <span>{tr('正文状态', 'Text state')}</span>
+              <strong>{branchPathTextStateLabel(branchInfo.pathTextState, tr)}</strong>
             </div>
             {branchInfo.branchId && (
               <div className="training-result-branch-item">

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -519,6 +520,117 @@ def test_pipecat_capability_reports_core_symbol_import_exception(monkeypatch):
     assert capability.missing_modules == ()
     assert "Pipecat module import failed while checking pipecat.frames.frames" in capability.error
     assert "bad pipecat frame import" in capability.error
+
+
+def test_pipecat_realtime_readiness_reports_structured_blockers_without_secrets():
+    capability = pipecat_adapter.PipecatCapability(
+        available=True,
+        core_available=True,
+        websocket_available=True,
+        stt_available=False,
+        tts_available=True,
+        llm_available=False,
+        vad_available=False,
+        turn_detection_available=False,
+        optional_missing_modules=(
+            pipecat_adapter.OPENAI_STT_PIPECAT_MODULE,
+            pipecat_adapter.OPENAI_LLM_PIPECAT_MODULE,
+            pipecat_adapter.SILERO_VAD_PIPECAT_MODULE,
+            pipecat_adapter.VAD_PROCESSOR_PIPECAT_MODULE,
+            pipecat_adapter.USER_TURN_PROCESSOR_PIPECAT_MODULE,
+            "openaiApiKey=sk-secret-should-not-appear",
+        ),
+        error="Pipecat saw api_key=sk-secret-should-not-appear",
+    )
+
+    readiness = pipecat_adapter.pipecat_realtime_readiness(
+        capability,
+        openai_api_key_available=False,
+    ).to_dict()
+
+    assert readiness["ready"] is False
+    assert readiness["status"] == "blocked"
+    assert readiness["required"]["features"] == {
+        "stt": "openai",
+        "tts": "openai",
+        "llm": "openai",
+        "vad": "silero",
+        "turnDetection": "pipecat",
+    }
+    errors = readiness["blockingReasons"]
+    assert [error["code"] for error in errors] == [
+        "PIPECAT_FEATURE_UNAVAILABLE",
+        "PIPECAT_FEATURE_UNAVAILABLE",
+        "PIPECAT_FEATURE_UNAVAILABLE",
+        "PIPECAT_FEATURE_UNAVAILABLE",
+        "MISSING_OPENAI_API_KEY",
+    ]
+    by_feature = {error.get("feature"): error for error in errors}
+    assert by_feature["stt:openai"]["modules"] == [
+        pipecat_adapter.OPENAI_STT_PIPECAT_MODULE
+    ]
+    assert by_feature["llm:openai"]["modules"] == [
+        pipecat_adapter.OPENAI_LLM_PIPECAT_MODULE
+    ]
+    assert by_feature["vad:silero"]["modules"] == [
+        pipecat_adapter.SILERO_VAD_PIPECAT_MODULE,
+        pipecat_adapter.VAD_PROCESSOR_PIPECAT_MODULE,
+    ]
+    assert by_feature["turnDetection:pipecat"]["modules"] == [
+        pipecat_adapter.USER_TURN_PROCESSOR_PIPECAT_MODULE
+    ]
+    assert errors[-1]["missingEnv"] == [
+        "REALTIME_OPENAI_API_KEY",
+        "LLM__API_KEY",
+        "OPENAI_API_KEY",
+    ]
+    assert "secret-should-not-appear" not in json.dumps(readiness)
+
+
+def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
+    capability = pipecat_adapter.PipecatCapability(
+        available=True,
+        core_available=True,
+        websocket_available=True,
+        vad_available=True,
+        stt_available=True,
+        tts_available=True,
+        llm_available=True,
+        turn_detection_available=True,
+    )
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "get_pipecat_capability",
+        lambda require_websocket=False: capability,
+    )
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "pipecat_source_snapshot",
+        lambda: {
+            "checkedAt": "test",
+            "coreEntrypoints": ("pipecat.pipeline.pipeline.Pipeline",),
+            "apiKey": "sk-secret-should-not-appear",
+            "nested": {
+                "Authorization": "Bearer secret-should-not-appear",
+                "label": "safe",
+            },
+        },
+    )
+
+    response = pipecat_adapter.pipecat_realtime_capability_response(
+        openai_api_key_available=True,
+    )
+
+    assert response["readyForCall"] is True
+    assert response["readiness"]["status"] == "ready"
+    assert response["errors"] == []
+    assert response["sourceSnapshot"]["coreEntrypoints"] == [
+        "pipecat.pipeline.pipeline.Pipeline"
+    ]
+    assert response["sourceSnapshot"]["nested"] == {"label": "safe"}
+    serialized = json.dumps(response)
+    assert "secret-should-not-appear" not in serialized
+    assert "apiKey" not in serialized
 
 
 def test_pipecat_capability_preserves_core_when_websocket_symbol_import_fails(monkeypatch):
@@ -1129,6 +1241,7 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
                 "tts": "openai",
                 "vad": "silero",
                 "turnDetection": "pipecat",
+                "openaiApiKey": "sk-secret-should-not-appear",
             },
         ),
     )
@@ -1154,6 +1267,20 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
         "vad": "silero",
         "turnDetection": "pipecat",
     }
+    assert capability.ready_for_call is False
+    assert capability.readiness_payload()["status"] == "blocked"
+    assert [error["feature"] for error in capability.errors] == [
+        "tts:openai",
+        "vad:silero",
+    ]
+    assert "secret-should-not-appear" not in json.dumps(
+        {
+            "errors": capability.errors,
+            "readiness": capability.readiness_payload(),
+            "metadata": capability.metadata,
+        },
+        default=str,
+    )
 
 
 @pytest.mark.asyncio
@@ -1260,6 +1387,56 @@ async def test_talkwise_event_processor_preserves_safe_frame_metadata():
         "frameName": "FakeTranscriptionFrame",
         "pts": 123456,
     }
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_strips_secret_frame_metadata():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            metadata={
+                "talkwise": {
+                    "trainingSessionId": "training-1",
+                    "apiKey": "sk-secret-should-not-appear",
+                    "safe": "kept",
+                }
+            },
+        ),
+    )
+
+    await processor.process_frame(
+        FakeTranscriptionFrame(
+            text="final user turn",
+            user_id="user",
+            timestamp="2026-07-16T00:00:00Z",
+            metadata={
+                "openaiApiKey": "sk-secret-should-not-appear",
+                "safe": "kept",
+                "nested": {
+                    "Authorization": "Bearer secret-should-not-appear",
+                    "label": "safe",
+                },
+            },
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+
+    assert event["metadata"]["safe"] == "kept"
+    assert event["metadata"]["nested"] == {"label": "safe"}
+    assert event["metadata"]["talkwise"] == {
+        "trainingSessionId": "training-1",
+        "safe": "kept",
+    }
+    serialized = json.dumps(event)
+    assert "secret-should-not-appear" not in serialized
+    assert "openaiApiKey" not in serialized
+    assert "Authorization" not in serialized
 
 
 @pytest.mark.asyncio

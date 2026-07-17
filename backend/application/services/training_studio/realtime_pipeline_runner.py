@@ -17,6 +17,8 @@ from application.ports.realtime import (
     RealtimeSessionBinding,
     TrainingTranscriptSink,
     TrainingVoiceContext,
+    redact_realtime_secret_text,
+    sanitize_realtime_public_value,
 )
 from application.services.training_studio.realtime_pipeline import build_realtime_transcript
 
@@ -37,11 +39,12 @@ class RealtimePipelineRunnerStateError(ValueError):
         provider: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(redact_realtime_secret_text(message))
         self.code = code
         self.phase = phase
         self.provider = provider
-        self.metadata = dict(metadata or {})
+        safe_metadata = sanitize_realtime_public_value(dict(metadata or {}))
+        self.metadata = dict(safe_metadata) if isinstance(safe_metadata, Mapping) else {}
 
     def to_realtime_error(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -67,11 +70,12 @@ class RealtimePipelineStartError(RuntimeError):
         provider: str,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(redact_realtime_secret_text(message))
         self.code = code
         self.phase = phase
         self.provider = provider
-        self.metadata = dict(metadata or {})
+        safe_metadata = sanitize_realtime_public_value(dict(metadata or {}))
+        self.metadata = dict(safe_metadata) if isinstance(safe_metadata, Mapping) else {}
 
     def to_realtime_error(self) -> dict[str, Any]:
         return {
@@ -87,7 +91,8 @@ class RealtimePipelineProviderError(RuntimeError):
     """Raised when a provider event reports a realtime pipeline error."""
 
     def __init__(self, payload: Mapping[str, Any], *, provider: str) -> None:
-        self.payload = dict(payload)
+        safe_payload = sanitize_realtime_public_value(dict(payload))
+        self.payload = dict(safe_payload) if isinstance(safe_payload, Mapping) else {}
         self.provider = provider
         message = _provider_error_message(self.payload)
         super().__init__(message)
@@ -396,11 +401,11 @@ def _provider_error_message(payload: Mapping[str, object]) -> str:
     for key in ("message", "detail", "error"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return redact_realtime_secret_text(value.strip())
         if isinstance(value, Mapping):
             nested = value.get("message") or value.get("detail")
             if isinstance(nested, str) and nested.strip():
-                return nested.strip()
+                return redact_realtime_secret_text(nested.strip())
     return "Realtime pipeline provider error"
 
 
@@ -434,8 +439,9 @@ def _provider_error_metadata(payload: Mapping[str, object]) -> dict[str, Any]:
     nested_metadata = payload.get("metadata")
     if isinstance(nested_metadata, Mapping):
         for key, value in nested_metadata.items():
-            if isinstance(value, str | int | float | bool) or value is None:
-                metadata[str(key)] = value
+            safe_item = sanitize_realtime_public_value({key: value})
+            if isinstance(safe_item, Mapping):
+                metadata.update(dict(safe_item))
     return metadata
 
 
@@ -483,9 +489,11 @@ def _realtime_error_from_exception(exc: BaseException) -> dict[str, Any]:
             with suppress(Exception):
                 value = method()
                 if isinstance(value, Mapping):
-                    return {str(key): item for key, item in value.items()}
+                    safe_value = sanitize_realtime_public_value(value)
+                    if isinstance(safe_value, Mapping):
+                        return {str(key): item for key, item in safe_value.items()}
 
-    data: dict[str, Any] = {"message": str(exc)}
+    data: dict[str, Any] = {"message": redact_realtime_secret_text(str(exc))}
     for attr_name, output_key in {
         "code": "code",
         "phase": "phase",
@@ -501,7 +509,8 @@ def _realtime_error_from_exception(exc: BaseException) -> dict[str, Any]:
             value = getattr(exc, attr_name)
             if value is not None:
                 data[output_key] = value
-    return data
+    safe_data = sanitize_realtime_public_value(data)
+    return dict(safe_data) if isinstance(safe_data, Mapping) else {"message": data["message"]}
 
 
 def _classify_start_error_message(message: str) -> dict[str, Any]:

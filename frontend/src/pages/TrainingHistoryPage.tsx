@@ -175,6 +175,20 @@ function historyBranchSourceText(info: TrainingConversationBranchInfo, tr: Trans
   return tr('metadata：进度', 'metadata: progress')
 }
 
+function historyBranchSourceDetailText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  const source = historyBranchSourceText(info, tr)
+  return info.sourceDetail ? `${source} · ${info.sourceDetail}` : source
+}
+
+function historyBranchPathTextStateText(
+  state: TrainingConversationBranchInfo['pathTextState'],
+  tr: TranslateInline,
+): string {
+  if (state === 'with_text') return tr('路径正文已保存', 'path text saved')
+  if (state === 'id_only') return tr('只有节点 ID', 'node IDs only')
+  return tr('只有路径引用', 'path refs only')
+}
+
 function historyBranchPathText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   const count = info.pathCount || info.selectedPath.length
   if (count > 0) return tr('当前路径：{count} 节点', 'Current path: {count} nodes', { count })
@@ -183,7 +197,7 @@ function historyBranchPathText(info: TrainingConversationBranchInfo, tr: Transla
 }
 
 function historyBranchEmptyText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
-  if (info.selectedPath.length > 0 && !info.selectedPath.some((item) => item.content.trim())) {
+  if (info.pathTextState === 'id_only') {
     return tr('metadata 只有消息 ID，没有保存最后回复正文。', 'Metadata has message IDs only; no last reply text was saved.')
   }
   return tr('metadata 没有保存可预览的路径正文。', 'Metadata has no previewable path text.')
@@ -191,8 +205,9 @@ function historyBranchEmptyText(info: TrainingConversationBranchInfo, tr: Transl
 
 function historyBranchTitle(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   return [
-    historyBranchSourceText(info, tr),
+    historyBranchSourceDetailText(info, tr),
     historyBranchPathText(info, tr),
+    historyBranchPathTextStateText(info.pathTextState, tr),
     info.branchId ? tr('分支：{value}', 'Branch: {value}', { value: info.branchId }) : '',
     info.forkPointMessageId ? tr('分叉点：{value}', 'Fork point: {value}', { value: info.forkPointMessageId }) : '',
     info.selectedTailMessageId ? tr('尾节点：{value}', 'Tail: {value}', { value: info.selectedTailMessageId }) : '',
@@ -634,6 +649,7 @@ export default function TrainingHistoryPage() {
                     title={historyBranchTitle(entry.branchInfo, tr)}
                   >
                     <span>{historyBranchPathText(entry.branchInfo, tr)}</span>
+                    <span>{historyBranchPathTextStateText(entry.branchInfo.pathTextState, tr)}</span>
                     {entry.branchInfo.forkPointMessageId && (
                       <span>
                         {tr('分叉点：{value}', 'Fork point: {value}', {

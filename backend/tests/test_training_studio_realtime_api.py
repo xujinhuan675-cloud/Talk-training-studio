@@ -32,8 +32,13 @@ from core.config import settings
 from domain.stakeholder.entity import ChatRoom, Message
 
 
-def _session_payload(mode: str = "realtime") -> dict:
-    return {
+def _session_payload(
+    mode: str = "realtime",
+    *,
+    user_id: str | None = None,
+    team_id: str | None = None,
+) -> dict:
+    payload = {
         "mode": mode,
         "task_config": {
             "role": "Sales Associate",
@@ -46,6 +51,11 @@ def _session_payload(mode: str = "realtime") -> dict:
             "category": "sales",
         },
     }
+    if user_id is not None:
+        payload["user_id"] = user_id
+    if team_id is not None:
+        payload["team_id"] = team_id
+    return payload
 
 
 @dataclass
@@ -226,11 +236,15 @@ def _response_error_message(response) -> str:
     return str(body.get("message") or body.get("detail") or body)
 
 
-def _make_bound_app(*, active: bool = True) -> tuple[FastAPI, _RealtimeRoomState]:
+def _make_bound_app(
+    *,
+    active: bool = True,
+    session_payload: dict | None = None,
+) -> tuple[FastAPI, _RealtimeRoomState]:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     session_service = TrainingSessionService(id_factory=lambda: "session-1")
-    session = asyncio.run(session_service.create_session(_session_payload()))
+    session = asyncio.run(session_service.create_session(session_payload or _session_payload()))
     if active:
         asyncio.run(session_service.start_session(session.session_id, room_id="42"))
     state = _RealtimeRoomState(
@@ -260,6 +274,7 @@ def _make_realtime_capability_app() -> FastAPI:
 
 def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
     calls: dict[str, object] = {}
+    adapter = SimpleNamespace()
 
     def get_pipecat_capability(*, require_websocket: bool = False):
         calls["require_websocket"] = require_websocket
@@ -268,11 +283,54 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
     def pipecat_source_snapshot():
         return snapshot or {"checkedAt": "test", "coreEntrypoints": ("pipecat.Pipeline",)}
 
-    return SimpleNamespace(
-        calls=calls,
-        get_pipecat_capability=get_pipecat_capability,
-        pipecat_source_snapshot=pipecat_source_snapshot,
-    )
+    def pipecat_realtime_capability_response(
+        *,
+        require_websocket: bool = True,
+        openai_api_key_available: bool | None = None,
+        include_source_snapshot: bool = True,
+    ):
+        from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
+
+        calls["require_websocket"] = require_websocket
+        calls["openai_api_key_available"] = openai_api_key_available
+        data = {
+            "available": bool(capability.available),
+            "coreAvailable": bool(capability.core_available),
+            "websocketAvailable": bool(capability.websocket_available),
+            "vadAvailable": bool(getattr(capability, "vad_available", False)),
+            "sttAvailable": bool(getattr(capability, "stt_available", False)),
+            "ttsAvailable": bool(getattr(capability, "tts_available", False)),
+            "llmAvailable": bool(getattr(capability, "llm_available", False)),
+            "turnDetectionAvailable": bool(
+                getattr(capability, "turn_detection_available", False)
+            ),
+            "missingModules": [str(module) for module in capability.missing_modules],
+            "optionalMissingModules": [
+                str(module)
+                for module in getattr(capability, "optional_missing_modules", ())
+            ],
+            "error": capability.error,
+        }
+        readiness = pipecat_adapter.pipecat_realtime_readiness(
+            capability,
+            require_websocket=require_websocket,
+            openai_api_key_available=openai_api_key_available,
+        ).to_dict()
+        data["readyForCall"] = readiness["ready"]
+        data["readiness"] = readiness
+        data["errors"] = readiness["blockingReasons"]
+        if include_source_snapshot:
+            try:
+                data["sourceSnapshot"] = dict(adapter.pipecat_source_snapshot())
+            except Exception:
+                pass
+        return data
+
+    adapter.calls = calls
+    adapter.get_pipecat_capability = get_pipecat_capability
+    adapter.pipecat_source_snapshot = pipecat_source_snapshot
+    adapter.pipecat_realtime_capability_response = pipecat_realtime_capability_response
+    return adapter
 
 
 def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch) -> None:
@@ -314,12 +372,14 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["openaiRealtime"] == {
-        "configured": True,
-        "effectiveKey": True,
-        "model": "gpt-realtime-test",
-        "voice": "marin-test",
-    }
+    assert data["openaiRealtime"]["configured"] is True
+    assert data["openaiRealtime"]["effectiveKey"] is True
+    assert data["openaiRealtime"]["model"] == "gpt-realtime-test"
+    assert data["openaiRealtime"]["voice"] == "marin-test"
+    assert data["openaiRealtime"]["readyForCall"] is True
+    assert data["openaiRealtime"]["readiness"]["status"] == "ready"
+    assert data["openaiRealtime"]["readiness"]["blockingReasons"] == []
+    assert data["openaiRealtime"]["errors"] == []
     assert "sk-realtime-capability" not in response.text
     assert data["pipecat"]["available"] is True
     assert data["pipecat"]["coreAvailable"] is True
@@ -360,6 +420,7 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
         == "pipecat.turns.user_turn_processor.UserTurnProcessor"
     )
     assert adapter.calls["require_websocket"] is True
+    assert adapter.calls["openai_api_key_available"] is True
 
 
 def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch) -> None:
@@ -392,6 +453,8 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
     data = response.json()["data"]
     assert data["openaiRealtime"]["configured"] is True
     assert data["openaiRealtime"]["effectiveKey"] is True
+    assert data["openaiRealtime"]["readyForCall"] is True
+    assert data["openaiRealtime"]["readiness"]["status"] == "ready"
     assert "sk-llm-fallback" not in response.text
     assert data["pipecat"]["available"] is False
     assert data["pipecat"]["coreAvailable"] is False
@@ -442,10 +505,10 @@ def test_realtime_capabilities_reports_pipecat_adapter_import_failure(monkeypatc
 
 
 def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch) -> None:
-    def _raise_capability_failure(*, require_websocket: bool = False):
+    def _raise_capability_failure(**_kwargs):
         raise RuntimeError("Pipecat capability crashed")
 
-    adapter = SimpleNamespace(get_pipecat_capability=_raise_capability_failure)
+    adapter = SimpleNamespace(pipecat_realtime_capability_response=_raise_capability_failure)
     monkeypatch.setattr(
         training_studio_routes,
         "_load_pipecat_realtime_adapter",
@@ -503,7 +566,12 @@ def test_realtime_capabilities_omits_pipecat_source_snapshot_when_snapshot_fails
     response = client.get("/api/v1/training-studio/realtime/capabilities")
 
     assert response.status_code == 200
-    data = response.json()["data"]["pipecat"]
+    payload = response.json()["data"]
+    openai = payload["openaiRealtime"]
+    data = payload["pipecat"]
+    assert openai["readyForCall"] is True
+    assert openai["readiness"]["status"] == "ready"
+    assert openai["errors"] == []
     assert data["available"] is True
     assert data["coreAvailable"] is True
     assert data["websocketAvailable"] is True
@@ -547,7 +615,13 @@ def test_realtime_capabilities_reports_missing_openai_key_for_pipecat_readiness(
     response = client.get("/api/v1/training-studio/realtime/capabilities")
 
     assert response.status_code == 200
-    data = response.json()["data"]["pipecat"]
+    payload = response.json()["data"]
+    openai = payload["openaiRealtime"]
+    data = payload["pipecat"]
+    assert openai["readyForCall"] is False
+    assert openai["readiness"]["status"] == "blocked"
+    assert openai["errors"][0]["code"] == "MISSING_OPENAI_API_KEY"
+    assert openai["errors"][0]["provider"] == "openaiRealtime"
     assert data["available"] is True
     assert data["readyForCall"] is False
     assert data["errors"] == [
@@ -681,6 +755,35 @@ def test_realtime_transcript_persistence_endpoint_stores_voice_realtime_messages
     session_response = client.get("/api/v1/training-studio/sessions/session-1")
     assert session_response.status_code == 200
     assert session_response.json()["data"]["message_count"] == 2
+
+
+def test_realtime_transcript_persistence_rejects_other_mock_user_binding() -> None:
+    app, state = _make_bound_app(
+        session_payload=_session_payload(
+            user_id="user-cs-001",
+            team_id="team-service",
+        )
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/training-studio/realtime/transcripts",
+        headers={"X-Mock-User": "sales"},
+        json={
+            "session_id": "session-1",
+            "room_id": 42,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "This transcript must not cross user boundaries.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 403
+    assert "current user scope" in _response_error_message(response)
+    assert state.messages == []
 
 
 def test_guidance_event_persistence_endpoint_stores_system_coach_messages_without_turn_count() -> (
@@ -965,6 +1068,56 @@ def test_realtime_websocket_binding_requires_active_training_session() -> None:
         error = ws.receive_json()
         assert error["type"] == "error"
         assert "active" in error["payload"]["message"]
+
+
+def test_realtime_websocket_query_binding_rejects_other_mock_user() -> None:
+    app, state = _make_bound_app(
+        session_payload=_session_payload(
+            user_id="user-cs-001",
+            team_id="team-service",
+        )
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&mock_user=sales"
+    ) as ws:
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "BINDING_ERROR"
+    assert error["payload"]["phase"] == "binding"
+    assert "current user scope" in error["payload"]["message"]
+    assert "trainingSessionId" not in error["payload"]
+    assert "roomId" not in error["payload"]
+    assert state.messages == []
+
+
+def test_realtime_websocket_configure_binding_rejects_other_mock_user() -> None:
+    app, state = _make_bound_app(
+        session_payload=_session_payload(
+            user_id="user-cs-001",
+            team_id="team-service",
+        )
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/api/v1/training-studio/realtime?mock_user=sales") as ws:
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        assert started["type"] == "session.started"
+        assert listening["status"] == "listening"
+
+        ws.send_json({"type": "session.configure", "sessionId": "session-1", "roomId": 42})
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "BINDING_ERROR"
+    assert error["payload"]["phase"] == "binding"
+    assert "current user scope" in error["payload"]["message"]
+    assert "trainingSessionId" not in error["payload"]
+    assert "roomId" not in error["payload"]
+    assert state.messages == []
 
 
 def test_openai_realtime_provider_relays_audio_and_persists_metadata() -> None:

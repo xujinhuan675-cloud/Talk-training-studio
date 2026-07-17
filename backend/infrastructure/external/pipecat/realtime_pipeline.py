@@ -21,11 +21,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from application.ports.realtime import (
+    OPENAI_REALTIME_API_KEY_ENV_KEYS,
     RealtimeAudioChunk,
     RealtimePipelineAdapter,
     RealtimePipelineCapability,
     RealtimePipelineConfig,
+    RealtimeProviderReadiness,
+    RealtimeReadinessIssue,
     TrainingVoiceContext,
+    build_realtime_readiness,
+    redact_realtime_secret_text,
+    sanitize_realtime_public_value,
 )
 
 CORE_PIPECAT_MODULES = (
@@ -48,7 +54,34 @@ LLM_RESPONSE_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_response_unive
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
-OPENAI_API_KEY_ENV_KEYS = ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY")
+OPENAI_API_KEY_ENV_KEYS = OPENAI_REALTIME_API_KEY_ENV_KEYS
+PIPECAT_REALTIME_REQUIRED_FEATURES = {
+    "stt": "openai",
+    "tts": "openai",
+    "llm": "openai",
+    "vad": "silero",
+    "turnDetection": "pipecat",
+}
+PIPECAT_FEATURE_MODULE_HINTS = {
+    "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
+    "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
+    "llm": (
+        OPENAI_LLM_PIPECAT_MODULE,
+        LLM_CONTEXT_PIPECAT_MODULE,
+        LLM_RESPONSE_PIPECAT_MODULE,
+    ),
+    "vad": (
+        SILERO_VAD_PIPECAT_MODULE,
+        VAD_ANALYZER_PIPECAT_MODULE,
+        VAD_PROCESSOR_PIPECAT_MODULE,
+        "onnxruntime",
+    ),
+    "turnDetection": (
+        USER_TURN_PROCESSOR_PIPECAT_MODULE,
+        USER_TURN_STRATEGIES_PIPECAT_MODULE,
+        USER_TURN_COMPLETION_PIPECAT_MODULE,
+    ),
+}
 logger = logging.getLogger(__name__)
 CORE_PIPECAT_SYMBOLS: Mapping[str, tuple[str, ...]] = {
     "pipecat.pipeline.pipeline": ("Pipeline",),
@@ -204,14 +237,15 @@ class PipecatRealtimePipelineError(RuntimeError):
         missing_env: Sequence[str] = (),
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(redact_realtime_secret_text(message))
         self.code = code
         self.phase = phase
         self.provider = "pipecat"
         self.feature = feature
         self.missing_modules = tuple(missing_modules)
         self.missing_env = tuple(missing_env)
-        self.metadata = dict(metadata or {})
+        safe_metadata = sanitize_realtime_public_value(dict(metadata or {}))
+        self.metadata = dict(safe_metadata) if isinstance(safe_metadata, Mapping) else {}
 
     def to_realtime_error(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -286,6 +320,187 @@ def get_pipecat_capability(*, require_websocket: bool = False) -> PipecatCapabil
         core_available=True,
         websocket_available=runtime.websocket_available,
         **_runtime_feature_status(runtime, optional_status),
+    )
+
+
+def pipecat_realtime_capability_response(
+    *,
+    require_websocket: bool = True,
+    openai_api_key_available: bool | None = None,
+    include_source_snapshot: bool = True,
+) -> dict[str, Any]:
+    """Return the public Pipecat capability/readiness payload for realtime calls."""
+
+    try:
+        capability = get_pipecat_capability(require_websocket=require_websocket)
+    except Exception as exc:
+        capability = PipecatCapability(
+            available=False,
+            core_available=False,
+            websocket_available=False,
+            error=f"Pipecat capability check failed: {redact_realtime_secret_text(str(exc))}",
+        )
+
+    data = _pipecat_capability_public_payload(capability)
+    readiness = pipecat_realtime_readiness(
+        capability,
+        require_websocket=require_websocket,
+        openai_api_key_available=openai_api_key_available,
+    ).to_dict()
+    data["readyForCall"] = readiness["ready"]
+    data["readiness"] = readiness
+    data["errors"] = readiness["blockingReasons"]
+    if include_source_snapshot:
+        with suppress(Exception):
+            source_snapshot = sanitize_realtime_public_value(dict(pipecat_source_snapshot()))
+            if isinstance(source_snapshot, Mapping):
+                data["sourceSnapshot"] = dict(source_snapshot)
+    return data
+
+
+def pipecat_realtime_readiness(
+    capability: PipecatCapability | None = None,
+    *,
+    require_websocket: bool = True,
+    openai_api_key_available: bool | None = None,
+) -> RealtimeProviderReadiness:
+    """Build structured readiness from Pipecat capability and call prerequisites."""
+
+    capability = capability or get_pipecat_capability(require_websocket=require_websocket)
+    missing_modules = tuple(str(module) for module in capability.missing_modules)
+    optional_missing_modules = tuple(
+        str(module) for module in capability.optional_missing_modules
+    )
+    blockers: list[RealtimeReadinessIssue] = []
+    error_message = (
+        redact_realtime_secret_text(capability.error) if capability.error else None
+    )
+
+    if not capability.core_available:
+        if error_message and not missing_modules:
+            blockers.append(
+                RealtimeReadinessIssue(
+                    code="PIPECAT_CAPABILITY_ERROR",
+                    message=error_message,
+                    phase="capability_check",
+                    provider="pipecat",
+                )
+            )
+        else:
+            blockers.append(
+                RealtimeReadinessIssue(
+                    code="PIPECAT_MODULE_UNAVAILABLE",
+                    message="Pipecat core modules are required before starting realtime calls",
+                    phase="capability_check",
+                    provider="pipecat",
+                    modules=missing_modules,
+                )
+            )
+    elif require_websocket and not capability.websocket_available:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="PIPECAT_WEBSOCKET_UNAVAILABLE",
+                message="Pipecat websocket transport is required before starting realtime calls",
+                phase="capability_check",
+                provider="pipecat",
+                modules=missing_modules or (WEBSOCKET_PIPECAT_MODULE,),
+            )
+        )
+    else:
+        for feature, required_provider in PIPECAT_REALTIME_REQUIRED_FEATURES.items():
+            if _pipecat_feature_available(capability, feature):
+                continue
+            blockers.append(
+                RealtimeReadinessIssue(
+                    code="PIPECAT_FEATURE_UNAVAILABLE",
+                    message=(
+                        f"Pipecat {feature} provider '{required_provider}' is required "
+                        "before starting realtime calls"
+                    ),
+                    phase="capability_check",
+                    provider="pipecat",
+                    feature=f"{feature}:{required_provider}",
+                    modules=_pipecat_feature_missing_modules(
+                        feature,
+                        optional_missing_modules,
+                    ),
+                )
+            )
+
+    if openai_api_key_available is None:
+        openai_api_key_available = bool(_openai_api_key({}))
+    if not openai_api_key_available:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_API_KEY",
+                message=(
+                    "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
+                    "before starting Pipecat realtime calls"
+                ),
+                phase="configuration",
+                provider="pipecat",
+                missing_env=OPENAI_API_KEY_ENV_KEYS,
+            )
+        )
+
+    if error_message and not blockers:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="PIPECAT_CAPABILITY_ERROR",
+                message=error_message,
+                phase="capability_check",
+                provider="pipecat",
+                modules=missing_modules,
+            )
+        )
+
+    return build_realtime_readiness(
+        required={
+            "transport": "websocket" if require_websocket else "audio_chunks",
+            "features": dict(PIPECAT_REALTIME_REQUIRED_FEATURES),
+            "env": OPENAI_API_KEY_ENV_KEYS,
+        },
+        blocking_reasons=blockers,
+    )
+
+
+def _pipecat_capability_public_payload(capability: PipecatCapability) -> dict[str, Any]:
+    return {
+        "available": bool(capability.available),
+        "coreAvailable": bool(capability.core_available),
+        "websocketAvailable": bool(capability.websocket_available),
+        "vadAvailable": bool(capability.vad_available),
+        "sttAvailable": bool(capability.stt_available),
+        "ttsAvailable": bool(capability.tts_available),
+        "llmAvailable": bool(capability.llm_available),
+        "turnDetectionAvailable": bool(capability.turn_detection_available),
+        "missingModules": [str(module) for module in capability.missing_modules],
+        "optionalMissingModules": [
+            str(module) for module in capability.optional_missing_modules
+        ],
+        "error": redact_realtime_secret_text(capability.error) if capability.error else None,
+    }
+
+
+def _pipecat_feature_available(capability: PipecatCapability, feature: str) -> bool:
+    return bool(
+        getattr(
+            capability,
+            "turn_detection_available" if feature == "turnDetection" else f"{feature}_available",
+            False,
+        )
+    )
+
+
+def _pipecat_feature_missing_modules(
+    feature: str,
+    optional_missing_modules: Sequence[str],
+) -> tuple[str, ...]:
+    hints = PIPECAT_FEATURE_MODULE_HINTS[feature]
+    return tuple(
+        module
+        for module in optional_missing_modules
+        if any(module == hint or module.startswith(f"{hint}.") for hint in hints)
     )
 
 
@@ -1236,6 +1451,7 @@ def pipecat_pipeline_capability(
 
     capability = get_pipecat_capability(require_websocket=websocket is not None)
     metadata = dict(config.metadata)
+    requested_features = _requested_feature_metadata(config)
     missing: list[str] = []
     if _feature_provider(metadata, "stt") == "openai" and not capability.stt_available:
         missing.append("stt:openai")
@@ -1249,7 +1465,15 @@ def pipecat_pipeline_capability(
         _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat"
         and not capability.turn_detection_available
     ):
-        missing.append("turn_detection:pipecat")
+        missing.append("turnDetection:pipecat")
+    readiness = _pipecat_pipeline_readiness(
+        capability,
+        config=config,
+        websocket=websocket,
+        requested_features=requested_features,
+        missing_features=missing,
+    )
+    readiness_payload = readiness.to_dict()
 
     return RealtimePipelineCapability(
         provider=config.provider,
@@ -1260,6 +1484,9 @@ def pipecat_pipeline_capability(
         vad=_feature_provider(metadata, "vad"),
         turn_detection=_feature_provider(metadata, "turnDetection", "turn_detection"),
         missing_features=tuple(missing),
+        ready_for_call=readiness.ready,
+        readiness=readiness,
+        errors=tuple(dict(error) for error in readiness_payload["blockingReasons"]),
         metadata={
             "coreAvailable": capability.core_available,
             "websocketAvailable": capability.websocket_available,
@@ -1268,13 +1495,7 @@ def pipecat_pipeline_capability(
             "llmAvailable": capability.llm_available,
             "vadAvailable": capability.vad_available,
             "turnDetectionAvailable": capability.turn_detection_available,
-            "requestedFeatures": {
-                "stt": _feature_provider(metadata, "stt"),
-                "tts": _feature_provider(metadata, "tts"),
-                "llm": _feature_provider(metadata, "llm"),
-                "vad": _feature_provider(metadata, "vad"),
-                "turnDetection": _feature_provider(metadata, "turnDetection", "turn_detection"),
-            },
+            "requestedFeatures": requested_features,
             "optionalMissingModules": capability.optional_missing_modules,
             "runtimeLoaded": runtime is not None,
             "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
@@ -1283,6 +1504,87 @@ def pipecat_pipeline_capability(
             "llmEntrypoint": OPENAI_LLM_PIPECAT_MODULE,
             "turnDetectionEntrypoint": USER_TURN_PROCESSOR_PIPECAT_MODULE,
         },
+    )
+
+
+def _pipecat_pipeline_readiness(
+    capability: PipecatCapability,
+    *,
+    config: RealtimePipelineConfig,
+    websocket: Any | None,
+    requested_features: Mapping[str, str | None],
+    missing_features: Sequence[str],
+) -> RealtimeProviderReadiness:
+    blockers: list[RealtimeReadinessIssue] = []
+    if not capability.core_available:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="PIPECAT_MODULE_UNAVAILABLE",
+                message="Pipecat core modules are required before starting realtime calls",
+                phase="capability_check",
+                provider="pipecat",
+                modules=tuple(str(module) for module in capability.missing_modules),
+            )
+        )
+    elif websocket is not None and not capability.websocket_available:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="PIPECAT_WEBSOCKET_UNAVAILABLE",
+                message="Pipecat websocket transport is required before starting realtime calls",
+                phase="capability_check",
+                provider="pipecat",
+                modules=tuple(str(module) for module in capability.missing_modules)
+                or (WEBSOCKET_PIPECAT_MODULE,),
+            )
+        )
+
+    optional_missing_modules = tuple(
+        str(module) for module in capability.optional_missing_modules
+    )
+    for feature in missing_features:
+        feature_name, _, provider = feature.partition(":")
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="PIPECAT_FEATURE_UNAVAILABLE",
+                message=(
+                    f"Pipecat {feature_name} provider '{provider}' is required "
+                    "before starting realtime calls"
+                ),
+                phase="capability_check",
+                provider="pipecat",
+                feature=feature,
+                modules=_pipecat_feature_missing_modules(
+                    feature_name,
+                    optional_missing_modules,
+                ),
+            )
+        )
+
+    metadata = dict(config.metadata)
+    if any(
+        requested_features.get(feature) == "openai"
+        for feature in ("stt", "tts", "llm")
+    ) and not _openai_api_key(metadata):
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_API_KEY",
+                message=(
+                    "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
+                    "before starting Pipecat realtime calls"
+                ),
+                phase="configuration",
+                provider="pipecat",
+                missing_env=OPENAI_API_KEY_ENV_KEYS,
+            )
+        )
+
+    return build_realtime_readiness(
+        required={
+            "transport": "websocket" if websocket is not None else "audio_chunks",
+            "features": dict(requested_features),
+            "env": OPENAI_API_KEY_ENV_KEYS,
+        },
+        blocking_reasons=blockers,
     )
 
 
@@ -1533,10 +1835,9 @@ def _frame_event_metadata(frame: Any) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     raw_metadata = getattr(frame, "metadata", None)
     if isinstance(raw_metadata, Mapping):
-        for key, value in raw_metadata.items():
-            safe_value = _json_safe_metadata(value)
-            if safe_value is not None:
-                metadata[str(key)] = safe_value
+        safe_metadata = _json_safe_metadata(raw_metadata)
+        if isinstance(safe_metadata, Mapping):
+            metadata.update(dict(safe_metadata))
 
     pipecat_frame: dict[str, Any] = {}
     for output_key, attr_name in {
@@ -1553,23 +1854,7 @@ def _frame_event_metadata(frame: Any) -> dict[str, Any]:
 
 
 def _json_safe_metadata(value: Any) -> Any | None:
-    if isinstance(value, str | int | float | bool):
-        return value
-    if value is None:
-        return None
-    if isinstance(value, Mapping):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            safe_item = _json_safe_metadata(item)
-            if safe_item is not None:
-                result[str(key)] = safe_item
-        return result or None
-    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray | str):
-        result = [
-            safe_item for item in value if (safe_item := _json_safe_metadata(item)) is not None
-        ]
-        return result or None
-    return None
+    return sanitize_realtime_public_value(value)
 
 
 def _llm_system_instruction(
@@ -2237,6 +2522,8 @@ __all__ = [
     "import_pipecat_runtime",
     "is_pipecat_available",
     "pipecat_pipeline_capability",
+    "pipecat_realtime_capability_response",
+    "pipecat_realtime_readiness",
     "pipecat_source_snapshot",
     "validate_pipecat_voice_config",
 ]

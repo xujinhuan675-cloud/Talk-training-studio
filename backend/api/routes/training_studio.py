@@ -54,11 +54,15 @@ from application.ports.llm import (
     build_llm_provider_registry,
 )
 from application.ports.realtime import (
+    OPENAI_REALTIME_API_KEY_ENV_KEYS,
     PersistedRealtimeTranscript,
     RealtimeAudioChunk,
     RealtimePipelineAdapter,
+    RealtimeReadinessIssue,
     RealtimeSessionBinding,
     RealtimeTranscript,
+    build_openai_realtime_capability_response,
+    build_realtime_readiness,
 )
 from application.services.stakeholder.analysis_service import AnalysisReaderService, AnalysisService
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
@@ -128,31 +132,7 @@ _PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "vad": "silero",
     "turnDetection": "pipecat",
 }
-_PIPECAT_FEATURE_MODULE_HINTS = {
-    "stt": ("pipecat.services.openai.stt", "websockets"),
-    "tts": ("pipecat.services.openai.tts", "openai"),
-    "llm": (
-        "pipecat.services.openai.llm",
-        "pipecat.processors.aggregators.llm_context",
-        "pipecat.processors.aggregators.llm_response_universal",
-    ),
-    "vad": (
-        "pipecat.audio.vad.silero",
-        "pipecat.audio.vad.vad_analyzer",
-        "pipecat.processors.audio.vad_processor",
-        "onnxruntime",
-    ),
-    "turnDetection": (
-        "pipecat.turns.user_turn_processor",
-        "pipecat.turns.user_turn_strategies",
-        "pipecat.turns.user_turn_completion_mixin",
-    ),
-}
-_OPENAI_REALTIME_API_KEY_ENV_KEYS = (
-    "REALTIME_OPENAI_API_KEY",
-    "LLM__API_KEY",
-    "OPENAI_API_KEY",
-)
+_OPENAI_REALTIME_API_KEY_ENV_KEYS = OPENAI_REALTIME_API_KEY_ENV_KEYS
 _training_session_service = TrainingSessionService(uow_factory=SQLAlchemyUnitOfWork)
 _live_guidance_service = TrainingLiveGuidanceService()
 _live_guidance_llm_client: LLMPort | None = None
@@ -1217,14 +1197,14 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
 
 def _openai_realtime_capability_response() -> dict[str, object]:
     effective_key = _openai_realtime_api_key()
-    return {
-        "configured": bool(
+    return build_openai_realtime_capability_response(
+        configured=bool(
             effective_key and settings.REALTIME_OPENAI_MODEL and settings.REALTIME_OPENAI_VOICE
         ),
-        "effectiveKey": bool(effective_key),
-        "model": settings.REALTIME_OPENAI_MODEL,
-        "voice": settings.REALTIME_OPENAI_VOICE,
-    }
+        effective_key=bool(effective_key),
+        model=settings.REALTIME_OPENAI_MODEL,
+        voice=settings.REALTIME_OPENAI_VOICE,
+    )
 
 
 def _load_pipecat_realtime_adapter() -> Any:
@@ -1233,201 +1213,75 @@ def _load_pipecat_realtime_adapter() -> Any:
     return pipecat_adapter
 
 
-def _structured_realtime_error(
+def _pipecat_unavailable_capability_response(
     *,
-    code: str,
     message: str,
-    phase: str,
-    provider: str = "pipecat",
-    feature: str | None = None,
-    modules: list[str] | None = None,
-    missing_env: list[str] | None = None,
-    metadata: dict[str, object] | None = None,
+    code: str,
+    modules: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "code": code,
-        "message": message,
-        "phase": phase,
-        "provider": provider,
-    }
-    if feature:
-        payload["feature"] = feature
-    if modules:
-        payload["modules"] = modules
-    if missing_env:
-        payload["missingEnv"] = missing_env
-    if metadata:
-        payload["metadata"] = metadata
-    return payload
-
-
-def _pipecat_feature_missing_modules(
-    feature: str,
-    optional_missing_modules: list[str],
-) -> list[str]:
-    hints = _PIPECAT_FEATURE_MODULE_HINTS[feature]
-    return [
-        module
-        for module in optional_missing_modules
-        if any(module == hint or module.startswith(f"{hint}.") for hint in hints)
-    ]
-
-
-def _pipecat_realtime_readiness(data: dict[str, object]) -> dict[str, object]:
-    blockers: list[dict[str, object]] = []
-    missing_modules = [str(module) for module in data.get("missingModules") or []]
-    optional_missing_modules = [
-        str(module) for module in data.get("optionalMissingModules") or []
-    ]
-    error_message = _coerce_optional_text(data.get("error"))
-
-    if not data.get("coreAvailable"):
-        if error_message and not missing_modules:
-            blockers.append(
-                _structured_realtime_error(
-                    code="PIPECAT_CAPABILITY_ERROR",
-                    message=error_message,
-                    phase="capability_check",
-                )
-            )
-        else:
-            blockers.append(
-                _structured_realtime_error(
-                    code="PIPECAT_MODULE_UNAVAILABLE",
-                    message="Pipecat core modules are required before starting realtime calls",
-                    phase="capability_check",
-                    modules=missing_modules,
-                )
-            )
-    elif not data.get("websocketAvailable"):
-        blockers.append(
-            _structured_realtime_error(
-                code="PIPECAT_WEBSOCKET_UNAVAILABLE",
-                message="Pipecat websocket transport is required before starting realtime calls",
-                phase="capability_check",
-                modules=missing_modules,
-            )
-        )
-    else:
-        for feature, required_provider in _PIPECAT_REALTIME_REQUIRED_FEATURES.items():
-            availability_key = f"{feature}Available"
-            if feature == "turnDetection":
-                availability_key = "turnDetectionAvailable"
-            if data.get(availability_key):
-                continue
-            feature_modules = _pipecat_feature_missing_modules(feature, optional_missing_modules)
-            blockers.append(
-                _structured_realtime_error(
-                    code="PIPECAT_FEATURE_UNAVAILABLE",
-                    message=(
-                        f"Pipecat {feature} provider '{required_provider}' is required "
-                        "before starting realtime calls"
-                    ),
-                    phase="capability_check",
-                    feature=f"{feature}:{required_provider}",
-                    modules=feature_modules,
-                )
-            )
-
-    if not _openai_realtime_api_key():
-        blockers.append(
-            _structured_realtime_error(
-                code="MISSING_OPENAI_API_KEY",
-                message=(
-                    "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
-                    "before starting Pipecat realtime calls"
-                ),
-                phase="configuration",
-                missing_env=list(_OPENAI_REALTIME_API_KEY_ENV_KEYS),
-            )
-        )
-
-    if error_message and not blockers:
-        blockers.append(
-            _structured_realtime_error(
-                code="PIPECAT_CAPABILITY_ERROR",
-                message=error_message,
-                phase="capability_check",
-                modules=missing_modules,
-            )
-        )
-
-    return {
-        "ready": not blockers,
-        "status": "ready" if not blockers else "blocked",
-        "checkedAt": datetime.now(UTC).isoformat(),
-        "required": {
+    readiness = build_realtime_readiness(
+        required={
             "transport": "websocket",
             "features": dict(_PIPECAT_REALTIME_REQUIRED_FEATURES),
-            "env": list(_OPENAI_REALTIME_API_KEY_ENV_KEYS),
+            "env": _OPENAI_REALTIME_API_KEY_ENV_KEYS,
         },
-        "blockingReasons": blockers,
+        blocking_reasons=(
+            RealtimeReadinessIssue(
+                code=code,
+                message=message,
+                phase="capability_check",
+                provider="pipecat",
+                modules=modules,
+            ),
+        ),
+    ).to_dict()
+    return {
+        "available": False,
+        "coreAvailable": False,
+        "websocketAvailable": False,
+        "vadAvailable": False,
+        "sttAvailable": False,
+        "ttsAvailable": False,
+        "llmAvailable": False,
+        "turnDetectionAvailable": False,
+        "missingModules": list(modules),
+        "optionalMissingModules": [],
+        "error": message,
+        "readyForCall": readiness["ready"],
+        "readiness": readiness,
+        "errors": readiness["blockingReasons"],
     }
-
-
-def _with_pipecat_realtime_readiness(data: dict[str, object]) -> dict[str, object]:
-    readiness = _pipecat_realtime_readiness(data)
-    data["readyForCall"] = readiness["ready"]
-    data["readiness"] = readiness
-    data["errors"] = readiness["blockingReasons"]
-    return data
 
 
 def _pipecat_realtime_capability_response() -> dict[str, object]:
     try:
         pipecat_adapter = _load_pipecat_realtime_adapter()
     except Exception as exc:
-        return _with_pipecat_realtime_readiness({
-            "available": False,
-            "coreAvailable": False,
-            "websocketAvailable": False,
-            "vadAvailable": False,
-            "sttAvailable": False,
-            "ttsAvailable": False,
-            "llmAvailable": False,
-            "turnDetectionAvailable": False,
-            "missingModules": ["infrastructure.external.pipecat"],
-            "optionalMissingModules": [],
-            "error": str(exc),
-        })
+        return _pipecat_unavailable_capability_response(
+            message=str(exc),
+            code="PIPECAT_MODULE_UNAVAILABLE",
+            modules=("infrastructure.external.pipecat",),
+        )
+
+    capability_response = getattr(pipecat_adapter, "pipecat_realtime_capability_response", None)
+    if not callable(capability_response):
+        return _pipecat_unavailable_capability_response(
+            message="Pipecat realtime capability helper is unavailable",
+            code="PIPECAT_CAPABILITY_ERROR",
+        )
 
     try:
-        capability = pipecat_adapter.get_pipecat_capability(require_websocket=True)
+        response = capability_response(
+            require_websocket=True,
+            openai_api_key_available=bool(_openai_realtime_api_key()),
+            include_source_snapshot=True,
+        )
     except Exception as exc:
-        return _with_pipecat_realtime_readiness({
-            "available": False,
-            "coreAvailable": False,
-            "websocketAvailable": False,
-            "vadAvailable": False,
-            "sttAvailable": False,
-            "ttsAvailable": False,
-            "llmAvailable": False,
-            "turnDetectionAvailable": False,
-            "missingModules": [],
-            "optionalMissingModules": [],
-            "error": f"Pipecat capability check failed: {exc}",
-        })
-
-    data: dict[str, object] = {
-        "available": bool(capability.available),
-        "coreAvailable": bool(capability.core_available),
-        "websocketAvailable": bool(capability.websocket_available),
-        "vadAvailable": bool(getattr(capability, "vad_available", False)),
-        "sttAvailable": bool(getattr(capability, "stt_available", False)),
-        "ttsAvailable": bool(getattr(capability, "tts_available", False)),
-        "llmAvailable": bool(getattr(capability, "llm_available", False)),
-        "turnDetectionAvailable": bool(
-            getattr(capability, "turn_detection_available", False)
-        ),
-        "missingModules": [str(module) for module in capability.missing_modules],
-        "optionalMissingModules": [
-            str(module) for module in getattr(capability, "optional_missing_modules", ())
-        ],
-        "error": capability.error,
-    }
-    with suppress(Exception):
-        data["sourceSnapshot"] = dict(pipecat_adapter.pipecat_source_snapshot())
-    return _with_pipecat_realtime_readiness(data)
+        return _pipecat_unavailable_capability_response(
+            message=f"Pipecat capability check failed: {exc}",
+            code="PIPECAT_CAPABILITY_ERROR",
+        )
+    return dict(response)
 
 
 def _realtime_capabilities_response() -> dict[str, object]:
@@ -2770,6 +2624,7 @@ async def realtime_training_session(
     websocket: WebSocket,
     svc: TrainingSessionService = Depends(get_training_session_service),
     uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_realtime_uow_factory),
+    current_user: CurrentUser = Depends(get_current_user),
     openai_factory: Callable[[], OpenAIRealtimeTranscriptionClient] = Depends(
         get_training_realtime_openai_factory
     ),
@@ -2865,6 +2720,7 @@ async def realtime_training_session(
             query_room_id,
             svc=svc,
             uow_factory=uow_factory,
+            current_user=current_user,
         )
         if binding is not None:
             await _ensure_pipeline_runner(binding)
@@ -2928,6 +2784,7 @@ async def realtime_training_session(
                     *_configure_binding(payload),
                     svc=svc,
                     uow_factory=uow_factory,
+                    current_user=current_user,
                 )
                 if configured is None:
                     await _send_wire_event(

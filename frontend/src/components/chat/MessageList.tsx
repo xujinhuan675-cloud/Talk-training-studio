@@ -653,6 +653,12 @@ function MessageTreeActions({
       return
     }
 
+    const previousPath = snapshot?.path ?? []
+    const previousTailNode = previousPath[previousPath.length - 1] ?? snapshot?.message ?? null
+    const previousTailLabel = previousTailNode
+      ? treeMessageCompactLabel(previousTailNode, labels)
+      : focusedContext.messagePublicId
+
     setExpanded(true)
     setApplyingAction(nextAction)
     setError(null)
@@ -669,7 +675,7 @@ function MessageTreeActions({
       const resultSnapshot = snapshotFromMessageActionResult(result)
       const nextContext = contextForMessageActionResult(focusedContext, result)
       if (!resultSnapshot || !nextContext) {
-        setWriteError(`${nextActionLabel} ${labels.actionError} ${labels.keptCurrentPath}`)
+        setWriteError(`${nextActionLabel} ${labels.actionError} ${labels.tailNode}: ${previousTailLabel}`)
         return
       }
       setFocusedContext(nextContext)
@@ -677,11 +683,15 @@ function MessageTreeActions({
       const selection = buildMessageTreeSelection(resultSnapshot, nextContext, message.id)
       if (selection) onSelectPath?.(selection)
       const resultTail = resultSnapshot.message?.publicId ?? nextContext.messagePublicId
-      setWriteStatus(`${nextActionLabel} ${labels.actionSuccess} ${labels.newTail}: ${resultTail}`)
-      await loadSnapshot(nextContext, 'focus', null, labels.refreshError)
+      setWriteStatus([
+        `${nextActionLabel} ${labels.actionSuccess}`,
+        `${labels.currentPath}: ${labels.pathNodeCount}: ${resultSnapshot.path.length}.`,
+        `${labels.branchLabel}: ${nextContext.branchId ?? labels.noBranch}.`,
+        `${labels.newTail}: ${resultTail}`,
+      ].join(' '))
     } catch (err) {
       console.error('Failed to apply message tree action:', err)
-      setWriteError(`${nextActionLabel} ${labels.actionError} ${labels.keptCurrentPath}`)
+      setWriteError(`${nextActionLabel} ${labels.actionError} ${labels.tailNode}: ${previousTailLabel}`)
     } finally {
       setApplyingAction(null)
     }
@@ -693,18 +703,21 @@ function MessageTreeActions({
     forkTitle,
     labels.actionError,
     labels.actionSuccess,
+    labels.branchLabel,
+    labels.currentPath,
     labels.edit,
     labels.editContentRequired,
     labels.fork,
-    labels.keptCurrentPath,
     labels.newTail,
-    labels.refreshError,
+    labels.noBranch,
+    labels.pathNodeCount,
     labels.retry,
-    loadSnapshot,
+    labels.tailNode,
     loadingAction,
     message.id,
     onSelectPath,
     retryContent,
+    snapshot,
     writeAction,
   ])
 
@@ -725,6 +738,18 @@ function MessageTreeActions({
     : selectedTreeNodeId && selectedPathIds.has(selectedTreeNodeId)
       ? labels.selectionInPath
       : labels.selectionHint
+  const selectedTreeNode = currentPath.find((item) => item.publicId === selectedTreeNodeId)
+    ?? snapshot?.children.find((item) => item.publicId === selectedTreeNodeId)
+    ?? null
+  const selectedNodeLabel = selectedTreeNode
+    ? treeMessageCompactLabel(selectedTreeNode, labels)
+    : selectedTreeNodeId ?? labels.noPath
+  const currentPathCountLabel = currentPath.length > 0
+    ? `${labels.pathNodeCount}: ${currentPath.length}`
+    : labels.noPath
+  const currentForkPointLabel = currentForkPoint
+    ? treeMessageCompactLabel(currentForkPoint, labels)
+    : labels.noForkPoint
   const currentWriteActionLabel = messageTreeWriteActionLabel(writeAction, labels)
   const applyingActionLabel = applyingAction ? messageTreeWriteActionLabel(applyingAction, labels) : null
   const applyingStatus = applyingActionLabel ? `${applyingActionLabel} ${labels.actionLoading}` : null
@@ -754,6 +779,10 @@ function MessageTreeActions({
       <p className="message-tree-actions-hint">{labels.hint}</p>
       <div className="message-tree-meta" aria-label={labels.branchLabel}>
         <span className="message-tree-meta-item">
+          <span className="message-tree-meta-label">{labels.currentPath}</span>
+          <span className="message-tree-meta-value">{currentPathCountLabel}</span>
+        </span>
+        <span className="message-tree-meta-item">
           <span className="message-tree-meta-label">{labels.branchLabel}</span>
           <span className="message-tree-meta-value">{focusedContext.branchId ?? labels.noBranch}</span>
         </span>
@@ -772,7 +801,7 @@ function MessageTreeActions({
         <span className="message-tree-meta-item">
           <span className="message-tree-meta-label">{labels.forkPoint}</span>
           <span className="message-tree-meta-value" title={treeMessageTitle(currentForkPoint)}>
-            {currentForkPoint ? treeMessageCompactLabel(currentForkPoint, labels) : labels.noForkPoint}
+            {currentForkPointLabel}
           </span>
         </span>
         <span className="message-tree-meta-item">
@@ -788,6 +817,12 @@ function MessageTreeActions({
             {selectionDescription}
             {currentPath.length > 0 ? ` ${labels.pathNodeCount}: ${currentPath.length}.` : ''}
           </em>
+          <small title={treeMessageTitle(selectedTreeNode) ?? selectedTreeNodeId ?? undefined}>
+            {labels.selectedBadge}: {selectedNodeLabel}
+          </small>
+          <small title={treeMessageTitle(currentTailNode) ?? focusedContext.messagePublicId}>
+            {labels.tailNode}: {currentTailLabel}
+          </small>
         </span>
       </div>
       <div className="message-tree-action-links">
@@ -914,6 +949,9 @@ function MessageTreeActions({
                     {currentNodeLabel}
                   </em>
                   <small>{labels.writeTargetDesc}</small>
+                  <small title={treeMessageTitle(currentTailNode) ?? focusedContext.messagePublicId}>
+                    {labels.tailNode}: {currentTailLabel}
+                  </small>
                 </span>
               </div>
               {writeAction === 'edit' && (

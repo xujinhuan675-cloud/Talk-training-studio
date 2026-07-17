@@ -749,6 +749,45 @@
   color: var(--green);
 }
 
+.message-tree-strip-details {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 360px;
+  min-width: 180px;
+  overflow: hidden;
+}
+
+.message-tree-strip-details span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.message-tree-strip-details strong {
+  flex: 0 0 auto;
+  color: var(--text-primary);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.message-tree-strip-details em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-style: normal;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-page-message-tree-strip > button {
   display: inline-flex;
   align-items: center;
@@ -1746,6 +1785,23 @@
 
   .message-tree-strip-path span {
     max-width: 180px;
+  }
+
+  .message-tree-strip-details {
+    order: 4;
+    flex-basis: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .message-tree-strip-details::-webkit-scrollbar {
+    display: none;
+  }
+
+  .message-tree-strip-details span {
+    flex: 0 0 auto;
+    max-width: 220px;
   }
 
   .guidance-event-list {

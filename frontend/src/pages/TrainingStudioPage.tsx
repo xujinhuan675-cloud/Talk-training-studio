@@ -214,6 +214,12 @@ function getOpenAIRealtimeStatus(
   capabilities: RealtimeCapabilities['openaiRealtime'],
   tr: TranslateInline,
 ): RealtimeDiagnosticStatus {
+  if (capabilities.readyForCall) {
+    return { label: tr('可发起通话', 'Ready for call'), tone: 'ready' }
+  }
+  if (capabilities.readiness?.status) {
+    return { label: sanitizeRealtimeDiagnosticText(capabilities.readiness.status), tone: 'blocked' }
+  }
   if (!capabilities.effectiveKey) {
     return { label: tr('缺少 Key', 'Missing key'), tone: 'blocked' }
   }
@@ -286,6 +292,8 @@ function mergeRealtimeIssues(
 
 function formatRealtimeIssueTitle(issue: RealtimeReadinessIssue, tr: TranslateInline): string {
   if (issue.code === 'MISSING_OPENAI_API_KEY') return tr('缺少 OpenAI Realtime Key', 'Missing OpenAI Realtime key')
+  if (issue.code === 'MISSING_OPENAI_REALTIME_MODEL') return tr('缺少 OpenAI Realtime 模型', 'Missing OpenAI Realtime model')
+  if (issue.code === 'MISSING_OPENAI_REALTIME_VOICE') return tr('缺少 OpenAI Realtime 声音', 'Missing OpenAI Realtime voice')
   if (issue.code === 'PIPECAT_MODULE_UNAVAILABLE') return tr('Pipecat 模块缺失', 'Pipecat module unavailable')
   if (issue.code === 'PIPECAT_WEBSOCKET_UNAVAILABLE') return tr('Pipecat WebSocket 不可用', 'Pipecat WebSocket unavailable')
   if (issue.code === 'PIPECAT_FEATURE_UNAVAILABLE') {
@@ -486,10 +494,16 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     : { label: tr('读取中', 'Loading'), tone: 'loading' as const }
   const realtimeBlockingIssues = useMemo(
     () => realtimeCapabilities
-      ? mergeRealtimeIssues(
-        realtimeCapabilities.pipecat.readiness?.blockingReasons,
-        realtimeCapabilities.pipecat.errors,
-      )
+      ? [
+        ...mergeRealtimeIssues(
+          realtimeCapabilities.openaiRealtime.readiness?.blockingReasons,
+          realtimeCapabilities.openaiRealtime.errors,
+        ),
+        ...mergeRealtimeIssues(
+          realtimeCapabilities.pipecat.readiness?.blockingReasons,
+          realtimeCapabilities.pipecat.errors,
+        ),
+      ]
       : [],
     [realtimeCapabilities],
   )
@@ -789,6 +803,14 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                     </div>
                     <dl className="training-studio-realtime-metrics">
                       <div>
+                        <dt>readyForCall</dt>
+                        <dd>{formatBooleanStatus(Boolean(realtimeCapabilities.openaiRealtime.readyForCall), tr)}</dd>
+                      </div>
+                      <div>
+                        <dt>readiness.status</dt>
+                        <dd>{cleanDiagnosticText(realtimeCapabilities.openaiRealtime.readiness?.status) || tr('未知', 'Unknown')}</dd>
+                      </div>
+                      <div>
                         <dt>effectiveKey</dt>
                         <dd>{formatBooleanStatus(realtimeCapabilities.openaiRealtime.effectiveKey, tr)}</dd>
                       </div>
@@ -803,6 +825,10 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                       <div>
                         <dt>voice</dt>
                         <dd>{cleanDiagnosticText(realtimeCapabilities.openaiRealtime.voice) || tr('未配置', 'Not configured')}</dd>
+                      </div>
+                      <div>
+                        <dt>checkedAt</dt>
+                        <dd>{cleanDiagnosticText(realtimeCapabilities.openaiRealtime.readiness?.checkedAt) || tr('未返回', 'Not returned')}</dd>
                       </div>
                     </dl>
                   </article>

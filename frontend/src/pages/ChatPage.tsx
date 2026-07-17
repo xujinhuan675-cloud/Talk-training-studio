@@ -166,6 +166,18 @@ function compactTreeNodeContent(
   return text.length > 72 ? `${text.slice(0, 71)}...` : text
 }
 
+function findMessageTreeForkPoint(
+  path: MessageTreePathSelection['path'],
+): MessageTreePathSelection['path'][number] | null {
+  for (let index = 1; index < path.length; index += 1) {
+    const previous = path[index - 1]
+    const current = path[index]
+    if (!current.branchId || current.branchId === previous.branchId) continue
+    return previous
+  }
+  return null
+}
+
 type TrainingContextTag = {
   label: string
   tone?: 'category' | 'difficulty' | 'required' | 'optional' | 'mode' | 'live'
@@ -1298,6 +1310,24 @@ function ChatArea() {
       ? videoPracticeStatus
       : tr('录制一段视频回答并发送到当前对话。', 'Record a video answer and send it to this conversation.')
   )
+  const messageTreeTailNode = messageTreeSelection
+    ? messageTreeSelection.path[messageTreeSelection.path.length - 1] ?? null
+    : null
+  const messageTreeSelectedNode = messageTreeSelection
+    ? messageTreeSelection.path.find((item) => item.publicId === messageTreeSelection.selectedMessageId) ?? null
+    : null
+  const messageTreeForkPoint = messageTreeSelection
+    ? findMessageTreeForkPoint(messageTreeSelection.path)
+    : null
+  const messageTreeSelectedLabel = messageTreeSelectedNode
+    ? compactTreeNodeContent(messageTreeSelectedNode, messageTreeSelectedNode.publicId)
+    : messageTreeSelection?.selectedMessageId ?? null
+  const messageTreeTailLabel = messageTreeTailNode
+    ? compactTreeNodeContent(messageTreeTailNode, messageTreeTailNode.publicId)
+    : null
+  const messageTreeForkPointLabel = messageTreeForkPoint
+    ? compactTreeNodeContent(messageTreeForkPoint, messageTreeForkPoint.publicId)
+    : null
 
   const handleVideoRecorded = React.useCallback(async (result: VideoAnswerResult) => {
     setVideoRecorderOpen(false)
@@ -1711,6 +1741,26 @@ function ChatArea() {
                 {index + 1}. {compactTreeNodeContent(item, item.publicId)}
               </span>
             ))}
+          </div>
+          <div className="message-tree-strip-details">
+            <span>
+              <strong>{t('messageTree.actions.currentSelection')}</strong>
+              <em title={messageTreeSelectedLabel ?? undefined}>
+                {messageTreeSelectedLabel ?? t('messageTree.actions.noPath')}
+              </em>
+            </span>
+            <span>
+              <strong>{t('messageTree.actions.tailNode')}</strong>
+              <em title={messageTreeTailLabel ?? undefined}>
+                {messageTreeTailLabel ?? t('messageTree.actions.noPath')}
+              </em>
+            </span>
+            <span>
+              <strong>{t('messageTree.actions.forkPoint')}</strong>
+              <em title={messageTreeForkPointLabel ?? undefined}>
+                {messageTreeForkPointLabel ?? t('messageTree.actions.noForkPoint')}
+              </em>
+            </span>
           </div>
           <button
             type="button"

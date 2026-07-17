@@ -70,6 +70,9 @@ export interface OpenAIRealtimeCapability {
   effectiveKey: boolean
   model: string | null
   voice: string | null
+  readyForCall?: boolean
+  readiness?: PipecatRealtimeReadiness
+  errors?: RealtimeReadinessIssue[]
 }
 
 export interface RealtimeReadinessIssue {

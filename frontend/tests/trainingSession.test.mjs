@@ -259,11 +259,13 @@ test('getTrainingConversationBranchInfo extracts selected path metadata from a s
   })
 
   assert.equal(info.source, 'session')
+  assert.equal(info.sourceDetail, 'session.task_config.metadata')
   assert.equal(info.provider, 'talkwise-conversation')
   assert.equal(info.conversationId, 'conv-1')
   assert.equal(info.branchId, 'branch-main')
   assert.equal(info.selectedTailMessageId, 'msg-leaf')
   assert.equal(info.pathCount, 2)
+  assert.equal(info.pathTextState, 'with_text')
   assert.deepEqual(info.selectedPath.map((item) => item.publicId), ['msg-root', 'msg-leaf'])
   assert.match(info.pathSummary, /Selected answer/)
   assert.equal(info.lastReplyPreview, 'Selected answer')
@@ -291,9 +293,11 @@ test('getTrainingConversationBranchInfo extracts id-only selected path state wit
   })
 
   assert.equal(info.source, 'session')
+  assert.equal(info.sourceDetail, 'session.metadata')
   assert.equal(info.branchId, 'main')
   assert.equal(info.selectedTailMessageId, 'msg-tail')
   assert.equal(info.pathCount, 2)
+  assert.equal(info.pathTextState, 'id_only')
   assert.deepEqual(info.selectedPath.map((item) => item.publicId), ['msg-root', 'msg-tail'])
   assert.equal(info.pathSummary, undefined)
   assert.equal(info.lastReplyPreview, undefined)
@@ -383,13 +387,71 @@ test('getTrainingConversationBranchInfo reads report and progress branch metadat
   })
 
   assert.equal(reportInfo.source, 'report')
+  assert.equal(reportInfo.sourceDetail, 'report.metadata')
   assert.equal(reportInfo.conversationId, 'conv-report')
   assert.equal(reportInfo.selectedTailMessageId, 'msg-report-tail')
   assert.equal(reportInfo.pathCount, 4)
+  assert.equal(reportInfo.pathTextState, 'reference_only')
   assert.equal(reportInfo.pathSummary, 'Root / Objection / Selected close')
   assert.equal(progressInfo.source, 'progress')
+  assert.equal(progressInfo.sourceDetail, 'progress.metadata')
   assert.equal(progressInfo.provider, 'message-tree')
   assert.equal(progressInfo.branchId, 'branch-progress')
+  assert.equal(progressInfo.pathTextState, 'reference_only')
+})
+
+test('getTrainingConversationBranchInfo keeps source priority and report content metadata detail', () => {
+  const info = trainingSession.getTrainingConversationBranchInfo({
+    session: {
+      metadata: {
+        messageTreeSelection: {
+          conversationId: 'conv-session',
+          branchId: 'branch-session',
+          tailMessageId: 'msg-session-tail',
+        },
+      },
+    },
+    report: {
+      metadata: {
+        conversationTree: {
+          conversation_id: 'conv-report',
+          branch_id: 'branch-report',
+          branch_tail_message_id: 'msg-report-tail',
+        },
+      },
+      content: {
+        metadata: {
+          conversationTree: {
+            conversation_id: 'conv-report-content',
+            branch_id: 'branch-report-content',
+            branch_tail_message_id: 'msg-report-content-tail',
+          },
+        },
+      },
+    },
+  })
+  const reportContentInfo = trainingSession.getTrainingConversationBranchInfo({
+    report: {
+      content: {
+        metadata: {
+          conversationTree: {
+            conversation_id: 'conv-report-content',
+            branch_id: 'branch-report-content',
+            branch_tail_message_id: 'msg-report-content-tail',
+          },
+        },
+      },
+    },
+  })
+
+  assert.equal(info.source, 'session')
+  assert.equal(info.sourceDetail, 'session.metadata')
+  assert.equal(info.conversationId, 'conv-session')
+  assert.equal(info.branchId, 'branch-session')
+  assert.equal(reportContentInfo.source, 'report')
+  assert.equal(reportContentInfo.sourceDetail, 'report.content.metadata')
+  assert.equal(reportContentInfo.conversationId, 'conv-report-content')
+  assert.equal(reportContentInfo.pathTextState, 'reference_only')
 })
 
 test('getTrainingConversationBranchInfo hides when metadata has no branch context', () => {

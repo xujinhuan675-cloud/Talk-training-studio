@@ -33,6 +33,10 @@ class _FakeConversationService:
     def __init__(self, conversations: dict[int, ConversationDTO] | None = None) -> None:
         self.conversations = conversations or {}
         self.created_payload = None
+        self.update_call = None
+        self.delete_call = None
+        self.action_call = None
+        self.list_call = None
         self.search_call = None
         self.get_calls: list[int] = []
 
@@ -40,13 +44,29 @@ class _FakeConversationService:
         self.created_payload = payload
         return _conversation(21, metadata=payload.metadata)
 
+    async def list_conversations(self, **kwargs):
+        self.list_call = kwargs
+        return list(self.conversations.values()), len(self.conversations)
+
     async def get_conversation(self, conversation_id: int):
         self.get_calls.append(conversation_id)
+        return self.conversations.get(conversation_id) or _conversation(conversation_id)
+
+    async def update_conversation(self, conversation_id: int, payload):
+        self.update_call = (conversation_id, payload)
+        return self.conversations.get(conversation_id) or _conversation(conversation_id)
+
+    async def delete_conversation(self, conversation_id: int):
+        self.delete_call = conversation_id
         return self.conversations.get(conversation_id) or _conversation(conversation_id)
 
     async def search_messages(self, conversation_id: int, query: str, **kwargs):
         self.search_call = (conversation_id, query, kwargs)
         return []
+
+    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
+        self.action_call = (conversation_id, message_public_id, payload)
+        return None
 
 
 class _FakeChatService:
@@ -126,6 +146,88 @@ def test_cross_user_conversation_search_is_blocked_before_service_call() -> None
     assert response.status_code == 403
     assert conversation_service.get_calls == [7]
     assert conversation_service.search_call is None
+
+
+def test_cross_user_conversation_list_filters_other_user_items() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            ),
+            8: _conversation(
+                8,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+        }
+    )
+    client = _client(conversation_service)
+
+    response = client.get("/api/v1/conversations", headers={"X-Mock-User": "sales"})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [item["id"] for item in data["items"]] == [8]
+    assert data["total"] == 1
+
+
+def test_cross_user_conversation_mutations_are_blocked_before_service_call() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            )
+        }
+    )
+    client = _client(conversation_service)
+
+    update_resp = client.patch(
+        "/api/v1/conversations/7",
+        headers={"X-Mock-User": "sales"},
+        json={"title": "forged title"},
+    )
+    delete_resp = client.delete("/api/v1/conversations/7", headers={"X-Mock-User": "sales"})
+
+    assert update_resp.status_code == 403
+    assert delete_resp.status_code == 403
+    assert conversation_service.get_calls == [7, 7]
+    assert conversation_service.update_call is None
+    assert conversation_service.delete_call is None
+
+
+def test_cross_user_message_action_is_blocked_before_service_call() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            )
+        }
+    )
+    client = _client(conversation_service)
+
+    response = client.post(
+        "/api/v1/conversations/7/messages/msg_answer/actions",
+        headers={"X-Mock-User": "sales"},
+        json={"action": "retry"},
+    )
+
+    assert response.status_code == 403
+    assert conversation_service.get_calls == [7]
+    assert conversation_service.action_call is None
 
 
 def test_cross_user_chat_is_blocked_before_llm_service_call() -> None:
