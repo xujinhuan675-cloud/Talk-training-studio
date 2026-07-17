@@ -81,6 +81,33 @@ def _extract_emotion(content: str) -> tuple[str, int | None, str | None]:
     return content[: m.start()].rstrip(), score, label
 
 
+def _clean_llm_selection_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _selected_llm_model_from_history(history: list[dict[str, object]]) -> str | None:
+    """Read runtime model selection from the latest user turn metadata."""
+    for item in reversed(history):
+        if item.get("sender_type") != "user":
+            continue
+        metadata = item.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        nested_llm = metadata.get("llm")
+        if isinstance(nested_llm, dict):
+            model = _clean_llm_selection_text(nested_llm.get("model"))
+            if model:
+                return model
+        return (
+            _clean_llm_selection_text(metadata.get("llm_model"))
+            or _clean_llm_selection_text(metadata.get("model"))
+        )
+    return None
+
+
 class StakeholderChatService:
     """Orchestrates sending user messages and generating persona replies."""
 
@@ -232,8 +259,8 @@ class StakeholderChatService:
         group_mode: bool = False,
         is_mentioned: bool = False,
         scenario_context: str | None = None,
-        cached_history: list[dict[str, str]] | None = None,
-    ) -> tuple[bool, dict[str, str] | None]:
+        cached_history: list[dict[str, object]] | None = None,
+    ) -> tuple[bool, dict[str, object] | None]:
         """Generate and save a persona reply using LLM, emitting SSE events.
 
         Each reply runs in its own UoW transaction so it's committed independently.
@@ -273,9 +300,11 @@ class StakeholderChatService:
                             "sender_type": m.sender_type,
                             "sender_id": m.sender_id,
                             "content": m.content,
+                            "metadata": m.metadata or {},
                         }
                         for m in history_entities
                     ]
+                selected_model = _selected_llm_model_from_history(history)
 
                 # Load room for compression state
                 room = await uow.chat_room_repository.get_by_id(room_id)
@@ -326,7 +355,7 @@ class StakeholderChatService:
                         sentence_buf = SentenceBuffer()
                         tts_reply_id = uuid.uuid4().hex[:12]
 
-                    async for chunk in self._llm.stream(all_messages):
+                    async for chunk in self._llm.stream(all_messages, model=selected_model):
                         if chunk.content:
                             chunks.append(chunk.content)
                             await room_event_bus.publish(
@@ -419,6 +448,7 @@ class StakeholderChatService:
                 "sender_type": saved_reply.sender_type,
                 "sender_id": saved_reply.sender_id,
                 "content": saved_reply.content,
+                "metadata": saved_reply.metadata or {},
             }
 
             # Trigger background compression (fire-and-forget, non-blocking).
@@ -526,7 +556,12 @@ class StakeholderChatService:
                 room_id, limit=200
             )
             history = [
-                {"sender_type": m.sender_type, "sender_id": m.sender_id, "content": m.content}
+                {
+                    "sender_type": m.sender_type,
+                    "sender_id": m.sender_id,
+                    "content": m.content,
+                    "metadata": m.metadata or {},
+                }
                 for m in history_entities
             ]
 

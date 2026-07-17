@@ -78,6 +78,63 @@ test('buildTrainingConversationPayload carries LibreChat-style branch fields', (
   assert.deepEqual(payload.metadata, { scenarioTemplateId: 'new-customer-discount' })
 })
 
+test('buildTrainingConversationPayload carries selected provider/model without rewriting training metadata', () => {
+  const payload = trainingConversation.buildTrainingConversationPayload({
+    mode: 'text',
+    conversation: {
+      provider: 'talkwise-conversation',
+      conversationId: 'conversation-1',
+      branchTailMessageId: 'msg-tail',
+      metadata: {
+        trainingSessionId: 'training-1',
+        personaIds: ['buyer', 'cfo'],
+        scenarioId: 9,
+        dispatcher: { policy: 'stakeholder_turns' },
+        evaluation: { rubricId: 'sales-v1' },
+        growthReport: { reportId: 'growth-1' },
+      },
+    },
+    turn: {
+      role: 'user',
+      text: 'Can we narrow the scope before talking price?',
+      provider: 'openai',
+      model: 'gpt-selected',
+      metadata: {
+        source: 'typed_input',
+        personaIds: ['turn-local-shadow'],
+      },
+    },
+    metadata: {
+      scenarioTemplateId: 'enterprise-renewal',
+      personaIds: ['buyer', 'cfo'],
+      evaluation: { rubricId: 'sales-v1' },
+    },
+  })
+
+  assert.equal(payload.provider, 'talkwise-conversation')
+  assert.equal(payload.turns[0].provider, 'openai')
+  assert.equal(payload.turns[0].model, 'gpt-selected')
+  assert.deepEqual(payload.turns[0].metadata, {
+    source: 'typed_input',
+    personaIds: ['turn-local-shadow'],
+  })
+  assert.deepEqual(payload.conversation.metadata, {
+    trainingSessionId: 'training-1',
+    personaIds: ['buyer', 'cfo'],
+    scenarioId: 9,
+    dispatcher: { policy: 'stakeholder_turns' },
+    evaluation: { rubricId: 'sales-v1' },
+    growthReport: { reportId: 'growth-1' },
+  })
+  assert.deepEqual(payload.metadata, {
+    scenarioTemplateId: 'enterprise-renewal',
+    personaIds: ['buyer', 'cfo'],
+    evaluation: { rubricId: 'sales-v1' },
+  })
+  assert.equal('provider' in payload.metadata, false)
+  assert.equal('model' in payload.metadata, false)
+})
+
 test('resolveRuntimeEndpoint picks realtime websocket endpoint with session binding', () => {
   const endpoint = trainingConversation.resolveRuntimeEndpoint({
     mode: 'realtime',

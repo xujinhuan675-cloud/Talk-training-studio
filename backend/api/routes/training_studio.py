@@ -44,7 +44,13 @@ from api.dependencies import (
     require_system_roles,
     training_scope_for,
 )
-from application.ports.llm import LLMPort
+from application.ports.llm import (
+    LLMEndpointMetadata,
+    LLMModelMetadata,
+    LLMPort,
+    LLMProviderMetadata,
+    build_llm_provider_registry,
+)
 from application.ports.realtime import (
     PersistedRealtimeTranscript,
     RealtimeAudioChunk,
@@ -368,6 +374,55 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
         realtime_call_url=settings.REALTIME_OPENAI_CALL_URL,
         updated_at=datetime.now(UTC).isoformat(),
     )
+
+
+def _settings_llm_provider_metadata() -> LLMProviderMetadata:
+    llm_cfg = settings.llm
+    default_model = LLMModelMetadata(
+        name=llm_cfg.default_model,
+        provider=llm_cfg.provider,
+        endpoint=llm_cfg.base_url,
+        is_default=True,
+        max_output_tokens=llm_cfg.max_tokens,
+    )
+    endpoint = LLMEndpointMetadata(
+        provider=llm_cfg.provider,
+        endpoint=llm_cfg.base_url,
+        wire_api=llm_cfg.wire_api,
+        default_model=llm_cfg.default_model,
+        models=[default_model],
+    )
+    return LLMProviderMetadata(
+        provider=llm_cfg.provider,
+        default_model=llm_cfg.default_model,
+        endpoint=llm_cfg.base_url,
+        wire_api=llm_cfg.wire_api,
+        max_retries=llm_cfg.max_retries,
+        models=[default_model],
+        endpoints=[endpoint],
+    )
+
+
+def _llm_registry_response(llm: LLMPort | None) -> dict[str, object]:
+    source = "active_client" if llm is not None else "settings"
+    provider_metadata = (
+        llm.provider_metadata if llm is not None else _settings_llm_provider_metadata()
+    )
+    api_key_configured = bool(
+        llm is not None or settings.llm.api_key or settings.stakeholder.anthropic_api_key
+    )
+    registry = build_llm_provider_registry(
+        [provider_metadata],
+        provider="talkwise",
+        default_model=provider_metadata.default_model or settings.llm.default_model,
+        extra={
+            "configured": api_key_configured,
+            "client_configured": llm is not None,
+            "api_key_configured": api_key_configured,
+            "source": source,
+        },
+    )
+    return registry.to_dict()
 
 
 async def _reload_voice_clients() -> None:
@@ -1874,6 +1929,14 @@ async def get_scenario_templates(
 ):
     templates = svc.get_scenario_templates()
     return success_response(data=[template.model_dump(mode="json") for template in templates])
+
+
+@router.get("/llm-registry", summary="Get text LLM provider and model registry")
+async def get_llm_registry(
+    llm: LLMPort | None = Depends(get_stakeholder_llm_client),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+):
+    return success_response(data=_llm_registry_response(llm))
 
 
 @router.get("/voice-config", summary="Get voice preference configuration")

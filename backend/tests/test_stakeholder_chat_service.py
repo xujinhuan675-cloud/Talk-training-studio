@@ -285,6 +285,7 @@ class _CapturingLLM:
     def __init__(self, response: str = "roger."):
         self._response = response
         self.last_messages: list[LLMMessage] = []
+        self.last_stream_kwargs: dict = {}
 
     async def generate(self, messages, **kwargs):
         self.last_messages = list(messages)
@@ -292,8 +293,46 @@ class _CapturingLLM:
 
     async def stream(self, messages, **kwargs):
         self.last_messages = list(messages)
+        self.last_stream_kwargs = dict(kwargs)
         yield LLMChunk(content=self._response)
         yield LLMChunk(content="", finish_reason="end_turn")
+
+
+@pytest.mark.asyncio
+async def test_selected_llm_model_metadata_is_passed_to_stream(session_factory):
+    from application.services.stakeholder.stakeholder_chat_service import (
+        StakeholderChatService,
+    )
+
+    room_id = await _create_room(session_factory)
+    llm = _CapturingLLM(response="selected model acknowledged.")
+    svc = StakeholderChatService(
+        uow_factory=_uow_factory(session_factory),
+        persona_loader=FakePersonaLoader(),
+        llm=llm,
+    )
+
+    _, room = await svc.send_message(
+        room_id,
+        "Use the selected training model.",
+        metadata={
+            "source": "training_room_selector",
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-selected",
+                "endpoint": "https://openai.example/v1",
+            },
+        },
+    )
+    await svc.generate_replies(room_id, room)
+
+    assert llm.last_stream_kwargs["model"] == "gpt-selected"
+
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        msgs = await uow.stakeholder_message_repository.list_by_room_id(room_id)
+
+    assert msgs[0].metadata["llm"]["model"] == "gpt-selected"
+    assert msgs[1].sender_type == "persona"
 
 
 @pytest.mark.asyncio

@@ -61,6 +61,13 @@ import {
 } from '../services/trainingSession'
 import { uploadVideoAnswer } from '../services/trainingStudio'
 import {
+  fetchLlmRegistry,
+  getLlmRegistryModelChoices,
+  selectDefaultLlmModelChoice,
+  type LLMModelChoice,
+  type LLMProviderMetadata,
+} from '../services/llmRegistry'
+import {
   getInteractionModeFromLocation,
   getLiveCoachLanguagePairFromLocation,
   getTrainingProfileFromLocation,
@@ -156,6 +163,30 @@ function compactTags(values: Array<TrainingContextTag | null | undefined | false
   return values.filter((value): value is TrainingContextTag => (
     Boolean(value && typeof value === 'object' && value.label.trim())
   ))
+}
+
+function mergeMetadata(
+  ...items: Array<Record<string, unknown> | null | undefined>
+): Record<string, unknown> | undefined {
+  const merged = Object.assign({}, ...items.filter(Boolean))
+  return Object.keys(merged).length > 0 ? merged : undefined
+}
+
+function buildLlmSelectionMetadata(choice: LLMModelChoice | null): Record<string, unknown> | undefined {
+  if (!choice) return undefined
+  return {
+    provider: choice.provider,
+    model: choice.model,
+    llm_provider: choice.provider,
+    llm_model: choice.model,
+    llm: {
+      provider: choice.provider,
+      model: choice.model,
+      endpoint: choice.endpoint,
+      wire_api: choice.wireApi,
+      source: 'training_room_selector',
+    },
+  }
 }
 
 function coercePercentScore(value: unknown): number | undefined {
@@ -269,7 +300,11 @@ function localizeGuideEvent(event: GuideEventDTO, tr: TranslateInline): Localize
 }
 
 function guidanceEventsSignature(events: GuideEventDTO[]): string {
-  return JSON.stringify(events.map(({ created_at: _createdAt, ...event }) => event))
+  return JSON.stringify(events.map((event) => {
+    const stableEvent = { ...event }
+    delete stableEvent.created_at
+    return stableEvent
+  }))
 }
 
 const scenarioDifficultyLabels: Record<ScenarioTrainingDifficulty, string> = {
@@ -315,7 +350,7 @@ function ChatArea() {
   const { currentUser } = useAuthContext()
   const navigate = useNavigate()
   const location = useLocation()
-  const { locale, tr } = useI18n()
+  const { locale, t, tr } = useI18n()
   const preparedVoiceRoomRef = React.useRef<number | null>(null)
   const guidanceTurnsRef = React.useRef<TranscriptTurnDTO[]>([])
   const guidanceTimerRef = React.useRef<number | null>(null)
@@ -332,6 +367,7 @@ function ChatArea() {
   const trainingProfile = getTrainingProfileFromLocation(location.search, location.state)
   const liveCoachLanguagePair = getLiveCoachLanguagePairFromLocation(location.search, location.state)
   const isLiveCoachSession = trainingProfile === 'live_coach'
+  const isTrainingSession = Boolean(trainingSessionId)
   const progressScope = React.useMemo(() => ({
     userId: currentUser?.userId ?? null,
     teamId: currentUser?.teamId ?? null,
@@ -375,6 +411,8 @@ function ChatArea() {
   const [cheatSheetData, setCheatSheetData] = useState<CheatSheetData | null>(null)
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
   const [trainingSceneExpanded, setTrainingSceneExpanded] = useState(false)
+  const [llmRegistry, setLlmRegistry] = useState<LLMProviderMetadata | null>(null)
+  const [selectedLlmChoiceKey, setSelectedLlmChoiceKey] = useState<string | null>(null)
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
   const sendChatMessage = chat.handleSend
@@ -422,6 +460,83 @@ function ChatArea() {
         }
       : undefined
   ), [liveCoachGuidanceMetadata])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!isTrainingSession) {
+      setLlmRegistry(null)
+      setSelectedLlmChoiceKey(null)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    fetchLlmRegistry()
+      .then((registry) => {
+        if (!cancelled) setLlmRegistry(registry)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        console.warn('Failed to fetch LLM registry:', error)
+        setLlmRegistry(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isTrainingSession])
+
+  const llmModelChoices = React.useMemo(
+    () => getLlmRegistryModelChoices(llmRegistry),
+    [llmRegistry],
+  )
+  const selectedLlmChoice = React.useMemo(
+    () => llmModelChoices.find((choice) => choice.key === selectedLlmChoiceKey) ?? null,
+    [llmModelChoices, selectedLlmChoiceKey],
+  )
+  const selectedLlmProvider = selectedLlmChoice?.provider ?? llmModelChoices[0]?.provider ?? ''
+  const llmProviderOptions = React.useMemo(() => {
+    const providers = new Map<string, string>()
+    for (const choice of llmModelChoices) {
+      if (!providers.has(choice.provider)) {
+        providers.set(choice.provider, choice.providerLabel)
+      }
+    }
+    return Array.from(providers, ([provider, label]) => ({ provider, label }))
+  }, [llmModelChoices])
+  const selectedProviderModelChoices = React.useMemo(
+    () => llmModelChoices.filter((choice) => choice.provider === selectedLlmProvider),
+    [llmModelChoices, selectedLlmProvider],
+  )
+  const llmSelectionMetadata = React.useMemo(
+    () => buildLlmSelectionMetadata(selectedLlmChoice),
+    [selectedLlmChoice],
+  )
+  const outgoingMessageMetadata = React.useMemo(
+    () => mergeMetadata(liveCoachGuidanceMetadata, llmSelectionMetadata),
+    [liveCoachGuidanceMetadata, llmSelectionMetadata],
+  )
+
+  useEffect(() => {
+    setSelectedLlmChoiceKey((currentKey) => {
+      if (llmModelChoices.length === 0) return null
+      if (currentKey && llmModelChoices.some((choice) => choice.key === currentKey)) {
+        return currentKey
+      }
+      return selectDefaultLlmModelChoice(llmRegistry)?.key ?? llmModelChoices[0].key
+    })
+  }, [llmModelChoices, llmRegistry])
+
+  const handleLlmProviderChange = React.useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    const provider = event.target.value
+    const providerChoices = llmModelChoices.filter((choice) => choice.provider === provider)
+    const nextChoice = providerChoices.find((choice) => choice.isDefault) ?? providerChoices[0] ?? null
+    setSelectedLlmChoiceKey(nextChoice?.key ?? null)
+  }, [llmModelChoices])
+
+  const handleLlmModelChange = React.useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedLlmChoiceKey(event.target.value || null)
+  }, [])
 
   useEffect(() => {
     setTrainingSessionCompleted(false)
@@ -652,7 +767,7 @@ function ChatArea() {
 
   const handleSend = React.useCallback(async () => {
     const outgoingText = chat.inputValue.trim()
-    const success = await sendChatMessage(liveCoachGuidanceMetadata)
+    const success = await sendChatMessage(outgoingMessageMetadata)
     if (!success) return
     if (trainingSessionId && outgoingText) {
       scheduleGuidanceRefresh({
@@ -661,7 +776,7 @@ function ChatArea() {
               speaker: 'user',
               text: outgoingText,
               metadata: {
-                ...(liveCoachGuidanceMetadata || {}),
+                ...(outgoingMessageMetadata || {}),
                 source: 'live_coach_text_input',
                 trainingMode,
                 interactionMode,
@@ -685,7 +800,7 @@ function ChatArea() {
     handleEndBattle,
     interactionMode,
     isLiveCoachSession,
-    liveCoachGuidanceMetadata,
+    outgoingMessageMetadata,
     scheduleGuidanceRefresh,
     selectedRoomType,
     sendChatMessage,
@@ -714,7 +829,6 @@ function ChatArea() {
     )
   }
 
-  const isTrainingSession = Boolean(trainingSessionId)
   const isBattlePrep = selectedRoomType === 'battle_prep' && !isTrainingSession
   const isVoiceBattlePrep = isTrainingModeBattlePrep(
     selectedRoomType,
@@ -1287,6 +1401,46 @@ function ChatArea() {
               {trainingSessionCompleted ? tr('已结束', 'Ended') : tr('结束练习', 'End practice')}
             </button>
           </div>
+
+          {llmModelChoices.length > 0 && (
+            <div
+              className="chat-page-llm-selector"
+              data-testid="training-llm-selector"
+              aria-label={t('training.llm.selectorLabel')}
+            >
+              <span className="chat-page-llm-selector-title">{t('training.llm.selectorLabel')}</span>
+              <label>
+                <span>{t('training.llm.provider')}</span>
+                <select
+                  aria-label={t('training.llm.providerAria')}
+                  value={selectedLlmProvider}
+                  onChange={handleLlmProviderChange}
+                  disabled={chat.sending}
+                >
+                  {llmProviderOptions.map((provider) => (
+                    <option key={provider.provider} value={provider.provider}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{t('training.llm.model')}</span>
+                <select
+                  aria-label={t('training.llm.modelAria')}
+                  value={selectedLlmChoice?.key ?? selectedProviderModelChoices[0]?.key ?? ''}
+                  onChange={handleLlmModelChange}
+                  disabled={chat.sending}
+                >
+                  {selectedProviderModelChoices.map((choice) => (
+                    <option key={choice.key} value={choice.key}>
+                      {choice.modelLabel}{choice.isDefault ? ` (${t('training.llm.defaultBadge')})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
 
           <div
             id="training-scene-details"
