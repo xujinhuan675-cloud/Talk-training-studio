@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +14,10 @@ from application.ports.realtime import (
     TrainingTranscriptSink,
     TrainingVoiceContext,
 )
+from application.services.stakeholder.dto import MessageDTO
+from application.services.training_studio.session_service import TrainingSessionService
+from domain.common.unit_of_work import AbstractUnitOfWork
+from domain.stakeholder.entity import Message
 
 
 FINAL_TRANSCRIPT_EVENT_TYPES = {
@@ -152,6 +157,75 @@ class MemoryTrainingTranscriptSink(TrainingTranscriptSink):
         )
 
 
+RoomMessagePublisher = Callable[[int, MessageDTO], Awaitable[None]]
+
+
+class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
+    """Persist realtime transcripts through the current TalkWise room storage."""
+
+    def __init__(
+        self,
+        *,
+        uow_factory: Callable[..., AbstractUnitOfWork],
+        session_service: TrainingSessionService | None = None,
+        publish_message: RoomMessagePublisher | None = None,
+        record_training_turns: bool = True,
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._session_service = session_service
+        self._publish_message = publish_message
+        self._record_training_turns = record_training_turns
+
+    async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
+        metadata = transcript_to_message_metadata(transcript)
+        sender_type, sender_id = _sender_for_transcript(transcript)
+        room_id = transcript.binding.room_id
+
+        async with self._uow_factory() as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            if room is None:
+                raise ValueError(f"Chat room {room_id} not found")
+            saved = await uow.stakeholder_message_repository.create(
+                Message(
+                    id=None,
+                    room_id=room_id,
+                    sender_type=sender_type,
+                    sender_id=sender_id,
+                    content=transcript.text,
+                    metadata=metadata,
+                )
+            )
+            await uow.chat_room_repository.update_last_message_at(room_id, saved.timestamp)
+            message = MessageDTO.model_validate(saved)
+
+        if self._publish_message is not None:
+            await self._publish_message(room_id, message)
+
+        if self._record_training_turns and self._session_service is not None:
+            await self._session_service.record_turns(transcript.binding.training_session_id)
+
+        payload = {
+            "trainingSessionId": transcript.binding.training_session_id,
+            "roomId": room_id,
+            "message": message.model_dump(mode="json"),
+        }
+        return PersistedRealtimeTranscript(
+            transcript=transcript,
+            message_id=message.id,
+            payload=payload,
+        )
+
+
+def _sender_for_transcript(transcript: RealtimeTranscript) -> tuple[str, str]:
+    metadata = dict(transcript.metadata or {})
+    sender_id = metadata.get("sender_id") or metadata.get("senderId")
+    if transcript.role == "assistant":
+        return "persona", str(sender_id or "assistant")
+    if transcript.role == "system":
+        return "system", str(sender_id or "training_coach")
+    return "user", str(sender_id or "user")
+
+
 def _metadata_text(payload: dict[str, object], *keys: str) -> str | None:
     value = _metadata_value(payload, *keys)
     if value is None:
@@ -231,6 +305,7 @@ def _metadata_from_event(
         "realtime": realtime,
     }
     for output_key, input_keys in {
+        "sender_id": ("sender_id", "senderId", "user_id", "userId"),
         "trainingProfile": ("trainingProfile", "training_profile"),
         "sourceLanguage": ("sourceLanguage", "source_language", "sourceLang"),
         "targetLanguage": ("targetLanguage", "target_language", "targetLang"),
@@ -249,6 +324,8 @@ def _metadata_from_event(
 __all__ = [
     "FINAL_TRANSCRIPT_EVENT_TYPES",
     "MemoryTrainingTranscriptSink",
+    "RealtimeTranscriptPersistenceSink",
+    "RoomMessagePublisher",
     "StaticTrainingContextInjector",
     "build_realtime_transcript",
     "extract_final_transcript",

@@ -18,6 +18,8 @@ from application.ports.realtime import (
 )
 from application.services.training_studio.realtime_pipeline import build_realtime_transcript
 
+_EVENT_PUMP_CLOSE_TIMEOUT_SECONDS = 1.0
+
 
 class RealtimePipelineRunnerStateError(ValueError):
     """Raised when a runner command is called before the pipeline is ready."""
@@ -38,6 +40,7 @@ class RealtimePipelineSessionRunner:
         self._config: RealtimePipelineConfig | None = None
         self._realtime_session_id: str | None = None
         self._events_task: asyncio.Task[None] | None = None
+        self._closed = True
 
     @property
     def context(self) -> TrainingVoiceContext | None:
@@ -94,23 +97,27 @@ class RealtimePipelineSessionRunner:
         self._config = config
         self._realtime_session_id = realtime_session_id or str(uuid4())
         await self._adapter.start(context, config)
+        self._closed = False
         self._events_task = asyncio.create_task(
             self._pump_events(),
             name=f"training-studio-realtime-events-{self._realtime_session_id}",
         )
 
     async def append_audio(self, chunk: RealtimeAudioChunk) -> None:
-        self._require_started()
+        self._require_open()
         await self._adapter.append_audio(chunk)
 
     async def commit(self) -> None:
-        self._require_started()
+        self._require_open()
         await self._adapter.commit_audio()
 
     async def commit_audio(self) -> None:
         await self.commit()
 
     async def close(self) -> None:
+        if self._closed and self._events_task is None:
+            return
+        self._closed = True
         try:
             await self._adapter.close()
         finally:
@@ -147,15 +154,27 @@ class RealtimePipelineSessionRunner:
         task = self._events_task
         if task is None:
             return
-        if not task.done():
-            task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-        self._events_task = None
+        try:
+            if not task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(task), timeout=_EVENT_PUMP_CLOSE_TIMEOUT_SECONDS
+                    )
+                except TimeoutError:
+                    task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        finally:
+            self._events_task = None
 
     def _require_started(self) -> None:
         if self._context is None or self._config is None or self._realtime_session_id is None:
             raise RealtimePipelineRunnerStateError("Realtime pipeline runner is not started")
+
+    def _require_open(self) -> None:
+        self._require_started()
+        if self._closed:
+            raise RealtimePipelineRunnerStateError("Realtime pipeline runner is closed")
 
 
 __all__ = [

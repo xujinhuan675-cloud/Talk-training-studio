@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -154,6 +154,146 @@ class SQLAlchemyMessageRepository(MessageRepository):
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
 
+    async def list_path_to_message(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        *,
+        limit: int = 200,
+        include_deleted: bool = False,
+    ) -> list[Message]:
+        messages: list[Message] = []
+        seen: set[str] = set()
+        current_id: str | None = message_public_id
+        while current_id and len(messages) < limit:
+            if current_id in seen:
+                raise ValueError("Message tree contains a cycle")
+            seen.add(current_id)
+
+            message = await self.get_by_public_id(current_id)
+            if message is None or message.conversation_id != conversation_id:
+                return []
+            if include_deleted or message.status != "deleted":
+                messages.append(message)
+            current_id = message.parent_message_id
+
+        messages.reverse()
+        return messages
+
+    async def search_by_content(
+        self,
+        conversation_id: int,
+        query: str,
+        *,
+        skip: int = 0,
+        limit: int = 20,
+        branch_id: Optional[str] = None,
+        roles: Optional[Sequence[str]] = None,
+        statuses: Optional[Sequence[str]] = None,
+    ) -> list[Message]:
+        normalized = query.strip().lower()
+        if not normalized:
+            return []
+
+        like_pattern = f"%{_escape_like(normalized)}%"
+        sql = (
+            select(MessageModel)
+            .where(MessageModel.conversation_id == conversation_id)
+            .where(func.lower(MessageModel.content).like(like_pattern, escape="\\"))
+            .order_by(MessageModel.created_at.desc(), MessageModel.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        if branch_id is not None:
+            sql = sql.where(MessageModel.branch_id == branch_id)
+        if roles:
+            sql = sql.where(MessageModel.role.in_(list(roles)))
+        if statuses:
+            sql = sql.where(MessageModel.status.in_(list(statuses)))
+        else:
+            sql = sql.where(MessageModel.status != "deleted")
+
+        result = await self.session.execute(sql)
+        return [self._to_entity(m) for m in result.scalars().all()]
+
+    async def list_context_window(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        *,
+        before: int = 2,
+        after: int = 2,
+        branch_id: Optional[str] = None,
+        include_deleted: bool = False,
+    ) -> list[Message]:
+        target = await self.get_by_public_id(message_public_id)
+        if target is None or target.conversation_id != conversation_id or target.id is None:
+            return []
+        if target.status == "deleted" and not include_deleted:
+            return []
+        if branch_id is not None and target.branch_id != branch_id:
+            return []
+
+        effective_branch_id = branch_id if branch_id is not None else target.branch_id
+
+        path = await self.list_path_to_message(
+            conversation_id,
+            message_public_id,
+            include_deleted=include_deleted,
+        )
+        if not path or path[-1].public_id != message_public_id:
+            return []
+
+        previous = path[max(0, len(path) - before - 1) : -1] if before > 0 else []
+        next_messages = await self._list_branch_continuation(
+            conversation_id,
+            target,
+            branch_id=effective_branch_id,
+            limit=max(0, after),
+            include_deleted=include_deleted,
+        )
+
+        return previous + [target] + next_messages
+
+    async def _list_branch_continuation(
+        self,
+        conversation_id: int,
+        target: Message,
+        *,
+        branch_id: Optional[str],
+        limit: int,
+        include_deleted: bool,
+    ) -> list[Message]:
+        messages: list[Message] = []
+        current = target
+        seen = {target.public_id}
+
+        while len(messages) < limit:
+            query = (
+                select(MessageModel)
+                .where(MessageModel.conversation_id == conversation_id)
+                .where(MessageModel.parent_message_id == current.public_id)
+                .order_by(MessageModel.created_at.asc(), MessageModel.id.asc())
+            )
+            if branch_id is not None:
+                query = query.where(MessageModel.branch_id == branch_id)
+            if not include_deleted:
+                query = query.where(MessageModel.status != "deleted")
+
+            result = await self.session.execute(query)
+            children = [self._to_entity(m) for m in result.scalars().all()]
+            if not children:
+                break
+
+            next_message = children[-1]
+            if next_message.public_id in seen:
+                raise ValueError("Message tree contains a cycle")
+            seen.add(next_message.public_id)
+            messages.append(next_message)
+            current = next_message
+
+        return messages
+
     async def count_by_conversation(self, conversation_id: int) -> int:
         query = (
             select(func.count())
@@ -162,3 +302,7 @@ class SQLAlchemyMessageRepository(MessageRepository):
         )
         result = await self.session.execute(query)
         return int(result.scalar() or 0)
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

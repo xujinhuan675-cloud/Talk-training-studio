@@ -10,7 +10,11 @@ import json
 from datetime import datetime, timezone
 from typing import AsyncIterator, Callable, Optional
 
-from application.dto import ChatRequestDTO, MessageDTO_Agent, RunDTO
+from application.dto import (
+    ChatRequestDTO,
+    MessageDTO_Agent,
+    RunDTO,
+)
 from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMResponse
 from core.logging_config import get_logger
 from domain.common.unit_of_work import AbstractUnitOfWork

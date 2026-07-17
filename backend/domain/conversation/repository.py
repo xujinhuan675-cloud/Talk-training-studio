@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Sequence
 
 from .entity import AgentConfig, Conversation, Message, Run
 
@@ -72,6 +72,41 @@ class MessageRepository(ABC):
 
     @abstractmethod
     async def list_children(self, parent_message_id: str) -> list[Message]: ...
+
+    @abstractmethod
+    async def list_path_to_message(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        *,
+        limit: int = 200,
+        include_deleted: bool = False,
+    ) -> list[Message]: ...
+
+    @abstractmethod
+    async def search_by_content(
+        self,
+        conversation_id: int,
+        query: str,
+        *,
+        skip: int = 0,
+        limit: int = 20,
+        branch_id: Optional[str] = None,
+        roles: Optional[Sequence[str]] = None,
+        statuses: Optional[Sequence[str]] = None,
+    ) -> list[Message]: ...
+
+    @abstractmethod
+    async def list_context_window(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        *,
+        before: int = 2,
+        after: int = 2,
+        branch_id: Optional[str] = None,
+        include_deleted: bool = False,
+    ) -> list[Message]: ...
 
     @abstractmethod
     async def count_by_conversation(self, conversation_id: int) -> int: ...

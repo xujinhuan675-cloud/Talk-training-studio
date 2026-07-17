@@ -85,11 +85,29 @@ async def test_message_repository_persists_tree_fields_and_queries_children(sess
     latest = await msg_repo.get_latest_by_conversation(conv.id, branch_id="main")
     children = await msg_repo.list_children(root.public_id)
     main_messages = await msg_repo.list_by_conversation(conv.id, branch_id="main")
+    sibling_path = await msg_repo.list_path_to_message(conv.id, sibling.public_id)
+    search_hits = await msg_repo.search_by_content(conv.id, "WORLD")
+    main_context = await msg_repo.list_context_window(
+        conv.id,
+        assistant.public_id,
+        before=1,
+        after=1,
+    )
+    sibling_context = await msg_repo.list_context_window(
+        conv.id,
+        sibling.public_id,
+        before=1,
+        after=0,
+    )
 
     assert by_public_id.id == root.id
     assert latest.public_id == assistant.public_id
     assert [m.public_id for m in children] == [assistant.public_id, sibling.public_id]
     assert [m.public_id for m in main_messages] == [root.public_id, assistant.public_id]
+    assert [m.public_id for m in sibling_path] == [root.public_id, sibling.public_id]
+    assert [m.public_id for m in search_hits] == [assistant.public_id]
+    assert [m.public_id for m in main_context] == [root.public_id, assistant.public_id]
+    assert [m.public_id for m in sibling_context] == [root.public_id, sibling.public_id]
     assert assistant.parent_message_id == root.public_id
     assert assistant.provider == "openai"
     assert assistant.model == "gpt-test"

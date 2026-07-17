@@ -13,6 +13,7 @@ from application.ports.realtime import (
     TrainingVoiceContext,
 )
 from application.services.training_studio.realtime_pipeline_runner import (
+    RealtimePipelineRunnerStateError,
     RealtimePipelineSessionRunner,
 )
 
@@ -200,3 +201,34 @@ async def test_runner_close_closes_adapter():
     await runner.close()
 
     assert adapter.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_close_drains_queued_final_transcripts_before_stopping_pump():
+    runner, adapter, sink = await _started_runner()
+
+    await adapter.emit(
+        {
+            "type": "transcript.done",
+            "event_id": "evt-close",
+            "text": "Persist this queued turn before closing.",
+        }
+    )
+    await runner.close()
+
+    assert len(sink.persisted) == 1
+    assert sink.persisted[0].event_id == "evt-close"
+    assert sink.persisted[0].text == "Persist this queued turn before closing."
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_audio_commands_after_close():
+    runner, _adapter, _sink = await _started_runner()
+
+    await runner.close()
+    await runner.close()
+
+    with pytest.raises(RealtimePipelineRunnerStateError, match="closed"):
+        await runner.append_audio(RealtimeAudioChunk(data=b"late-pcm"))
+    with pytest.raises(RealtimePipelineRunnerStateError, match="closed"):
+        await runner.commit_audio()

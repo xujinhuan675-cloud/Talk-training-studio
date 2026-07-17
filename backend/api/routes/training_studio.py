@@ -71,10 +71,10 @@ from application.services.training_studio.openai_realtime import (
 )
 from application.services.training_studio.realtime_pipeline import (
     FINAL_TRANSCRIPT_EVENT_TYPES,
+    RealtimeTranscriptPersistenceSink,
     build_realtime_transcript,
     extract_final_transcript,
     realtime_role_for_event,
-    transcript_to_message_metadata,
 )
 from application.services.training_studio.realtime_pipeline_runner import (
     RealtimePipelineSessionRunner,
@@ -953,7 +953,13 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
         "available": bool(capability.available),
         "coreAvailable": bool(capability.core_available),
         "websocketAvailable": bool(capability.websocket_available),
+        "vadAvailable": bool(getattr(capability, "vad_available", False)),
+        "sttAvailable": bool(getattr(capability, "stt_available", False)),
+        "ttsAvailable": bool(getattr(capability, "tts_available", False)),
         "missingModules": [str(module) for module in capability.missing_modules],
+        "optionalMissingModules": [
+            str(module) for module in getattr(capability, "optional_missing_modules", ())
+        ],
         "error": capability.error,
     }
     with suppress(Exception):
@@ -1078,56 +1084,6 @@ def _extract_final_transcript(payload: dict[str, object]) -> str | None:
     return extract_final_transcript(payload)
 
 
-def _metadata_scalar(value: object | None) -> object | None:
-    if isinstance(value, str | int | float | bool) or value is None:
-        return value
-    return None
-
-
-def _wire_metadata_value(payload: dict[str, object], *keys: str) -> object | None:
-    value = _wire_value(payload, *keys)
-    if value is not None:
-        return value
-    metadata = payload.get("metadata")
-    if isinstance(metadata, dict):
-        for key in keys:
-            value = metadata.get(key)
-            if value is not None:
-                return value
-    return None
-
-
-def _metadata_scalar_mapping(value: object | None) -> dict[str, object] | None:
-    if not isinstance(value, dict):
-        return None
-    result: dict[str, object] = {}
-    for key, item in value.items():
-        scalar = _metadata_scalar(item)
-        if scalar is not None:
-            result[str(key)] = scalar
-    return result or None
-
-
-def _realtime_transcript_metadata(
-    payload: dict[str, object],
-    *,
-    training_session_id: str,
-    room_id: int,
-    provider: str,
-    realtime_session_id: str,
-    role: str = "user",
-) -> dict[str, object]:
-    transcript = _normalize_realtime_transcript(
-        payload,
-        training_session_id=training_session_id,
-        room_id=room_id,
-        provider=provider,
-        realtime_session_id=realtime_session_id,
-        role=role,
-    )
-    return transcript_to_message_metadata(transcript)
-
-
 def _realtime_role_for_event(payload: dict[str, object]) -> str:
     return realtime_role_for_event(payload)
 
@@ -1212,8 +1168,12 @@ async def _persist_realtime_message(
         await uow.chat_room_repository.update_last_message_at(room_id, saved.timestamp)
         dto = MessageDTO.model_validate(saved)
 
-    await room_event_bus.publish(room_id, "message", dto.model_dump(mode="json"))
+    await _publish_realtime_room_message(room_id, dto)
     return dto
+
+
+async def _publish_realtime_room_message(room_id: int, message: MessageDTO) -> None:
+    await room_event_bus.publish(room_id, "message", message.model_dump(mode="json"))
 
 
 class _WebSocketTrainingTranscriptSink:
@@ -1231,52 +1191,24 @@ class _WebSocketTrainingTranscriptSink:
         self._session = session
         self._training_session_id = training_session_id
         self._room_id = room_id
-        self._svc = svc
-        self._uow_factory = uow_factory
+        self._sink = RealtimeTranscriptPersistenceSink(
+            uow_factory=uow_factory,
+            session_service=svc,
+            publish_message=_publish_realtime_room_message,
+        )
 
     async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
-        message = await _persist_realtime_message(
-            self._room_id,
-            transcript.text,
-            uow_factory=self._uow_factory,
-            metadata=transcript_to_message_metadata(transcript),
-            sender_type="persona" if transcript.role == "assistant" else "user",
-            sender_id="assistant" if transcript.role == "assistant" else "user",
-        )
-        await self._svc.record_turns(self._training_session_id)
-        payload = {
-            "trainingSessionId": self._training_session_id,
-            "roomId": self._room_id,
-            "message": message.model_dump(mode="json"),
-        }
+        persisted = await self._sink.persist(transcript)
+        payload = dict(persisted.payload)
+        payload.setdefault("trainingSessionId", self._training_session_id)
+        payload.setdefault("roomId", self._room_id)
         await _send_wire_event(
             self._websocket,
             "transcript.persisted",
             self._session,
             payload,
         )
-        return PersistedRealtimeTranscript(
-            transcript=transcript,
-            message_id=message.id,
-            payload=payload,
-        )
-
-
-async def _persist_realtime_transcript(
-    room_id: int,
-    transcript: str,
-    *,
-    uow_factory: Callable[..., AbstractUnitOfWork],
-    metadata: dict[str, object] | None = None,
-) -> MessageDTO:
-    return await _persist_realtime_message(
-        room_id,
-        transcript,
-        uow_factory=uow_factory,
-        metadata=metadata,
-        sender_type="user",
-        sender_id="user",
-    )
+        return persisted
 
 
 async def _pump_openai_realtime_events(
@@ -1289,6 +1221,14 @@ async def _pump_openai_realtime_events(
     provider: str,
     uow_factory: Callable[..., AbstractUnitOfWork],
 ) -> None:
+    sink = _WebSocketTrainingTranscriptSink(
+        websocket=websocket,
+        session=session,
+        training_session_id=binding[0],
+        room_id=binding[1],
+        svc=svc,
+        uow_factory=uow_factory,
+    )
     while True:
         event = await openai_client.receive_event()
         if event is None:
@@ -1310,26 +1250,7 @@ async def _pump_openai_realtime_events(
             continue
         if session.status.value == "processing":
             await _send_event(websocket, session.transcript_done(transcript.text))
-        metadata = transcript_to_message_metadata(transcript)
-        message = await _persist_realtime_message(
-            binding[1],
-            transcript.text,
-            uow_factory=uow_factory,
-            metadata=metadata,
-            sender_type="persona" if transcript.role == "assistant" else "user",
-            sender_id="assistant" if transcript.role == "assistant" else "user",
-        )
-        await svc.record_turns(binding[0])
-        await _send_wire_event(
-            websocket,
-            "transcript.persisted",
-            session,
-            {
-                "trainingSessionId": binding[0],
-                "roomId": binding[1],
-                "message": message.model_dump(mode="json"),
-            },
-        )
+        await sink.persist(transcript)
         if session.status.value == "processing":
             await _send_event(websocket, session.listen())
 
@@ -1648,13 +1569,16 @@ async def persist_realtime_transcripts(
             status_code=400, detail="Realtime transcript persistence requires a bound session"
         )
 
-    persisted: list[MessageDTO] = []
+    sink = RealtimeTranscriptPersistenceSink(
+        uow_factory=uow_factory,
+        session_service=svc,
+        publish_message=_publish_realtime_room_message,
+    )
+    persisted_messages: list[dict[str, object]] = []
     for item in body.messages:
         content = item.content.strip()
         if not content:
             continue
-        sender_type = "persona" if item.role == "assistant" else "user"
-        sender_id = item.sender_id or ("assistant" if item.role == "assistant" else "user")
         payload: dict[str, object] = {
             "type": f"client.realtime_transcript.{item.role}",
             "text": content,
@@ -1663,7 +1587,7 @@ async def persist_realtime_transcripts(
             "response_id": item.response_id,
             **item.metadata,
         }
-        metadata = _realtime_transcript_metadata(
+        transcript = _normalize_realtime_transcript(
             payload,
             training_session_id=binding[0],
             room_id=binding[1],
@@ -1671,22 +1595,17 @@ async def persist_realtime_transcripts(
             realtime_session_id=binding[0],
             role=item.role,
         )
-        message = await _persist_realtime_message(
-            binding[1],
-            content,
-            uow_factory=uow_factory,
-            metadata=metadata,
-            sender_type=sender_type,
-            sender_id=sender_id,
-        )
-        persisted.append(message)
+        if item.sender_id:
+            transcript = replace(
+                transcript,
+                metadata={**dict(transcript.metadata), "sender_id": item.sender_id},
+            )
+        persisted = await sink.persist(transcript)
+        message = persisted.payload.get("message")
+        if isinstance(message, dict):
+            persisted_messages.append(message)
 
-    if persisted:
-        await svc.record_turns(binding[0], len(persisted))
-
-    return success_response(
-        data={"messages": [message.model_dump(mode="json") for message in persisted]}
-    )
+    return success_response(data={"messages": persisted_messages})
 
 
 @router.get("/sessions/{session_id}/guidance", summary="Get Training Studio live guidance")
@@ -2383,25 +2302,15 @@ async def realtime_training_session(
                         {"reason": "empty_transcript"},
                     )
                     continue
-                message = await _persist_realtime_message(
-                    binding[1],
-                    transcript.text,
+                sink = _WebSocketTrainingTranscriptSink(
+                    websocket=websocket,
+                    session=session,
+                    training_session_id=binding[0],
+                    room_id=binding[1],
+                    svc=svc,
                     uow_factory=uow_factory,
-                    metadata=transcript_to_message_metadata(transcript),
-                    sender_type="persona" if transcript.role == "assistant" else "user",
-                    sender_id="assistant" if transcript.role == "assistant" else "user",
                 )
-                await svc.record_turns(binding[0])
-                await _send_wire_event(
-                    websocket,
-                    "transcript.persisted",
-                    session,
-                    {
-                        "trainingSessionId": binding[0],
-                        "roomId": binding[1],
-                        "message": message.model_dump(mode="json"),
-                    },
-                )
+                await sink.persist(transcript)
             else:
                 await _send_event(
                     websocket, session.fail("Unsupported event type", "UNSUPPORTED_EVENT")

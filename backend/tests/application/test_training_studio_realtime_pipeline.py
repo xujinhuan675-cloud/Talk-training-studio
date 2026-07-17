@@ -3,11 +3,66 @@ import pytest
 from application.ports.realtime import RealtimeSessionBinding
 from application.services.training_studio.realtime_pipeline import (
     MemoryTrainingTranscriptSink,
+    RealtimeTranscriptPersistenceSink,
     StaticTrainingContextInjector,
     build_realtime_transcript,
     extract_final_transcript,
     transcript_to_message_metadata,
 )
+from domain.stakeholder.entity import ChatRoom, Message
+
+
+class _RoomRepository:
+    def __init__(self, room: ChatRoom) -> None:
+        self.room = room
+
+    async def get_by_id(self, room_id: int) -> ChatRoom | None:
+        if self.room.id == room_id:
+            return self.room
+        return None
+
+    async def update_last_message_at(self, room_id: int, timestamp) -> None:
+        if self.room.id == room_id:
+            self.room.last_message_at = timestamp
+
+
+class _MessageRepository:
+    def __init__(self) -> None:
+        self.messages: list[Message] = []
+
+    async def create(self, message: Message) -> Message:
+        saved = Message(
+            id=len(self.messages) + 1,
+            room_id=message.room_id,
+            sender_type=message.sender_type,
+            sender_id=message.sender_id,
+            content=message.content,
+            metadata=message.metadata,
+            timestamp=message.timestamp,
+        )
+        self.messages.append(saved)
+        return saved
+
+
+class _RealtimePersistenceUoW:
+    def __init__(self, room: ChatRoom, messages: _MessageRepository) -> None:
+        self.chat_room_repository = _RoomRepository(room)
+        self.stakeholder_message_repository = messages
+
+    async def __aenter__(self) -> "_RealtimePersistenceUoW":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _TrainingSessionRecorder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    async def record_turns(self, session_id: str, count: int = 1):
+        self.calls.append((session_id, count))
+        return None
 
 
 def test_build_realtime_transcript_maps_openai_user_event_to_provider_neutral_dto():
@@ -81,6 +136,26 @@ def test_build_realtime_transcript_maps_response_events_to_assistant_role():
     assert metadata["realtime"]["roomId"] == 7
 
 
+def test_build_realtime_transcript_maps_pipecat_user_id_to_sender_metadata():
+    transcript = build_realtime_transcript(
+        {
+            "type": "transcript.done",
+            "text": "I can start with the user problem.",
+            "user_id": "participant-7",
+            "source": "pipecat",
+        },
+        binding=RealtimeSessionBinding(training_session_id="training-7", room_id=17),
+        provider="pipecat",
+        realtime_session_id="rt-7",
+    )
+
+    assert transcript is not None
+    assert transcript.metadata["sender_id"] == "participant-7"
+    metadata = transcript_to_message_metadata(transcript)
+    assert metadata["sender_id"] == "participant-7"
+    assert metadata["realtime"]["provider"] == "pipecat"
+
+
 def test_non_final_or_empty_transcript_events_are_ignored():
     assert extract_final_transcript({"type": "response.created", "text": "draft"}) is None
     assert extract_final_transcript({"type": "transcript.done", "text": "   "}) is None
@@ -118,6 +193,49 @@ async def test_transcript_sink_persists_without_transport_dependency():
     assert persisted.payload["sender_type"] == "persona"
     assert persisted.payload["sender_id"] == "assistant"
     assert persisted.payload["metadata"]["realtime"]["provider"] == "pipecat"
+
+
+@pytest.mark.asyncio
+async def test_persistence_sink_writes_room_message_publishes_and_records_turn():
+    room = ChatRoom(id=12, name="Realtime room", type="battle_prep")
+    messages = _MessageRepository()
+    recorder = _TrainingSessionRecorder()
+    published = []
+    transcript = build_realtime_transcript(
+        {
+            "type": "response.audio_transcript.done",
+            "text": "We can define the pilot metric first.",
+            "metadata": {"sender_id": "customer-ai", "source": "pipecat"},
+        },
+        binding=RealtimeSessionBinding(training_session_id="training-6", room_id=12),
+        provider="pipecat",
+        realtime_session_id="rt-6",
+    )
+    assert transcript is not None
+
+    async def publish(room_id, message):
+        published.append((room_id, message))
+
+    sink = RealtimeTranscriptPersistenceSink(
+        uow_factory=lambda **_kwargs: _RealtimePersistenceUoW(room, messages),
+        session_service=recorder,
+        publish_message=publish,
+    )
+
+    persisted = await sink.persist(transcript)
+
+    assert persisted.message_id == 1
+    assert persisted.payload["trainingSessionId"] == "training-6"
+    assert persisted.payload["roomId"] == 12
+    assert persisted.payload["message"]["content"] == "We can define the pilot metric first."
+    assert messages.messages[0].sender_type == "persona"
+    assert messages.messages[0].sender_id == "customer-ai"
+    assert messages.messages[0].metadata["source"] == "pipecat"
+    assert messages.messages[0].metadata["trainingMode"] == "voice"
+    assert room.last_message_at == messages.messages[0].timestamp
+    assert published[0][0] == 12
+    assert published[0][1].content == "We can define the pilot metric first."
+    assert recorder.calls == [("training-6", 1)]
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -32,8 +33,8 @@ class ConversationRef:
     metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        provider = self.provider.strip()
-        conversation_id = self.conversation_id.strip()
+        provider = _normalize_required_text(self.provider, "provider")
+        conversation_id = _normalize_required_text(self.conversation_id, "conversation_id")
         if not provider:
             raise ValueError("provider cannot be empty")
         if not conversation_id:
@@ -43,14 +44,14 @@ class ConversationRef:
         object.__setattr__(
             self,
             "branch_tail_message_id",
-            self.branch_tail_message_id.strip() if self.branch_tail_message_id else None,
+            _normalize_optional_text(self.branch_tail_message_id),
         )
         object.__setattr__(
             self,
             "legacy_room_id",
-            self.legacy_room_id.strip() if self.legacy_room_id else None,
+            _normalize_optional_text(self.legacy_room_id),
         )
-        object.__setattr__(self, "metadata", dict(self.metadata or {}))
+        object.__setattr__(self, "metadata", _copy_metadata(self.metadata))
 
     @property
     def session_room_id(self) -> str:
@@ -69,18 +70,17 @@ class TrainingTurn:
     metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        text = self.text.strip()
-        if not text:
-            raise ValueError("text cannot be empty")
-        object.__setattr__(self, "text", text)
-        object.__setattr__(self, "metadata", dict(self.metadata or {}))
+        object.__setattr__(self, "speaker", _normalize_speaker(self.speaker))
+        object.__setattr__(self, "text", _normalize_required_text(self.text, "text"))
+        object.__setattr__(self, "turn_id", _normalize_optional_text(self.turn_id))
+        object.__setattr__(self, "metadata", _copy_metadata(self.metadata))
 
     def to_transcript_turn(self) -> TranscriptTurn:
         return TranscriptTurn(
             speaker=self.speaker,
             text=self.text,
             turn_id=self.turn_id,
-            metadata=dict(self.metadata),
+            metadata=_copy_metadata(self.metadata),
         )
 
 
@@ -123,7 +123,7 @@ class TrainingCoreOrchestrator:
         guidance_service: TrainingLiveGuidanceService | None = None,
     ) -> None:
         self._session_service = session_service
-        self._conversation_adapter = conversation_adapter
+        self._conversation_adapter = _require_conversation_adapter(conversation_adapter)
         self._guidance_service = guidance_service or TrainingLiveGuidanceService()
 
     async def start_session(
@@ -131,7 +131,9 @@ class TrainingCoreOrchestrator:
         payload: CreateTrainingSessionDTO | TrainingTaskConfigDTO | dict,
     ) -> StartedTrainingSession:
         session = await self._session_service.create_session(payload)
-        conversation = await self._conversation_adapter.create_conversation(session)
+        conversation = _require_conversation_ref(
+            await self._conversation_adapter.create_conversation(session)
+        )
         started = await self._session_service.start_session(
             session.session_id,
             room_id=conversation.session_room_id,
@@ -145,8 +147,13 @@ class TrainingCoreOrchestrator:
         conversation: ConversationRef,
         turn: TrainingTurn,
     ) -> ConversationRef:
-        updated = await self._conversation_adapter.append_turn(conversation, turn)
-        await self._session_service.record_turns(training_session_id)
+        session_id = _normalize_required_text(training_session_id, "training_session_id")
+        conversation = _require_conversation_ref(conversation)
+        turn = _require_training_turn(turn)
+        updated = _require_conversation_ref(
+            await self._conversation_adapter.append_turn(conversation, turn)
+        )
+        await self._session_service.record_turns(session_id)
         return updated
 
     async def generate_guidance(
@@ -158,13 +165,62 @@ class TrainingCoreOrchestrator:
         rubric: Mapping[str, object] | None = None,
         limit: int | None = None,
     ) -> list[GuideEvent]:
+        session_id = _normalize_required_text(training_session_id, "training_session_id")
+        task_goal = _normalize_required_text(task_goal, "task_goal")
+        conversation = _require_conversation_ref(conversation)
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be at least 1")
         recent_turns = await self._conversation_adapter.recent_turns(
             conversation,
             limit=limit or self._guidance_service.window_size,
         )
         return await self._guidance_service.generate_guidance_async(
-            training_session_id=training_session_id,
+            training_session_id=session_id,
             task_goal=task_goal,
             rubric=dict(rubric or {}),
-            recent_turns=[turn.to_transcript_turn() for turn in recent_turns],
+            recent_turns=[
+                _require_training_turn(turn).to_transcript_turn() for turn in recent_turns
+            ],
         )
+
+
+def _normalize_required_text(value: object, field_name: str) -> str:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        raise ValueError(f"{field_name} cannot be empty")
+    return text
+
+
+def _normalize_optional_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_speaker(speaker: TranscriptSpeaker | str) -> TranscriptSpeaker | str:
+    if isinstance(speaker, TranscriptSpeaker):
+        return speaker
+    return _normalize_required_text(speaker, "speaker")
+
+
+def _copy_metadata(metadata: Mapping[str, object] | None) -> dict[str, object]:
+    return deepcopy(dict(metadata or {}))
+
+
+def _require_conversation_ref(value: object) -> ConversationRef:
+    if not isinstance(value, ConversationRef):
+        raise TypeError("conversation adapter must return ConversationRef")
+    return value
+
+
+def _require_conversation_adapter(value: object) -> TrainingConversationAdapter:
+    if not isinstance(value, TrainingConversationAdapter):
+        raise TypeError("conversation_adapter must implement TrainingConversationAdapter")
+    return value
+
+
+def _require_training_turn(value: object) -> TrainingTurn:
+    if not isinstance(value, TrainingTurn):
+        raise TypeError("turn must be TrainingTurn")
+    return value

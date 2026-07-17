@@ -264,6 +264,22 @@ class MessageDTO_Agent(DTOBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MessageLocationDTO(DTOBase):
+    """Message location data for branch navigation."""
+
+    message: MessageDTO_Agent
+    path: list[MessageDTO_Agent] = Field(default_factory=list)
+    context: list[MessageDTO_Agent] = Field(default_factory=list)
+
+
+class MessageSearchResultDTO(DTOBase):
+    """A message search hit with enough context to jump to its branch."""
+
+    message: MessageDTO_Agent
+    path: list[MessageDTO_Agent] = Field(default_factory=list)
+    context: list[MessageDTO_Agent] = Field(default_factory=list)
+
+
 class RunDTO(DTOBase):
     """Run tracking DTO."""
 

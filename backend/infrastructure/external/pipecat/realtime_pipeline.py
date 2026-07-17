@@ -11,6 +11,7 @@ import asyncio
 import importlib
 import importlib.util
 from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -31,6 +32,14 @@ CORE_PIPECAT_MODULES = (
     "pipecat.processors.frame_processor",
 )
 WEBSOCKET_PIPECAT_MODULE = "pipecat.transports.websocket.fastapi"
+SILERO_VAD_PIPECAT_MODULE = "pipecat.audio.vad.silero"
+OPENAI_STT_PIPECAT_MODULE = "pipecat.services.openai.stt"
+OPENAI_TTS_PIPECAT_MODULE = "pipecat.services.openai.tts"
+OPTIONAL_PIPECAT_FEATURE_MODULES = {
+    "vad": (SILERO_VAD_PIPECAT_MODULE, "onnxruntime"),
+    "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
+    "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,10 @@ class PipecatCapability:
     core_available: bool
     websocket_available: bool
     missing_modules: tuple[str, ...] = ()
+    vad_available: bool = False
+    stt_available: bool = False
+    tts_available: bool = False
+    optional_missing_modules: tuple[str, ...] = ()
     error: str | None = None
 
 
@@ -96,6 +109,7 @@ def get_pipecat_capability(*, require_websocket: bool = False) -> PipecatCapabil
     if require_websocket:
         modules.append(WEBSOCKET_PIPECAT_MODULE)
 
+    optional_status = _optional_feature_status()
     missing = tuple(module for module in modules if not _module_spec_exists(module))
     if missing:
         return PipecatCapability(
@@ -103,16 +117,20 @@ def get_pipecat_capability(*, require_websocket: bool = False) -> PipecatCapabil
             core_available=not any(module in CORE_PIPECAT_MODULES for module in missing),
             websocket_available=WEBSOCKET_PIPECAT_MODULE not in missing,
             missing_modules=missing,
+            **optional_status,
             error=f"Missing optional Pipecat module(s): {', '.join(missing)}",
         )
 
     try:
         runtime = import_pipecat_runtime(require_websocket=require_websocket)
     except ImportError as exc:
+        websocket_error = "websocket transport" in str(exc).lower()
         return PipecatCapability(
             available=False,
-            core_available=False,
+            core_available=websocket_error,
             websocket_available=False,
+            missing_modules=(WEBSOCKET_PIPECAT_MODULE,) if websocket_error else (),
+            **optional_status,
             error=str(exc),
         )
 
@@ -120,6 +138,7 @@ def get_pipecat_capability(*, require_websocket: bool = False) -> PipecatCapabil
         available=True if not require_websocket else runtime.websocket_available,
         core_available=True,
         websocket_available=runtime.websocket_available,
+        **optional_status,
     )
 
 
@@ -128,6 +147,21 @@ def _module_spec_exists(module: str) -> bool:
         return importlib.util.find_spec(module) is not None
     except (ImportError, ModuleNotFoundError, ValueError):
         return False
+
+
+def _optional_feature_status() -> dict[str, bool | tuple[str, ...]]:
+    missing_by_feature = {
+        feature: tuple(module for module in modules if not _module_spec_exists(module))
+        for feature, modules in OPTIONAL_PIPECAT_FEATURE_MODULES.items()
+    }
+    return {
+        "vad_available": not missing_by_feature["vad"],
+        "stt_available": not missing_by_feature["stt"],
+        "tts_available": not missing_by_feature["tts"],
+        "optional_missing_modules": tuple(
+            module for modules in missing_by_feature.values() for module in modules
+        ),
+    }
 
 
 def create_pipecat_realtime_pipeline(
@@ -220,6 +254,7 @@ class PipecatRealtimePipelineAdapter:
         self._handle: PipecatPipelineHandle | None = None
         self._context: TrainingVoiceContext | None = None
         self._config: RealtimePipelineConfig | None = None
+        self._closed = False
 
     @property
     def handle(self) -> PipecatPipelineHandle | None:
@@ -228,12 +263,16 @@ class PipecatRealtimePipelineAdapter:
         return self._handle
 
     async def start(self, context: TrainingVoiceContext, config: RealtimePipelineConfig) -> None:
+        if self._handle is not None and not self._closed:
+            raise RuntimeError("Pipecat realtime pipeline is already started")
+
         runtime = self._runtime or import_pipecat_runtime(
             require_websocket=self._websocket is not None
         )
         self._runtime = runtime
         self._context = context
         self._config = config
+        self._closed = False
         self._handle = build_pipecat_pipeline_handle(
             runtime=runtime,
             context=context,
@@ -249,7 +288,7 @@ class PipecatRealtimePipelineAdapter:
         )
 
     async def append_audio(self, chunk: RealtimeAudioChunk) -> None:
-        self._require_started()
+        self._require_open()
         assert self._handle is not None
         runtime = self._runtime or import_pipecat_runtime(
             require_websocket=self._websocket is not None
@@ -263,7 +302,7 @@ class PipecatRealtimePipelineAdapter:
         )
 
     async def commit_audio(self) -> None:
-        self._require_started()
+        self._require_open()
         handle = self._handle
         if handle is not None and hasattr(handle.worker, "flush_pipeline"):
             await handle.worker.flush_pipeline()
@@ -278,23 +317,35 @@ class PipecatRealtimePipelineAdapter:
             yield event
 
     async def close(self) -> None:
-        if self._handle is None:
+        if self._handle is None or self._closed:
             return
+        self._closed = True
         runtime = self._runtime or import_pipecat_runtime(
             require_websocket=self._websocket is not None
         )
-        if hasattr(self._handle.worker, "queue_frame"):
-            await self._handle.worker.queue_frame(runtime.EndFrame())
-        if self._handle.run_task is not None:
-            try:
-                await asyncio.wait_for(self._handle.run_task, timeout=5)
-            except TimeoutError:
-                self._handle.run_task.cancel()
-        await self._handle.event_queue.put({"type": "talkwise.pipecat.closed"})
+        try:
+            if hasattr(self._handle.worker, "end"):
+                await self._handle.worker.end()
+            elif hasattr(self._handle.worker, "queue_frame"):
+                await self._handle.worker.queue_frame(runtime.EndFrame())
+            if self._handle.run_task is not None:
+                try:
+                    await asyncio.wait_for(self._handle.run_task, timeout=5)
+                except TimeoutError:
+                    self._handle.run_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await self._handle.run_task
+        finally:
+            await self._handle.event_queue.put({"type": "talkwise.pipecat.closed"})
 
     def _require_started(self) -> None:
         if self._handle is None:
             raise RuntimeError("Pipecat realtime pipeline has not been started")
+
+    def _require_open(self) -> None:
+        self._require_started()
+        if self._closed:
+            raise RuntimeError("Pipecat realtime pipeline is closed")
 
 
 def build_pipecat_pipeline_handle(
@@ -372,23 +423,77 @@ def _event_from_pipecat_frame(
     config: RealtimePipelineConfig,
 ) -> Mapping[str, Any] | None:
     if isinstance(frame, runtime.TranscriptionFrame):
-        return {
+        user_id = getattr(frame, "user_id", None)
+        event: dict[str, Any] = {
             "type": "transcript.done",
             "text": frame.text,
             "provider": config.provider,
             "source": "pipecat",
-            "user_id": getattr(frame, "user_id", None),
+            "user_id": user_id,
+            "sender_id": user_id,
             "language": str(getattr(frame, "language", "") or "") or None,
             "timestamp": getattr(frame, "timestamp", None),
         }
+        return _with_frame_metadata(event, frame)
     if isinstance(frame, runtime.LLMContextAssistantTurnFrame):
-        return {
+        event = {
             "type": "response.audio_transcript.done",
             "text": frame.text,
             "provider": config.provider,
             "source": "pipecat",
             "timestamp": getattr(frame, "timestamp", None),
         }
+        return _with_frame_metadata(event, frame)
+    return None
+
+
+def _with_frame_metadata(event: dict[str, Any], frame: Any) -> dict[str, Any]:
+    metadata = _frame_event_metadata(frame)
+    if metadata:
+        event["metadata"] = metadata
+    return event
+
+
+def _frame_event_metadata(frame: Any) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    raw_metadata = getattr(frame, "metadata", None)
+    if isinstance(raw_metadata, Mapping):
+        for key, value in raw_metadata.items():
+            safe_value = _json_safe_metadata(value)
+            if safe_value is not None:
+                metadata[str(key)] = safe_value
+
+    pipecat_frame: dict[str, Any] = {}
+    for output_key, attr_name in {
+        "frameId": "id",
+        "frameName": "name",
+        "pts": "pts",
+    }.items():
+        safe_value = _json_safe_metadata(getattr(frame, attr_name, None))
+        if safe_value is not None:
+            pipecat_frame[output_key] = safe_value
+    if pipecat_frame:
+        metadata["pipecatFrame"] = pipecat_frame
+    return metadata
+
+
+def _json_safe_metadata(value: Any) -> Any | None:
+    if isinstance(value, str | int | float | bool):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_item = _json_safe_metadata(item)
+            if safe_item is not None:
+                result[str(key)] = safe_item
+        return result or None
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray | str):
+        result = [
+            safe_item for item in value if (safe_item := _json_safe_metadata(item)) is not None
+        ]
+        return result or None
     return None
 
 
@@ -452,9 +557,18 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "pipecat.pipeline.pipeline.Pipeline",
             "pipecat.pipeline.worker.PipelineWorker",
             "pipecat.workers.runner.WorkerRunner",
+        ),
+        "frameEntrypoints": (
             "pipecat.frames.frames.InputAudioRawFrame",
+            "pipecat.frames.frames.TranscriptionFrame",
+            "pipecat.frames.frames.LLMContextAssistantTurnFrame",
+            "pipecat.frames.frames.UserStartedSpeakingFrame",
+            "pipecat.frames.frames.UserStoppedSpeakingFrame",
         ),
         "websocketEntrypoint": ("pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport"),
+        "vadEntrypoint": ("pipecat.audio.vad.silero.SileroVADAnalyzer"),
+        "sttEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService"),
+        "ttsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService"),
         "talkwiseResponsibilities": (
             "optional import and capability detection",
             "pipeline factory configuration",

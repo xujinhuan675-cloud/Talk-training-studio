@@ -177,6 +177,64 @@ async def test_chat_sync_uses_branch_latest_when_parent_is_omitted(session_facto
 
 
 @pytest.mark.asyncio
+async def test_conversation_service_reads_branch_path_and_search_locations(session_factory):
+    conversation, first_user, first_assistant, off_path_user = await _seed_conversation(
+        session_factory
+    )
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    path = await service.get_message_path(conversation.id, off_path_user.public_id)
+    location = await service.locate_message(
+        conversation.id,
+        first_assistant.public_id,
+        before=1,
+        after=1,
+    )
+    branch_location = await service.locate_message(
+        conversation.id,
+        off_path_user.public_id,
+        before=1,
+        after=0,
+    )
+    search_results = await service.search_messages(
+        conversation.id,
+        "assistant turn",
+        branch_id="main",
+    )
+
+    assert [message.content for message in path] == [
+        "Root user turn.",
+        "Unrelated branch turn.",
+    ]
+    assert [message.content for message in location.path] == [
+        "Root user turn.",
+        "Root assistant turn.",
+    ]
+    assert [message.public_id for message in location.context] == [
+        first_user.public_id,
+        first_assistant.public_id,
+    ]
+    assert [message.public_id for message in branch_location.context] == [
+        first_user.public_id,
+        off_path_user.public_id,
+    ]
+    assert [result.message.public_id for result in search_results] == [first_assistant.public_id]
+    assert [message.public_id for message in search_results[0].path] == [
+        first_user.public_id,
+        first_assistant.public_id,
+    ]
+    assert [message.public_id for message in search_results[0].context] == [
+        first_user.public_id,
+        first_assistant.public_id,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_conversation_service_returns_message_path_and_children(session_factory):
     conversation, first_user, first_assistant, off_path_user = await _seed_conversation(
         session_factory

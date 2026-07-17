@@ -7,20 +7,22 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 from application.dto import (
     AgentConfigDTO,
     ConversationDTO,
     CreateAgentConfigDTO,
     CreateConversationDTO,
+    MessageLocationDTO,
     MessageDTO_Agent,
+    MessageSearchResultDTO,
     RunDTO,
     UpdateAgentConfigDTO,
     UpdateConversationDTO,
 )
 from domain.common.unit_of_work import AbstractUnitOfWork
-from domain.conversation.entity import AgentConfig, Conversation
+from domain.conversation.entity import AgentConfig, Conversation, Message
 from domain.conversation.exceptions import (
     AgentConfigNameExistsException,
     AgentConfigNotFoundException,
@@ -31,6 +33,13 @@ from domain.conversation.exceptions import (
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _clean_optional_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 class ConversationApplicationService:
@@ -137,20 +146,13 @@ class ConversationApplicationService:
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
 
-            messages = []
-            seen: set[str] = set()
-            current_id: str | None = message_public_id
-            while current_id and len(messages) < limit:
-                if current_id in seen:
-                    raise ValueError("Message tree contains a cycle")
-                seen.add(current_id)
-                message = await uow.message_repository.get_by_public_id(current_id)
-                if message is None or message.conversation_id != conversation_id:
-                    raise MessageNotFoundException()
-                if message.status != "deleted":
-                    messages.append(message)
-                current_id = message.parent_message_id
-            messages.reverse()
+            messages = await uow.message_repository.list_path_to_message(
+                conversation_id,
+                message_public_id,
+                limit=limit,
+            )
+            if not messages or messages[-1].public_id != message_public_id:
+                raise MessageNotFoundException()
             return [MessageDTO_Agent.model_validate(message) for message in messages]
 
     async def list_message_children(
@@ -172,6 +174,96 @@ class ConversationApplicationService:
                 if child.conversation_id == conversation_id and child.status != "deleted"
             ]
             return [MessageDTO_Agent.model_validate(child) for child in children]
+
+    async def locate_message(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        *,
+        before: int = 2,
+        after: int = 2,
+    ) -> MessageLocationDTO:
+        async with self._uow_factory(readonly=True) as uow:
+            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            if conv is None:
+                raise ConversationNotFoundException(conversation_id)
+
+            path = await uow.message_repository.list_path_to_message(
+                conversation_id,
+                message_public_id,
+            )
+            if not path or path[-1].public_id != message_public_id:
+                raise MessageNotFoundException()
+
+            context = await uow.message_repository.list_context_window(
+                conversation_id,
+                message_public_id,
+                before=max(0, before),
+                after=max(0, after),
+            )
+            if not context:
+                raise MessageNotFoundException()
+
+            target = path[-1]
+            return MessageLocationDTO(
+                message=MessageDTO_Agent.model_validate(target),
+                path=[MessageDTO_Agent.model_validate(message) for message in path],
+                context=[MessageDTO_Agent.model_validate(message) for message in context],
+            )
+
+    async def search_messages(
+        self,
+        conversation_id: int,
+        query: str,
+        *,
+        skip: int = 0,
+        limit: int = 20,
+        branch_id: str | None = None,
+        roles: Sequence[str] | None = None,
+        include_path: bool = True,
+        context_before: int = 1,
+        context_after: int = 1,
+    ) -> list[MessageSearchResultDTO]:
+        normalized_query = _clean_optional_text(query)
+        if normalized_query is None:
+            return []
+
+        async with self._uow_factory(readonly=True) as uow:
+            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            if conv is None:
+                raise ConversationNotFoundException(conversation_id)
+
+            matches = await uow.message_repository.search_by_content(
+                conversation_id,
+                normalized_query,
+                skip=max(0, skip),
+                limit=max(1, limit),
+                branch_id=_clean_optional_text(branch_id),
+                roles=roles,
+            )
+
+            results: list[MessageSearchResultDTO] = []
+            for match in matches:
+                path: list[Message] = []
+                if include_path:
+                    path = await uow.message_repository.list_path_to_message(
+                        conversation_id,
+                        match.public_id,
+                    )
+                context = await uow.message_repository.list_context_window(
+                    conversation_id,
+                    match.public_id,
+                    before=max(0, context_before),
+                    after=max(0, context_after),
+                )
+                results.append(
+                    MessageSearchResultDTO(
+                        message=MessageDTO_Agent.model_validate(match),
+                        path=[MessageDTO_Agent.model_validate(message) for message in path],
+                        context=[MessageDTO_Agent.model_validate(message) for message in context],
+                    )
+                )
+            return results
 
     # ── Runs ───────────────────────────────────────────────────────
 

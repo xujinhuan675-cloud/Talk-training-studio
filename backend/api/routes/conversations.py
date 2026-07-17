@@ -16,7 +16,9 @@ from application.dto import (
     ConversationDTO,
     CreateAgentConfigDTO,
     CreateConversationDTO,
+    MessageLocationDTO,
     MessageDTO_Agent,
+    MessageSearchResultDTO,
     RunDTO,
     UpdateAgentConfigDTO,
     UpdateConversationDTO,
@@ -123,6 +125,37 @@ async def list_messages(
 
 
 @router.get(
+    "/conversations/{conversation_id}/messages/search",
+    summary="Search conversation messages",
+    response_model=ApiResponse[list[MessageSearchResultDTO]],
+)
+async def search_messages(
+    conversation_id: int,
+    q: str = Query(..., min_length=1),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    branch_id: Optional[str] = Query(default=None),
+    roles: list[str] | None = Query(default=None),
+    include_path: bool = Query(default=True),
+    context_before: int = Query(1, ge=0, le=20),
+    context_after: int = Query(1, ge=0, le=20),
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    items = await service.search_messages(
+        conversation_id,
+        q,
+        skip=skip,
+        limit=limit,
+        branch_id=branch_id,
+        roles=roles,
+        include_path=include_path,
+        context_before=context_before,
+        context_after=context_after,
+    )
+    return success_response(items, message=t("ok"))
+
+
+@router.get(
     "/conversations/{conversation_id}/messages/{message_public_id}/path",
     summary="消息树路径",
     response_model=ApiResponse[list[MessageDTO_Agent]],
@@ -134,6 +167,27 @@ async def get_message_path(
 ):
     items = await service.get_message_path(conversation_id, message_public_id)
     return success_response(items, message=t("ok"))
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages/{message_public_id}/locate",
+    summary="Locate a conversation message in its branch",
+    response_model=ApiResponse[MessageLocationDTO],
+)
+async def locate_message(
+    conversation_id: int,
+    message_public_id: str,
+    before: int = Query(2, ge=0, le=50),
+    after: int = Query(2, ge=0, le=50),
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    item = await service.locate_message(
+        conversation_id,
+        message_public_id,
+        before=before,
+        after=after,
+    )
+    return success_response(item, message=t("ok"))
 
 
 @router.get(
