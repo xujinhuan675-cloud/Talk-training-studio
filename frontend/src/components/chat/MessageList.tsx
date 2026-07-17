@@ -196,10 +196,20 @@ function renderVideoAttachment(attachment: VideoAttachment | null) {
 
 type MessageTreeActionLabels = {
   group: string
+  title: string
+  readonlyBadge: string
+  hint: string
+  branchLabel: string
+  noBranch: string
+  searchQueryLabel: string
   locate: string
+  locateDesc: string
   path: string
+  pathDesc: string
   children: string
+  childrenDesc: string
   search: string
+  searchDesc: string
 }
 
 function appendQuery(
@@ -234,6 +244,7 @@ function renderMessageTreeActions(
   labels: MessageTreeActionLabels,
 ) {
   const branchQuery: [string, string | null] = ['branch_id', context.branchId]
+  const searchQuery = messageSearchQuery(message, context)
   const actions = [
     {
       key: 'locate',
@@ -242,24 +253,27 @@ function renderMessageTreeActions(
         ['after', 2],
       ]),
       label: labels.locate,
+      description: labels.locateDesc,
       icon: <MapPin size={13} />,
     },
     {
       key: 'path',
       href: appendQuery(context.endpoints.path, [['limit', 200]]),
       label: labels.path,
+      description: labels.pathDesc,
       icon: <Route size={13} />,
     },
     {
       key: 'children',
-      href: context.endpoints.children,
+      href: appendQuery(context.endpoints.children, [branchQuery]),
       label: labels.children,
+      description: labels.childrenDesc,
       icon: <ListTree size={13} />,
     },
     {
       key: 'search',
       href: appendQuery(context.endpoints.search, [
-        ['q', messageSearchQuery(message, context)],
+        ['q', searchQuery],
         ['limit', 20],
         ['include_path', true],
         ['context_before', 2],
@@ -267,32 +281,59 @@ function renderMessageTreeActions(
         branchQuery,
       ]),
       label: labels.search,
+      description: labels.searchDesc,
       icon: <Search size={13} />,
     },
   ] satisfies Array<{
     key: 'locate' | 'path' | 'children' | 'search'
     href: string
     label: string
+    description: string
     icon: React.ReactNode
   }>
 
   return (
-    <div className="message-tree-actions" role="group" aria-label={labels.group}>
-      {actions.map((action) => (
-        <a
-          key={action.key}
-          className="message-tree-action"
-          href={action.href}
-          target="_blank"
-          rel="noreferrer"
-          title={action.label}
-          aria-label={action.label}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {action.icon}
-        </a>
-      ))}
-    </div>
+    <section className="message-tree-actions" aria-label={labels.group}>
+      <div className="message-tree-actions-header">
+        <span className="message-tree-actions-title">
+          <ListTree size={14} aria-hidden="true" />
+          {labels.title}
+        </span>
+        <span className="message-tree-readonly-badge">{labels.readonlyBadge}</span>
+      </div>
+      <p className="message-tree-actions-hint">{labels.hint}</p>
+      <div className="message-tree-meta" aria-label={labels.branchLabel}>
+        <span className="message-tree-meta-item">
+          <span className="message-tree-meta-label">{labels.branchLabel}</span>
+          <span className="message-tree-meta-value">{context.branchId ?? labels.noBranch}</span>
+        </span>
+        <span className="message-tree-meta-item">
+          <span className="message-tree-meta-label">{labels.searchQueryLabel}</span>
+          <span className="message-tree-meta-value">{searchQuery}</span>
+        </span>
+      </div>
+      <div className="message-tree-action-links" role="list">
+        {actions.map((action) => (
+          <a
+            key={action.key}
+            className="message-tree-action"
+            href={action.href}
+            target="_blank"
+            rel="noreferrer"
+            title={action.description}
+            aria-label={`${action.label}: ${action.description}`}
+            role="listitem"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="message-tree-action-icon" aria-hidden="true">{action.icon}</span>
+            <span className="message-tree-action-copy">
+              <span className="message-tree-action-label">{action.label}</span>
+              <span className="message-tree-action-description">{action.description}</span>
+            </span>
+          </a>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -339,10 +380,20 @@ export default function MessageList({
   const isEmpty = messages.length === 0 && streamingEntries.length === 0
   const messageTreeActionLabels: MessageTreeActionLabels = {
     group: t('messageTree.actions.group'),
+    title: t('messageTree.actions.title'),
+    readonlyBadge: t('messageTree.actions.readonlyBadge'),
+    hint: t('messageTree.actions.hint'),
+    branchLabel: t('messageTree.actions.branchLabel'),
+    noBranch: t('messageTree.actions.noBranch'),
+    searchQueryLabel: t('messageTree.actions.searchQueryLabel'),
     locate: t('messageTree.actions.locate'),
+    locateDesc: t('messageTree.actions.locateDesc'),
     path: t('messageTree.actions.path'),
+    pathDesc: t('messageTree.actions.pathDesc'),
     children: t('messageTree.actions.children'),
+    childrenDesc: t('messageTree.actions.childrenDesc'),
     search: t('messageTree.actions.search'),
+    searchDesc: t('messageTree.actions.searchDesc'),
   }
 
   React.useEffect(() => {

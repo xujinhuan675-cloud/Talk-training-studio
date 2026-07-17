@@ -64,6 +64,7 @@ test('buildTrainingConversationPayload carries LibreChat-style branch fields', (
       branchId: 'branch_main',
       provider: 'openai',
       model: 'gpt-test',
+      model_spec: 'openai::https://openai.example/v1::responses::gpt-test',
     },
     metadata: { scenarioTemplateId: 'new-customer-discount' },
   })
@@ -75,6 +76,10 @@ test('buildTrainingConversationPayload carries LibreChat-style branch fields', (
   assert.equal(payload.turns[0].branchId, 'branch_main')
   assert.equal(payload.turns[0].provider, 'openai')
   assert.equal(payload.turns[0].model, 'gpt-test')
+  assert.equal(
+    payload.turns[0].modelSpec,
+    'openai::https://openai.example/v1::responses::gpt-test',
+  )
   assert.deepEqual(payload.metadata, { scenarioTemplateId: 'new-customer-discount' })
 })
 
@@ -99,6 +104,7 @@ test('buildTrainingConversationPayload carries selected provider/model without r
       text: 'Can we narrow the scope before talking price?',
       provider: 'openai',
       model: 'gpt-selected',
+      modelSpec: 'openai::https://openai.example/v1::responses::gpt-selected',
       metadata: {
         source: 'typed_input',
         personaIds: ['turn-local-shadow'],
@@ -114,6 +120,10 @@ test('buildTrainingConversationPayload carries selected provider/model without r
   assert.equal(payload.provider, 'talkwise-conversation')
   assert.equal(payload.turns[0].provider, 'openai')
   assert.equal(payload.turns[0].model, 'gpt-selected')
+  assert.equal(
+    payload.turns[0].modelSpec,
+    'openai::https://openai.example/v1::responses::gpt-selected',
+  )
   assert.deepEqual(payload.turns[0].metadata, {
     source: 'typed_input',
     personaIds: ['turn-local-shadow'],
@@ -133,6 +143,74 @@ test('buildTrainingConversationPayload carries selected provider/model without r
   })
   assert.equal('provider' in payload.metadata, false)
   assert.equal('model' in payload.metadata, false)
+})
+
+test('buildTrainingConversationPayload keeps model registry metadata from shadowing TalkWise semantics', () => {
+  const payload = trainingConversation.buildTrainingConversationPayload({
+    mode: 'text',
+    conversation: {
+      provider: 'talkwise-conversation',
+      conversationId: 'conversation-1',
+      metadata: {
+        trainingSessionId: 'training-1',
+        personaIds: ['buyer', 'cfo'],
+        scenarioId: 9,
+        dispatcher: { policy: 'stakeholder_turns' },
+        evaluation: { rubricId: 'sales-v1' },
+        growthReport: { reportId: 'growth-1' },
+        report: { id: 'full-report-1' },
+        liveGuidance: { enabled: true },
+      },
+    },
+    turn: {
+      role: 'user',
+      text: 'Can we narrow the scope before talking price?',
+      provider: 'openai',
+      model: 'gpt-selected',
+      metadata: {
+        model_registry: { provider: 'openai' },
+        model_spec: { id: 'gpt-selected' },
+        personaIds: ['turn-local-shadow'],
+        scenarioId: 404,
+        dispatcher: { policy: 'generic-chat' },
+        evaluation: { rubricId: 'generic' },
+        growthReport: { reportId: 'generic' },
+        report: { id: 'generic-report' },
+        liveGuidance: { enabled: false },
+      },
+    },
+    metadata: {
+      provider: 'openai',
+      model: 'gpt-selected',
+      model_registry: { provider: 'openai' },
+      model_spec: { id: 'gpt-selected' },
+      personaIds: ['payload-shadow'],
+      scenarioId: 404,
+      dispatcher: { policy: 'generic-chat' },
+      evaluation: { rubricId: 'generic' },
+      growthReport: { reportId: 'generic' },
+      report: { id: 'generic-report' },
+      liveGuidance: { enabled: false },
+    },
+  })
+
+  assert.equal(payload.provider, 'talkwise-conversation')
+  assert.equal(payload.turns[0].provider, 'openai')
+  assert.equal(payload.turns[0].model, 'gpt-selected')
+  assert.deepEqual(payload.conversation.metadata, {
+    trainingSessionId: 'training-1',
+    personaIds: ['buyer', 'cfo'],
+    scenarioId: 9,
+    dispatcher: { policy: 'stakeholder_turns' },
+    evaluation: { rubricId: 'sales-v1' },
+    growthReport: { reportId: 'growth-1' },
+    report: { id: 'full-report-1' },
+    liveGuidance: { enabled: true },
+  })
+  assert.deepEqual(payload.metadata.model_registry, { provider: 'openai' })
+  assert.deepEqual(payload.metadata.model_spec, { id: 'gpt-selected' })
+  assert.deepEqual(payload.turns[0].metadata.personaIds, ['turn-local-shadow'])
+  assert.deepEqual(payload.metadata.personaIds, ['payload-shadow'])
 })
 
 test('resolveRuntimeEndpoint picks realtime websocket endpoint with session binding', () => {
@@ -181,7 +259,7 @@ test('buildTrainingConversationPayload maps branch tail to chat parent message',
   assert.equal(payload.turns[0].branchId, 'branch-selected')
 })
 
-test('buildConversationTreeMessageActionContext exposes generic conversation action endpoints', () => {
+test('buildConversationTreeMessageActionContext exposes readonly conversation action endpoints', () => {
   const context = trainingConversation.buildConversationTreeMessageActionContext({
     provider: 'talkwise-conversation',
     conversationId: 42,
@@ -197,9 +275,6 @@ test('buildConversationTreeMessageActionContext exposes generic conversation act
     'locate',
     'path',
     'children',
-    'fork',
-    'edit',
-    'retry',
     'search',
   ])
   assert.equal(context.endpoints.locate, '/api/v1/conversations/42/messages/msg_leaf/locate')

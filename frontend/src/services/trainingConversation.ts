@@ -50,6 +50,8 @@ export interface TrainingTurnInput {
   branch_id?: string | number | null
   provider?: string | null
   model?: string | null
+  modelSpec?: string | null
+  model_spec?: string | null
 }
 
 export interface TrainingTurn {
@@ -65,6 +67,7 @@ export interface TrainingTurn {
   branchId: string | null
   provider: string | null
   model: string | null
+  modelSpec: string | null
 }
 
 export interface ResolveRuntimeEndpointOptions {
@@ -188,6 +191,7 @@ export function normalizeTrainingTurn(input: TrainingTurnInput): TrainingTurn {
     branchId: cleanText(input.branchId ?? input.branch_id),
     provider: cleanText(input.provider),
     model: cleanText(input.model),
+    modelSpec: cleanText(input.modelSpec ?? input.model_spec),
   }
 }
 
@@ -288,7 +292,7 @@ export function buildConversationTreeMessageActionContext(
       retry: `${messagePath}/retry`,
       search: `${conversationPath}/messages/search`,
     },
-    availableActions: ['locate', 'path', 'children', 'fork', 'edit', 'retry', 'search'],
+    availableActions: ['locate', 'path', 'children', 'search'],
   }
 }
 

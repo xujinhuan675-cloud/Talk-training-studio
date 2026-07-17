@@ -19,6 +19,7 @@ class _FakeLLM:
     def __init__(self) -> None:
         self.provider = "fake-provider"
         self.calls: list[list[LLMMessage]] = []
+        self.generate_kwargs: list[dict] = []
 
     @property
     def provider_metadata(self) -> LLMProviderMetadata:
@@ -32,6 +33,7 @@ class _FakeLLM:
 
     async def generate(self, messages, **_kwargs) -> LLMResponse:
         self.calls.append(list(messages))
+        self.generate_kwargs.append(dict(_kwargs))
         return LLMResponse(
             content="Assistant reply.",
             model="gpt-test",
@@ -158,6 +160,129 @@ async def test_chat_sync_uses_explicit_parent_message_path_for_llm_history(sessi
     assert runs[0].metadata["branch_id"] == "branch-selected"
     assert runs[0].metadata["provider_metadata"]["wire_api"] == "chat_completions"
     assert off_path_user.public_id not in {message.public_id for message in messages}
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_propagates_request_runtime_selection_to_llm_and_metadata(
+    session_factory,
+):
+    conversation, _first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    llm = _FakeLLM()
+    service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    result = await service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Use the selected model.",
+            parent_message_id=first_assistant.public_id,
+            provider="openai",
+            model="gpt-selected",
+            model_spec="openai::https://openai.example/v1::responses::gpt-selected",
+            metadata={
+                "source": "training_room_selector",
+                "llm": {
+                    "provider": "metadata-provider",
+                    "model": "metadata-model",
+                    "model_spec": "metadata-spec",
+                },
+            },
+            stream=False,
+        ),
+    )
+
+    assert llm.generate_kwargs[0]["model"] == "gpt-selected"
+    assert result["message"]["provider"] == "openai"
+    assert result["message"]["model"] == "gpt-test"
+    assert (
+        result["message"]["metadata"]["model_spec"]
+        == "openai::https://openai.example/v1::responses::gpt-selected"
+    )
+    assert result["message"]["metadata"]["source"] == "training_room_selector"
+    assert result["message"]["metadata"]["runtime_selection"] == {
+        "provider": "openai",
+        "model": "gpt-selected",
+        "model_spec": "openai::https://openai.example/v1::responses::gpt-selected",
+        "source": "chat_request",
+    }
+
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        messages = await uow.message_repository.list_by_conversation(
+            conversation.id,
+            branch_id="main",
+        )
+        runs = await uow.run_repository.list_by_conversation(conversation.id)
+
+    user_message = messages[-2]
+    assistant_message = messages[-1]
+    assert user_message.provider == "openai"
+    assert user_message.model == "gpt-selected"
+    assert user_message.metadata["llm"]["model"] == "metadata-model"
+    assert user_message.metadata["runtime_selection"]["model"] == "gpt-selected"
+    assert runs[0].provider == "openai"
+    assert runs[0].model == "gpt-selected"
+    assert runs[0].metadata["model_spec"] == (
+        "openai::https://openai.example/v1::responses::gpt-selected"
+    )
+    assert runs[0].metadata["runtime_selection"]["source"] == "chat_request"
+    assert assistant_message.metadata["runtime_selection"]["model"] == "gpt-selected"
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_uses_parent_message_runtime_metadata_when_request_omits_selection(
+    session_factory,
+):
+    conversation, _first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        first_assistant.metadata = {
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-selected",
+                "model_spec": "anthropic::https://anthropic.example::messages::claude-selected",
+            }
+        }
+        await uow.message_repository.update(first_assistant)
+        await uow.commit()
+
+    llm = _FakeLLM()
+    service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    await service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Continue with the parent selection.",
+            parent_message_id=first_assistant.public_id,
+            stream=False,
+        ),
+    )
+
+    assert llm.generate_kwargs[0]["model"] == "claude-selected"
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        runs = await uow.run_repository.list_by_conversation(conversation.id)
+        latest = await uow.message_repository.get_latest_by_conversation(conversation.id)
+
+    assert runs[0].provider == "anthropic"
+    assert runs[0].model == "claude-selected"
+    assert runs[0].metadata["runtime_selection"]["source"] == "parent_message_metadata"
+    assert latest is not None
+    assert latest.metadata["model_spec"] == (
+        "anthropic::https://anthropic.example::messages::claude-selected"
+    )
 
 
 @pytest.mark.asyncio

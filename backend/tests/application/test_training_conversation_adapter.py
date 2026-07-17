@@ -389,6 +389,67 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
 
 
 @pytest.mark.asyncio
+async def test_conversation_adapter_model_selection_metadata_cannot_shadow_training_semantics(
+) -> None:
+    state = _ConversationState()
+    adapter = ConversationTrainingConversationAdapter(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs),
+        default_model="gpt-training",
+    )
+    orchestrator = TrainingCoreOrchestrator(
+        session_service=TrainingSessionService(id_factory=lambda: "training-text-shadow"),
+        conversation_adapter=adapter,
+    )
+    task_config = TrainingTaskConfigDTO(
+        role="Account Manager",
+        level="Senior",
+        tech_stack=["renewal"],
+        question_type_ratios={"craft": 1},
+        question_count=3,
+        category="sales",
+        metadata={
+            "room_name": "Renewal practice",
+            "persona_ids": ["customer-1"],
+            "scenario_id": 9,
+            "dispatcher": {"strategy": "stakeholder_turns"},
+            "evaluation": {"rubric_id": "sales-v1"},
+            "growth_report": {"report_id": "growth-1"},
+            "report": {"report_id": "generic-chat-report"},
+            "live_guidance": {"enabled": True},
+            "guidance": {"enabled": False},
+            "personaIds": ["generic-chat-persona"],
+            "scenarioId": 404,
+            "growthReport": {"report_id": "generic-chat-growth"},
+            "liveGuidance": {"enabled": False},
+            "provider": "openai",
+            "model": "gpt-selected",
+            "model_registry": {"default": "openai"},
+            "model_spec": {"id": "gpt-selected"},
+        },
+    )
+
+    started = await orchestrator.start_session(
+        CreateTrainingSessionDTO(task_config=task_config, mode="text")
+    )
+
+    assert state.conversations[1].model == "gpt-selected"
+    assert state.conversations[1].metadata["provider"] == "openai"
+    assert state.conversations[1].metadata["model"] == "gpt-selected"
+    assert state.conversations[1].metadata["model_registry"] == {"default": "openai"}
+    assert state.conversations[1].metadata["model_spec"] == {"id": "gpt-selected"}
+    assert state.conversations[1].metadata["personaIds"] == ["customer-1"]
+    assert state.conversations[1].metadata["scenarioId"] == 9
+    assert state.conversations[1].metadata["dispatcher"] == {"strategy": "stakeholder_turns"}
+    assert state.conversations[1].metadata["evaluation"] == {"rubric_id": "sales-v1"}
+    assert state.conversations[1].metadata["growthReport"] == {"report_id": "growth-1"}
+    assert state.conversations[1].metadata["liveGuidance"] == {"enabled": True}
+    assert started.conversation.metadata["personaIds"] == ["customer-1"]
+    assert started.conversation.metadata["scenarioId"] == 9
+    assert started.conversation.metadata["growthReport"] == {"report_id": "growth-1"}
+    assert started.conversation.metadata["liveGuidance"] == {"enabled": True}
+
+
+@pytest.mark.asyncio
 async def test_conversation_adapter_preserves_training_semantics_across_tree_edit_retry_fork(
 ) -> None:
     state = _ConversationState()

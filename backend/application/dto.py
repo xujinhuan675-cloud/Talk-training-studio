@@ -369,6 +369,8 @@ class ChatRequestDTO(DTOBase):
     branch_id: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    model_spec: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)
     history_limit: int = Field(default=200, ge=1, le=200)
