@@ -41,6 +41,7 @@ OPENAI_STT_PIPECAT_MODULE = "pipecat.services.openai.stt"
 OPENAI_TTS_PIPECAT_MODULE = "pipecat.services.openai.tts"
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
+USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
 OPTIONAL_PIPECAT_FEATURE_MODULES = {
     "vad": (
         SILERO_VAD_PIPECAT_MODULE,
@@ -53,6 +54,7 @@ OPTIONAL_PIPECAT_FEATURE_MODULES = {
     "turn_detection": (
         USER_TURN_PROCESSOR_PIPECAT_MODULE,
         USER_TURN_STRATEGIES_PIPECAT_MODULE,
+        USER_TURN_COMPLETION_PIPECAT_MODULE,
     ),
 }
 
@@ -89,6 +91,7 @@ class PipecatRuntime:
     LLMContextAssistantTurnFrame: type
     FrameProcessor: type
     FrameDirection: type
+    InterimTranscriptionFrame: type | None = None
     FastAPIWebsocketParams: type | None = None
     FastAPIWebsocketTransport: type | None = None
     SileroVADAnalyzer: type | None = None
@@ -98,6 +101,9 @@ class PipecatRuntime:
     OpenAITTSService: type | None = None
     UserTurnProcessor: type | None = None
     UserTurnStrategies: type | None = None
+    ExternalUserTurnStrategies: type | None = None
+    FilterIncompleteUserTurnStrategies: type | None = None
+    UserTurnCompletionConfig: type | None = None
 
     @property
     def websocket_available(self) -> bool:
@@ -255,6 +261,15 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     user_turn_strategies = _optional_pipecat_symbol(
         USER_TURN_STRATEGIES_PIPECAT_MODULE, "UserTurnStrategies"
     )
+    external_user_turn_strategies = _optional_pipecat_symbol(
+        USER_TURN_STRATEGIES_PIPECAT_MODULE, "ExternalUserTurnStrategies"
+    )
+    filter_incomplete_user_turn_strategies = _optional_pipecat_symbol(
+        USER_TURN_STRATEGIES_PIPECAT_MODULE, "FilterIncompleteUserTurnStrategies"
+    )
+    user_turn_completion_config = _optional_pipecat_symbol(
+        USER_TURN_COMPLETION_PIPECAT_MODULE, "UserTurnCompletionConfig"
+    )
 
     return PipecatRuntime(
         Pipeline=pipeline_module.Pipeline,
@@ -269,6 +284,7 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         LLMContextAssistantTurnFrame=frames_module.LLMContextAssistantTurnFrame,
         FrameProcessor=processor_module.FrameProcessor,
         FrameDirection=processor_module.FrameDirection,
+        InterimTranscriptionFrame=getattr(frames_module, "InterimTranscriptionFrame", None),
         FastAPIWebsocketParams=websocket_params,
         FastAPIWebsocketTransport=websocket_transport,
         SileroVADAnalyzer=silero_vad_analyzer,
@@ -278,6 +294,9 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         OpenAITTSService=openai_tts,
         UserTurnProcessor=user_turn_processor,
         UserTurnStrategies=user_turn_strategies,
+        ExternalUserTurnStrategies=external_user_turn_strategies,
+        FilterIncompleteUserTurnStrategies=filter_incomplete_user_turn_strategies,
+        UserTurnCompletionConfig=user_turn_completion_config,
     )
 
 
@@ -544,22 +563,24 @@ def build_pipecat_voice_processors(
         if runtime.UserTurnProcessor is None:
             raise RuntimeError("Pipecat user turn processor is unavailable")
         turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
-        processors.append(
-            runtime.UserTurnProcessor(
-                user_turn_stop_timeout=_metadata_float(
-                    turn_config,
-                    "userTurnStopTimeout",
-                    "user_turn_stop_timeout",
-                    default=5.0,
-                ),
-                user_idle_timeout=_metadata_float(
-                    turn_config,
-                    "userIdleTimeout",
-                    "user_idle_timeout",
-                    default=0,
-                ),
-            )
-        )
+        turn_kwargs: dict[str, Any] = {
+            "user_turn_stop_timeout": _metadata_float(
+                turn_config,
+                "userTurnStopTimeout",
+                "user_turn_stop_timeout",
+                default=5.0,
+            ),
+            "user_idle_timeout": _metadata_float(
+                turn_config,
+                "userIdleTimeout",
+                "user_idle_timeout",
+                default=0,
+            ),
+        }
+        user_turn_strategies = _user_turn_strategies(runtime, turn_config)
+        if user_turn_strategies is not None:
+            turn_kwargs["user_turn_strategies"] = user_turn_strategies
+        processors.append(runtime.UserTurnProcessor(**turn_kwargs))
 
     tts_provider = _feature_provider(metadata, "tts")
     if tts_provider == "openai":
@@ -668,6 +689,23 @@ def _event_from_pipecat_frame(
     *,
     config: RealtimePipelineConfig,
 ) -> Mapping[str, Any] | None:
+    if runtime.InterimTranscriptionFrame is not None and isinstance(
+        frame, runtime.InterimTranscriptionFrame
+    ):
+        user_id = getattr(frame, "user_id", None)
+        text = getattr(frame, "text", "")
+        event: dict[str, Any] = {
+            "type": "transcript.delta",
+            "text": text,
+            "delta": text,
+            "provider": config.provider,
+            "source": "pipecat",
+            "user_id": user_id,
+            "sender_id": user_id,
+            "language": str(getattr(frame, "language", "") or "") or None,
+            "timestamp": getattr(frame, "timestamp", None),
+        }
+        return _with_frame_metadata(event, frame, config=config)
     if isinstance(frame, runtime.TranscriptionFrame):
         user_id = getattr(frame, "user_id", None)
         event: dict[str, Any] = {
@@ -990,6 +1028,138 @@ def _turn_detection_config(metadata: Mapping[str, Any]) -> Mapping[str, Any] | b
     return False
 
 
+def _user_turn_strategies(runtime: PipecatRuntime, metadata: Mapping[str, Any]) -> Any | None:
+    strategy = _user_turn_strategy_name(metadata)
+    if strategy is None:
+        return None
+
+    if strategy == "external":
+        if runtime.ExternalUserTurnStrategies is None:
+            raise RuntimeError("Pipecat external user turn strategies are unavailable")
+        return runtime.ExternalUserTurnStrategies()
+
+    if runtime.FilterIncompleteUserTurnStrategies is None:
+        raise RuntimeError("Pipecat filter-incomplete user turn strategies are unavailable")
+    completion_config = _user_turn_completion_config(runtime, metadata)
+    if completion_config is None:
+        return runtime.FilterIncompleteUserTurnStrategies()
+    return runtime.FilterIncompleteUserTurnStrategies(config=completion_config)
+
+
+def _user_turn_strategy_name(metadata: Mapping[str, Any]) -> str | None:
+    selected = _metadata_text(
+        metadata,
+        "userTurnStrategies",
+        "user_turn_strategies",
+        "userTurnStrategy",
+        "user_turn_strategy",
+        "strategy",
+    )
+    if selected is None and _metadata_bool(
+        metadata,
+        "filterIncompleteUserTurns",
+        "filter_incomplete_user_turns",
+        default=False,
+    ):
+        selected = "filter_incomplete"
+    if selected is None:
+        return None
+
+    normalized = selected.strip().lower().replace("-", "_").replace(" ", "_")
+    compact = normalized.replace("_", "")
+    if compact in {"", "default", "none", "false", "disabled", "pipecat"}:
+        return None
+    if compact in {"external", "externaluserturn", "externaluserturnstrategies"}:
+        return "external"
+    if compact in {
+        "filterincomplete",
+        "filterincompleteuserturn",
+        "filterincompleteuserturns",
+        "filterincompleteuserturnstrategies",
+    }:
+        return "filter_incomplete"
+    raise ValueError(
+        "Unsupported Pipecat user turn strategy "
+        f"'{selected}'; expected external or filter_incomplete"
+    )
+
+
+def _user_turn_completion_config(
+    runtime: PipecatRuntime,
+    metadata: Mapping[str, Any],
+) -> Any | None:
+    completion_metadata = _user_turn_completion_metadata(metadata)
+    if not completion_metadata:
+        return None
+
+    kwargs: dict[str, Any] = {}
+    if instructions := _metadata_text(completion_metadata, "instructions"):
+        kwargs["instructions"] = instructions
+    incomplete_short_timeout = _metadata_float(
+        completion_metadata,
+        "incompleteShortTimeout",
+        "incomplete_short_timeout",
+    )
+    if incomplete_short_timeout is not None:
+        kwargs["incomplete_short_timeout"] = incomplete_short_timeout
+    incomplete_long_timeout = _metadata_float(
+        completion_metadata,
+        "incompleteLongTimeout",
+        "incomplete_long_timeout",
+    )
+    if incomplete_long_timeout is not None:
+        kwargs["incomplete_long_timeout"] = incomplete_long_timeout
+    if incomplete_short_prompt := _metadata_text(
+        completion_metadata,
+        "incompleteShortPrompt",
+        "incomplete_short_prompt",
+    ):
+        kwargs["incomplete_short_prompt"] = incomplete_short_prompt
+    if incomplete_long_prompt := _metadata_text(
+        completion_metadata,
+        "incompleteLongPrompt",
+        "incomplete_long_prompt",
+    ):
+        kwargs["incomplete_long_prompt"] = incomplete_long_prompt
+
+    if not kwargs:
+        return None
+    if runtime.UserTurnCompletionConfig is None:
+        raise RuntimeError("Pipecat user turn completion config is unavailable")
+    return runtime.UserTurnCompletionConfig(**kwargs)
+
+
+def _user_turn_completion_metadata(metadata: Mapping[str, Any]) -> Mapping[str, Any]:
+    for key in (
+        "userTurnCompletionConfig",
+        "user_turn_completion_config",
+        "completionConfig",
+        "completion_config",
+        "filterIncompleteUserTurns",
+        "filter_incomplete_user_turns",
+        "filterIncomplete",
+        "filter_incomplete",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, Mapping):
+            return value
+
+    direct_config_keys = {
+        "instructions",
+        "incompleteShortTimeout",
+        "incomplete_short_timeout",
+        "incompleteLongTimeout",
+        "incomplete_long_timeout",
+        "incompleteShortPrompt",
+        "incomplete_short_prompt",
+        "incompleteLongPrompt",
+        "incomplete_long_prompt",
+    }
+    if any(key in metadata for key in direct_config_keys):
+        return metadata
+    return {}
+
+
 def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
     """Validate supported Pipecat-owned voice chain options before constructing services."""
 
@@ -998,6 +1168,8 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
     _validate_provider(metadata, "tts", supported={"openai"})
     _validate_provider(metadata, "vad", supported={"silero"})
     _validate_provider(metadata, "turnDetection", "turn_detection", supported={"pipecat"})
+    if _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat":
+        _user_turn_strategy_name(_feature_config(metadata, "turnDetection", "turn_detection"))
 
     vad_provider = _feature_provider(metadata, "vad")
     stt_provider = _feature_provider(metadata, "stt")
@@ -1057,6 +1229,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         ),
         "frameEntrypoints": (
             "pipecat.frames.frames.InputAudioRawFrame",
+            "pipecat.frames.frames.InterimTranscriptionFrame",
             "pipecat.frames.frames.TranscriptionFrame",
             "pipecat.frames.frames.LLMContextAssistantTurnFrame",
             "pipecat.frames.frames.UserStartedSpeakingFrame",
@@ -1069,10 +1242,15 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         "sttEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService"),
         "ttsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService"),
         "turnDetectionEntrypoint": ("pipecat.turns.user_turn_processor.UserTurnProcessor"),
+        "turnStrategyEntrypoints": (
+            "pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies",
+            "pipecat.turns.user_turn_strategies.FilterIncompleteUserTurnStrategies",
+        ),
         "talkwiseResponsibilities": (
             "optional import and capability detection",
             "pipeline factory configuration",
             "RealtimeAudioChunk to InputAudioRawFrame adaptation",
+            "interim transcript frame mirroring",
             "final transcript frame mirroring",
         ),
     }

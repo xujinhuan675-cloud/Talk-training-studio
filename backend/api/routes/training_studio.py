@@ -925,8 +925,8 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
         "outputSampleRate": 24000,
         "stt": stt,
         "tts": {"provider": "openai"},
-        "vad": {"provider": "silero", "sampleRate": 16000},
-        "turnDetection": {"provider": "pipecat"},
+        "vad": {"provider": "silero", "source": "pipecat", "sampleRate": 16000},
+        "turnDetection": {"provider": "pipecat", "source": "pipecat"},
         "talkwise": {
             "trainingSessionId": binding[0],
             "roomId": binding[1],
@@ -983,6 +983,9 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
         "vadAvailable": bool(getattr(capability, "vad_available", False)),
         "sttAvailable": bool(getattr(capability, "stt_available", False)),
         "ttsAvailable": bool(getattr(capability, "tts_available", False)),
+        "turnDetectionAvailable": bool(
+            getattr(capability, "turn_detection_available", False)
+        ),
         "missingModules": [str(module) for module in capability.missing_modules],
         "optionalMissingModules": [
             str(module) for module in getattr(capability, "optional_missing_modules", ())

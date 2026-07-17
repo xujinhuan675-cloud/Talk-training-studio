@@ -271,12 +271,23 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
         available=True,
         core_available=True,
         websocket_available=True,
+        vad_available=True,
+        stt_available=True,
+        tts_available=True,
+        turn_detection_available=True,
         missing_modules=(),
+        optional_missing_modules=(),
         error=None,
     )
     adapter = _fake_pipecat_adapter(
         capability,
-        snapshot={"checkedAt": "test", "coreEntrypoints": ("pipecat.Pipeline",)},
+        snapshot={
+            "checkedAt": "test",
+            "coreEntrypoints": ("pipecat.pipeline.pipeline.Pipeline",),
+            "vadEntrypoint": "pipecat.audio.vad.silero.SileroVADAnalyzer",
+            "vadProcessorEntrypoint": "pipecat.processors.audio.vad_processor.VADProcessor",
+            "turnDetectionEntrypoint": "pipecat.turns.user_turn_processor.UserTurnProcessor",
+        },
     )
     monkeypatch.setattr(
         training_studio_routes,
@@ -303,9 +314,27 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
     assert data["pipecat"]["available"] is True
     assert data["pipecat"]["coreAvailable"] is True
     assert data["pipecat"]["websocketAvailable"] is True
+    assert data["pipecat"]["vadAvailable"] is True
+    assert data["pipecat"]["sttAvailable"] is True
+    assert data["pipecat"]["ttsAvailable"] is True
+    assert data["pipecat"]["turnDetectionAvailable"] is True
     assert data["pipecat"]["missingModules"] == []
     assert data["pipecat"]["error"] is None
-    assert data["pipecat"]["sourceSnapshot"]["coreEntrypoints"] == ["pipecat.Pipeline"]
+    assert data["pipecat"]["sourceSnapshot"]["coreEntrypoints"] == [
+        "pipecat.pipeline.pipeline.Pipeline"
+    ]
+    assert (
+        data["pipecat"]["sourceSnapshot"]["vadEntrypoint"]
+        == "pipecat.audio.vad.silero.SileroVADAnalyzer"
+    )
+    assert (
+        data["pipecat"]["sourceSnapshot"]["vadProcessorEntrypoint"]
+        == "pipecat.processors.audio.vad_processor.VADProcessor"
+    )
+    assert (
+        data["pipecat"]["sourceSnapshot"]["turnDetectionEntrypoint"]
+        == "pipecat.turns.user_turn_processor.UserTurnProcessor"
+    )
     assert adapter.calls["require_websocket"] is True
 
 
@@ -314,7 +343,12 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
         available=False,
         core_available=False,
         websocket_available=False,
+        vad_available=False,
+        stt_available=False,
+        tts_available=False,
+        turn_detection_available=False,
         missing_modules=("pipecat.pipeline.pipeline", "pipecat.frames.frames"),
+        optional_missing_modules=(),
         error="Missing optional Pipecat module(s)",
     )
     adapter = _fake_pipecat_adapter(capability)
@@ -337,6 +371,7 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
     assert data["pipecat"]["available"] is False
     assert data["pipecat"]["coreAvailable"] is False
     assert data["pipecat"]["websocketAvailable"] is False
+    assert data["pipecat"]["turnDetectionAvailable"] is False
     assert data["pipecat"]["missingModules"] == [
         "pipecat.pipeline.pipeline",
         "pipecat.frames.frames",
@@ -781,8 +816,15 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> Non
     if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
         assert stt_metadata["model"] == settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
     assert adapter.started_config.metadata["tts"] == {"provider": "openai"}
-    assert adapter.started_config.metadata["vad"] == {"provider": "silero", "sampleRate": 16000}
-    assert adapter.started_config.metadata["turnDetection"] == {"provider": "pipecat"}
+    assert adapter.started_config.metadata["vad"] == {
+        "provider": "silero",
+        "source": "pipecat",
+        "sampleRate": 16000,
+    }
+    assert adapter.started_config.metadata["turnDetection"] == {
+        "provider": "pipecat",
+        "source": "pipecat",
+    }
     assert adapter.started_config.metadata["talkwise"] == {
         "trainingSessionId": "session-1",
         "roomId": 42,

@@ -55,6 +55,18 @@ class FakeTranscriptionFrame:
 
 
 @dataclass
+class FakeInterimTranscriptionFrame:
+    text: str
+    user_id: str
+    timestamp: str
+    language: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 303
+    name: str = "FakeInterimTranscriptionFrame"
+    pts: int | None = None
+
+
+@dataclass
 class FakeLLMContextAssistantTurnFrame:
     text: str
     timestamp: str
@@ -95,6 +107,20 @@ class FakeOpenAITTSService:
 
 
 class FakeUserTurnProcessor:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeExternalUserTurnStrategies:
+    pass
+
+
+class FakeFilterIncompleteUserTurnStrategies:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeUserTurnCompletionConfig:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
@@ -168,6 +194,7 @@ def fake_runtime(websocket=True):
         LLMContextAssistantTurnFrame=FakeLLMContextAssistantTurnFrame,
         FrameProcessor=FakeFrameProcessor,
         FrameDirection=FakeFrameDirection,
+        InterimTranscriptionFrame=FakeInterimTranscriptionFrame,
         FastAPIWebsocketParams=FakeFastAPIWebsocketParams if websocket else None,
         FastAPIWebsocketTransport=FakeFastAPIWebsocketTransport if websocket else None,
         SileroVADAnalyzer=FakeSileroVADAnalyzer,
@@ -176,6 +203,9 @@ def fake_runtime(websocket=True):
         OpenAIRealtimeSTTService=FakeOpenAIRealtimeSTTService,
         OpenAITTSService=FakeOpenAITTSService,
         UserTurnProcessor=FakeUserTurnProcessor,
+        ExternalUserTurnStrategies=FakeExternalUserTurnStrategies,
+        FilterIncompleteUserTurnStrategies=FakeFilterIncompleteUserTurnStrategies,
+        UserTurnCompletionConfig=FakeUserTurnCompletionConfig,
     )
 
 
@@ -501,6 +531,60 @@ def test_build_pipecat_voice_processors_supports_nested_feature_config():
     assert processors[3].kwargs["speed"] == 1.2
 
 
+def test_build_pipecat_voice_processors_supports_external_user_turn_strategy_metadata():
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        metadata={
+            "turnDetection": {
+                "provider": "pipecat",
+                "strategy": "external",
+                "userTurnStopTimeout": 2.5,
+                "userIdleTimeout": 8.0,
+            },
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(fake_runtime(False), config)
+
+    assert [type(processor) for processor in processors] == [FakeUserTurnProcessor]
+    assert processors[0].kwargs["user_turn_stop_timeout"] == 2.5
+    assert processors[0].kwargs["user_idle_timeout"] == 8.0
+    assert isinstance(processors[0].kwargs["user_turn_strategies"], FakeExternalUserTurnStrategies)
+
+
+def test_build_pipecat_voice_processors_supports_filter_incomplete_strategy_metadata():
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        metadata={
+            "turnDetection": {
+                "provider": "pipecat",
+                "userTurnStrategies": "filterIncomplete",
+                "userTurnCompletionConfig": {
+                    "instructions": "Decide whether the trainee finished.",
+                    "incompleteShortTimeout": 1.5,
+                    "incompleteLongTimeout": 9.0,
+                    "incompleteShortPrompt": "Please continue.",
+                    "incompleteLongPrompt": "Take your time.",
+                },
+            },
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(fake_runtime(False), config)
+
+    strategies = processors[0].kwargs["user_turn_strategies"]
+    assert isinstance(strategies, FakeFilterIncompleteUserTurnStrategies)
+    completion_config = strategies.kwargs["config"]
+    assert isinstance(completion_config, FakeUserTurnCompletionConfig)
+    assert completion_config.kwargs == {
+        "instructions": "Decide whether the trainee finished.",
+        "incomplete_short_timeout": 1.5,
+        "incomplete_long_timeout": 9.0,
+        "incomplete_short_prompt": "Please continue.",
+        "incomplete_long_prompt": "Take your time.",
+    }
+
+
 def test_build_pipecat_voice_processors_rejects_local_and_server_vad_mix():
     with pytest.raises(ValueError, match="server-side turn detection"):
         pipecat_adapter.build_pipecat_voice_processors(
@@ -536,6 +620,14 @@ def test_build_pipecat_voice_processors_validates_supported_options():
             RealtimePipelineConfig(
                 provider="pipecat",
                 metadata={"tts": {"provider": "openai", "speed": 5.0}},
+            )
+        )
+
+    with pytest.raises(ValueError, match="Unsupported Pipecat user turn strategy"):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={"turnDetection": {"provider": "pipecat", "strategy": "homegrown"}},
             )
         )
 
@@ -654,6 +746,44 @@ async def test_talkwise_event_processor_mirrors_pipecat_transcription_frames():
 
 
 @pytest.mark.asyncio
+async def test_talkwise_event_processor_maps_interim_transcription_to_delta_event():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+    )
+
+    await processor.process_frame(
+        FakeInterimTranscriptionFrame(
+            text="partial user turn",
+            user_id="user",
+            timestamp="2026-07-16T00:00:00Z",
+            language="en",
+            pts=42,
+            metadata={"sequence": 1},
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+    assert event["type"] == "transcript.delta"
+    assert event["text"] == "partial user turn"
+    assert event["delta"] == "partial user turn"
+    assert event["source"] == "pipecat"
+    assert event["sender_id"] == "user"
+    assert event["language"] == "en"
+    assert event["metadata"]["sequence"] == 1
+    assert event["metadata"]["pipecatFrame"] == {
+        "frameId": 303,
+        "frameName": "FakeInterimTranscriptionFrame",
+        "pts": 42,
+    }
+    assert processor.pushed[0][0].text == "partial user turn"
+
+
+@pytest.mark.asyncio
 async def test_talkwise_event_processor_preserves_safe_frame_metadata():
     runtime = fake_runtime(websocket=False)
     queue = asyncio.Queue()
@@ -766,6 +896,8 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
         "RealtimeAudioChunk to InputAudioRawFrame adaptation"
         in snapshot["talkwiseResponsibilities"]
     )
+    assert "interim transcript frame mirroring" in snapshot["talkwiseResponsibilities"]
+    assert "pipecat.frames.frames.InterimTranscriptionFrame" in snapshot["frameEntrypoints"]
     assert "pipecat.audio.vad.silero.SileroVADAnalyzer" == snapshot["vadEntrypoint"]
     assert (
         "pipecat.processors.audio.vad_processor.VADProcessor"
@@ -773,3 +905,7 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     )
     assert "pipecat.services.openai.stt.OpenAIRealtimeSTTService" == snapshot["sttEntrypoint"]
     assert "pipecat.services.openai.tts.OpenAITTSService" == snapshot["ttsEntrypoint"]
+    assert (
+        "pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies"
+        in snapshot["turnStrategyEntrypoints"]
+    )
