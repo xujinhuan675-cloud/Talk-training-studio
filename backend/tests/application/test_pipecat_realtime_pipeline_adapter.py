@@ -619,6 +619,25 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
     runtime = fake_runtime(websocket=True)
     custom_processor = object()
     websocket = object()
+    context = TrainingVoiceContext(
+        binding=RealtimeSessionBinding(training_session_id="training-1", room_id=7),
+        task_goal="Practice a discovery call",
+        rubric={"clarity": 1},
+        recent_turns=(
+            {
+                "speaker": "user",
+                "text": "Can we discuss renewal risk?",
+                "metadata": {"message_id": 1},
+            },
+        ),
+        metadata={
+            "personaIds": ["buyer"],
+            "scenarioId": 9,
+            "scenarioTemplateId": "enterprise-renewal",
+            "category": "sales",
+            "liveGuidance": {"enabled": True},
+        },
+    )
     config = RealtimePipelineConfig(
         provider="pipecat",
         metadata={"inputSampleRate": 16000, "outputSampleRate": 24000},
@@ -626,7 +645,7 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
 
     handle = pipecat_adapter.build_pipecat_pipeline_handle(
         runtime=runtime,
-        context=voice_context(),
+        context=context,
         config=config,
         websocket=websocket,
         processors=[custom_processor],
@@ -642,7 +661,20 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
     assert handle.pipeline.processors[-1] is handle.transport.output_processor
     assert handle.worker.kwargs["params"].kwargs["audio_in_sample_rate"] == 16000
     assert handle.worker.kwargs["params"].kwargs["audio_out_sample_rate"] == 24000
-    assert handle.worker.kwargs["params"].kwargs["start_metadata"]["provider"] == "pipecat"
+    start_metadata = handle.worker.kwargs["params"].kwargs["start_metadata"]
+    assert start_metadata["provider"] == "pipecat"
+    assert start_metadata["personaIds"] == ["buyer"]
+    assert start_metadata["scenarioId"] == 9
+    assert start_metadata["scenarioTemplateId"] == "enterprise-renewal"
+    assert start_metadata["category"] == "sales"
+    assert start_metadata["liveGuidance"] == {"enabled": True}
+    assert start_metadata["recentTurns"] == [
+        {
+            "speaker": "user",
+            "text": "Can we discuss renewal risk?",
+            "metadata": {"message_id": 1},
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -956,7 +988,10 @@ def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
         metadata={
             "personaIds": ["buyer"],
             "scenarioId": "renewal-1",
+            "scenarioTemplateId": "enterprise-renewal",
+            "category": "sales",
             "dispatcher": {"selectedPersonaId": "buyer"},
+            "liveGuidance": {"enabled": True},
             "growthReport": {"internal": "not prompt material"},
         },
     )
@@ -1022,6 +1057,9 @@ def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
     assert "Practice enterprise renewal discovery." in llm_settings["system_instruction"]
     assert "Persona IDs" in llm_settings["system_instruction"]
     assert "Scenario ID" in llm_settings["system_instruction"]
+    assert "Scenario template ID" in llm_settings["system_instruction"]
+    assert "Scenario category" in llm_settings["system_instruction"]
+    assert "Live guidance" in llm_settings["system_instruction"]
     assert "not prompt material" not in llm_settings["system_instruction"]
 
 

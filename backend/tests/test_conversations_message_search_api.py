@@ -8,6 +8,7 @@ from api.routes.conversations import router
 from application.dto import (
     ConversationDTO,
     ForkConversationResultDTO,
+    MessageActionResultDTO,
     MessageDTO_Agent,
     MessageLocationDTO,
     MessageSearchResultDTO,
@@ -48,6 +49,7 @@ class _FakeChatService:
         self.path_call = None
         self.children_call = None
         self.locate_call = None
+        self.action_call = None
         self.fork_call = None
         self.edit_call = None
         self.retry_call = None
@@ -78,6 +80,18 @@ class _FakeChatService:
             message=message,
             path=[message],
             context=[message],
+        )
+
+    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
+        self.action_call = (conversation_id, message_public_id, payload)
+        message = _message("Selected action branch", public_id=message_public_id)
+        return MessageActionResultDTO(
+            action=payload.action,
+            message=message,
+            path=[message],
+            children=[_message("Child branch", public_id="msg_child")],
+            siblings=[message],
+            branch_id="main",
         )
 
     async def edit_message(self, conversation_id: int, message_public_id: str, payload):
@@ -207,6 +221,35 @@ def test_locate_message_route_returns_message_location() -> None:
     assert data["message"]["public_id"] == "msg_selected"
     assert data["context"][0]["content"] == "Selected branch turn"
     assert service.locate_call == (7, "msg_selected", {"before": 1, "after": 4})
+
+
+def test_message_action_route_returns_controlled_tree_context() -> None:
+    service = _FakeChatService()
+    client = _client(service)
+
+    response = client.post(
+        "/api/v1/conversations/7/messages/msg_selected/actions",
+        json={
+            "action": "branch",
+            "include_deleted": True,
+            "statuses": ["active", "superseded"],
+            "metadata": {"source": "training_room"},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["action"] == "branch"
+    assert data["message"]["public_id"] == "msg_selected"
+    assert data["path"][0]["content"] == "Selected action branch"
+    assert data["children"][0]["public_id"] == "msg_child"
+    assert data["siblings"][0]["public_id"] == "msg_selected"
+    assert data["branch_id"] == "main"
+    assert service.action_call[0:2] == (7, "msg_selected")
+    assert service.action_call[2].action == "branch"
+    assert service.action_call[2].include_deleted is True
+    assert service.action_call[2].statuses == ["active", "superseded"]
+    assert service.action_call[2].metadata == {"source": "training_room"}
 
 
 def test_fork_conversation_route_creates_copied_tree() -> None:

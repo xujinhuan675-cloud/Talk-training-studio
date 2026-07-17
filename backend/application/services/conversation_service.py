@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Literal, Optional, Sequence, Tuple
 
 from application.dto import (
     AgentConfigDTO,
@@ -17,6 +17,8 @@ from application.dto import (
     EditMessageDTO,
     ForkConversationDTO,
     ForkConversationResultDTO,
+    MessageActionDTO,
+    MessageActionResultDTO,
     MessageLocationDTO,
     MessageDTO_Agent,
     MessageSearchResultDTO,
@@ -187,6 +189,25 @@ def _forked_created_at_after_parent(
     return parent_created_at + timedelta(microseconds=1)
 
 
+def _message_action_metadata(
+    source: Message,
+    *,
+    action_key: str,
+    metadata: dict | None,
+) -> dict:
+    inherited = dict(source.metadata or {})
+    merged = {
+        **inherited,
+        **(metadata or {}),
+        action_key: source.public_id,
+    }
+    if source.provider is not None and not _clean_optional_text(merged.get("provider")):
+        merged["provider"] = source.provider
+    if source.model is not None and not _clean_optional_text(merged.get("model")):
+        merged["model"] = source.model
+    return merged
+
+
 class ConversationApplicationService:
     """High-level conversation workflows bridging API and domain layers."""
 
@@ -346,6 +367,133 @@ class ConversationApplicationService:
             ]
             return [MessageDTO_Agent.model_validate(child) for child in children]
 
+    async def apply_message_action(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        dto: MessageActionDTO,
+    ) -> MessageActionResultDTO:
+        action = dto.action
+        if action == "branch":
+            return await self._build_message_action_result(
+                conversation_id=conversation_id,
+                message_public_id=message_public_id,
+                action=action,
+                include_deleted=dto.include_deleted,
+                statuses=dto.statuses,
+            )
+        if action == "edit":
+            created = await self.edit_message(
+                conversation_id,
+                message_public_id,
+                EditMessageDTO(content=dto.content or "", metadata=dto.metadata),
+            )
+            return await self._build_message_action_result(
+                conversation_id=conversation_id,
+                message_public_id=created.public_id or "",
+                action=action,
+            )
+        if action == "retry":
+            created = await self.retry_message(
+                conversation_id,
+                message_public_id,
+                RetryMessageDTO(content=dto.content or "", metadata=dto.metadata),
+            )
+            return await self._build_message_action_result(
+                conversation_id=conversation_id,
+                message_public_id=created.public_id or "",
+                action=action,
+            )
+
+        forked = await self.fork_conversation(
+            conversation_id,
+            message_public_id,
+            ForkConversationDTO(
+                title=dto.title,
+                option=dto.option,
+                include_deleted=dto.include_deleted,
+                statuses=dto.statuses,
+                metadata=dto.metadata,
+            ),
+        )
+        forked_message_id = forked.source_to_forked_id.get(message_public_id)
+        result = await self._build_message_action_result(
+            conversation_id=forked.conversation.id,
+            message_public_id=forked_message_id or "",
+            action=action,
+        )
+        result.conversation = forked.conversation
+        result.messages = forked.messages
+        result.source_to_forked_id = forked.source_to_forked_id
+        return result
+
+    async def _build_message_action_result(
+        self,
+        *,
+        conversation_id: int,
+        message_public_id: str,
+        action: Literal["branch", "edit", "retry", "fork"],
+        include_deleted: bool = False,
+        statuses: Sequence[str] | None = None,
+    ) -> MessageActionResultDTO:
+        async with self._uow_factory(readonly=True) as uow:
+            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            if conv is None:
+                raise ConversationNotFoundException(conversation_id)
+            message = await uow.message_repository.get_by_public_id(message_public_id)
+            if message is None or message.conversation_id != conversation_id:
+                raise MessageNotFoundException()
+            if message.status == "deleted" and not include_deleted:
+                raise MessageNotFoundException()
+
+            cleaned_statuses = _clean_statuses(statuses)
+            path = await uow.message_repository.list_path_to_message(
+                conversation_id,
+                message_public_id,
+                include_deleted=include_deleted,
+                statuses=cleaned_statuses,
+            )
+            if not path or path[-1].public_id != message_public_id:
+                raise MessageNotFoundException()
+
+            children = await uow.message_repository.list_children(
+                message_public_id,
+                statuses=cleaned_statuses,
+                include_deleted=include_deleted,
+            )
+            children = [
+                child for child in children if child.conversation_id == conversation_id
+            ]
+
+            if message.parent_message_id:
+                siblings = await uow.message_repository.list_children(
+                    message.parent_message_id,
+                    statuses=cleaned_statuses,
+                    include_deleted=include_deleted,
+                )
+                siblings = [
+                    sibling
+                    for sibling in siblings
+                    if sibling.conversation_id == conversation_id
+                ]
+            else:
+                roots = await uow.message_repository.list_by_conversation(
+                    conversation_id,
+                    limit=10000,
+                    statuses=cleaned_statuses,
+                    include_deleted=include_deleted,
+                )
+                siblings = [root for root in roots if root.parent_message_id is None]
+
+            return MessageActionResultDTO(
+                action=action,
+                message=MessageDTO_Agent.model_validate(message),
+                path=[MessageDTO_Agent.model_validate(item) for item in path],
+                children=[MessageDTO_Agent.model_validate(item) for item in children],
+                siblings=[MessageDTO_Agent.model_validate(item) for item in siblings],
+                branch_id=message.branch_id,
+            )
+
     async def fork_conversation(
         self,
         conversation_id: int,
@@ -462,7 +610,14 @@ class ConversationApplicationService:
             if source.status == "deleted":
                 raise MessageNotFoundException()
 
-            edited = source.create_edit(content=dto.content, metadata=dto.metadata)
+            edited = source.create_edit(
+                content=dto.content,
+                metadata=_message_action_metadata(
+                    source,
+                    action_key="edit_of",
+                    metadata=dto.metadata,
+                ),
+            )
             source.mark_superseded()
             await uow.message_repository.update(source)
             created = await uow.message_repository.create(edited)
@@ -484,7 +639,14 @@ class ConversationApplicationService:
             if source.status == "deleted":
                 raise MessageNotFoundException()
 
-            retry = source.create_retry(content=dto.content, metadata=dto.metadata)
+            retry = source.create_retry(
+                content=dto.content,
+                metadata=_message_action_metadata(
+                    source,
+                    action_key="retry_of",
+                    metadata=dto.metadata,
+                ),
+            )
             source.mark_superseded()
             await uow.message_repository.update(source)
             created = await uow.message_repository.create(retry)

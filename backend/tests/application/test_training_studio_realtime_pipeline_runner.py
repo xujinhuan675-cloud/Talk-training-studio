@@ -214,6 +214,7 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
         }
     )
     await sink.wait_for_persisted()
+    await event_sink.wait_for_events()
 
     assert len(sink.persisted) == 1
     transcript = sink.persisted[0]
@@ -222,9 +223,27 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
     assert transcript.provider == "pipecat"
     assert transcript.realtime_session_id == "rt-1"
     assert transcript.event_id == "evt-1"
+    assert event_sink.events == [
+        {
+            "type": "training.live_guidance.triggered",
+            "schemaVersion": 1,
+            "source": "realtime_voice",
+            "reason": "final_transcript",
+            "provider": "pipecat",
+            "trainingSessionId": "training-1",
+            "roomId": 42,
+            "realtimeSessionId": "rt-1",
+            "transcript": {
+                "text": "We can start with a pilot.",
+                "role": "user",
+                "eventType": "transcript.done",
+                "eventId": "evt-1",
+            },
+            "messageId": 1,
+        }
+    ]
 
     await runner.close()
-    assert event_sink.events == []
 
 
 @pytest.mark.asyncio

@@ -134,6 +134,7 @@ _VIDEO_EXTENSIONS = {
     "video/x-matroska": ".mkv",
 }
 _TRAINING_GUIDANCE_MESSAGE_SOURCE = "training_live_guidance"
+_REALTIME_CONTEXT_RECENT_TURN_LIMIT = 8
 _TRAINING_GUIDANCE_SENDER_ID = "training_coach"
 _ENV_ASSIGNMENT_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 _VOICE_TTS_PROVIDERS = {"minimax", "elevenlabs", "openrouter"}
@@ -746,6 +747,20 @@ def _request_turn_to_guidance_turn(turn: TrainingGuidanceTurnDTO) -> TranscriptT
     )
 
 
+def _guidance_turn_to_realtime_context_turn(turn: TranscriptTurn) -> dict[str, object]:
+    context_turn: dict[str, object] = {
+        "speaker": turn.normalized_speaker,
+        "text": turn.text,
+    }
+    if turn.turn_id is not None:
+        context_turn["turn_id"] = turn.turn_id
+    if turn.created_at is not None:
+        context_turn["created_at"] = turn.created_at.isoformat()
+    if turn.metadata:
+        context_turn["metadata"] = dict(turn.metadata)
+    return context_turn
+
+
 def _is_training_guidance_message(message: MessageDTO) -> bool:
     return (message.metadata or {}).get("source") == _TRAINING_GUIDANCE_MESSAGE_SOURCE
 
@@ -1181,6 +1196,7 @@ async def _build_realtime_voice_context(
     *,
     provider: str,
     svc: TrainingSessionService,
+    uow_factory: Callable[..., AbstractUnitOfWork],
 ) -> dict[str, object]:
     """Build the TrainingCore-derived context shared by text and voice runtimes."""
 
@@ -1200,9 +1216,40 @@ async def _build_realtime_voice_context(
     return {
         "task_goal": _task_goal_for_guidance(session),
         "rubric": _rubric_for_guidance(session),
-        "recent_turns": (),
+        "recent_turns": await _recent_realtime_context_turns(
+            binding[1],
+            uow_factory=uow_factory,
+            limit=_REALTIME_CONTEXT_RECENT_TURN_LIMIT,
+        ),
         "metadata": metadata,
     }
+
+
+async def _recent_realtime_context_turns(
+    room_id: int,
+    *,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+    limit: int,
+) -> tuple[dict[str, object], ...]:
+    if limit < 1:
+        return ()
+
+    async with uow_factory(readonly=True) as uow:
+        total = await uow.stakeholder_message_repository.count_by_room_id(room_id)
+        skip = max(total - limit, 0)
+        messages = await uow.stakeholder_message_repository.list_by_room_id(
+            room_id,
+            skip=skip,
+            limit=limit,
+        )
+
+    turns: list[dict[str, object]] = []
+    for message in messages:
+        dto = MessageDTO.model_validate(message)
+        if not dto.content.strip() or _is_training_guidance_message(dto):
+            continue
+        turns.append(_guidance_turn_to_realtime_context_turn(_message_to_guidance_turn(dto)))
+    return tuple(turns)
 
 
 _FINAL_TRANSCRIPT_EVENT_TYPES = FINAL_TRANSCRIPT_EVENT_TYPES
@@ -2407,12 +2454,28 @@ async def realtime_training_session(
             svc=svc,
             uow_factory=uow_factory,
         )
+
         async def _relay_pipeline_event(payload: Mapping[str, Any]) -> None:
-            if _pipeline_event_type(payload) == "audio.output":
+            event_type = _pipeline_event_type(payload)
+            if event_type == "audio.output":
                 await _send_pipeline_audio_output_event(
                     websocket=websocket,
                     session=session,
                     payload=payload,
+                )
+            elif event_type == "training.live_guidance.triggered":
+                trigger_payload: dict[str, object] = {}
+                for key, value in payload.items():
+                    if key == "type":
+                        continue
+                    safe_value = _json_safe_realtime_value(value)
+                    if safe_value is not None:
+                        trigger_payload[str(key)] = safe_value
+                await _send_wire_event(
+                    websocket,
+                    "training.live_guidance.triggered",
+                    session,
+                    trigger_payload,
                 )
 
         runner = RealtimePipelineSessionRunner(
@@ -2424,6 +2487,7 @@ async def realtime_training_session(
             active_binding,
             provider=provider,
             svc=svc,
+            uow_factory=uow_factory,
         )
         await runner.start(
             binding=RealtimeSessionBinding(

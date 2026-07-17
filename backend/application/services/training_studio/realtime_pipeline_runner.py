@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from application.ports.realtime import (
+    PersistedRealtimeTranscript,
     RealtimeAudioChunk,
     RealtimePipelineAdapter,
     RealtimePipelineConfig,
@@ -158,7 +159,15 @@ class RealtimePipelineSessionRunner:
                     config,
                     realtime_session_id,
                 )
-                if persisted:
+                if persisted is not None:
+                    await self._forward_event(
+                        _live_guidance_trigger_event(
+                            persisted,
+                            context=context,
+                            config=config,
+                            realtime_session_id=realtime_session_id,
+                        )
+                    )
                     continue
                 if not _is_transcript_event(payload):
                     await self._forward_event(payload)
@@ -174,7 +183,7 @@ class RealtimePipelineSessionRunner:
         context: TrainingVoiceContext,
         config: RealtimePipelineConfig,
         realtime_session_id: str,
-    ) -> bool:
+    ) -> PersistedRealtimeTranscript | None:
         transcript = build_realtime_transcript(
             payload,
             binding=context.binding,
@@ -182,9 +191,8 @@ class RealtimePipelineSessionRunner:
             realtime_session_id=realtime_session_id,
         )
         if transcript is None:
-            return False
-        await self._transcript_sink.persist(transcript)
-        return True
+            return None
+        return await self._transcript_sink.persist(transcript)
 
     async def _forward_event(self, payload: Mapping[str, Any]) -> None:
         if self._event_sink is None:
@@ -235,6 +243,43 @@ class RealtimePipelineSessionRunner:
 def _is_provider_error(payload: Mapping[str, object]) -> bool:
     event_type = str(payload.get("type") or "").lower()
     return event_type in {"error", "pipeline.error", "realtime.error"}
+
+
+def _live_guidance_trigger_event(
+    persisted: PersistedRealtimeTranscript,
+    *,
+    context: TrainingVoiceContext,
+    config: RealtimePipelineConfig,
+    realtime_session_id: str,
+) -> dict[str, Any]:
+    transcript = persisted.transcript
+    transcript_payload: dict[str, Any] = {
+        "text": transcript.text,
+        "role": transcript.role,
+        "eventType": transcript.event_type,
+    }
+    for output_key, value in {
+        "eventId": transcript.event_id,
+        "itemId": transcript.item_id,
+        "responseId": transcript.response_id,
+    }.items():
+        if value is not None:
+            transcript_payload[output_key] = value
+
+    event: dict[str, Any] = {
+        "type": "training.live_guidance.triggered",
+        "schemaVersion": 1,
+        "source": "realtime_voice",
+        "reason": "final_transcript",
+        "provider": config.provider,
+        "trainingSessionId": context.binding.training_session_id,
+        "roomId": context.binding.room_id,
+        "realtimeSessionId": realtime_session_id,
+        "transcript": transcript_payload,
+    }
+    if persisted.message_id is not None:
+        event["messageId"] = persisted.message_id
+    return event
 
 
 def _is_transcript_event(payload: Mapping[str, object]) -> bool:

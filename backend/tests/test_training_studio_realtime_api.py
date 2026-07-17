@@ -85,6 +85,16 @@ class _FakeMessageRepository:
         self._state.messages.append(saved)
         return saved
 
+    async def list_by_room_id(
+        self, room_id: int, *, skip: int = 0, limit: int = 50
+    ) -> list[Message]:
+        messages = [message for message in self._state.messages if message.room_id == room_id]
+        messages.sort(key=lambda message: message.timestamp)
+        return messages[skip : skip + limit]
+
+    async def count_by_room_id(self, room_id: int) -> int:
+        return sum(1 for message in self._state.messages if message.room_id == room_id)
+
 
 class _FakeUoW:
     def __init__(self, state: _RealtimeRoomState, *, readonly: bool = False) -> None:
@@ -806,6 +816,63 @@ def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline()
     assert adapter.closed is True
 
 
+def test_realtime_websocket_pipecat_provider_injects_recent_room_turns() -> None:
+    app, state = _make_bound_app()
+    state.messages.extend(
+        [
+            Message(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="user",
+                content="Can we discuss renewal risk?",
+                metadata={"source": "realtime_voice"},
+            ),
+            Message(
+                id=2,
+                room_id=42,
+                sender_type="system",
+                sender_id="training_coach",
+                content="Ask one sharper follow-up.",
+                metadata={"source": "training_live_guidance"},
+            ),
+            Message(
+                id=3,
+                room_id=42,
+                sender_type="persona",
+                sender_id="buyer",
+                content="I am worried the rollout is risky.",
+                metadata={"source": "realtime_voice"},
+            ),
+        ]
+    )
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+        ws.send_json({"type": "session.close", "reason": "context"})
+        closed = ws.receive_json()
+        assert closed["type"] == "session.closed"
+
+    assert adapter.started_context is not None
+    assert [
+        (turn["speaker"], turn["text"]) for turn in adapter.started_context.recent_turns
+    ] == [
+        ("user", "Can we discuss renewal risk?"),
+        ("counterpart", "I am worried the rollout is risky."),
+    ]
+    assert adapter.started_context.recent_turns[0]["metadata"]["message_id"] == 1
+    assert adapter.started_context.recent_turns[1]["metadata"]["sender_id"] == "buyer"
+    assert adapter.closed is True
+
+
 def test_realtime_websocket_binding_requires_active_training_session() -> None:
     app, _ = _make_bound_app(active=False)
     client = TestClient(app)
@@ -932,11 +999,14 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
 
         ws.send_json({"type": "audio.commit"})
         committed = ws.receive_json()
-        events = [ws.receive_json() for _ in range(3)]
+        events = [ws.receive_json() for _ in range(4)]
 
         assert committed["status"] == "processing"
         audio_output = next(event for event in events if event["type"] == "audio.output")
         persisted = next(event for event in events if event["type"] == "transcript.persisted")
+        guidance_trigger = next(
+            event for event in events if event["type"] == "training.live_guidance.triggered"
+        )
         assert any(
             event["type"] == "status.changed" and event["status"] == "listening"
             for event in events
@@ -951,6 +1021,16 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
         assert persisted["payload"]["message"]["content"] == (
             "Let's define the pilot metric before we begin."
         )
+        assert guidance_trigger["payload"]["reason"] == "final_transcript"
+        assert guidance_trigger["payload"]["provider"] == "pipecat"
+        assert guidance_trigger["payload"]["trainingSessionId"] == "session-1"
+        assert guidance_trigger["payload"]["roomId"] == 42
+        assert guidance_trigger["payload"]["transcript"] == {
+            "text": "Let's define the pilot metric before we begin.",
+            "role": "assistant",
+            "eventType": "response.audio_transcript.done",
+            "responseId": "response_pipecat_2",
+        }
 
         ws.send_json({"type": "session.close", "reason": "audio-output"})
         closed = ws.receive_json()

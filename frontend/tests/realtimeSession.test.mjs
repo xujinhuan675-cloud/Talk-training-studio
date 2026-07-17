@@ -78,6 +78,7 @@ globalThis.window = {
   },
 }
 globalThis.WebSocket = FakeWebSocket
+globalThis.atob ??= (value) => Buffer.from(value, 'base64').toString('binary')
 
 const realtimeSession = await loadRealtimeSessionModule()
 const expectedAuthHeaders = {
@@ -271,4 +272,127 @@ test('RealtimeSession updates status from backend wire events', () => {
   assert.equal(statuses.at(-1), 'listening')
   assert.equal(events[0].type, 'transcript.persisted')
   assert.equal(events[0].payload.message.content, 'Saved turn.')
+})
+
+test('RealtimeSession decodes nested base64 audio.output events from the websocket', () => {
+  let socket
+  const events = []
+  const statuses = []
+  const client = realtimeSession.createRealtimeSession({
+    url: 'ws://local/realtime',
+    socketFactory: () => {
+      socket = new FakeWebSocket('ws://local/realtime')
+      return socket
+    },
+    onStatusChange: (status) => statuses.push(status),
+    onEvent: (event) => events.push(event),
+  })
+
+  client.connect()
+  socket.open()
+  socket.onmessage?.({
+    data: JSON.stringify({
+      type: 'audio.output',
+      sessionId: 'session-1',
+      status: 'speaking',
+      payload: {
+        audio: Buffer.from([16, 32, 48]).toString('base64'),
+        mimeType: 'audio/pcm',
+        sequence: 7,
+        contextId: 'tts-context-1',
+        sampleRate: 24000,
+        channels: 1,
+        bytes: 3,
+      },
+    }),
+  })
+
+  assert.equal(statuses.at(-1), 'speaking')
+  assert.equal(events[0].type, 'audio.output')
+  assert.equal(events[0].mimeType, 'audio/pcm')
+  assert.equal(events[0].sequence, 7)
+  assert.equal(events[0].contextId, 'tts-context-1')
+  assert.equal(events[0].sampleRate, 24000)
+  assert.equal(events[0].channels, 1)
+  assert.deepEqual(Array.from(new Uint8Array(events[0].audio)), [16, 32, 48])
+  assert.deepEqual(Array.from(new Uint8Array(events[0].payload.audio)), [16, 32, 48])
+})
+
+test('decodeRealtimeServerEvent accepts top-level pipecat audio.output fields', () => {
+  const event = realtimeSession.decodeRealtimeServerEvent(JSON.stringify({
+    type: 'audio.output',
+    audio: Buffer.from([1, 2]).toString('base64'),
+    mimeType: 'audio/l16',
+    sequence: '2',
+    contextId: 'ctx-top-level',
+  }))
+
+  assert.equal(event.type, 'audio.output')
+  assert.equal(event.mimeType, 'audio/l16')
+  assert.equal(event.sequence, 2)
+  assert.equal(event.contextId, 'ctx-top-level')
+  assert.deepEqual(Array.from(new Uint8Array(event.audio)), [1, 2])
+})
+
+test('RealtimeAudioOutputQueue plays same-context chunks in sequence order', async () => {
+  const played = []
+  const queue = new realtimeSession.RealtimeAudioOutputQueue({
+    flushDelayMs: 0,
+    play: async (event) => {
+      played.push(event.sequence)
+    },
+  })
+
+  queue.enqueue({
+    type: 'audio.output',
+    audio: new Uint8Array([2]).buffer,
+    sequence: 2,
+    contextId: 'tts-context-1',
+  })
+  queue.enqueue({
+    type: 'audio.output',
+    audio: new Uint8Array([1]).buffer,
+    sequence: 1,
+    contextId: 'tts-context-1',
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  assert.deepEqual(played, [1, 2])
+})
+
+test('RealtimeAudioOutputQueue reports playback failures and drains later chunks', async () => {
+  const played = []
+  const errors = []
+  const queue = new realtimeSession.RealtimeAudioOutputQueue({
+    flushDelayMs: 0,
+    play: async (event) => {
+      if (event.sequence === 1) throw new Error('cannot play chunk')
+      played.push(event.sequence)
+    },
+    onError: (error, event) => {
+      errors.push({
+        message: error instanceof Error ? error.message : String(error),
+        sequence: event.sequence,
+      })
+    },
+  })
+
+  queue.enqueue({
+    type: 'audio.output',
+    audio: new Uint8Array([1]).buffer,
+    sequence: 1,
+    contextId: 'tts-context-1',
+  })
+  queue.enqueue({
+    type: 'audio.output',
+    audio: new Uint8Array([2]).buffer,
+    sequence: 2,
+    contextId: 'tts-context-1',
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  assert.deepEqual(errors, [{ message: 'cannot play chunk', sequence: 1 }])
+  assert.deepEqual(played, [2])
 })

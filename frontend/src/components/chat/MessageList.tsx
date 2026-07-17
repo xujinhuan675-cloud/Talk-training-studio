@@ -1,11 +1,15 @@
 import React from 'react'
 import Markdown from 'react-markdown'
-import { ListTree, MapPin, MessageCircle, ClipboardList, Route, Search, Volume2, Video } from 'lucide-react'
+import { ListTree, MapPin, MessageCircle, ClipboardList, Route, Search, Volume2, Video, Loader2 } from 'lucide-react'
 import Avatar from '../Avatar'
 import type { Message, DispatchPhase, PersonaSummary } from '../../services/api'
 import {
   buildConversationTreeMessageActionContext,
+  fetchConversationTreeBranchSnapshot,
+  type ConversationTreeBranchSnapshot,
+  type ConversationTreeActionKind,
   type ConversationTreeMessageActionContext,
+  type ConversationTreeMessage,
 } from '../../services/trainingConversation'
 import { useI18n } from '../../i18n'
 import './MessageList.css'
@@ -202,27 +206,38 @@ type MessageTreeActionLabels = {
   branchLabel: string
   noBranch: string
   searchQueryLabel: string
-  locate: string
-  locateDesc: string
+  selectedBadge: string
+  focus: string
+  focusDesc: string
   path: string
   pathDesc: string
   children: string
   childrenDesc: string
   search: string
   searchDesc: string
+  searchPlaceholder: string
+  loading: string
+  error: string
+  currentPath: string
+  childBranches: string
+  searchResults: string
+  selectPath: string
+  noPath: string
+  noChildren: string
+  noSearchResults: string
+  roleUser: string
+  roleAssistant: string
+  roleSystem: string
+  statusLabel: string
 }
 
-function appendQuery(
-  endpoint: string,
-  params: Array<[string, string | number | boolean | null | undefined]>,
-): string {
-  const searchParams = new URLSearchParams()
-  for (const [key, value] of params) {
-    if (value === null || value === undefined || value === '') continue
-    searchParams.set(key, String(value))
-  }
-  const query = searchParams.toString()
-  return query ? `${endpoint}?${query}` : endpoint
+export interface MessageTreePathSelection {
+  provider: string
+  conversationId: string
+  selectedMessageId: string
+  branchId: string | null
+  path: ConversationTreeMessage[]
+  sourceMessageId: number | null
 }
 
 function messageSearchQuery(message: Message, context: ConversationTreeMessageActionContext): string {
@@ -238,59 +253,216 @@ function getMessageTreeActionContext(message: Message): ConversationTreeMessageA
   return buildConversationTreeMessageActionContext({ metadata: message.metadata ?? null })
 }
 
-function renderMessageTreeActions(
+function buildMessageTreeSelection(
+  snapshot: ConversationTreeBranchSnapshot,
+  context: ConversationTreeMessageActionContext,
+  sourceMessageId: number | null,
+): MessageTreePathSelection | null {
+  const selectedMessage = snapshot.message ?? snapshot.path[snapshot.path.length - 1]
+  if (!selectedMessage) return null
+
+  return {
+    provider: context.provider,
+    conversationId: context.conversationId,
+    selectedMessageId: selectedMessage.publicId,
+    branchId: selectedMessage.branchId ?? context.branchId,
+    path: snapshot.path.length > 0 ? snapshot.path : [selectedMessage],
+    sourceMessageId,
+  }
+}
+
+function contextForTreeMessage(
+  baseContext: ConversationTreeMessageActionContext,
+  message: ConversationTreeMessage,
+): ConversationTreeMessageActionContext | null {
+  return buildConversationTreeMessageActionContext({
+    provider: baseContext.provider,
+    conversationId: baseContext.conversationId,
+    messagePublicId: message.publicId,
+    branchId: message.branchId ?? baseContext.branchId,
+  })
+}
+
+function treeMessagePreview(message: ConversationTreeMessage): string {
+  const text = message.content.replace(/\s+/g, ' ').trim()
+  return text.length > 96 ? `${text.slice(0, 95)}...` : text || message.publicId
+}
+
+function treeRoleLabel(role: string, labels: MessageTreeActionLabels): string {
+  const normalized = role.toLowerCase()
+  if (normalized === 'assistant' || normalized === 'persona') return labels.roleAssistant
+  if (normalized === 'system') return labels.roleSystem
+  return labels.roleUser
+}
+
+function MessageTreeItem({
+  message,
+  labels,
+  active,
+  onSelect,
+}: {
+  message: ConversationTreeMessage
+  labels: MessageTreeActionLabels
+  active: boolean
+  onSelect: (message: ConversationTreeMessage) => void
+}) {
+  const preview = treeMessagePreview(message)
+  return (
+    <button
+      type="button"
+      className={`message-tree-node${active ? ' active' : ''}`}
+      onClick={(event) => {
+        event.stopPropagation()
+        onSelect(message)
+      }}
+      title={preview}
+      aria-label={`${labels.selectPath}: ${preview}`}
+    >
+      <span className="message-tree-node-role">{treeRoleLabel(message.role, labels)}</span>
+      <span className="message-tree-node-preview">{preview}</span>
+      <span className="message-tree-node-meta">
+        <span>{message.branchId ?? labels.noBranch}</span>
+        <span>{labels.statusLabel}: {message.status}</span>
+      </span>
+    </button>
+  )
+}
+
+interface MessageTreeActionsProps {
   message: Message,
   context: ConversationTreeMessageActionContext,
   labels: MessageTreeActionLabels,
-) {
-  const branchQuery: [string, string | null] = ['branch_id', context.branchId]
+  selectedTreeNodeId?: string | null
+  onSelectPath?: (selection: MessageTreePathSelection) => void
+}
+
+function MessageTreeActions({
+  message,
+  context,
+  labels,
+  selectedTreeNodeId,
+  onSelectPath,
+}: MessageTreeActionsProps) {
+  const [expanded, setExpanded] = React.useState(false)
+  const [focusedContext, setFocusedContext] = React.useState(context)
+  const [snapshot, setSnapshot] = React.useState<ConversationTreeBranchSnapshot | null>(null)
+  const [loadingAction, setLoadingAction] = React.useState<'focus' | 'children' | 'search' | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
   const searchQuery = messageSearchQuery(message, context)
-  const actions = [
-    {
-      key: 'locate',
-      href: appendQuery(context.endpoints.locate, [
-        ['before', 2],
-        ['after', 2],
-      ]),
-      label: labels.locate,
-      description: labels.locateDesc,
-      icon: <MapPin size={13} />,
+  const {
+    availableActions,
+    branchId,
+    conversationId,
+    endpoints,
+    messagePublicId,
+    provider,
+  } = context
+  const {
+    children: childrenEndpoint,
+    edit: editEndpoint,
+    fork: forkEndpoint,
+    locate: locateEndpoint,
+    path: pathEndpoint,
+    retry: retryEndpoint,
+    search: searchEndpoint,
+  } = endpoints
+  const availableActionsKey = availableActions.join('|')
+  const resetContext = React.useMemo<ConversationTreeMessageActionContext>(() => ({
+    availableActions: availableActionsKey
+      .split('|')
+      .filter(Boolean) as ConversationTreeActionKind[],
+    branchId,
+    conversationId,
+    endpoints: {
+      children: childrenEndpoint,
+      edit: editEndpoint,
+      fork: forkEndpoint,
+      locate: locateEndpoint,
+      path: pathEndpoint,
+      retry: retryEndpoint,
+      search: searchEndpoint,
     },
-    {
-      key: 'path',
-      href: appendQuery(context.endpoints.path, [['limit', 200]]),
-      label: labels.path,
-      description: labels.pathDesc,
-      icon: <Route size={13} />,
-    },
-    {
-      key: 'children',
-      href: appendQuery(context.endpoints.children, [branchQuery]),
-      label: labels.children,
-      description: labels.childrenDesc,
-      icon: <ListTree size={13} />,
-    },
-    {
-      key: 'search',
-      href: appendQuery(context.endpoints.search, [
-        ['q', searchQuery],
-        ['limit', 20],
-        ['include_path', true],
-        ['context_before', 2],
-        ['context_after', 2],
-        branchQuery,
-      ]),
-      label: labels.search,
-      description: labels.searchDesc,
-      icon: <Search size={13} />,
-    },
-  ] satisfies Array<{
-    key: 'locate' | 'path' | 'children' | 'search'
-    href: string
-    label: string
-    description: string
-    icon: React.ReactNode
-  }>
+    messagePublicId,
+    provider,
+  }), [
+    availableActionsKey,
+    branchId,
+    childrenEndpoint,
+    conversationId,
+    editEndpoint,
+    forkEndpoint,
+    locateEndpoint,
+    messagePublicId,
+    pathEndpoint,
+    provider,
+    retryEndpoint,
+    searchEndpoint,
+  ])
+  const [searchText, setSearchText] = React.useState(searchQuery)
+  const requestSeqRef = React.useRef(0)
+  const selectedPathIds = React.useMemo(
+    () => new Set(snapshot?.path.map((item) => item.publicId) ?? []),
+    [snapshot],
+  )
+
+  React.useEffect(() => {
+    setFocusedContext(resetContext)
+    setSnapshot(null)
+    setError(null)
+    setSearchText(searchQuery)
+  }, [resetContext, searchQuery])
+
+  React.useEffect(() => () => {
+    requestSeqRef.current += 1
+  }, [])
+
+  const loadSnapshot = React.useCallback(async (
+    nextContext: ConversationTreeMessageActionContext,
+    action: 'focus' | 'children' | 'search',
+    query: string | null,
+  ) => {
+    const requestSeq = requestSeqRef.current + 1
+    requestSeqRef.current = requestSeq
+    setExpanded(true)
+    setLoadingAction(action)
+    setError(null)
+    try {
+      const nextSnapshot = await fetchConversationTreeBranchSnapshot(nextContext, {
+        branchId: nextContext.branchId,
+        searchQuery: query,
+      })
+      if (requestSeqRef.current !== requestSeq) return
+      setFocusedContext(nextContext)
+      setSnapshot(nextSnapshot)
+      const selection = buildMessageTreeSelection(nextSnapshot, nextContext, message.id)
+      if (selection) onSelectPath?.(selection)
+    } catch (err) {
+      if (requestSeqRef.current !== requestSeq) return
+      console.error('Failed to load message tree branch data:', err)
+      setError(labels.error)
+    } finally {
+      if (requestSeqRef.current === requestSeq) {
+        setLoadingAction(null)
+      }
+    }
+  }, [labels.error, message.id, onSelectPath])
+
+  const handleSelectTreeMessage = React.useCallback((treeMessage: ConversationTreeMessage) => {
+    const nextContext = contextForTreeMessage(focusedContext, treeMessage)
+    if (!nextContext) return
+    void loadSnapshot(nextContext, 'children', searchText.trim() || null)
+  }, [focusedContext, loadSnapshot, searchText])
+
+  const handleSubmitSearch = React.useCallback((event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void loadSnapshot(focusedContext, 'search', searchText.trim() || searchQuery)
+  }, [focusedContext, loadSnapshot, searchQuery, searchText])
+
+  const hasSnapshot = Boolean(snapshot)
+  const currentNodeId = snapshot?.message?.publicId ?? focusedContext.messagePublicId
+  const isSelectedCurrentNode = selectedTreeNodeId === focusedContext.messagePublicId
+    || selectedTreeNodeId === currentNodeId
 
   return (
     <section className="message-tree-actions" aria-label={labels.group}>
@@ -299,40 +471,146 @@ function renderMessageTreeActions(
           <ListTree size={14} aria-hidden="true" />
           {labels.title}
         </span>
-        <span className="message-tree-readonly-badge">{labels.readonlyBadge}</span>
+        <span className="message-tree-badges">
+          {isSelectedCurrentNode && <span className="message-tree-selected-badge">{labels.selectedBadge}</span>}
+          <span className="message-tree-readonly-badge">{labels.readonlyBadge}</span>
+        </span>
       </div>
       <p className="message-tree-actions-hint">{labels.hint}</p>
       <div className="message-tree-meta" aria-label={labels.branchLabel}>
         <span className="message-tree-meta-item">
           <span className="message-tree-meta-label">{labels.branchLabel}</span>
-          <span className="message-tree-meta-value">{context.branchId ?? labels.noBranch}</span>
+          <span className="message-tree-meta-value">{focusedContext.branchId ?? labels.noBranch}</span>
         </span>
         <span className="message-tree-meta-item">
           <span className="message-tree-meta-label">{labels.searchQueryLabel}</span>
-          <span className="message-tree-meta-value">{searchQuery}</span>
+          <span className="message-tree-meta-value">{searchText || searchQuery}</span>
         </span>
       </div>
-      <div className="message-tree-action-links" role="list">
-        {actions.map((action) => (
-          <a
-            key={action.key}
-            className="message-tree-action"
-            href={action.href}
-            target="_blank"
-            rel="noreferrer"
-            title={action.description}
-            aria-label={`${action.label}: ${action.description}`}
-            role="listitem"
+      <div className="message-tree-action-links">
+        <button
+          type="button"
+          className="message-tree-action"
+          title={labels.focusDesc}
+          onClick={(event) => {
+            event.stopPropagation()
+            void loadSnapshot(focusedContext, 'focus', null)
+          }}
+        >
+          <span className="message-tree-action-icon" aria-hidden="true">
+            {loadingAction === 'focus' ? <Loader2 size={13} className="spin" /> : <MapPin size={13} />}
+          </span>
+          <span className="message-tree-action-copy">
+            <span className="message-tree-action-label">{labels.focus}</span>
+            <span className="message-tree-action-description">{labels.focusDesc}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="message-tree-action"
+          title={labels.childrenDesc}
+          onClick={(event) => {
+            event.stopPropagation()
+            void loadSnapshot(focusedContext, 'children', null)
+          }}
+        >
+          <span className="message-tree-action-icon" aria-hidden="true">
+            {loadingAction === 'children' ? <Loader2 size={13} className="spin" /> : <ListTree size={13} />}
+          </span>
+          <span className="message-tree-action-copy">
+            <span className="message-tree-action-label">{labels.children}</span>
+            <span className="message-tree-action-description">{labels.childrenDesc}</span>
+          </span>
+        </button>
+        <form className="message-tree-search-form" onSubmit={handleSubmitSearch}>
+          <label>
+            <span className="sr-only">{labels.searchPlaceholder}</span>
+            <input
+              value={searchText}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder={labels.searchPlaceholder}
+            />
+          </label>
+          <button
+            type="submit"
+            title={labels.searchDesc}
             onClick={(event) => event.stopPropagation()}
           >
-            <span className="message-tree-action-icon" aria-hidden="true">{action.icon}</span>
-            <span className="message-tree-action-copy">
-              <span className="message-tree-action-label">{action.label}</span>
-              <span className="message-tree-action-description">{action.description}</span>
-            </span>
-          </a>
-        ))}
+            {loadingAction === 'search' ? <Loader2 size={13} className="spin" /> : <Search size={13} />}
+            <span>{labels.search}</span>
+          </button>
+        </form>
       </div>
+      {loadingAction && <div className="message-tree-status">{labels.loading}</div>}
+      {error && <div className="message-tree-error">{error}</div>}
+      {expanded && !loadingAction && !error && (
+        <div className="message-tree-branch-panel">
+          <div className="message-tree-section">
+            <div className="message-tree-section-title">
+              <Route size={13} aria-hidden="true" />
+              <span>{labels.currentPath}</span>
+            </div>
+            {hasSnapshot && snapshot?.path.length ? (
+              <div className="message-tree-path-list">
+                {snapshot.path.map((pathMessage) => (
+                  <MessageTreeItem
+                    key={pathMessage.publicId}
+                    message={pathMessage}
+                    labels={labels}
+                    active={selectedTreeNodeId === pathMessage.publicId || currentNodeId === pathMessage.publicId}
+                    onSelect={handleSelectTreeMessage}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="message-tree-empty">{labels.noPath}</div>
+            )}
+          </div>
+          <div className="message-tree-section">
+            <div className="message-tree-section-title">
+              <ListTree size={13} aria-hidden="true" />
+              <span>{labels.childBranches}</span>
+            </div>
+            {hasSnapshot && snapshot?.children.length ? (
+              <div className="message-tree-node-list">
+                {snapshot.children.map((child) => (
+                  <MessageTreeItem
+                    key={child.publicId}
+                    message={child}
+                    labels={labels}
+                    active={selectedPathIds.has(child.publicId) || selectedTreeNodeId === child.publicId}
+                    onSelect={handleSelectTreeMessage}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="message-tree-empty">{labels.noChildren}</div>
+            )}
+          </div>
+          {snapshot?.searchResults.length ? (
+            <div className="message-tree-section">
+              <div className="message-tree-section-title">
+                <Search size={13} aria-hidden="true" />
+                <span>{labels.searchResults}</span>
+              </div>
+              <div className="message-tree-node-list">
+                {snapshot.searchResults.map((result) => (
+                  <MessageTreeItem
+                    key={result.message.publicId}
+                    message={result.message}
+                    labels={labels}
+                    active={selectedTreeNodeId === result.message.publicId}
+                    onSelect={handleSelectTreeMessage}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : loadingAction !== 'search' && hasSnapshot && searchText.trim() ? (
+            <div className="message-tree-empty">{labels.noSearchResults}</div>
+          ) : null}
+        </div>
+      )}
     </section>
   )
 }
@@ -355,6 +633,8 @@ export interface MessageListProps {
   /** Typing / voice indicators */
   typingPersona: string | null
   playingPersonaId: string | null
+  currentTreeSelection?: MessageTreePathSelection | null
+  onSelectTreePath?: (selection: MessageTreePathSelection) => void
   /** Close export menu on click inside message list */
   onClick?: () => void
 }
@@ -374,10 +654,16 @@ export default function MessageList({
   onToggleDispatch,
   typingPersona,
   playingPersonaId,
+  currentTreeSelection,
+  onSelectTreePath,
   onClick,
 }: MessageListProps) {
   const { t, tr, locale } = useI18n()
   const isEmpty = messages.length === 0 && streamingEntries.length === 0
+  const currentTreePathIds = React.useMemo(
+    () => new Set(currentTreeSelection?.path.map((item) => item.publicId) ?? []),
+    [currentTreeSelection],
+  )
   const messageTreeActionLabels: MessageTreeActionLabels = {
     group: t('messageTree.actions.group'),
     title: t('messageTree.actions.title'),
@@ -386,14 +672,29 @@ export default function MessageList({
     branchLabel: t('messageTree.actions.branchLabel'),
     noBranch: t('messageTree.actions.noBranch'),
     searchQueryLabel: t('messageTree.actions.searchQueryLabel'),
-    locate: t('messageTree.actions.locate'),
-    locateDesc: t('messageTree.actions.locateDesc'),
+    selectedBadge: t('messageTree.actions.selectedBadge'),
+    focus: t('messageTree.actions.focus'),
+    focusDesc: t('messageTree.actions.focusDesc'),
     path: t('messageTree.actions.path'),
     pathDesc: t('messageTree.actions.pathDesc'),
     children: t('messageTree.actions.children'),
     childrenDesc: t('messageTree.actions.childrenDesc'),
     search: t('messageTree.actions.search'),
     searchDesc: t('messageTree.actions.searchDesc'),
+    searchPlaceholder: t('messageTree.actions.searchPlaceholder'),
+    loading: t('messageTree.actions.loading'),
+    error: t('messageTree.actions.error'),
+    currentPath: t('messageTree.actions.currentPath'),
+    childBranches: t('messageTree.actions.childBranches'),
+    searchResults: t('messageTree.actions.searchResults'),
+    selectPath: t('messageTree.actions.selectPath'),
+    noPath: t('messageTree.actions.noPath'),
+    noChildren: t('messageTree.actions.noChildren'),
+    noSearchResults: t('messageTree.actions.noSearchResults'),
+    roleUser: t('messageTree.actions.roleUser'),
+    roleAssistant: t('messageTree.actions.roleAssistant'),
+    roleSystem: t('messageTree.actions.roleSystem'),
+    statusLabel: t('messageTree.actions.statusLabel'),
   }
 
   React.useEffect(() => {
@@ -417,11 +718,18 @@ export default function MessageList({
             const borderColor = persona?.avatar_color || undefined
             const videoAttachment = findVideoAttachment(msg)
             const messageTreeActionContext = getMessageTreeActionContext(msg)
+            const isInSelectedTreePath = messageTreeActionContext
+              ? currentTreePathIds.has(messageTreeActionContext.messagePublicId)
+              : false
+            const isSelectedTreeNode = Boolean(
+              messageTreeActionContext
+              && currentTreeSelection?.selectedMessageId === messageTreeActionContext.messagePublicId,
+            )
             return (
               <div
                 key={msg.id}
                 id={`msg-${msg.id}`}
-                className={`message ${msg.sender_type}${highlightedMessageId === msg.id ? ' highlighted' : ''}`}
+                className={`message ${msg.sender_type}${highlightedMessageId === msg.id ? ' highlighted' : ''}${isInSelectedTreePath ? ' tree-path-selected' : ''}${isSelectedTreeNode ? ' tree-node-selected' : ''}`}
                 data-sender={msg.sender_type}
               >
                 {msg.sender_type === 'persona' && (
@@ -443,7 +751,15 @@ export default function MessageList({
                         {renderContent(msg.content)}
                         {renderVideoAttachment(videoAttachment)}
                       </div>
-                      {messageTreeActionContext && renderMessageTreeActions(msg, messageTreeActionContext, messageTreeActionLabels)}
+                      {messageTreeActionContext && (
+                        <MessageTreeActions
+                          message={msg}
+                          context={messageTreeActionContext}
+                          labels={messageTreeActionLabels}
+                          selectedTreeNodeId={currentTreeSelection?.selectedMessageId}
+                          onSelectPath={onSelectTreePath}
+                        />
+                      )}
                       <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
                     </div>
                   </div>
@@ -454,7 +770,15 @@ export default function MessageList({
                       {renderContent(msg.content)}
                       {renderVideoAttachment(videoAttachment)}
                     </div>
-                    {messageTreeActionContext && renderMessageTreeActions(msg, messageTreeActionContext, messageTreeActionLabels)}
+                    {messageTreeActionContext && (
+                      <MessageTreeActions
+                        message={msg}
+                        context={messageTreeActionContext}
+                        labels={messageTreeActionLabels}
+                        selectedTreeNodeId={currentTreeSelection?.selectedMessageId}
+                        onSelectPath={onSelectTreePath}
+                      />
+                    )}
                     <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
                   </>
                 )}
@@ -464,7 +788,15 @@ export default function MessageList({
                       {renderContent(msg.content)}
                       {renderVideoAttachment(videoAttachment)}
                     </div>
-                    {messageTreeActionContext && renderMessageTreeActions(msg, messageTreeActionContext, messageTreeActionLabels)}
+                    {messageTreeActionContext && (
+                      <MessageTreeActions
+                        message={msg}
+                        context={messageTreeActionContext}
+                        labels={messageTreeActionLabels}
+                        selectedTreeNodeId={currentTreeSelection?.selectedMessageId}
+                        onSelectPath={onSelectTreePath}
+                      />
+                    )}
                   </>
                 )}
               </div>

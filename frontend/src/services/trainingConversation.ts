@@ -142,6 +142,53 @@ export interface ConversationTreeMessageActionContext {
   availableActions: ConversationTreeActionKind[]
 }
 
+export interface ConversationTreeMessage {
+  id: string | null
+  conversationId: string | null
+  role: string
+  content: string
+  publicId: string
+  parentMessageId: string | null
+  branchId: string | null
+  status: string
+  provider: string | null
+  model: string | null
+  createdAt: string | null
+  metadata: Record<string, unknown>
+}
+
+export interface ConversationTreeLocation {
+  message: ConversationTreeMessage | null
+  path: ConversationTreeMessage[]
+  context: ConversationTreeMessage[]
+}
+
+export interface ConversationTreeSearchResult {
+  message: ConversationTreeMessage
+  path: ConversationTreeMessage[]
+  context: ConversationTreeMessage[]
+}
+
+export interface ConversationTreeBranchSnapshot extends ConversationTreeLocation {
+  children: ConversationTreeMessage[]
+  searchResults: ConversationTreeSearchResult[]
+}
+
+export interface ConversationTreeFetchOptions {
+  signal?: AbortSignal
+  limit?: number
+  before?: number
+  after?: number
+  branchId?: string | null
+  searchQuery?: string | null
+  searchLimit?: number
+  includePath?: boolean
+  contextBefore?: number
+  contextAfter?: number
+  includeDeleted?: boolean
+  statuses?: string[]
+}
+
 const TRAINING_RUNTIME_MODES = new Set<TrainingRuntimeMode>(['text', 'voice', 'video', 'realtime'])
 const STAKEHOLDER_API_BASE = '/api/v1/stakeholder'
 const TRAINING_STUDIO_API_BASE = '/api/v1/training-studio'
@@ -296,6 +343,102 @@ export function buildConversationTreeMessageActionContext(
   }
 }
 
+export async function fetchConversationTreeMessagePath(
+  context: ConversationTreeMessageActionContext,
+  options: ConversationTreeFetchOptions = {},
+): Promise<ConversationTreeMessage[]> {
+  const data = await fetchConversationTreeData(
+    appendUrlQuery(context.endpoints.path, [
+      ['limit', options.limit],
+      ['include_deleted', options.includeDeleted],
+      ...statusParams(options.statuses),
+    ]),
+    options.signal,
+  )
+  return normalizeConversationTreeMessageList(data)
+}
+
+export async function fetchConversationTreeMessageChildren(
+  context: ConversationTreeMessageActionContext,
+  options: ConversationTreeFetchOptions = {},
+): Promise<ConversationTreeMessage[]> {
+  const data = await fetchConversationTreeData(
+    appendUrlQuery(context.endpoints.children, [
+      ['include_deleted', options.includeDeleted],
+      ...statusParams(options.statuses),
+    ]),
+    options.signal,
+  )
+  return normalizeConversationTreeMessageList(data)
+}
+
+export async function fetchConversationTreeMessageLocation(
+  context: ConversationTreeMessageActionContext,
+  options: ConversationTreeFetchOptions = {},
+): Promise<ConversationTreeLocation> {
+  const data = await fetchConversationTreeData(
+    appendUrlQuery(context.endpoints.locate, [
+      ['before', options.before],
+      ['after', options.after],
+    ]),
+    options.signal,
+  )
+  return normalizeConversationTreeLocation(data)
+}
+
+export async function searchConversationTreeMessages(
+  context: ConversationTreeMessageActionContext,
+  options: ConversationTreeFetchOptions = {},
+): Promise<ConversationTreeSearchResult[]> {
+  const query = cleanText(options.searchQuery)
+  if (!query) return []
+
+  const data = await fetchConversationTreeData(
+    appendUrlQuery(context.endpoints.search, [
+      ['q', query],
+      ['limit', options.searchLimit ?? options.limit],
+      ['include_path', options.includePath],
+      ['context_before', options.contextBefore],
+      ['context_after', options.contextAfter],
+      ['branch_id', options.branchId],
+      ...statusParams(options.statuses),
+    ]),
+    options.signal,
+  )
+  return normalizeConversationTreeSearchResults(data)
+}
+
+export async function fetchConversationTreeBranchSnapshot(
+  context: ConversationTreeMessageActionContext,
+  options: ConversationTreeFetchOptions = {},
+): Promise<ConversationTreeBranchSnapshot> {
+  const searchQuery = cleanText(options.searchQuery)
+  const [location, children, searchResults] = await Promise.all([
+    fetchConversationTreeMessageLocation(context, {
+      ...options,
+      before: options.before ?? 2,
+      after: options.after ?? 2,
+    }),
+    fetchConversationTreeMessageChildren(context, options),
+    searchQuery
+      ? searchConversationTreeMessages(context, {
+        ...options,
+        searchQuery,
+        searchLimit: options.searchLimit ?? 8,
+        includePath: options.includePath ?? true,
+        contextBefore: options.contextBefore ?? 1,
+        contextAfter: options.contextAfter ?? 1,
+      })
+      : Promise.resolve([]),
+  ])
+
+  return {
+    ...location,
+    children,
+    searchResults,
+  }
+}
+
 export function resolveRuntimeEndpoint(options: ResolveRuntimeEndpointOptions): string {
   const mode = normalizeRuntimeMode(options.mode)
   const provider = normalizeProvider(options.provider ?? options.conversation?.provider, mode)
@@ -329,6 +472,89 @@ export function resolveRuntimeEndpoint(options: ResolveRuntimeEndpointOptions): 
 function normalizeRuntimeMode(mode: TrainingRuntimeMode): TrainingRuntimeMode {
   if (TRAINING_RUNTIME_MODES.has(mode)) return mode
   throw new Error(`unsupported training runtime mode: ${String(mode)}`)
+}
+
+async function fetchConversationTreeData(endpoint: string, signal?: AbortSignal): Promise<unknown> {
+  const resp = await fetch(endpoint, { signal })
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch conversation tree data: ${resp.status}`)
+  }
+  const json = await resp.json() as { data?: unknown }
+  return json.data
+}
+
+function normalizeConversationTreeMessageList(value: unknown): ConversationTreeMessage[] {
+  if (!Array.isArray(value)) return []
+  return value.map(normalizeConversationTreeMessage).filter((message): message is ConversationTreeMessage => Boolean(message))
+}
+
+function normalizeConversationTreeLocation(value: unknown): ConversationTreeLocation {
+  const data = recordValue(value)
+  const message = normalizeConversationTreeMessage(data?.message)
+  return {
+    message,
+    path: normalizeConversationTreeMessageList(data?.path),
+    context: normalizeConversationTreeMessageList(data?.context),
+  }
+}
+
+function normalizeConversationTreeSearchResults(value: unknown): ConversationTreeSearchResult[] {
+  if (!Array.isArray(value)) return []
+  const results: ConversationTreeSearchResult[] = []
+  for (const item of value) {
+    const data = recordValue(item)
+    const message = normalizeConversationTreeMessage(data?.message)
+    if (!message) continue
+    results.push({
+      message,
+      path: normalizeConversationTreeMessageList(data?.path),
+      context: normalizeConversationTreeMessageList(data?.context),
+    })
+  }
+  return results
+}
+
+function normalizeConversationTreeMessage(value: unknown): ConversationTreeMessage | null {
+  const data = recordValue(value)
+  if (!data) return null
+  const publicId = cleanPublicMessageId(data.publicId ?? data.public_id)
+  if (!publicId) return null
+
+  return {
+    id: cleanText(data.id),
+    conversationId: cleanText(data.conversationId ?? data.conversation_id),
+    role: cleanText(data.role) ?? 'user',
+    content: cleanText(data.content ?? data.text ?? data.message) ?? '',
+    publicId,
+    parentMessageId: cleanText(data.parentMessageId ?? data.parent_message_id),
+    branchId: cleanText(data.branchId ?? data.branch_id),
+    status: cleanText(data.status) ?? 'active',
+    provider: cleanText(data.provider),
+    model: cleanText(data.model),
+    createdAt: cleanText(data.createdAt ?? data.created_at),
+    metadata: cloneMetadata(recordValue(data.metadata)),
+  }
+}
+
+function appendUrlQuery(
+  endpoint: string,
+  params: Array<[string, string | number | boolean | null | undefined]>,
+): string {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of params) {
+    if (value === null || value === undefined || value === '') continue
+    searchParams.append(key, String(value))
+  }
+  const query = searchParams.toString()
+  return query ? `${endpoint}?${query}` : endpoint
+}
+
+function statusParams(statuses: string[] | undefined): Array<[string, string]> {
+  if (!statuses) return []
+  return statuses
+    .map((status) => cleanText(status))
+    .filter((status): status is string => Boolean(status))
+    .map((status) => ['statuses', status])
 }
 
 function normalizeProvider(provider: string | null | undefined, mode: TrainingRuntimeMode): string {

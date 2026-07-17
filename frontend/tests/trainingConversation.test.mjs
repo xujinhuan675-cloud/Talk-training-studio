@@ -29,6 +29,25 @@ async function loadTrainingConversationModule() {
 
 const trainingConversation = await loadTrainingConversationModule()
 
+async function withMockFetch(handler, testBody) {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init })
+    const response = handler(String(url), init)
+    return new Response(JSON.stringify({ data: response }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  try {
+    await testBody(calls)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+
 test('normalizeTrainingTurn maps TalkWise senders to training roles and preserves metadata', () => {
   const turn = trainingConversation.normalizeTrainingTurn({
     id: 17,
@@ -313,6 +332,181 @@ test('buildConversationTreeMessageActionContext ignores stakeholder room local m
   })
 
   assert.equal(context, null)
+})
+
+test('fetchConversationTreeMessagePath normalizes readonly path messages', async () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 42,
+    messagePublicId: 'msg_leaf',
+  })
+
+  await withMockFetch(
+    (url) => {
+      assert.equal(
+        url,
+        '/api/v1/conversations/42/messages/msg_leaf/path?limit=3&include_deleted=true&statuses=active&statuses=superseded',
+      )
+      return [
+        {
+          id: 1,
+          conversation_id: 42,
+          role: 'user',
+          content: 'Root turn',
+          public_id: 'msg_root',
+          branch_id: 'main',
+          status: 'active',
+          created_at: '2026-07-17T00:00:00Z',
+        },
+        {
+          id: 2,
+          conversation_id: 42,
+          role: 'assistant',
+          content: 'Leaf answer',
+          public_id: 'msg_leaf',
+          parent_message_id: 'msg_root',
+          branch_id: 'main',
+          status: 'superseded',
+          provider: 'openai',
+          model: 'gpt-test',
+          metadata: { score: 1 },
+          created_at: '2026-07-17T00:01:00Z',
+        },
+      ]
+    },
+    async () => {
+      const pathItems = await trainingConversation.fetchConversationTreeMessagePath(context, {
+        limit: 3,
+        includeDeleted: true,
+        statuses: ['active', ' ', 'superseded'],
+      })
+
+      assert.deepEqual(pathItems.map((item) => item.publicId), ['msg_root', 'msg_leaf'])
+      assert.equal(pathItems[1].parentMessageId, 'msg_root')
+      assert.equal(pathItems[1].branchId, 'main')
+      assert.equal(pathItems[1].status, 'superseded')
+      assert.equal(pathItems[1].provider, 'openai')
+      assert.deepEqual(pathItems[1].metadata, { score: 1 })
+    },
+  )
+})
+
+test('fetchConversationTreeBranchSnapshot loads focused node children and search results', async () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 7,
+    messagePublicId: 'msg_selected',
+    branchId: 'main',
+  })
+
+  await withMockFetch(
+    (url) => {
+      if (url === '/api/v1/conversations/7/messages/msg_selected/locate?before=2&after=2') {
+        return {
+          message: {
+            id: 2,
+            conversation_id: 7,
+            role: 'assistant',
+            content: 'Selected answer',
+            public_id: 'msg_selected',
+            parent_message_id: 'msg_root',
+            branch_id: 'main',
+            status: 'active',
+            created_at: '2026-07-17T00:01:00Z',
+          },
+          path: [
+            {
+              id: 1,
+              conversation_id: 7,
+              role: 'user',
+              content: 'Root question',
+              public_id: 'msg_root',
+              branch_id: 'main',
+              status: 'active',
+              created_at: '2026-07-17T00:00:00Z',
+            },
+            {
+              id: 2,
+              conversation_id: 7,
+              role: 'assistant',
+              content: 'Selected answer',
+              public_id: 'msg_selected',
+              parent_message_id: 'msg_root',
+              branch_id: 'main',
+              status: 'active',
+              created_at: '2026-07-17T00:01:00Z',
+            },
+          ],
+          context: [],
+        }
+      }
+      if (url === '/api/v1/conversations/7/messages/msg_selected/children') {
+        return [
+          {
+            id: 3,
+            conversation_id: 7,
+            role: 'user',
+            content: 'Main follow-up',
+            public_id: 'msg_child_main',
+            parent_message_id: 'msg_selected',
+            branch_id: 'main',
+            status: 'active',
+            created_at: '2026-07-17T00:02:00Z',
+          },
+          {
+            id: 4,
+            conversation_id: 7,
+            role: 'user',
+            content: 'Alternate follow-up',
+            public_id: 'msg_child_alt',
+            parent_message_id: 'msg_selected',
+            branch_id: 'branch_alt',
+            status: 'active',
+            created_at: '2026-07-17T00:03:00Z',
+          },
+        ]
+      }
+      if (url === '/api/v1/conversations/7/messages/search?q=pilot&limit=8&include_path=true&context_before=1&context_after=1&branch_id=main') {
+        return [
+          {
+            message: {
+              id: 5,
+              conversation_id: 7,
+              role: 'assistant',
+              content: 'Pilot discussion',
+              public_id: 'msg_search',
+              parent_message_id: 'msg_child_main',
+              branch_id: 'main',
+              status: 'active',
+              created_at: '2026-07-17T00:04:00Z',
+            },
+            path: [],
+            context: [],
+          },
+        ]
+      }
+      throw new Error(`Unexpected URL ${url}`)
+    },
+    async (calls) => {
+      const snapshot = await trainingConversation.fetchConversationTreeBranchSnapshot(context, {
+        branchId: 'main',
+        searchQuery: 'pilot',
+      })
+
+      assert.deepEqual(
+        calls.map((call) => call.url).sort(),
+        [
+          '/api/v1/conversations/7/messages/msg_selected/children',
+          '/api/v1/conversations/7/messages/msg_selected/locate?before=2&after=2',
+          '/api/v1/conversations/7/messages/search?q=pilot&limit=8&include_path=true&context_before=1&context_after=1&branch_id=main',
+        ].sort(),
+      )
+      assert.equal(snapshot.message.publicId, 'msg_selected')
+      assert.deepEqual(snapshot.path.map((item) => item.publicId), ['msg_root', 'msg_selected'])
+      assert.deepEqual(snapshot.children.map((item) => item.branchId), ['main', 'branch_alt'])
+      assert.equal(snapshot.searchResults[0].message.publicId, 'msg_search')
+    },
+  )
 })
 
 test('resolveRuntimeEndpoint keeps OpenAI WebRTC on SDP endpoint', () => {

@@ -41,10 +41,15 @@ def _message(content: str, public_id: str = "msg_1") -> MessageDTO_Agent:
 
 class _FakeActionService:
     def __init__(self) -> None:
+        self.action_call = None
         self.retry_call = None
 
     async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):
         raise MessageNotFoundException()
+
+    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
+        self.action_call = (conversation_id, message_public_id, payload)
+        return None
 
     async def retry_message(
         self,
@@ -98,6 +103,20 @@ def test_retry_message_route_accepts_empty_payload_default_content() -> None:
     assert response.json()["data"]["content"] == ""
     assert service.retry_call[0:2] == (7, "msg_answer")
     assert service.retry_call[2].content == ""
+
+
+def test_message_action_route_rejects_edit_without_content() -> None:
+    service = _FakeActionService()
+    client = _client(service)
+
+    response = client.post(
+        "/api/v1/conversations/7/messages/msg_answer/actions",
+        json={"action": "edit"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["type"] == "ValidationError"
+    assert service.action_call is None
 
 
 @pytest.mark.asyncio

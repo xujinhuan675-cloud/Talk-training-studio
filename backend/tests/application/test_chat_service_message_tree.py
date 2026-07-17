@@ -6,7 +6,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from application.dto import ChatRequestDTO, EditMessageDTO, ForkConversationDTO, RetryMessageDTO
+from application.dto import (
+    ChatRequestDTO,
+    EditMessageDTO,
+    ForkConversationDTO,
+    MessageActionDTO,
+    RetryMessageDTO,
+)
 from application.ports.llm import LLMMessage, LLMProviderMetadata, LLMResponse
 from application.services.chat_service import ChatApplicationService
 from application.services.conversation_service import ConversationApplicationService
@@ -663,6 +669,98 @@ async def test_conversation_service_creates_edit_and_retry_branches(session_fact
 
 
 @pytest.mark.asyncio
+async def test_conversation_service_message_action_returns_tree_context_and_runtime_metadata(
+    session_factory,
+):
+    conversation, first_user, first_assistant, off_path_user = await _seed_conversation(
+        session_factory
+    )
+    first_user.provider = "openai"
+    first_user.model = "gpt-4.1"
+    first_user.metadata = {
+        "provider": "openai",
+        "model": "gpt-4.1",
+        "model_spec": "openai::https://openai.example/v1::responses::gpt-4.1",
+        "runtime_selection": {
+            "provider": "openai",
+            "model": "gpt-4.1",
+            "model_spec": "openai::https://openai.example/v1::responses::gpt-4.1",
+            "source": "chat_request",
+        },
+    }
+    first_assistant.provider = "anthropic"
+    first_assistant.model = "claude-sonnet"
+    first_assistant.metadata = {
+        "provider": "anthropic",
+        "model": "claude-sonnet",
+        "model_spec": "anthropic::https://anthropic.example::messages::claude-sonnet",
+    }
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        await uow.message_repository.update(first_user)
+        await uow.message_repository.update(first_assistant)
+        await uow.commit()
+
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    edit_result = await service.apply_message_action(
+        conversation.id,
+        first_user.public_id,
+        MessageActionDTO(
+            action="edit",
+            content="Edited root user turn.",
+            metadata={"reason": "training correction"},
+        ),
+    )
+    retry_result = await service.apply_message_action(
+        conversation.id,
+        first_assistant.public_id,
+        MessageActionDTO(action="retry", content="Retry assistant turn."),
+    )
+
+    assert edit_result.action == "edit"
+    assert edit_result.message is not None
+    assert edit_result.message.provider == "openai"
+    assert edit_result.message.model == "gpt-4.1"
+    assert edit_result.message.metadata["edit_of"] == first_user.public_id
+    assert edit_result.message.metadata["reason"] == "training correction"
+    assert edit_result.message.metadata["model_spec"] == (
+        "openai::https://openai.example/v1::responses::gpt-4.1"
+    )
+    assert edit_result.message.metadata["runtime_selection"]["source"] == "chat_request"
+    assert [message.public_id for message in edit_result.path] == [
+        edit_result.message.public_id
+    ]
+    assert {message.public_id for message in edit_result.siblings} == {
+        first_user.public_id,
+        edit_result.message.public_id,
+    }
+    assert edit_result.children == []
+
+    assert retry_result.action == "retry"
+    assert retry_result.message is not None
+    assert retry_result.message.provider == "anthropic"
+    assert retry_result.message.model == "claude-sonnet"
+    assert retry_result.message.metadata["retry_of"] == first_assistant.public_id
+    assert retry_result.message.metadata["model_spec"] == (
+        "anthropic::https://anthropic.example::messages::claude-sonnet"
+    )
+    assert [message.public_id for message in retry_result.path] == [
+        first_user.public_id,
+        retry_result.message.public_id,
+    ]
+    assert {message.public_id for message in retry_result.siblings} == {
+        first_assistant.public_id,
+        off_path_user.public_id,
+        retry_result.message.public_id,
+    }
+
+
+@pytest.mark.asyncio
 async def test_conversation_service_forks_message_tree_with_remapped_parents(session_factory):
     conversation, first_user, first_assistant, off_path_user = await _seed_conversation(
         session_factory
@@ -720,6 +818,50 @@ async def test_conversation_service_forks_message_tree_with_remapped_parents(ses
         copied_root.public_id,
         copied_assistant.public_id,
     ]
+
+
+@pytest.mark.asyncio
+async def test_conversation_service_message_action_fork_returns_forked_context(
+    session_factory,
+):
+    conversation, first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    result = await service.apply_message_action(
+        conversation.id,
+        first_assistant.public_id,
+        MessageActionDTO(
+            action="fork",
+            title="Action fork",
+            option="directPath",
+            metadata={"source": "training_action"},
+        ),
+    )
+
+    assert result.action == "fork"
+    assert result.conversation is not None
+    assert result.conversation.id != conversation.id
+    assert result.conversation.title == "Action fork"
+    assert result.conversation.metadata["source"] == "training_action"
+    assert result.message is not None
+    assert result.source_to_forked_id[first_assistant.public_id] == result.message.public_id
+    assert set(result.source_to_forked_id) == {
+        first_user.public_id,
+        first_assistant.public_id,
+    }
+    path_ids = [message.public_id for message in result.path]
+    assert path_ids == [
+        result.source_to_forked_id[first_user.public_id],
+        result.source_to_forked_id[first_assistant.public_id],
+    ]
+    assert [message.public_id for message in result.messages] == path_ids
 
 
 @pytest.mark.asyncio

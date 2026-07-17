@@ -19,6 +19,8 @@ from application.dto import (
     EditMessageDTO,
     ForkConversationDTO,
     ForkConversationResultDTO,
+    MessageActionDTO,
+    MessageActionResultDTO,
     MessageLocationDTO,
     MessageDTO_Agent,
     MessageSearchResultDTO,
@@ -173,6 +175,21 @@ async def search_messages(
         context_after=context_after,
     )
     return success_response(items, message=t("ok"))
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_public_id}/actions",
+    summary="Apply controlled message tree action",
+    response_model=ApiResponse[MessageActionResultDTO],
+)
+async def apply_message_action(
+    conversation_id: int,
+    message_public_id: str,
+    payload: MessageActionDTO,
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    item = await service.apply_message_action(conversation_id, message_public_id, payload)
+    return success_response(item, message=t("ok"))
 
 
 @router.get(

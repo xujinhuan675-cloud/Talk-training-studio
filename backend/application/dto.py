@@ -12,6 +12,7 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from shared.codes import BusinessCode
 
@@ -276,6 +277,41 @@ class MessageSearchResultDTO(DTOBase):
     message: MessageDTO_Agent
     path: list[MessageDTO_Agent] = Field(default_factory=list)
     context: list[MessageDTO_Agent] = Field(default_factory=list)
+
+
+class MessageActionDTO(DTOBase):
+    """Controlled message tree action input for training chat UIs."""
+
+    action: Literal["branch", "edit", "retry", "fork"]
+    content: Optional[str] = None
+    title: Optional[str] = Field(default=None, max_length=255)
+    option: Literal["directPath", "includeBranches", "targetLevel"] = "targetLevel"
+    include_deleted: bool = False
+    statuses: list[str] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_action_payload(self):  # type: ignore[override]
+        if self.action == "edit" and not (self.content or "").strip():
+            raise PydanticCustomError(
+                "message_action_content_required",
+                "edit action requires non-empty content",
+            )
+        return self
+
+
+class MessageActionResultDTO(DTOBase):
+    """Controlled message tree action result with branch navigation context."""
+
+    action: Literal["branch", "edit", "retry", "fork"]
+    message: Optional[MessageDTO_Agent] = None
+    path: list[MessageDTO_Agent] = Field(default_factory=list)
+    children: list[MessageDTO_Agent] = Field(default_factory=list)
+    siblings: list[MessageDTO_Agent] = Field(default_factory=list)
+    branch_id: Optional[str] = None
+    conversation: Optional[ConversationDTO] = None
+    messages: list[MessageDTO_Agent] = Field(default_factory=list)
+    source_to_forked_id: dict[str, str] = Field(default_factory=dict)
 
 
 class ForkConversationDTO(DTOBase):

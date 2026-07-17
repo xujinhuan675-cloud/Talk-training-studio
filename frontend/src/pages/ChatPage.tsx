@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ArrowLeft,
+  ListTree,
+  Route,
   PhoneCall,
   Volume2,
   VolumeX,
@@ -29,7 +31,7 @@ import { useAppContext } from '../contexts/AppContext'
 import { ChatProvider, useChatContext } from '../contexts/ChatContext'
 import RoomList from '../components/RoomList'
 import CreateRoomDialog from '../components/CreateRoomDialog'
-import MessageList from '../components/chat/MessageList'
+import MessageList, { type MessageTreePathSelection } from '../components/chat/MessageList'
 import ChatInput from '../components/chat/ChatInput'
 import type { VoiceRecorderState } from '../components/VoiceRecorder'
 import RealtimeVoiceRecorder from '../components/RealtimeVoiceRecorder'
@@ -153,6 +155,15 @@ function getScenarioCategoryFromState(state: unknown): ScenarioTrainingCategory 
 
 function compactStrings(values: Array<string | null | undefined | false>): string[] {
   return values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+}
+
+function compactTreeNodeContent(
+  item: MessageTreePathSelection['path'][number],
+  fallback: string,
+): string {
+  const text = item.content.replace(/\s+/g, ' ').trim()
+  if (!text) return fallback
+  return text.length > 72 ? `${text.slice(0, 71)}...` : text
 }
 
 type TrainingContextTag = {
@@ -461,6 +472,7 @@ function ChatArea() {
   const [videoAnswerStatus, setVideoAnswerStatus] = useState<'idle' | 'uploading' | 'sent' | 'error'>('idle')
   const [videoAnswerError, setVideoAnswerError] = useState<string | null>(null)
   const [videoRecorderOpen, setVideoRecorderOpen] = useState(false)
+  const [messageTreeSelection, setMessageTreeSelection] = useState<MessageTreePathSelection | null>(null)
 
   // Battle prep state
   const [battlePrepRoundCount, setBattlePrepRoundCount] = useState(0)
@@ -484,6 +496,11 @@ function ChatArea() {
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
   const sendChatMessage = chat.handleSend
+
+  useEffect(() => {
+    setMessageTreeSelection(null)
+  }, [selectedRoomId])
+
   const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.sourceLanguage, locale)
   const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.targetLanguage, locale)
   const liveCoachGuidanceMetadata = React.useMemo(() => {
@@ -1670,6 +1687,42 @@ function ChatArea() {
         </section>
       )}
 
+      {messageTreeSelection && (
+        <section className="chat-page-message-tree-strip" aria-label={t('messageTree.current.aria')}>
+          <div className="message-tree-strip-copy">
+            <ListTree size={15} />
+            <strong>{t('messageTree.current.title')}</strong>
+            <span>
+              {t('messageTree.current.summary', {
+                count: messageTreeSelection.path.length,
+                branch: messageTreeSelection.branchId || t('messageTree.actions.noBranch'),
+              })}
+            </span>
+            <em>{t('messageTree.actions.readonlyBadge')}</em>
+          </div>
+          <div className="message-tree-strip-path">
+            <Route size={14} />
+            {messageTreeSelection.path.map((item, index) => (
+              <span
+                key={item.publicId}
+                className={item.publicId === messageTreeSelection.selectedMessageId ? 'active' : undefined}
+                title={compactTreeNodeContent(item, item.publicId)}
+              >
+                {index + 1}. {compactTreeNodeContent(item, item.publicId)}
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMessageTreeSelection(null)}
+            title={t('messageTree.current.clear')}
+            aria-label={t('messageTree.current.clear')}
+          >
+            <X size={14} />
+          </button>
+        </section>
+      )}
+
       {/* Battle prep bar */}
       {isBattlePrep && (
         <div className="chat-page-battle-bar">
@@ -1830,6 +1883,8 @@ function ChatArea() {
             onToggleDispatch={() => chat.setDispatchExpanded((v) => !v)}
             typingPersona={chat.typingPersona}
             playingPersonaId={voice.playingPersonaId}
+            currentTreeSelection={messageTreeSelection}
+            onSelectTreePath={setMessageTreeSelection}
             onClick={() => showExportMenu && setShowExportMenu(false)}
           />
 

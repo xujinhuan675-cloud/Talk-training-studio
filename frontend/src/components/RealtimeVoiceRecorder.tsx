@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Mic, Square } from 'lucide-react'
 import {
+  decodeRealtimeServerEvent,
   createTrainingRealtimeSdpAnswer,
   persistTrainingRealtimeTranscripts,
+  RealtimeAudioOutputQueue,
+  type RealtimeAudioOutputEvent,
   type RealtimeSessionStatus,
   type RealtimeTranscriptRole,
 } from '../services/realtimeSession'
@@ -73,6 +76,43 @@ function responseDoneTranscript(event: OpenAIRealtimeEvent): string {
   return parts.join(' ').trim()
 }
 
+function cleanMimeType(mimeType?: string): string {
+  return mimeType?.split(';')[0]?.trim().toLowerCase() || ''
+}
+
+function isPcmAudioOutput(event: RealtimeAudioOutputEvent): boolean {
+  const mimeType = cleanMimeType(event.mimeType)
+  return mimeType === 'audio/pcm' || mimeType === 'audio/l16' || mimeType === 'audio/x-pcm' || mimeType === 'audio/raw'
+}
+
+function createAudioContext(): AudioContext {
+  const AudioContextConstructor = window.AudioContext
+    || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioContextConstructor) {
+    throw new Error('Web Audio is unavailable')
+  }
+  return new AudioContextConstructor()
+}
+
+function createPcm16AudioBuffer(context: AudioContext, event: RealtimeAudioOutputEvent): AudioBuffer {
+  const channels = Math.max(1, Math.floor(event.channels || 1))
+  const sampleRate = Math.max(1, Math.floor(event.sampleRate || 24000))
+  const bytesPerSample = 2
+  const frameCount = Math.floor(event.audio.byteLength / (bytesPerSample * channels))
+  const audioBuffer = context.createBuffer(channels, frameCount, sampleRate)
+  if (frameCount === 0) return audioBuffer
+
+  const dataView = new DataView(event.audio)
+  for (let channel = 0; channel < channels; channel += 1) {
+    const channelData = audioBuffer.getChannelData(channel)
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const byteOffset = ((frame * channels) + channel) * bytesPerSample
+      channelData[frame] = Math.max(-1, Math.min(1, dataView.getInt16(byteOffset, true) / 32768))
+    }
+  }
+  return audioBuffer
+}
+
 export default function RealtimeVoiceRecorder({
   roomId,
   trainingSessionId,
@@ -87,12 +127,38 @@ export default function RealtimeVoiceRecorder({
   const dataChannelRef = useRef<RTCDataChannel | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
+  const outputAudioQueueRef = useRef<RealtimeAudioOutputQueue | null>(null)
+  const outputAudioElementRef = useRef<HTMLAudioElement | null>(null)
+  const outputAudioUrlRef = useRef<string | null>(null)
+  const outputAudioContextRef = useRef<AudioContext | null>(null)
+  const outputAudioSourceRef = useRef<AudioBufferSourceNode | null>(null)
   const transcriptKeysRef = useRef<Set<string>>(new Set())
   const [status, setStatus] = useState<RealtimeSessionStatus>('idle')
   const [preview, setPreview] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  const stopOutputAudio = useCallback(() => {
+    outputAudioQueueRef.current?.clear()
+    try {
+      outputAudioSourceRef.current?.stop()
+    } catch {
+      // Source may already have ended.
+    }
+    outputAudioSourceRef.current = null
+    if (outputAudioElementRef.current) {
+      outputAudioElementRef.current.pause()
+      outputAudioElementRef.current.removeAttribute('src')
+      outputAudioElementRef.current.load()
+    }
+    outputAudioElementRef.current = null
+    if (outputAudioUrlRef.current) {
+      URL.revokeObjectURL(outputAudioUrlRef.current)
+      outputAudioUrlRef.current = null
+    }
+  }, [])
+
   const closeRealtime = useCallback((nextStatus: RealtimeSessionStatus = 'closed') => {
+    stopOutputAudio()
     dataChannelRef.current?.close()
     dataChannelRef.current = null
     peerRef.current?.close()
@@ -104,12 +170,117 @@ export default function RealtimeVoiceRecorder({
       remoteAudioRef.current.srcObject = null
     }
     remoteAudioRef.current = null
+    void outputAudioContextRef.current?.close().catch(() => {})
+    outputAudioContextRef.current = null
     setStatus(nextStatus)
-  }, [])
+  }, [stopOutputAudio])
 
   useEffect(() => {
     return () => closeRealtime('closed')
   }, [closeRealtime])
+
+  const getOutputAudioContext = useCallback(() => {
+    if (!outputAudioContextRef.current || outputAudioContextRef.current.state === 'closed') {
+      outputAudioContextRef.current = createAudioContext()
+    }
+    return outputAudioContextRef.current
+  }, [])
+
+  const playPcmAudioOutput = useCallback(async (event: RealtimeAudioOutputEvent) => {
+    const context = getOutputAudioContext()
+    if (context.state === 'suspended') {
+      await context.resume()
+    }
+    const audioBuffer = createPcm16AudioBuffer(context, event)
+    if (audioBuffer.length === 0) return
+    await new Promise<void>((resolve) => {
+      const source = context.createBufferSource()
+      outputAudioSourceRef.current = source
+      source.buffer = audioBuffer
+      source.connect(context.destination)
+      source.onended = () => {
+        if (outputAudioSourceRef.current === source) {
+          outputAudioSourceRef.current = null
+        }
+        resolve()
+      }
+      source.start()
+    })
+  }, [getOutputAudioContext])
+
+  const playBlobAudioOutput = useCallback(async (event: RealtimeAudioOutputEvent) => {
+    const blob = new Blob([event.audio], { type: event.mimeType || 'audio/mpeg' })
+    const objectUrl = URL.createObjectURL(blob)
+    outputAudioUrlRef.current = objectUrl
+    const audio = new Audio(objectUrl)
+    outputAudioElementRef.current = audio
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const resolveOnce = () => {
+          if (settled) return
+          settled = true
+          resolve()
+        }
+        const rejectOnce = (error: Error) => {
+          if (settled) return
+          settled = true
+          reject(error)
+        }
+        audio.onended = resolveOnce
+        audio.onpause = resolveOnce
+        audio.onerror = () => rejectOnce(new Error('Realtime audio output could not be played'))
+        const playResult = audio.play()
+        if (playResult) {
+          void playResult.catch(rejectOnce)
+        }
+      })
+    } finally {
+      if (outputAudioElementRef.current === audio) {
+        outputAudioElementRef.current = null
+      }
+      if (outputAudioUrlRef.current === objectUrl) {
+        outputAudioUrlRef.current = null
+      }
+      audio.pause()
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [])
+
+  const playRealtimeAudioOutput = useCallback(async (event: RealtimeAudioOutputEvent) => {
+    setError(null)
+    setStatus('speaking')
+    setPreview(tr('AI is speaking', 'AI is speaking'))
+    try {
+      if (isPcmAudioOutput(event)) {
+        await playPcmAudioOutput(event)
+      } else {
+        await playBlobAudioOutput(event)
+      }
+    } finally {
+      setStatus((current) => (current === 'speaking' ? 'listening' : current))
+    }
+  }, [playBlobAudioOutput, playPcmAudioOutput, tr])
+
+  const handleAudioOutputPlaybackError = useCallback(() => {
+    setError(tr('Realtime audio playback failed', 'Realtime audio playback failed'))
+    setStatus('error')
+  }, [tr])
+
+  useEffect(() => {
+    const queue = new RealtimeAudioOutputQueue({
+      play: playRealtimeAudioOutput,
+      onError: handleAudioOutputPlaybackError,
+    })
+    outputAudioQueueRef.current = queue
+    return () => {
+      queue.clear()
+      if (outputAudioQueueRef.current === queue) {
+        outputAudioQueueRef.current = null
+      }
+    }
+  }, [handleAudioOutputPlaybackError, playRealtimeAudioOutput])
 
   const persistTranscript = useCallback(async (
     role: RealtimeTranscriptRole,
@@ -146,6 +317,20 @@ export default function RealtimeVoiceRecorder({
   }, [onPersistedTranscript, personaId, roomId, trainingSessionId, transcriptMetadata, tr])
 
   const handleRealtimeEvent = useCallback((raw: string) => {
+    const decoded = decodeRealtimeServerEvent(raw)
+    if (decoded?.type === 'audio.output') {
+      outputAudioQueueRef.current?.enqueue(decoded)
+      return
+    }
+    if (decoded?.type === 'error') {
+      const message = typeof decoded.message === 'string' && decoded.message.trim()
+        ? decoded.message
+        : tr('OpenAI realtime error', 'OpenAI realtime error')
+      setError(message)
+      setStatus('error')
+      return
+    }
+
     let event: OpenAIRealtimeEvent
     try {
       event = JSON.parse(raw) as OpenAIRealtimeEvent

@@ -1364,9 +1364,26 @@ def _llm_system_instruction(
             rendered = _compact_json(scenario_id)
             if rendered:
                 parts.append(f"Scenario ID: {rendered}")
+        scenario_template_id = metadata.get("scenarioTemplateId") or metadata.get(
+            "scenario_template_id"
+        )
+        if scenario_template_id:
+            rendered = _compact_json(scenario_template_id)
+            if rendered:
+                parts.append(f"Scenario template ID: {rendered}")
+        category = metadata.get("category")
+        if category:
+            rendered = _compact_json(category)
+            if rendered:
+                parts.append(f"Scenario category: {rendered}")
         active_persona = _active_persona_from_metadata(metadata)
         if active_persona:
             parts.append(f"Active persona ID: {active_persona}")
+        live_guidance = metadata.get("liveGuidance") or metadata.get("live_guidance")
+        if live_guidance:
+            rendered = _compact_json(live_guidance)
+            if rendered:
+                parts.append(f"Live guidance: {rendered}")
     if len(parts) > 1:
         parts.append(
             "Use this context to run the role-play; do not produce a long evaluation during the call."
@@ -1438,7 +1455,8 @@ def _start_metadata(
     context: TrainingVoiceContext,
     config: RealtimePipelineConfig,
 ) -> dict[str, Any]:
-    return {
+    metadata = {**dict(context.metadata), **dict(config.metadata)}
+    start_metadata: dict[str, Any] = {
         "source": "talkwise",
         "provider": config.provider,
         "model": config.model,
@@ -1447,8 +1465,24 @@ def _start_metadata(
         "roomId": context.binding.room_id,
         "taskGoal": context.task_goal,
         "rubric": dict(context.rubric),
-        "metadata": {**dict(context.metadata), **dict(config.metadata)},
+        "metadata": metadata,
     }
+    for output_key, input_keys in {
+        "personaIds": ("personaIds", "persona_ids"),
+        "scenarioId": ("scenarioId", "scenario_id"),
+        "scenarioTemplateId": ("scenarioTemplateId", "scenario_template_id"),
+        "category": ("category",),
+        "liveGuidance": ("liveGuidance", "live_guidance"),
+    }.items():
+        for input_key in input_keys:
+            safe_value = _json_safe_metadata(metadata.get(input_key))
+            if safe_value is not None:
+                start_metadata[output_key] = safe_value
+                break
+    recent_turns = _json_safe_metadata(tuple(dict(turn) for turn in context.recent_turns))
+    if recent_turns is not None:
+        start_metadata["recentTurns"] = recent_turns
+    return start_metadata
 
 
 def _pipeline_params(
