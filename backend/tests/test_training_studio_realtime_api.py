@@ -319,6 +319,7 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
     assert data["pipecat"]["ttsAvailable"] is True
     assert data["pipecat"]["turnDetectionAvailable"] is True
     assert data["pipecat"]["missingModules"] == []
+    assert data["pipecat"]["optionalMissingModules"] == []
     assert data["pipecat"]["error"] is None
     assert data["pipecat"]["sourceSnapshot"]["coreEntrypoints"] == [
         "pipecat.pipeline.pipeline.Pipeline"
@@ -348,7 +349,7 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
         tts_available=False,
         turn_detection_available=False,
         missing_modules=("pipecat.pipeline.pipeline", "pipecat.frames.frames"),
-        optional_missing_modules=(),
+        optional_missing_modules=("onnxruntime",),
         error="Missing optional Pipecat module(s)",
     )
     adapter = _fake_pipecat_adapter(capability)
@@ -376,8 +377,54 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
         "pipecat.pipeline.pipeline",
         "pipecat.frames.frames",
     ]
+    assert data["pipecat"]["optionalMissingModules"] == ["onnxruntime"]
     assert data["pipecat"]["error"] == "Missing optional Pipecat module(s)"
     assert adapter.calls["require_websocket"] is True
+
+
+def test_realtime_capabilities_reports_pipecat_adapter_import_failure(monkeypatch) -> None:
+    def _raise_import_failure():
+        raise RuntimeError("Pipecat adapter import failed")
+
+    monkeypatch.setattr(
+        training_studio_routes,
+        "_load_pipecat_realtime_adapter",
+        _raise_import_failure,
+    )
+    client = TestClient(_make_realtime_capability_app())
+
+    response = client.get("/api/v1/training-studio/realtime/capabilities")
+
+    assert response.status_code == 200
+    data = response.json()["data"]["pipecat"]
+    assert data["available"] is False
+    assert data["coreAvailable"] is False
+    assert data["websocketAvailable"] is False
+    assert data["missingModules"] == ["infrastructure.external.pipecat"]
+    assert data["error"] == "Pipecat adapter import failed"
+
+
+def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch) -> None:
+    def _raise_capability_failure(*, require_websocket: bool = False):
+        raise RuntimeError("Pipecat capability crashed")
+
+    adapter = SimpleNamespace(get_pipecat_capability=_raise_capability_failure)
+    monkeypatch.setattr(
+        training_studio_routes,
+        "_load_pipecat_realtime_adapter",
+        lambda: adapter,
+    )
+    client = TestClient(_make_realtime_capability_app())
+
+    response = client.get("/api/v1/training-studio/realtime/capabilities")
+
+    assert response.status_code == 200
+    data = response.json()["data"]["pipecat"]
+    assert data["available"] is False
+    assert data["coreAvailable"] is False
+    assert data["websocketAvailable"] is False
+    assert data["missingModules"] == []
+    assert data["error"] == "Pipecat capability check failed: Pipecat capability crashed"
 
 
 def test_realtime_sdp_proxy_returns_sdp_answer_when_openai_call_succeeds(monkeypatch) -> None:
@@ -668,6 +715,50 @@ def test_realtime_websocket_configure_binding_persists_final_transcript() -> Non
     assert state.messages[0].metadata["realtime"]["translationIntent"] == "text_first_mvp"
 
 
+def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/api/v1/training-studio/realtime?provider=pipecat") as ws:
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        assert started["payload"]["provider"] == "pipecat"
+        assert "trainingSessionId" not in started["payload"]
+        assert listening["status"] == "listening"
+        assert adapter.started_context is None
+
+        ws.send_json({"type": "session.configure", "sessionId": "session-1", "roomId": 42})
+        configured = ws.receive_json()
+        assert configured["type"] == "session.configured"
+        assert configured["payload"] == {
+            "bound": True,
+            "trainingSessionId": "session-1",
+            "roomId": 42,
+        }
+
+        ws.send_json({"type": "session.close", "reason": "configured"})
+        closed = ws.receive_json()
+        assert closed["type"] == "session.closed"
+
+    assert adapter.started_context is not None
+    assert adapter.started_context.binding.training_session_id == "session-1"
+    assert adapter.started_context.binding.room_id == 42
+    assert adapter.started_context.metadata["runtime"] == "realtime_voice"
+    assert adapter.started_context.metadata["provider"] == "pipecat"
+    assert adapter.started_config is not None
+    assert adapter.started_config.provider == "pipecat"
+    assert adapter.started_config.metadata["talkwise"] == {
+        "trainingSessionId": "session-1",
+        "roomId": 42,
+        "runtime": "realtime_voice",
+    }
+    assert adapter.closed is True
+
+
 def test_realtime_websocket_binding_requires_active_training_session() -> None:
     app, _ = _make_bound_app(active=False)
     client = TestClient(app)
@@ -834,6 +925,37 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> Non
         RealtimeAudioChunk(data=audio, mime_type="audio/pcm", sequence=1)
     ]
     assert adapter.commits == 1
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_pipecat_provider_forwards_binary_audio_to_pipeline() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+    audio = b"\x09\x08\x07"
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        assert started["payload"]["provider"] == "pipecat"
+        assert listening["status"] == "listening"
+
+        ws.send_bytes(audio)
+        audio_event = ws.receive_json()
+        assert audio_event["type"] == "audio.input"
+
+        ws.send_json({"type": "session.close", "reason": "binary"})
+        closed = ws.receive_json()
+        assert closed["type"] == "session.closed"
+
+    assert adapter.audio_chunks == [
+        RealtimeAudioChunk(data=audio, mime_type="audio/pcm", sequence=1)
+    ]
     assert adapter.closed is True
 
 

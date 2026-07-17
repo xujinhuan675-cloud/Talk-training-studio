@@ -122,13 +122,15 @@ def training_core_metadata_for_session(
             source.get("live_guidance") or source.get("guidance")
         ),
     }
-    metadata.update(dict(extra or {}))
+    for key, value in dict(extra or {}).items():
+        if key not in metadata:
+            metadata[key] = _copy_metadata_value(value)
     return {key: value for key, value in metadata.items() if _metadata_value_present(value)}
 
 
 @runtime_checkable
 class TrainingConversationAdapter(Protocol):
-    """Adapter implemented by current rooms, LibreChat-style text, or Pipecat sinks."""
+    """Adapter implemented by current rooms, text runtimes, or voice transcript sinks."""
 
     async def create_conversation(self, session: TrainingSession) -> ConversationRef: ...
 

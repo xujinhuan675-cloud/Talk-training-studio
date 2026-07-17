@@ -167,7 +167,7 @@ def get_pipecat_capability(*, require_websocket: bool = False) -> PipecatCapabil
         available=True if not require_websocket else runtime.websocket_available,
         core_available=True,
         websocket_available=runtime.websocket_available,
-        **optional_status,
+        **_runtime_feature_status(runtime, optional_status),
     )
 
 
@@ -191,6 +191,29 @@ def _optional_feature_status() -> dict[str, bool | tuple[str, ...]]:
         "optional_missing_modules": tuple(
             module for modules in missing_by_feature.values() for module in modules
         ),
+    }
+
+
+def _runtime_feature_status(
+    runtime: PipecatRuntime,
+    module_status: Mapping[str, bool | tuple[str, ...]],
+) -> dict[str, bool | tuple[str, ...]]:
+    return {
+        "vad_available": bool(module_status.get("vad_available"))
+        and (
+            runtime.SileroVADAnalyzer is not None
+            and runtime.VADParams is not None
+            and runtime.VADProcessor is not None
+        ),
+        "stt_available": bool(module_status.get("stt_available"))
+        and runtime.OpenAIRealtimeSTTService is not None,
+        "tts_available": bool(module_status.get("tts_available"))
+        and runtime.OpenAITTSService is not None,
+        "turn_detection_available": bool(module_status.get("turn_detection_available"))
+        and (
+            runtime.UserTurnProcessor is not None and runtime.UserTurnStrategies is not None
+        ),
+        "optional_missing_modules": tuple(module_status.get("optional_missing_modules", ())),
     }
 
 

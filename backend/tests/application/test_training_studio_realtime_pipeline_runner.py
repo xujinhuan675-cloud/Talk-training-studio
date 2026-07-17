@@ -256,16 +256,40 @@ async def test_runner_rejects_audio_commands_after_close():
         await runner.commit_audio()
 
 
+@pytest.mark.parametrize(
+    ("provider_event", "expected_message"),
+    [
+        (
+            {
+                "type": "pipeline.error",
+                "error": {"message": "provider websocket disconnected"},
+            },
+            "provider websocket disconnected",
+        ),
+        (
+            {
+                "type": "error",
+                "message": "provider rejected audio frame",
+            },
+            "provider rejected audio frame",
+        ),
+        (
+            {
+                "type": "realtime.error",
+                "detail": "provider realtime session expired",
+            },
+            "provider realtime session expired",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_runner_surfaces_provider_error_events_to_later_commands():
+async def test_runner_surfaces_provider_error_events_to_later_commands(
+    provider_event,
+    expected_message,
+):
     runner, adapter, _sink = await _started_runner()
 
-    await adapter.emit(
-        {
-            "type": "pipeline.error",
-            "error": {"message": "provider websocket disconnected"},
-        }
-    )
+    await adapter.emit(provider_event)
 
     async def _wait_for_error() -> None:
         while runner.events_error is None:
@@ -273,7 +297,7 @@ async def test_runner_surfaces_provider_error_events_to_later_commands():
 
     await asyncio.wait_for(_wait_for_error(), timeout=1)
 
-    with pytest.raises(RealtimePipelineRunnerStateError, match="provider websocket disconnected"):
+    with pytest.raises(RealtimePipelineRunnerStateError, match=expected_message):
         await runner.commit_audio()
 
     await runner.close()

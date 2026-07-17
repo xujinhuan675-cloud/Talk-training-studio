@@ -3,6 +3,7 @@ import inspect
 
 import pytest
 
+import application.ports.realtime as realtime_ports_module
 import application.services.training_studio.training_core as training_core_module
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
 from application.services.training_studio.live_guidance_service import (
@@ -115,6 +116,27 @@ def test_training_core_module_does_not_own_conversation_or_voice_runtimes():
     assert not any(module.lower().startswith("librechat") for module in imported_modules)
 
 
+def test_realtime_ports_do_not_import_runtime_or_infrastructure_modules():
+    tree = ast.parse(inspect.getsource(realtime_ports_module))
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+
+    assert not any(module.startswith("infrastructure") for module in imported_modules)
+    assert not any(module.startswith("domain.conversation") for module in imported_modules)
+    assert not any(module.startswith("domain.stakeholder") for module in imported_modules)
+    assert not any(module.lower().startswith("pipecat") for module in imported_modules)
+    assert not any(module.lower().startswith("librechat") for module in imported_modules)
+
+
 @pytest.mark.asyncio
 async def test_training_core_metadata_keeps_talkwise_semantics_inside_core_boundary():
     session_service = TrainingSessionService(id_factory=lambda: "session-semantic-1")
@@ -158,6 +180,56 @@ async def test_training_core_metadata_keeps_talkwise_semantics_inside_core_bound
         "liveGuidance": {"enabled": True},
         "branchId": "main",
     }
+
+
+@pytest.mark.asyncio
+async def test_training_core_metadata_keeps_core_fields_when_extra_collides():
+    session_service = TrainingSessionService(id_factory=lambda: "session-semantic-2")
+    session = await session_service.create_session(
+        {
+            "role": "Product Manager",
+            "level": "Senior",
+            "tech_stack": ["Roadmap"],
+            "question_type_ratios": {"craft": 1},
+            "question_count": 3,
+            "category": "sales",
+            "scenario_template_id": "enterprise-renewal",
+            "metadata": {
+                "persona_ids": ["buyer"],
+                "scenario_id": 9,
+                "dispatcher": {"policy": "round_robin"},
+                "evaluation": {"rubric_id": "sales-v1"},
+                "growth_report": {"report_id": "growth-1"},
+                "live_guidance": {"enabled": True},
+            },
+        }
+    )
+
+    metadata = training_core_metadata_for_session(
+        session,
+        runtime="voice_pipeline",
+        extra={
+            "runtime": "pipecat-runtime-shadow",
+            "trainingSessionId": "shadow-session",
+            "personaIds": ["adapter-shadow"],
+            "scenarioId": 404,
+            "dispatcher": {"policy": "adapter-shadow"},
+            "evaluation": {"rubric_id": "adapter-shadow"},
+            "growthReport": {"report_id": "adapter-shadow"},
+            "liveGuidance": {"enabled": False},
+            "provider": "pipecat",
+        },
+    )
+
+    assert metadata["runtime"] == "voice_pipeline"
+    assert metadata["trainingSessionId"] == "session-semantic-2"
+    assert metadata["personaIds"] == ["buyer"]
+    assert metadata["scenarioId"] == 9
+    assert metadata["dispatcher"] == {"policy": "round_robin"}
+    assert metadata["evaluation"] == {"rubric_id": "sales-v1"}
+    assert metadata["growthReport"] == {"report_id": "growth-1"}
+    assert metadata["liveGuidance"] == {"enabled": True}
+    assert metadata["provider"] == "pipecat"
 
 
 @pytest.mark.asyncio

@@ -268,6 +268,34 @@ def test_pipecat_capability_reports_optional_voice_feature_modules(monkeypatch):
     assert "openai" in capability.optional_missing_modules
 
 
+def test_pipecat_capability_uses_runtime_symbols_for_optional_voice_features(monkeypatch):
+    monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
+    runtime = pipecat_adapter.PipecatRuntime(
+        **{
+            **fake_runtime(websocket=True).__dict__,
+            "VADProcessor": None,
+            "OpenAIRealtimeSTTService": None,
+            "UserTurnProcessor": None,
+        }
+    )
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "import_pipecat_runtime",
+        lambda require_websocket=False: runtime,
+    )
+
+    capability = pipecat_adapter.get_pipecat_capability(require_websocket=True)
+
+    assert capability.available is True
+    assert capability.core_available is True
+    assert capability.websocket_available is True
+    assert capability.vad_available is False
+    assert capability.stt_available is False
+    assert capability.tts_available is True
+    assert capability.turn_detection_available is False
+    assert capability.optional_missing_modules == ()
+
+
 def test_pipecat_capability_preserves_core_when_websocket_extra_import_fails(monkeypatch):
     monkeypatch.setattr(pipecat_adapter.importlib.util, "find_spec", lambda name: object())
 
