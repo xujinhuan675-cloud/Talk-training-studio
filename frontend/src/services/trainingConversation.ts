@@ -630,6 +630,40 @@ function normalizeMessageActionResult(value: unknown): MessageActionResult {
   }
 }
 
+export function getMessageActionResultPath(result: MessageActionResult): ConversationTreeMessage[] {
+  if (result.path.length > 0) return result.path
+  if (result.messages.length > 0) {
+    return buildPathFromMessageList(result.messages, result.message)
+  }
+  return result.message ? [result.message] : []
+}
+
+function buildPathFromMessageList(
+  messages: ConversationTreeMessage[],
+  selectedMessage: ConversationTreeMessage | null,
+): ConversationTreeMessage[] {
+  if (!selectedMessage) return messages
+
+  const messagesByPublicId = new Map(messages.map((message) => [message.publicId, message]))
+  const firstMessage = messagesByPublicId.get(selectedMessage.publicId) ?? selectedMessage
+  const path: ConversationTreeMessage[] = []
+  const seen = new Set<string>()
+  let current: ConversationTreeMessage | undefined = firstMessage
+
+  while (current && !seen.has(current.publicId)) {
+    path.unshift(current)
+    seen.add(current.publicId)
+    current = current.parentMessageId ? messagesByPublicId.get(current.parentMessageId) : undefined
+  }
+
+  if (path.length > 0 && path[path.length - 1]?.publicId === selectedMessage.publicId) {
+    return path
+  }
+
+  const selectedIndex = messages.findIndex((message) => message.publicId === selectedMessage.publicId)
+  return selectedIndex >= 0 ? messages.slice(0, selectedIndex + 1) : messages
+}
+
 function normalizeConversationTreeMessage(value: unknown): ConversationTreeMessage | null {
   const data = recordValue(value)
   if (!data) return null

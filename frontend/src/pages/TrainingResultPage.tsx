@@ -368,6 +368,32 @@ function branchPathNodeText(
   return `${index + 1}. ${compactBranchText(item.content || item.publicId)}`
 }
 
+function branchSourceLabel(source: TrainingConversationBranchInfo['source'], tr: TranslateInline): string {
+  if (source === 'session') return tr('来自会话', 'from session')
+  if (source === 'report') return tr('来自报告', 'from report')
+  return tr('来自本地进度', 'from local progress')
+}
+
+function branchConversationRefText(info: TrainingConversationBranchInfo): string {
+  return [info.provider, info.conversationId].filter(Boolean).join(' · ')
+}
+
+function branchPathStatusText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  const count = info.pathCount || info.selectedPath.length
+  if (count > 0) return tr('{count} 个节点', '{count} nodes', { count })
+  return tr('已记录引用', 'Reference recorded')
+}
+
+function branchPathNoticeText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  if (info.selectedPath.length === 0) {
+    return tr('只保存了分支引用；暂无可预览的路径节点。', 'Only branch references were saved; no path nodes are available to preview.')
+  }
+  if (!info.selectedPath.some((item) => item.content.trim())) {
+    return tr('已记录路径节点 ID；消息正文未随 metadata 保存。', 'Path node IDs are recorded; message text was not saved with the metadata.')
+  }
+  return ''
+}
+
 function coachEventTypeLabel(eventType: string, tr: TranslateInline): string {
   if (eventType === 'risk') return tr('风险提醒', 'Risk alert')
   if (eventType === 'next_reply') return tr('下一句建议', 'Next reply')
@@ -480,6 +506,8 @@ export default function TrainingResultPage() {
   const branchPathPreviewOffset = branchInfo
     ? Math.max(0, branchInfo.selectedPath.length - branchPathPreview.length)
     : 0
+  const branchPathNotice = branchInfo ? branchPathNoticeText(branchInfo, tr) : ''
+  const branchConversationRef = branchInfo ? branchConversationRefText(branchInfo) : ''
   const progressScore = coerceScore(scenarioProgress?.score)
   const dimensions = useMemo(
     () => collectDimensions(content, progressScore, tr),
@@ -664,39 +692,58 @@ export default function TrainingResultPage() {
           <div className="training-result-card-head training-result-branch-head">
             <h2>
               <GitBranch size={15} />
-              {tr('训练路径/分支', 'Training path / branch')}
+              {tr('路径上下文', 'Path context')}
             </h2>
-            <span>{tr('只读上下文', 'Read-only context')}</span>
+            <span>{branchSourceLabel(branchInfo.source, tr)}</span>
           </div>
           <div className="training-result-branch-grid">
-            {branchInfo.branchId && (
-              <div className="training-result-branch-item">
-                <span>{tr('分支', 'Branch')}</span>
-                <strong title={branchInfo.branchId}>{compactBranchText(branchInfo.branchId, 48)}</strong>
-              </div>
-            )}
-            {branchInfo.selectedTailMessageId && (
-              <div className="training-result-branch-item">
-                <span>{tr('选中尾节点', 'Selected tail')}</span>
-                <strong title={branchInfo.selectedTailMessageId}>
-                  {compactBranchText(branchInfo.selectedTailMessageId, 48)}
-                </strong>
-              </div>
-            )}
-            {(branchInfo.pathCount || branchInfo.pathSummary) && (
+            {(branchInfo.pathCount || branchInfo.pathSummary || branchInfo.selectedPath.length > 0) && (
               <div className="training-result-branch-item wide">
-                <span>{tr('选中路径', 'Selected path')}</span>
-                <strong>
-                  {branchInfo.pathCount
-                    ? tr('{count} 个节点', '{count} nodes', { count: branchInfo.pathCount })
-                    : tr('已记录', 'Recorded')}
-                </strong>
+                <span>{tr('当前路径', 'Current path')}</span>
+                <strong>{branchPathStatusText(branchInfo, tr)}</strong>
                 {branchInfo.pathSummary && (
                   <em title={branchInfo.pathSummary}>{compactBranchText(branchInfo.pathSummary, 96)}</em>
                 )}
               </div>
             )}
+            {branchInfo.branchId && (
+              <div className="training-result-branch-item">
+                <span>{tr('当前分支', 'Current branch')}</span>
+                <strong title={branchInfo.branchId}>{compactBranchText(branchInfo.branchId, 48)}</strong>
+              </div>
+            )}
+            {branchInfo.forkPointMessageId && (
+              <div className="training-result-branch-item">
+                <span>{tr('分叉点', 'Fork point')}</span>
+                <strong title={branchInfo.forkPointMessageId}>
+                  {compactBranchText(branchInfo.forkPointMessageId, 48)}
+                </strong>
+              </div>
+            )}
+            {branchInfo.selectedTailMessageId && (
+              <div className="training-result-branch-item">
+                <span>{tr('尾节点', 'Tail node')}</span>
+                <strong title={branchInfo.selectedTailMessageId}>
+                  {compactBranchText(branchInfo.selectedTailMessageId, 48)}
+                </strong>
+              </div>
+            )}
+            {branchInfo.lastReplyPreview && (
+              <div className="training-result-branch-item wide">
+                <span>{tr('最后回复', 'Last reply')}</span>
+                <strong title={branchInfo.lastReplyPreview}>{compactBranchText(branchInfo.lastReplyPreview, 96)}</strong>
+              </div>
+            )}
+            {branchConversationRef && (
+              <div className="training-result-branch-item">
+                <span>{tr('会话引用', 'Conversation ref')}</span>
+                <strong title={branchConversationRef}>{compactBranchText(branchConversationRef, 48)}</strong>
+              </div>
+            )}
           </div>
+          {branchPathNotice && (
+            <p className="training-result-branch-note">{branchPathNotice}</p>
+          )}
           {branchPathPreview.length > 0 && (
             <div className="training-result-branch-path" aria-label={tr('已选择路径摘要', 'Selected path summary')}>
               {branchPathPreview.map((item, index) => (

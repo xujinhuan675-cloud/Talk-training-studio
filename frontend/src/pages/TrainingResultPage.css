@@ -337,7 +337,7 @@
 
 .training-result-branch-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
   gap: 10px;
 }
 
@@ -352,7 +352,7 @@
 }
 
 .training-result-branch-item.wide {
-  grid-column: span 1;
+  grid-column: span 2;
 }
 
 .training-result-branch-item span {
@@ -378,6 +378,14 @@
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 700;
+}
+
+.training-result-branch-note {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .training-result-branch-path {
@@ -768,6 +776,10 @@
 
   .training-result-branch-grid {
     grid-template-columns: 1fr;
+  }
+
+  .training-result-branch-item.wide {
+    grid-column: span 1;
   }
 
   .training-result-message > div:last-child,

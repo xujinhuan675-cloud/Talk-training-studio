@@ -266,6 +266,91 @@ test('getTrainingConversationBranchInfo extracts selected path metadata from a s
   assert.equal(info.pathCount, 2)
   assert.deepEqual(info.selectedPath.map((item) => item.publicId), ['msg-root', 'msg-leaf'])
   assert.match(info.pathSummary, /Selected answer/)
+  assert.equal(info.lastReplyPreview, 'Selected answer')
+})
+
+test('getTrainingConversationBranchInfo extracts id-only selected path state without inventing text', () => {
+  const info = trainingSession.getTrainingConversationBranchInfo({
+    session: {
+      metadata: {
+        runtime: 'conversation_message_tree',
+        branchId: 'main',
+        selectedPath: {
+          branchId: 'main',
+          tailMessageId: 'msg-tail',
+          messageIds: ['msg-root', 'msg-tail'],
+          purpose: 'training_replay_context',
+          replayContextOnly: true,
+        },
+        currentBranchTail: {
+          branchId: 'main',
+          messageId: 'msg-tail',
+        },
+      },
+    },
+  })
+
+  assert.equal(info.source, 'session')
+  assert.equal(info.branchId, 'main')
+  assert.equal(info.selectedTailMessageId, 'msg-tail')
+  assert.equal(info.pathCount, 2)
+  assert.deepEqual(info.selectedPath.map((item) => item.publicId), ['msg-root', 'msg-tail'])
+  assert.equal(info.lastReplyPreview, undefined)
+})
+
+test('getTrainingConversationBranchInfo reads fork point and last reply preview', () => {
+  const info = trainingSession.getTrainingConversationBranchInfo({
+    session: {
+      task_config: {
+        metadata: {
+          messageTreeSelection: {
+            provider: 'talkwise-conversation',
+            conversationId: 'conv-branch',
+            branchId: 'branch-review',
+            forked_from_message_id: 'msg-objection',
+            path: [
+              { publicId: 'msg-root', role: 'user', content: 'Can we revisit pricing?' },
+              { publicId: 'msg-objection', role: 'assistant', content: 'We can talk through value first.' },
+              {
+                publicId: 'msg-leaf',
+                role: 'assistant',
+                content: 'I can propose an annual pilot with a measurable success bar.',
+                branchId: 'branch-review',
+                parentMessageId: 'msg-objection',
+              },
+            ],
+          },
+        },
+      },
+    },
+  })
+
+  assert.equal(info.branchId, 'branch-review')
+  assert.equal(info.selectedTailMessageId, 'msg-leaf')
+  assert.equal(info.forkPointMessageId, 'msg-objection')
+  assert.equal(info.lastReplyPreview, 'I can propose an annual pilot with a measurable success bar.')
+})
+
+test('getTrainingConversationBranchInfo hides default main branch when no path is selected', () => {
+  const info = trainingSession.getTrainingConversationBranchInfo({
+    session: {
+      metadata: {
+        runtime: 'conversation_message_tree',
+        branchId: 'main',
+        selectedPath: {
+          branchId: 'main',
+          tailMessageId: null,
+          messageIds: [],
+        },
+        currentBranchTail: {
+          branchId: 'main',
+          messageId: null,
+        },
+      },
+    },
+  })
+
+  assert.equal(info, null)
 })
 
 test('getTrainingConversationBranchInfo reads report and progress branch metadata fallbacks', () => {

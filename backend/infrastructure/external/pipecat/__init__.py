@@ -3,6 +3,7 @@
 from infrastructure.external.pipecat.realtime_pipeline import (
     PipecatCapability,
     PipecatPipelineHandle,
+    PipecatRealtimePipelineError,
     PipecatRealtimePipelineAdapter,
     PipecatRuntime,
     build_pipecat_llm_processors,
@@ -21,6 +22,7 @@ from infrastructure.external.pipecat.realtime_pipeline import (
 __all__ = [
     "PipecatCapability",
     "PipecatPipelineHandle",
+    "PipecatRealtimePipelineError",
     "PipecatRealtimePipelineAdapter",
     "PipecatRuntime",
     "build_pipecat_llm_processors",

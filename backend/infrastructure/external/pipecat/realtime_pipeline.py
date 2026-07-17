@@ -12,6 +12,7 @@ import base64
 import importlib
 import importlib.util
 import json
+import logging
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
@@ -47,6 +48,8 @@ LLM_RESPONSE_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_response_unive
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
+OPENAI_API_KEY_ENV_KEYS = ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY")
+logger = logging.getLogger(__name__)
 CORE_PIPECAT_SYMBOLS: Mapping[str, tuple[str, ...]] = {
     "pipecat.pipeline.pipeline": ("Pipeline",),
     "pipecat.pipeline.worker": ("PipelineParams", "PipelineWorker"),
@@ -185,6 +188,47 @@ class PipecatPipelineHandle:
     transport: Any | None = None
     event_processor: Any | None = None
     run_task: asyncio.Task | None = None
+
+
+class PipecatRealtimePipelineError(RuntimeError):
+    """Structured Pipecat adapter error for realtime readiness and startup paths."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        phase: str,
+        feature: str | None = None,
+        missing_modules: Sequence[str] = (),
+        missing_env: Sequence[str] = (),
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.phase = phase
+        self.provider = "pipecat"
+        self.feature = feature
+        self.missing_modules = tuple(missing_modules)
+        self.missing_env = tuple(missing_env)
+        self.metadata = dict(metadata or {})
+
+    def to_realtime_error(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "code": self.code,
+            "message": str(self),
+            "phase": self.phase,
+            "provider": self.provider,
+        }
+        if self.feature is not None:
+            payload["feature"] = self.feature
+        if self.missing_modules:
+            payload["modules"] = self.missing_modules
+        if self.missing_env:
+            payload["missingEnv"] = self.missing_env
+        if self.metadata:
+            payload["metadata"] = self.metadata
+        return payload
 
 
 def is_pipecat_available() -> bool:
@@ -609,29 +653,45 @@ class PipecatRealtimePipelineAdapter:
         if self._handle is not None and not self._closed:
             raise RuntimeError("Pipecat realtime pipeline is already started")
 
-        runtime = self._runtime or import_pipecat_runtime(
-            require_websocket=self._websocket is not None
-        )
-        self._runtime = runtime
-        self._context = context
-        self._config = config
-        self._closed = False
-        self._handle = build_pipecat_pipeline_handle(
-            runtime=runtime,
-            context=context,
-            config=config,
-            websocket=self._websocket,
-            processors=(
-                *build_pipecat_voice_processors(runtime, config, context=context),
-                *self._processors,
-            ),
-            serializer=self._serializer,
-            transport_params=self._transport_params,
-        )
-        await self._handle.runner.add_workers(self._handle.worker)
-        self._handle.run_task = asyncio.create_task(
-            self._handle.runner.run(), name="talkwise-pipecat-realtime"
-        )
+        try:
+            runtime = self._runtime or import_pipecat_runtime(
+                require_websocket=self._websocket is not None
+            )
+            self._runtime = runtime
+            self._context = context
+            self._config = config
+            self._closed = False
+            self._handle = build_pipecat_pipeline_handle(
+                runtime=runtime,
+                context=context,
+                config=config,
+                websocket=self._websocket,
+                processors=(
+                    *build_pipecat_voice_processors(runtime, config, context=context),
+                    *self._processors,
+                ),
+                serializer=self._serializer,
+                transport_params=self._transport_params,
+            )
+            await self._handle.runner.add_workers(self._handle.worker)
+            self._handle.run_task = asyncio.create_task(
+                self._handle.runner.run(), name="talkwise-pipecat-realtime"
+            )
+        except PipecatRealtimePipelineError:
+            raise
+        except Exception as exc:
+            error = _pipecat_start_error(
+                exc,
+                websocket=self._websocket is not None,
+                context=context,
+                config=config,
+            )
+            logger.warning(
+                "Pipecat realtime pipeline start failed",
+                extra={"realtime_error": error.to_realtime_error()},
+                exc_info=True,
+            )
+            raise error from exc
 
     async def append_audio(self, chunk: RealtimeAudioChunk) -> None:
         self._require_open()
@@ -694,6 +754,150 @@ class PipecatRealtimePipelineAdapter:
             raise RuntimeError("Pipecat realtime pipeline is closed")
 
 
+def _pipecat_start_error(
+    exc: BaseException,
+    *,
+    websocket: bool,
+    context: TrainingVoiceContext,
+    config: RealtimePipelineConfig,
+) -> PipecatRealtimePipelineError:
+    message = str(exc)
+    metadata: dict[str, Any] = {
+        "trainingSessionId": context.binding.training_session_id,
+        "roomId": context.binding.room_id,
+        "requestedFeatures": _requested_feature_metadata(config),
+    }
+    if isinstance(exc, ImportError):
+        return PipecatRealtimePipelineError(
+            message,
+            code="PIPECAT_MODULE_UNAVAILABLE",
+            phase="runtime_import",
+            missing_modules=_missing_modules_for_start_error(websocket),
+            metadata=metadata,
+        )
+    if isinstance(exc, ValueError):
+        return PipecatRealtimePipelineError(
+            message,
+            code="PIPECAT_CONFIG_INVALID",
+            phase="configuration",
+            metadata=metadata,
+        )
+
+    classified = _classify_pipecat_start_error(message)
+    return PipecatRealtimePipelineError(
+        message,
+        code=str(classified.get("code") or "PIPECAT_PIPELINE_START_FAILED"),
+        phase=str(classified.get("phase") or "pipeline_start"),
+        feature=classified.get("feature"),
+        missing_modules=tuple(classified.get("modules") or ()),
+        missing_env=tuple(classified.get("missingEnv") or ()),
+        metadata=metadata,
+    )
+
+
+def _missing_modules_for_start_error(websocket: bool) -> tuple[str, ...]:
+    with suppress(Exception):
+        capability = get_pipecat_capability(require_websocket=websocket)
+        return tuple(capability.missing_modules)
+    return ()
+
+
+def _requested_feature_metadata(config: RealtimePipelineConfig) -> dict[str, str | None]:
+    metadata = dict(config.metadata)
+    return {
+        "stt": _feature_provider(metadata, "stt"),
+        "tts": _feature_provider(metadata, "tts"),
+        "llm": _feature_provider(metadata, "llm"),
+        "vad": _feature_provider(metadata, "vad"),
+        "turnDetection": _feature_provider(metadata, "turnDetection", "turn_detection"),
+    }
+
+
+def _classify_pipecat_start_error(message: str) -> dict[str, object]:
+    text = message.lower()
+    if "api key is required" in text or "openai api key" in text:
+        return {
+            "code": "MISSING_OPENAI_API_KEY",
+            "phase": "configuration",
+            "missingEnv": OPENAI_API_KEY_ENV_KEYS,
+            "feature": _feature_from_error_text(text),
+        }
+    if "stt" in text and ("unavailable" in text or "settings class" in text):
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "voice_processor_config",
+            "feature": "stt:openai",
+            "modules": (OPENAI_STT_PIPECAT_MODULE,),
+        }
+    if "tts" in text and ("unavailable" in text or "settings class" in text):
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "voice_processor_config",
+            "feature": "tts:openai",
+            "modules": (OPENAI_TTS_PIPECAT_MODULE,),
+        }
+    if ("llm" in text or "aggregator" in text) and (
+        "unavailable" in text or "settings class" in text
+    ):
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "voice_processor_config",
+            "feature": "llm:openai",
+            "modules": (OPENAI_LLM_PIPECAT_MODULE,),
+        }
+    if "vad" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "voice_processor_config",
+            "feature": "vad:silero",
+            "modules": (SILERO_VAD_PIPECAT_MODULE, VAD_PROCESSOR_PIPECAT_MODULE),
+        }
+    if "user turn" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "voice_processor_config",
+            "feature": "turnDetection:pipecat",
+            "modules": (USER_TURN_PROCESSOR_PIPECAT_MODULE,),
+        }
+    return {}
+
+
+def _feature_from_error_text(text: str) -> str | None:
+    if "stt" in text:
+        return "stt:openai"
+    if "tts" in text:
+        return "tts:openai"
+    if "llm" in text:
+        return "llm:openai"
+    return None
+
+
+def _pipecat_feature_unavailable_error(
+    message: str,
+    *,
+    feature: str,
+    modules: Sequence[str],
+) -> PipecatRealtimePipelineError:
+    return PipecatRealtimePipelineError(
+        message,
+        code="PIPECAT_FEATURE_UNAVAILABLE",
+        phase="voice_processor_config",
+        feature=feature,
+        missing_modules=tuple(modules),
+    )
+
+
+def _missing_openai_api_key_error(feature: str) -> PipecatRealtimePipelineError:
+    label = feature.upper()
+    return PipecatRealtimePipelineError(
+        f"OpenAI API key is required for Pipecat OpenAI {label}",
+        code="MISSING_OPENAI_API_KEY",
+        phase="configuration",
+        feature=f"{feature}:openai",
+        missing_env=OPENAI_API_KEY_ENV_KEYS,
+    )
+
+
 def build_pipecat_pipeline_handle(
     *,
     runtime: PipecatRuntime,
@@ -713,7 +917,12 @@ def build_pipecat_pipeline_handle(
     pipecat_processors = []
     if websocket is not None:
         if not runtime.websocket_available:
-            raise RuntimeError("Pipecat FastAPI websocket transport is unavailable")
+            raise PipecatRealtimePipelineError(
+                "Pipecat FastAPI websocket transport is unavailable",
+                code="PIPECAT_WEBSOCKET_UNAVAILABLE",
+                phase="pipeline_build",
+                missing_modules=(WEBSOCKET_PIPECAT_MODULE,),
+            )
         params = _coerce_websocket_params(runtime, serializer, transport_params)
         transport = runtime.FastAPIWebsocketTransport(websocket=websocket, params=params)
         pipecat_processors.append(transport.input())
@@ -758,7 +967,11 @@ def build_pipecat_voice_processors(
 
     if _feature_provider(metadata, "vad") == "silero":
         if runtime.SileroVADAnalyzer is None or runtime.VADProcessor is None:
-            raise RuntimeError("Pipecat Silero VAD processor is unavailable")
+            raise _pipecat_feature_unavailable_error(
+                "Pipecat Silero VAD processor is unavailable",
+                feature="vad:silero",
+                modules=(SILERO_VAD_PIPECAT_MODULE, VAD_PROCESSOR_PIPECAT_MODULE),
+            )
         vad_config = _feature_config(metadata, "vad")
         vad_sample_rate = _metadata_int(
             vad_config,
@@ -795,11 +1008,15 @@ def build_pipecat_voice_processors(
     stt_provider = _feature_provider(metadata, "stt")
     if stt_provider == "openai":
         if runtime.OpenAIRealtimeSTTService is None:
-            raise RuntimeError("Pipecat OpenAI realtime STT service is unavailable")
+            raise _pipecat_feature_unavailable_error(
+                "Pipecat OpenAI realtime STT service is unavailable",
+                feature="stt:openai",
+                modules=(OPENAI_STT_PIPECAT_MODULE,),
+            )
         stt_config = _feature_config(metadata, "stt")
         api_key = _openai_api_key(metadata)
         if not api_key:
-            raise RuntimeError("OpenAI API key is required for Pipecat OpenAI STT")
+            raise _missing_openai_api_key_error("stt")
         stt_settings_kwargs: dict[str, Any] = {}
         stt_model = (
             _metadata_text(stt_config, "model")
@@ -844,7 +1061,11 @@ def build_pipecat_voice_processors(
         and llm_provider is None
     ):
         if runtime.UserTurnProcessor is None:
-            raise RuntimeError("Pipecat user turn processor is unavailable")
+            raise _pipecat_feature_unavailable_error(
+                "Pipecat user turn processor is unavailable",
+                feature="turnDetection:pipecat",
+                modules=(USER_TURN_PROCESSOR_PIPECAT_MODULE,),
+            )
         turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
         turn_kwargs: dict[str, Any] = {
             "user_turn_stop_timeout": _metadata_float(
@@ -878,11 +1099,15 @@ def build_pipecat_voice_processors(
     tts_provider = _feature_provider(metadata, "tts")
     if tts_provider == "openai":
         if runtime.OpenAITTSService is None:
-            raise RuntimeError("Pipecat OpenAI TTS service is unavailable")
+            raise _pipecat_feature_unavailable_error(
+                "Pipecat OpenAI TTS service is unavailable",
+                feature="tts:openai",
+                modules=(OPENAI_TTS_PIPECAT_MODULE,),
+            )
         tts_config = _feature_config(metadata, "tts")
         api_key = _openai_api_key(metadata)
         if not api_key:
-            raise RuntimeError("OpenAI API key is required for Pipecat OpenAI TTS")
+            raise _missing_openai_api_key_error("tts")
         tts_settings_kwargs: dict[str, Any] = {}
         if tts_model := (
             _metadata_text(tts_config, "model")
@@ -930,14 +1155,22 @@ def build_pipecat_llm_processors(
     """Build Pipecat-native LLM context, aggregators, and OpenAI LLM processor."""
 
     if runtime.OpenAILLMService is None:
-        raise RuntimeError("Pipecat OpenAI LLM service is unavailable")
+        raise _pipecat_feature_unavailable_error(
+            "Pipecat OpenAI LLM service is unavailable",
+            feature="llm:openai",
+            modules=(OPENAI_LLM_PIPECAT_MODULE,),
+        )
     if (
         runtime.LLMContext is None
         or runtime.LLMContextAggregatorPair is None
         or runtime.LLMUserAggregatorParams is None
         or runtime.LLMAssistantAggregatorParams is None
     ):
-        raise RuntimeError("Pipecat LLM context aggregators are unavailable")
+        raise _pipecat_feature_unavailable_error(
+            "Pipecat LLM context aggregators are unavailable",
+            feature="llm:openai",
+            modules=(LLM_CONTEXT_PIPECAT_MODULE, LLM_RESPONSE_PIPECAT_MODULE),
+        )
 
     metadata = dict(config.metadata)
     llm_config = _feature_config(metadata, "llm")
@@ -945,7 +1178,7 @@ def build_pipecat_llm_processors(
         llm_config, "openaiApiKey", "openai_api_key", "apiKey", "api_key"
     ) or _openai_api_key(metadata)
     if not api_key:
-        raise RuntimeError("OpenAI API key is required for Pipecat OpenAI LLM")
+        raise _missing_openai_api_key_error("llm")
 
     settings_kwargs: dict[str, Any] = {}
     model = (
@@ -1992,6 +2225,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
 __all__ = [
     "PipecatCapability",
     "PipecatPipelineHandle",
+    "PipecatRealtimePipelineError",
     "PipecatRealtimePipelineAdapter",
     "PipecatRuntime",
     "build_pipecat_pipeline_handle",

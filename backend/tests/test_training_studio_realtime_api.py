@@ -332,6 +332,18 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
     assert data["pipecat"]["missingModules"] == []
     assert data["pipecat"]["optionalMissingModules"] == []
     assert data["pipecat"]["error"] is None
+    assert data["pipecat"]["readyForCall"] is True
+    assert data["pipecat"]["readiness"]["ready"] is True
+    assert data["pipecat"]["readiness"]["status"] == "ready"
+    assert data["pipecat"]["readiness"]["blockingReasons"] == []
+    assert data["pipecat"]["readiness"]["required"]["features"] == {
+        "stt": "openai",
+        "tts": "openai",
+        "llm": "openai",
+        "vad": "silero",
+        "turnDetection": "pipecat",
+    }
+    assert data["pipecat"]["errors"] == []
     assert data["pipecat"]["sourceSnapshot"]["coreEntrypoints"] == [
         "pipecat.pipeline.pipeline.Pipeline"
     ]
@@ -392,6 +404,15 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
     ]
     assert data["pipecat"]["optionalMissingModules"] == ["onnxruntime"]
     assert data["pipecat"]["error"] == "Missing optional Pipecat module(s)"
+    assert data["pipecat"]["readyForCall"] is False
+    assert data["pipecat"]["readiness"]["ready"] is False
+    assert data["pipecat"]["readiness"]["status"] == "blocked"
+    assert data["pipecat"]["errors"][0]["code"] == "PIPECAT_MODULE_UNAVAILABLE"
+    assert data["pipecat"]["errors"][0]["phase"] == "capability_check"
+    assert data["pipecat"]["errors"][0]["modules"] == [
+        "pipecat.pipeline.pipeline",
+        "pipecat.frames.frames",
+    ]
     assert adapter.calls["require_websocket"] is True
 
 
@@ -415,6 +436,9 @@ def test_realtime_capabilities_reports_pipecat_adapter_import_failure(monkeypatc
     assert data["websocketAvailable"] is False
     assert data["missingModules"] == ["infrastructure.external.pipecat"]
     assert data["error"] == "Pipecat adapter import failed"
+    assert data["readyForCall"] is False
+    assert data["errors"][0]["code"] == "PIPECAT_MODULE_UNAVAILABLE"
+    assert data["errors"][0]["modules"] == ["infrastructure.external.pipecat"]
 
 
 def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch) -> None:
@@ -427,6 +451,8 @@ def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch)
         "_load_pipecat_realtime_adapter",
         lambda: adapter,
     )
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", "sk-realtime-snapshot")
+    monkeypatch.setattr(settings.llm, "api_key", None)
     client = TestClient(_make_realtime_capability_app())
 
     response = client.get("/api/v1/training-studio/realtime/capabilities")
@@ -438,6 +464,9 @@ def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch)
     assert data["websocketAvailable"] is False
     assert data["missingModules"] == []
     assert data["error"] == "Pipecat capability check failed: Pipecat capability crashed"
+    assert data["readyForCall"] is False
+    assert data["errors"][0]["code"] == "PIPECAT_CAPABILITY_ERROR"
+    assert data["errors"][0]["phase"] == "capability_check"
 
 
 def test_realtime_capabilities_omits_pipecat_source_snapshot_when_snapshot_fails(
@@ -467,6 +496,8 @@ def test_realtime_capabilities_omits_pipecat_source_snapshot_when_snapshot_fails
         "_load_pipecat_realtime_adapter",
         lambda: adapter,
     )
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", "sk-realtime-snapshot")
+    monkeypatch.setattr(settings.llm, "api_key", None)
     client = TestClient(_make_realtime_capability_app())
 
     response = client.get("/api/v1/training-studio/realtime/capabilities")
@@ -479,9 +510,58 @@ def test_realtime_capabilities_omits_pipecat_source_snapshot_when_snapshot_fails
     assert data["missingModules"] == []
     assert data["optionalMissingModules"] == []
     assert data["error"] is None
+    assert data["readyForCall"] is True
+    assert data["errors"] == []
     assert "sourceSnapshot" not in data
     assert "Pipecat source snapshot failed" not in response.text
     assert adapter.calls["require_websocket"] is True
+
+
+def test_realtime_capabilities_reports_missing_openai_key_for_pipecat_readiness(
+    monkeypatch,
+) -> None:
+    capability = SimpleNamespace(
+        available=True,
+        core_available=True,
+        websocket_available=True,
+        vad_available=True,
+        stt_available=True,
+        tts_available=True,
+        llm_available=True,
+        turn_detection_available=True,
+        missing_modules=(),
+        optional_missing_modules=(),
+        error=None,
+    )
+    adapter = _fake_pipecat_adapter(capability)
+    monkeypatch.setattr(
+        training_studio_routes,
+        "_load_pipecat_realtime_adapter",
+        lambda: adapter,
+    )
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings.llm, "api_key", None)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    client = TestClient(_make_realtime_capability_app())
+
+    response = client.get("/api/v1/training-studio/realtime/capabilities")
+
+    assert response.status_code == 200
+    data = response.json()["data"]["pipecat"]
+    assert data["available"] is True
+    assert data["readyForCall"] is False
+    assert data["errors"] == [
+        {
+            "code": "MISSING_OPENAI_API_KEY",
+            "message": (
+                "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
+                "before starting Pipecat realtime calls"
+            ),
+            "phase": "configuration",
+            "provider": "pipecat",
+            "missingEnv": ["REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY"],
+        }
+    ]
 
 
 def test_realtime_sdp_proxy_returns_sdp_answer_when_openai_call_succeeds(monkeypatch) -> None:
@@ -811,7 +891,9 @@ def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline()
     assert adapter.started_config.metadata["talkwise"] == {
         "trainingSessionId": "session-1",
         "roomId": 42,
+        "provider": "pipecat",
         "runtime": "realtime_voice",
+        "transport": "websocket",
     }
     assert adapter.closed is True
 
@@ -1126,7 +1208,9 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> Non
     assert adapter.started_config.metadata["talkwise"] == {
         "trainingSessionId": "session-1",
         "roomId": 42,
+        "provider": "pipecat",
         "runtime": "realtime_voice",
+        "transport": "websocket",
     }
     assert adapter.audio_chunks == [
         RealtimeAudioChunk(data=audio, mime_type="audio/pcm", sequence=1)
@@ -1215,7 +1299,12 @@ def test_realtime_websocket_pipecat_provider_surfaces_pipeline_error_on_commit()
 
     assert committed["status"] == "processing"
     assert error["type"] == "error"
-    assert error["payload"]["code"] == "SESSION_ERROR"
+    assert error["payload"]["code"] == "PIPECAT_PROVIDER_ERROR"
+    assert error["payload"]["provider"] == "pipecat"
+    assert error["payload"]["phase"] == "provider_event"
+    assert error["payload"]["eventType"] == "pipeline.error"
+    assert error["payload"]["trainingSessionId"] == "session-1"
+    assert error["payload"]["roomId"] == 42
     assert "Pipecat provider disconnected" in error["payload"]["message"]
     assert adapter.closed is True
 
@@ -1235,8 +1324,43 @@ def test_realtime_websocket_pipecat_provider_surfaces_pipeline_start_error() -> 
         error = ws.receive_json()
 
     assert error["type"] == "error"
-    assert error["payload"]["code"] == "SESSION_ERROR"
+    assert error["payload"]["code"] == "PIPECAT_FEATURE_UNAVAILABLE"
+    assert error["payload"]["provider"] == "pipecat"
+    assert error["payload"]["phase"] == "pipeline_start"
+    assert error["payload"]["feature"] == "stt:openai"
+    assert error["payload"]["trainingSessionId"] == "session-1"
+    assert error["payload"]["roomId"] == 42
     assert "Pipecat OpenAI realtime STT service is unavailable" in error["payload"]["message"]
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_pipecat_provider_surfaces_missing_api_key_start_error() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.start_error = RuntimeError("OpenAI API key is required for Pipecat OpenAI STT")
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "MISSING_OPENAI_API_KEY"
+    assert error["payload"]["provider"] == "pipecat"
+    assert error["payload"]["phase"] == "configuration"
+    assert error["payload"]["feature"] == "stt:openai"
+    assert error["payload"]["missingEnv"] == [
+        "REALTIME_OPENAI_API_KEY",
+        "LLM__API_KEY",
+        "OPENAI_API_KEY",
+    ]
+    assert error["payload"]["trainingSessionId"] == "session-1"
+    assert error["payload"]["roomId"] == 42
+    assert "OpenAI API key is required" in error["payload"]["message"]
     assert adapter.closed is True
 
 
@@ -1253,6 +1377,9 @@ def test_realtime_websocket_pipecat_provider_requires_pipeline_adapter() -> None
         error = ws.receive_json()
 
     assert error["type"] == "error"
+    assert error["payload"]["code"] == "PIPECAT_PIPELINE_UNAVAILABLE"
+    assert error["payload"]["provider"] == "pipecat"
+    assert error["payload"]["phase"] == "pipeline_factory"
     assert "Pipecat realtime pipeline is not available" in error["payload"]["message"]
 
 

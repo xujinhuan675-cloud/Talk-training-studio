@@ -533,6 +533,51 @@ test('applyConversationTreeMessageAction normalizes fork action result', async (
   )
 })
 
+test('getMessageActionResultPath prefers returned path and rebuilds message fallbacks', () => {
+  const root = {
+    publicId: 'msg_root',
+    parentMessageId: null,
+    content: 'Root',
+  }
+  const selected = {
+    publicId: 'msg_selected',
+    parentMessageId: 'msg_root',
+    content: 'Selected',
+  }
+  const sibling = {
+    publicId: 'msg_sibling',
+    parentMessageId: 'msg_root',
+    content: 'Sibling',
+  }
+
+  assert.deepEqual(
+    trainingConversation.getMessageActionResultPath({
+      message: selected,
+      path: [root, selected],
+      messages: [sibling],
+    }).map((message) => message.publicId),
+    ['msg_root', 'msg_selected'],
+  )
+
+  assert.deepEqual(
+    trainingConversation.getMessageActionResultPath({
+      message: selected,
+      path: [],
+      messages: [sibling, selected, root],
+    }).map((message) => message.publicId),
+    ['msg_root', 'msg_selected'],
+  )
+
+  assert.deepEqual(
+    trainingConversation.getMessageActionResultPath({
+      message: selected,
+      path: [],
+      messages: [],
+    }).map((message) => message.publicId),
+    ['msg_selected'],
+  )
+})
+
 test('fetchConversationTreeMessagePath normalizes readonly path messages', async () => {
   const context = trainingConversation.buildConversationTreeMessageActionContext({
     provider: 'talkwise-conversation',

@@ -948,7 +948,10 @@ def test_build_pipecat_voice_processors_reports_missing_optional_service():
         **{**runtime.__dict__, "OpenAIRealtimeSTTService": None}
     )
 
-    with pytest.raises(RuntimeError, match="OpenAI realtime STT"):
+    with pytest.raises(
+        pipecat_adapter.PipecatRealtimePipelineError,
+        match="OpenAI realtime STT",
+    ) as exc_info:
         pipecat_adapter.build_pipecat_voice_processors(
             runtime,
             RealtimePipelineConfig(
@@ -956,6 +959,42 @@ def test_build_pipecat_voice_processors_reports_missing_optional_service():
                 metadata={"stt": "openai", "openaiApiKey": "sk-test"},
             ),
         )
+
+    error = exc_info.value.to_realtime_error()
+    assert error["code"] == "PIPECAT_FEATURE_UNAVAILABLE"
+    assert error["phase"] == "voice_processor_config"
+    assert error["feature"] == "stt:openai"
+    assert error["modules"] == (pipecat_adapter.OPENAI_STT_PIPECAT_MODULE,)
+
+
+def test_build_pipecat_voice_processors_reports_missing_openai_key(monkeypatch):
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings.llm, "api_key", None)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    monkeypatch.delenv("REALTIME_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(
+        pipecat_adapter.PipecatRealtimePipelineError,
+        match="OpenAI API key is required",
+    ) as exc_info:
+        pipecat_adapter.build_pipecat_voice_processors(
+            fake_runtime(False),
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={"stt": {"provider": "openai", "turnDetection": "disabled"}},
+            ),
+        )
+
+    error = exc_info.value.to_realtime_error()
+    assert error["code"] == "MISSING_OPENAI_API_KEY"
+    assert error["phase"] == "configuration"
+    assert error["feature"] == "stt:openai"
+    assert error["missingEnv"] == (
+        "REALTIME_OPENAI_API_KEY",
+        "LLM__API_KEY",
+        "OPENAI_API_KEY",
+    )
 
 
 def test_build_pipecat_voice_processors_uses_settings_key_without_metadata(monkeypatch):

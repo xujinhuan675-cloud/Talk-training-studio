@@ -172,10 +172,38 @@ function compactHistoryBranchText(value: string, maxLength = 30): string {
 function historyBranchTitle(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   return [
     info.branchId ? tr('分支：{value}', 'Branch: {value}', { value: info.branchId }) : '',
+    info.forkPointMessageId ? tr('分叉点：{value}', 'Fork point: {value}', { value: info.forkPointMessageId }) : '',
     info.selectedTailMessageId ? tr('尾节点：{value}', 'Tail: {value}', { value: info.selectedTailMessageId }) : '',
     info.pathCount ? tr('路径节点：{count}', 'Path nodes: {count}', { count: info.pathCount }) : '',
     info.pathSummary ? compactHistoryBranchText(info.pathSummary, 90) : '',
+    info.lastReplyPreview ? tr('最后回复：{value}', 'Last reply: {value}', { value: compactHistoryBranchText(info.lastReplyPreview, 90) }) : '',
   ].filter(Boolean).join(' · ')
+}
+
+function historyBranchTagText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  if (info.pathCount) return tr('{count} 节点', '{count} nodes', { count: info.pathCount })
+  if (info.branchId) return compactHistoryBranchText(info.branchId)
+  return tr('路径引用', 'Path ref')
+}
+
+function historyBranchSummaryText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  if (info.lastReplyPreview) {
+    return tr('最后回复：{value}', 'Last reply: {value}', {
+      value: compactHistoryBranchText(info.lastReplyPreview, 72),
+    })
+  }
+  if (info.forkPointMessageId) {
+    return tr('分叉点：{value}', 'Fork point: {value}', {
+      value: compactHistoryBranchText(info.forkPointMessageId, 48),
+    })
+  }
+  if (info.pathSummary) return compactHistoryBranchText(info.pathSummary, 72)
+  if (info.selectedTailMessageId) {
+    return tr('尾节点：{value}', 'Tail: {value}', {
+      value: compactHistoryBranchText(info.selectedTailMessageId, 48),
+    })
+  }
+  return ''
 }
 
 function gradeKey(score?: number): string {
@@ -320,8 +348,10 @@ function matchesEntry(
     entry.difficulty,
     entry.mode,
     entry.branchInfo?.branchId,
+    entry.branchInfo?.forkPointMessageId,
     entry.branchInfo?.selectedTailMessageId,
     entry.branchInfo?.pathSummary,
+    entry.branchInfo?.lastReplyPreview,
     statusLabels[entry.status].join(' '),
   ].some((value) => String(value || '').toLowerCase().includes(needle))
 }
@@ -531,6 +561,7 @@ export default function TrainingHistoryPage() {
           const chatPath = entry.sessionId && entry.mode && Number.isFinite(roomId) && roomId > 0
             ? buildTrainingModeChatPath(roomId, entry.mode, entry.sessionId)
             : null
+          const branchSummary = entry.branchInfo ? historyBranchSummaryText(entry.branchInfo, tr) : ''
           return (
             <article className="training-history-row" key={entry.key}>
               <div className="training-history-time">
@@ -557,12 +588,19 @@ export default function TrainingHistoryPage() {
                       title={historyBranchTitle(entry.branchInfo, tr)}
                     >
                       <GitBranch size={12} />
-                      {entry.branchInfo.branchId
-                        ? compactHistoryBranchText(entry.branchInfo.branchId)
-                        : tr('路径分支', 'Path branch')}
+                      {historyBranchTagText(entry.branchInfo, tr)}
                     </span>
                   )}
                 </div>
+                {branchSummary && entry.branchInfo && (
+                  <p
+                    className="training-history-branch-summary"
+                    title={historyBranchTitle(entry.branchInfo, tr)}
+                  >
+                    <GitBranch size={12} />
+                    <span>{branchSummary}</span>
+                  </p>
+                )}
               </div>
 
               <div>

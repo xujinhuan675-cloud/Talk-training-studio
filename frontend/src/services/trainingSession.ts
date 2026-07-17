@@ -72,7 +72,7 @@ export interface TrainingSessionReportDTO {
 
 export type TrainingConversationBranchPathItem = Pick<
   ConversationTreeMessage,
-  'publicId' | 'role' | 'content' | 'branchId'
+  'publicId' | 'role' | 'content' | 'branchId' | 'parentMessageId'
 >
 
 export interface TrainingConversationBranchInfo {
@@ -80,8 +80,10 @@ export interface TrainingConversationBranchInfo {
   conversationId?: string
   branchId?: string
   selectedTailMessageId?: string
+  forkPointMessageId?: string
   pathCount?: number
   pathSummary?: string
+  lastReplyPreview?: string
   selectedPath: TrainingConversationBranchPathItem[]
   source: 'session' | 'report' | 'progress'
 }
@@ -224,6 +226,7 @@ function jsonRequest(method: 'POST' | 'PUT' | 'PATCH', body?: unknown): RequestI
 
 function cleanText(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined
+  if (typeof value === 'object' || typeof value === 'function' || typeof value === 'symbol') return undefined
   const text = String(value).trim()
   return text || undefined
 }
@@ -269,7 +272,7 @@ function collectBranchMetadataCandidates(
   }
 
   add('session', sources.session?.metadata)
-  add('session', sources.session?.task_config.metadata)
+  add('session', sources.session?.task_config?.metadata)
   add('report', sources.report?.metadata)
   add('report', asRecord(sources.report?.content)?.metadata)
   add('report', sources.report?.content)
@@ -294,6 +297,8 @@ const branchRecordKeys = [
   'selected_path',
   'currentPath',
   'current_path',
+  'currentBranchTail',
+  'current_branch_tail',
   'branch',
   'message',
   'messageRef',
@@ -314,6 +319,40 @@ const selectedTailKeys = [
   'message_public_id',
   'publicId',
   'public_id',
+  'tailMessageId',
+  'tail_message_id',
+  'currentTailMessageId',
+  'current_tail_message_id',
+  'messageId',
+  'message_id',
+]
+const forkPointKeys = [
+  'forkPointMessageId',
+  'fork_point_message_id',
+  'forkedFromMessageId',
+  'forked_from_message_id',
+  'splitFromMessageId',
+  'split_from_message_id',
+  'sourceMessageId',
+  'source_message_id',
+  'parentMessageId',
+  'parent_message_id',
+]
+const lastReplyKeys = [
+  'lastReply',
+  'last_reply',
+  'lastReplyPreview',
+  'last_reply_preview',
+  'lastResponse',
+  'last_response',
+  'lastMessage',
+  'last_message',
+  'lastMessageContent',
+  'last_message_content',
+  'replyPreview',
+  'reply_preview',
+  'tailPreview',
+  'tail_preview',
 ]
 const pathKeys = [
   'path',
@@ -323,6 +362,10 @@ const pathKeys = [
   'current_path',
   'messagePath',
   'message_path',
+  'messageIds',
+  'message_ids',
+  'selectedMessageIds',
+  'selected_message_ids',
 ]
 const pathCountKeys = [
   'pathCount',
@@ -360,6 +403,7 @@ function normalizeBranchPathItem(value: unknown): TrainingConversationBranchPath
       role: '',
       content: '',
       branchId: null,
+      parentMessageId: null,
     }
   }
 
@@ -381,6 +425,7 @@ function normalizeBranchPathItem(value: unknown): TrainingConversationBranchPath
     role: firstText(record, ['role', 'speaker', 'sender', 'senderType', 'sender_type']) ?? '',
     content: firstText(record, ['content', 'text', 'message', 'preview', 'title']) ?? '',
     branchId: firstText(record, branchIdKeys) ?? null,
+    parentMessageId: firstText(record, forkPointKeys) ?? null,
   }
 }
 
@@ -404,6 +449,42 @@ function compactPathSummary(path: TrainingConversationBranchPathItem[]): string 
   return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary
 }
 
+function previewText(value: unknown): string | undefined {
+  const directText = cleanText(value)
+  if (directText) return directText
+
+  const record = asRecord(value)
+  if (!record) return undefined
+  return firstText(record, [
+    'content',
+    'text',
+    'message',
+    'preview',
+    'reply',
+    'response',
+    'body',
+    'title',
+  ])
+}
+
+function firstPreview(records: Record<string, unknown>[], keys: string[]): string | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      const text = previewText(record[key])
+      if (text) return text
+    }
+  }
+  return undefined
+}
+
+function lastReplyFromPath(path: TrainingConversationBranchPathItem[]): string | undefined {
+  const items = [...path].reverse()
+  const assistantReply = items.find((item) => (
+    Boolean(item.content) && !['user', 'system'].includes(item.role.toLowerCase())
+  ))
+  return assistantReply?.content || items.find((item) => Boolean(item.content))?.content
+}
+
 function branchInfoFromCandidate(
   candidate: BranchMetadataCandidate,
 ): TrainingConversationBranchInfo | null {
@@ -417,20 +498,27 @@ function branchInfoFromCandidate(
     ?? undefined
   const selectedTailMessageId = records.map((record) => firstText(record, selectedTailKeys)).find(Boolean)
     ?? lastPathItem?.publicId
+  const forkPointMessageId = records.map((record) => firstText(record, forkPointKeys)).find(Boolean)
+    ?? lastPathItem?.parentMessageId
+    ?? undefined
   const explicitPathCount = records.map((record) => firstNumber(record, pathCountKeys)).find(Boolean)
   const pathCount = selectedPath.length > 0 ? selectedPath.length : explicitPathCount
   const pathSummary = records.map((record) => firstText(record, pathSummaryKeys)).find(Boolean)
     ?? compactPathSummary(selectedPath)
+  const lastReplyPreview = firstPreview(records, lastReplyKeys) ?? lastReplyFromPath(selectedPath)
 
-  if (!branchId && !selectedTailMessageId && !pathCount && !pathSummary) return null
+  const hasPathContext = Boolean(selectedTailMessageId || forkPointMessageId || pathCount || pathSummary || lastReplyPreview)
+  if (!hasPathContext && (!branchId || branchId === 'main')) return null
 
   return {
     provider,
     conversationId,
     branchId,
     selectedTailMessageId,
+    forkPointMessageId,
     pathCount,
     pathSummary,
+    lastReplyPreview,
     selectedPath,
     source: candidate.source,
   }

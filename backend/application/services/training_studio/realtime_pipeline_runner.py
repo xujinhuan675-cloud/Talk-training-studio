@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from typing import Any
@@ -21,10 +22,94 @@ from application.services.training_studio.realtime_pipeline import build_realtim
 
 _EVENT_PUMP_CLOSE_TIMEOUT_SECONDS = 1.0
 RealtimePipelineEventSink = Callable[[Mapping[str, Any]], Awaitable[None] | None]
+logger = logging.getLogger(__name__)
 
 
 class RealtimePipelineRunnerStateError(ValueError):
     """Raised when a runner command is called before the pipeline is ready."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "REALTIME_PIPELINE_STATE_ERROR",
+        phase: str = "runner_state",
+        provider: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.phase = phase
+        self.provider = provider
+        self.metadata = dict(metadata or {})
+
+    def to_realtime_error(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "code": self.code,
+            "message": str(self),
+            "phase": self.phase,
+        }
+        if self.provider is not None:
+            payload["provider"] = self.provider
+        payload.update(self.metadata)
+        return payload
+
+
+class RealtimePipelineStartError(RuntimeError):
+    """Raised when a realtime pipeline adapter fails before it is ready."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "REALTIME_PIPELINE_START_FAILED",
+        phase: str = "pipeline_start",
+        provider: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.phase = phase
+        self.provider = provider
+        self.metadata = dict(metadata or {})
+
+    def to_realtime_error(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": str(self),
+            "phase": self.phase,
+            "provider": self.provider,
+            **self.metadata,
+        }
+
+
+class RealtimePipelineProviderError(RuntimeError):
+    """Raised when a provider event reports a realtime pipeline error."""
+
+    def __init__(self, payload: Mapping[str, Any], *, provider: str) -> None:
+        self.payload = dict(payload)
+        self.provider = provider
+        message = _provider_error_message(self.payload)
+        super().__init__(message)
+        self.code = _provider_error_code(self.payload)
+        self.phase = "provider_event"
+        self.event_type = str(self.payload.get("type") or "")
+
+    def to_realtime_error(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "code": self.code,
+            "message": str(self),
+            "phase": self.phase,
+            "provider": self.provider,
+            "eventType": self.event_type,
+        }
+        source_code = _provider_error_source_code(self.payload)
+        if source_code is not None:
+            payload["sourceCode"] = source_code
+        metadata = _provider_error_metadata(self.payload)
+        if metadata:
+            payload["metadata"] = metadata
+        return payload
 
 
 class RealtimePipelineSessionRunner:
@@ -108,10 +193,21 @@ class RealtimePipelineSessionRunner:
         self._events_error = None
         try:
             await self._adapter.start(context, config)
-        except Exception:
+        except Exception as exc:
             with suppress(Exception):
                 await self._adapter.close()
-            raise
+            error = _pipeline_start_error(
+                exc,
+                provider=provider,
+                realtime_session_id=self._realtime_session_id,
+                binding=binding,
+            )
+            logger.warning(
+                "Realtime pipeline adapter start failed",
+                extra={"realtime_error": error.to_realtime_error()},
+                exc_info=True,
+            )
+            raise error from exc
         self._closed = False
         self._events_task = asyncio.create_task(
             self._pump_events(),
@@ -152,7 +248,7 @@ class RealtimePipelineSessionRunner:
             async for event in self._adapter.events():
                 payload = dict(event)
                 if _is_provider_error(payload):
-                    raise RuntimeError(_provider_error_message(payload))
+                    raise RealtimePipelineProviderError(payload, provider=config.provider)
                 persisted = await self._persist_final_transcript(
                     payload,
                     context,
@@ -235,8 +331,17 @@ class RealtimePipelineSessionRunner:
 
     def _raise_events_error(self) -> None:
         if self._events_error is not None:
+            structured = _realtime_error_from_exception(self._events_error)
             raise RealtimePipelineRunnerStateError(
-                f"Realtime pipeline event pump failed: {self._events_error}"
+                f"Realtime pipeline event pump failed: {structured['message']}",
+                code=str(structured["code"]),
+                phase=str(structured["phase"]),
+                provider=str(structured["provider"]) if structured.get("provider") else None,
+                metadata={
+                    key: value
+                    for key, value in structured.items()
+                    if key not in {"code", "message", "phase", "provider"}
+                },
             ) from self._events_error
 
 
@@ -299,8 +404,164 @@ def _provider_error_message(payload: Mapping[str, object]) -> str:
     return "Realtime pipeline provider error"
 
 
+def _provider_error_code(payload: Mapping[str, object]) -> str:
+    for key in ("code", "error_code", "errorCode"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    error = payload.get("error")
+    if isinstance(error, Mapping):
+        for key in ("code", "type"):
+            value = error.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return "PIPECAT_PROVIDER_ERROR"
+
+
+def _provider_error_source_code(payload: Mapping[str, object]) -> str | None:
+    code = _provider_error_code(payload)
+    if code == "PIPECAT_PROVIDER_ERROR":
+        return None
+    return code
+
+
+def _provider_error_metadata(payload: Mapping[str, object]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for key in ("request_id", "requestId", "trace_id", "traceId"):
+        value = payload.get(key)
+        if isinstance(value, str | int | float | bool):
+            metadata[key] = value
+    nested_metadata = payload.get("metadata")
+    if isinstance(nested_metadata, Mapping):
+        for key, value in nested_metadata.items():
+            if isinstance(value, str | int | float | bool) or value is None:
+                metadata[str(key)] = value
+    return metadata
+
+
+def _pipeline_start_error(
+    exc: BaseException,
+    *,
+    provider: str,
+    realtime_session_id: str | None,
+    binding: RealtimeSessionBinding,
+) -> RealtimePipelineStartError:
+    structured = _realtime_error_from_exception(exc)
+    message = str(structured.get("message") or exc)
+    code = str(structured.get("code") or "REALTIME_PIPELINE_START_FAILED")
+    phase = str(structured.get("phase") or "pipeline_start")
+    metadata = {
+        key: value
+        for key, value in structured.items()
+        if key not in {"code", "message", "phase", "provider"}
+    }
+    metadata.setdefault("trainingSessionId", binding.training_session_id)
+    metadata.setdefault("roomId", binding.room_id)
+    if realtime_session_id is not None:
+        metadata.setdefault("realtimeSessionId", realtime_session_id)
+
+    if code == "REALTIME_PIPELINE_START_FAILED":
+        fallback = _classify_start_error_message(message)
+        if fallback:
+            code = str(fallback.pop("code"))
+            phase = str(fallback.pop("phase", phase))
+            metadata.update(fallback)
+
+    return RealtimePipelineStartError(
+        message,
+        code=code,
+        phase=phase,
+        provider=provider,
+        metadata=metadata,
+    )
+
+
+def _realtime_error_from_exception(exc: BaseException) -> dict[str, Any]:
+    for method_name in ("to_realtime_error", "to_dict"):
+        method = getattr(exc, method_name, None)
+        if callable(method):
+            with suppress(Exception):
+                value = method()
+                if isinstance(value, Mapping):
+                    return {str(key): item for key, item in value.items()}
+
+    data: dict[str, Any] = {"message": str(exc)}
+    for attr_name, output_key in {
+        "code": "code",
+        "phase": "phase",
+        "provider": "provider",
+        "feature": "feature",
+        "missing_env": "missingEnv",
+        "missing_modules": "modules",
+        "event_type": "eventType",
+        "source_code": "sourceCode",
+        "metadata": "metadata",
+    }.items():
+        if hasattr(exc, attr_name):
+            value = getattr(exc, attr_name)
+            if value is not None:
+                data[output_key] = value
+    return data
+
+
+def _classify_start_error_message(message: str) -> dict[str, Any]:
+    text = message.lower()
+    if "api key is required" in text or "openai api key" in text:
+        return {
+            "code": "MISSING_OPENAI_API_KEY",
+            "phase": "configuration",
+            "missingEnv": ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY"),
+            "feature": _feature_from_error_text(text),
+        }
+    if "stt" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "pipeline_start",
+            "feature": "stt:openai",
+        }
+    if "tts" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "pipeline_start",
+            "feature": "tts:openai",
+        }
+    if ("llm" in text or "aggregator" in text) and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "pipeline_start",
+            "feature": "llm:openai",
+        }
+    if "vad" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "pipeline_start",
+            "feature": "vad:silero",
+        }
+    if "user turn" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": "pipeline_start",
+            "feature": "turnDetection:pipecat",
+        }
+    if "not importable" in text or ("module" in text and "missing" in text):
+        return {"code": "PIPECAT_MODULE_UNAVAILABLE", "phase": "runtime_import"}
+    return {}
+
+
+def _feature_from_error_text(text: str) -> str | None:
+    if "stt" in text:
+        return "stt:openai"
+    if "tts" in text:
+        return "tts:openai"
+    if "llm" in text:
+        return "llm:openai"
+    return None
+
+
 __all__ = [
     "RealtimePipelineEventSink",
+    "RealtimePipelineProviderError",
+    "RealtimePipelineStartError",
     "RealtimePipelineRunnerStateError",
     "RealtimePipelineSessionRunner",
 ]

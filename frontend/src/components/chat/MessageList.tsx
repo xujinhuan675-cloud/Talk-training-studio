@@ -22,6 +22,7 @@ import {
   applyConversationTreeMessageAction,
   buildConversationTreeMessageActionContext,
   fetchConversationTreeBranchSnapshot,
+  getMessageActionResultPath,
   type ConversationTreeBranchSnapshot,
   type ConversationTreeActionKind,
   type ConversationTreeMessageActionContext,
@@ -269,8 +270,10 @@ type MessageTreeActionLabels = {
   forkOptionIncludeBranches: string
   forkOptionTargetLevel: string
   apply: string
+  actionLoading: string
   actionSuccess: string
   actionError: string
+  refreshError: string
   editContentRequired: string
 }
 
@@ -330,11 +333,19 @@ type MessageTreeWriteAction = Extract<ConversationTreeMessageWriteActionKind, 'e
 
 const MESSAGE_TREE_WRITE_SOURCE = 'training_message_tree_panel'
 
+function messageTreeWriteActionLabel(action: MessageTreeWriteAction, labels: MessageTreeActionLabels): string {
+  if (action === 'retry') return labels.retry
+  if (action === 'fork') return labels.fork
+  return labels.edit
+}
+
 function snapshotFromMessageActionResult(result: MessageActionResult): ConversationTreeBranchSnapshot | null {
-  if (!result.message && result.path.length === 0) return null
+  const resultPath = getMessageActionResultPath(result)
+  const selectedMessage = result.message ?? resultPath[resultPath.length - 1] ?? null
+  if (!selectedMessage && resultPath.length === 0) return null
   return {
-    message: result.message,
-    path: result.path.length > 0 ? result.path : result.message ? [result.message] : [],
+    message: selectedMessage,
+    path: resultPath.length > 0 ? resultPath : selectedMessage ? [selectedMessage] : [],
     context: [],
     children: result.children,
     searchResults: [],
@@ -345,7 +356,8 @@ function contextForMessageActionResult(
   baseContext: ConversationTreeMessageActionContext,
   result: MessageActionResult,
 ): ConversationTreeMessageActionContext | null {
-  const selectedMessage = result.message ?? result.path[result.path.length - 1]
+  const resultPath = getMessageActionResultPath(result)
+  const selectedMessage = result.message ?? resultPath[resultPath.length - 1]
   if (!selectedMessage) return null
 
   return buildConversationTreeMessageActionContext({
@@ -372,11 +384,13 @@ function MessageTreeItem({
   message,
   labels,
   active,
+  disabled = false,
   onSelect,
 }: {
   message: ConversationTreeMessage
   labels: MessageTreeActionLabels
   active: boolean
+  disabled?: boolean
   onSelect: (message: ConversationTreeMessage) => void
 }) {
   const preview = treeMessagePreview(message)
@@ -390,6 +404,8 @@ function MessageTreeItem({
       }}
       title={preview}
       aria-label={`${labels.selectPath}: ${preview}`}
+      aria-current={active ? 'true' : undefined}
+      disabled={disabled}
     >
       <span className="message-tree-node-role">{treeRoleLabel(message.role, labels)}</span>
       <span className="message-tree-node-preview">{preview}</span>
@@ -430,6 +446,8 @@ function MessageTreeActions({
   const [writeError, setWriteError] = React.useState<string | null>(null)
   const [writeStatus, setWriteStatus] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const writePanelId = React.useId()
+  const writeFeedbackId = React.useId()
   const searchQuery = messageSearchQuery(message, context)
   const {
     availableActions,
@@ -514,7 +532,8 @@ function MessageTreeActions({
     nextContext: ConversationTreeMessageActionContext,
     action: 'focus' | 'children' | 'search',
     query: string | null,
-  ) => {
+    errorLabel = labels.error,
+  ): Promise<boolean> => {
     const requestSeq = requestSeqRef.current + 1
     requestSeqRef.current = requestSeq
     setExpanded(true)
@@ -525,15 +544,17 @@ function MessageTreeActions({
         branchId: nextContext.branchId,
         searchQuery: query,
       })
-      if (requestSeqRef.current !== requestSeq) return
+      if (requestSeqRef.current !== requestSeq) return false
       setFocusedContext(nextContext)
       setSnapshot(nextSnapshot)
       const selection = buildMessageTreeSelection(nextSnapshot, nextContext, message.id)
       if (selection) onSelectPath?.(selection)
+      return true
     } catch (err) {
-      if (requestSeqRef.current !== requestSeq) return
+      if (requestSeqRef.current !== requestSeq) return false
       console.error('Failed to load message tree branch data:', err)
-      setError(labels.error)
+      setError(errorLabel)
+      return false
     } finally {
       if (requestSeqRef.current === requestSeq) {
         setLoadingAction(null)
@@ -573,9 +594,14 @@ function MessageTreeActions({
   const handleSubmitWriteAction = React.useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     event.stopPropagation()
-    if (applyingAction) return
+    if (applyingAction || loadingAction) return
 
     const nextAction = writeAction
+    const nextActionLabel = nextAction === 'retry'
+      ? labels.retry
+      : nextAction === 'fork'
+        ? labels.fork
+        : labels.edit
     const nextContent = nextAction === 'edit'
       ? editContent.trim()
       : nextAction === 'retry'
@@ -589,6 +615,7 @@ function MessageTreeActions({
 
     setExpanded(true)
     setApplyingAction(nextAction)
+    setError(null)
     setWriteError(null)
     setWriteStatus(null)
     try {
@@ -601,19 +628,19 @@ function MessageTreeActions({
       })
       const resultSnapshot = snapshotFromMessageActionResult(result)
       const nextContext = contextForMessageActionResult(focusedContext, result)
-      if (resultSnapshot && nextContext) {
-        setFocusedContext(nextContext)
-        setSnapshot(resultSnapshot)
-        const selection = buildMessageTreeSelection(resultSnapshot, nextContext, message.id)
-        if (selection) onSelectPath?.(selection)
+      if (!resultSnapshot || !nextContext) {
+        setWriteError(`${nextActionLabel} ${labels.actionError}`)
+        return
       }
-      setWriteStatus(labels.actionSuccess)
-      if (nextContext) {
-        await loadSnapshot(nextContext, 'focus', null)
-      }
+      setFocusedContext(nextContext)
+      setSnapshot(resultSnapshot)
+      const selection = buildMessageTreeSelection(resultSnapshot, nextContext, message.id)
+      if (selection) onSelectPath?.(selection)
+      setWriteStatus(`${nextActionLabel} ${labels.actionSuccess}`)
+      await loadSnapshot(nextContext, 'focus', null, labels.refreshError)
     } catch (err) {
       console.error('Failed to apply message tree action:', err)
-      setWriteError(labels.actionError)
+      setWriteError(`${nextActionLabel} ${labels.actionError}`)
     } finally {
       setApplyingAction(null)
     }
@@ -625,8 +652,13 @@ function MessageTreeActions({
     forkTitle,
     labels.actionError,
     labels.actionSuccess,
+    labels.edit,
     labels.editContentRequired,
+    labels.fork,
+    labels.refreshError,
+    labels.retry,
     loadSnapshot,
+    loadingAction,
     message.id,
     onSelectPath,
     retryContent,
@@ -637,10 +669,22 @@ function MessageTreeActions({
   const currentNodeId = snapshot?.message?.publicId ?? focusedContext.messagePublicId
   const isSelectedCurrentNode = selectedTreeNodeId === focusedContext.messagePublicId
     || selectedTreeNodeId === currentNodeId
-  const canSubmitWrite = !applyingAction && (writeAction !== 'edit' || editContent.trim().length > 0)
+  const currentWriteActionLabel = messageTreeWriteActionLabel(writeAction, labels)
+  const applyingActionLabel = applyingAction ? messageTreeWriteActionLabel(applyingAction, labels) : null
+  const applyingStatus = applyingActionLabel ? `${applyingActionLabel} ${labels.actionLoading}` : null
+  const isReadBusy = Boolean(loadingAction)
+  const isWriteBusy = Boolean(applyingAction)
+  const isTreeBusy = isReadBusy || isWriteBusy
+  const editContentMissing = writeAction === 'edit' && editContent.trim().length === 0
+  const canSubmitWrite = !isTreeBusy && !editContentMissing
+  const submitAccessibleLabel = applyingStatus ?? `${labels.apply}: ${currentWriteActionLabel}`
+  const submitDisabledReason = applyingStatus
+    ?? (loadingAction ? labels.loading : null)
+    ?? (editContentMissing ? labels.editContentRequired : null)
+  const shouldShowBranchPanel = expanded && (!loadingAction || hasSnapshot) && (!error || hasSnapshot)
 
   return (
-    <section className="message-tree-actions" aria-label={labels.group}>
+    <section className="message-tree-actions" aria-label={labels.group} aria-busy={isTreeBusy}>
       <div className="message-tree-actions-header">
         <span className="message-tree-actions-title">
           <ListTree size={14} aria-hidden="true" />
@@ -667,6 +711,8 @@ function MessageTreeActions({
           type="button"
           className="message-tree-action"
           title={labels.focusDesc}
+          aria-label={loadingAction === 'focus' ? `${labels.focus}: ${labels.loading}` : labels.focus}
+          disabled={isTreeBusy}
           onClick={(event) => {
             event.stopPropagation()
             void loadSnapshot(focusedContext, 'focus', null)
@@ -684,6 +730,8 @@ function MessageTreeActions({
           type="button"
           className="message-tree-action"
           title={labels.childrenDesc}
+          aria-label={loadingAction === 'children' ? `${labels.children}: ${labels.loading}` : labels.children}
+          disabled={isTreeBusy}
           onClick={(event) => {
             event.stopPropagation()
             void loadSnapshot(focusedContext, 'children', null)
@@ -705,11 +753,14 @@ function MessageTreeActions({
               onClick={(event) => event.stopPropagation()}
               onChange={(event) => setSearchText(event.target.value)}
               placeholder={labels.searchPlaceholder}
+              disabled={isTreeBusy}
             />
           </label>
           <button
             type="submit"
             title={labels.searchDesc}
+            aria-label={loadingAction === 'search' ? `${labels.search}: ${labels.loading}` : labels.search}
+            disabled={isTreeBusy}
             onClick={(event) => event.stopPropagation()}
           >
             {loadingAction === 'search' ? <Loader2 size={13} className="spin" /> : <Search size={13} />}
@@ -723,6 +774,8 @@ function MessageTreeActions({
             type="button"
             className="message-tree-write-toggle"
             aria-expanded={writeExpanded}
+            aria-controls={writePanelId}
+            disabled={isTreeBusy}
             onClick={(event) => {
               event.stopPropagation()
               setWriteExpanded((value) => !value)
@@ -743,6 +796,7 @@ function MessageTreeActions({
           </button>
           {writeExpanded && (
             <form
+              id={writePanelId}
               className="message-tree-write-panel"
               onSubmit={handleSubmitWriteAction}
               onClick={(event) => event.stopPropagation()}
@@ -754,7 +808,9 @@ function MessageTreeActions({
                     type="button"
                     className={writeAction === action ? 'active' : undefined}
                     title={description}
+                    aria-label={`${label}: ${description}`}
                     aria-pressed={writeAction === action}
+                    disabled={isTreeBusy}
                     onClick={() => {
                       setWriteAction(action)
                       setWriteError(null)
@@ -773,6 +829,7 @@ function MessageTreeActions({
                     rows={3}
                     value={editContent}
                     placeholder={labels.editPlaceholder}
+                    disabled={isTreeBusy}
                     onChange={(event) => {
                       setEditContent(event.target.value)
                       setWriteError(null)
@@ -788,6 +845,7 @@ function MessageTreeActions({
                     rows={2}
                     value={retryContent}
                     placeholder={labels.retryPlaceholder}
+                    disabled={isTreeBusy}
                     onChange={(event) => {
                       setRetryContent(event.target.value)
                       setWriteError(null)
@@ -803,6 +861,7 @@ function MessageTreeActions({
                     <input
                       value={forkTitle}
                       placeholder={labels.forkTitlePlaceholder}
+                      disabled={isTreeBusy}
                       onChange={(event) => {
                         setForkTitle(event.target.value)
                         setWriteStatus(null)
@@ -813,6 +872,7 @@ function MessageTreeActions({
                     <span>{labels.forkOptionLabel}</span>
                     <select
                       value={forkOption}
+                      disabled={isTreeBusy}
                       onChange={(event) => {
                         setForkOption(event.target.value as MessageActionForkOption)
                         setWriteStatus(null)
@@ -826,26 +886,34 @@ function MessageTreeActions({
                 </div>
               )}
               <div className="message-tree-write-footer">
-                <div className="message-tree-write-feedback" aria-live="polite">
+                <div
+                  id={writeFeedbackId}
+                  className="message-tree-write-feedback"
+                  role={writeError ? 'alert' : 'status'}
+                  aria-live={writeError ? 'assertive' : 'polite'}
+                >
                   {writeError && <span className="error">{writeError}</span>}
-                  {writeStatus && !writeError && <span className="success">{writeStatus}</span>}
+                  {applyingStatus && !writeError && <span className="pending">{applyingStatus}</span>}
+                  {writeStatus && !writeError && !applyingStatus && <span className="success">{writeStatus}</span>}
                 </div>
                 <button
                   type="submit"
                   className="message-tree-write-submit"
                   disabled={!canSubmitWrite}
+                  aria-describedby={writeFeedbackId}
+                  aria-label={submitDisabledReason ? `${submitAccessibleLabel}: ${submitDisabledReason}` : submitAccessibleLabel}
                 >
                   {applyingAction ? <Loader2 size={13} className="spin" /> : <Check size={13} />}
-                  <span>{labels.apply}</span>
+                  <span>{applyingStatus ?? labels.apply}</span>
                 </button>
               </div>
             </form>
           )}
         </div>
       )}
-      {loadingAction && <div className="message-tree-status">{labels.loading}</div>}
-      {error && <div className="message-tree-error">{error}</div>}
-      {expanded && !loadingAction && !error && (
+      {loadingAction && <div className="message-tree-status" role="status" aria-live="polite">{labels.loading}</div>}
+      {error && <div className="message-tree-error" role="alert">{error}</div>}
+      {shouldShowBranchPanel && (
         <div className="message-tree-branch-panel">
           <div className="message-tree-section">
             <div className="message-tree-section-title">
@@ -860,6 +928,7 @@ function MessageTreeActions({
                     message={pathMessage}
                     labels={labels}
                     active={selectedTreeNodeId === pathMessage.publicId || currentNodeId === pathMessage.publicId}
+                    disabled={isTreeBusy}
                     onSelect={handleSelectTreeMessage}
                   />
                 ))}
@@ -881,6 +950,7 @@ function MessageTreeActions({
                     message={child}
                     labels={labels}
                     active={selectedPathIds.has(child.publicId) || selectedTreeNodeId === child.publicId}
+                    disabled={isTreeBusy}
                     onSelect={handleSelectTreeMessage}
                   />
                 ))}
@@ -902,6 +972,7 @@ function MessageTreeActions({
                     message={result.message}
                     labels={labels}
                     active={selectedTreeNodeId === result.message.publicId}
+                    disabled={isTreeBusy}
                     onSelect={handleSelectTreeMessage}
                   />
                 ))}
@@ -1017,8 +1088,10 @@ export default function MessageList({
     forkOptionIncludeBranches: t('messageTree.actions.forkOptionIncludeBranches'),
     forkOptionTargetLevel: t('messageTree.actions.forkOptionTargetLevel'),
     apply: t('messageTree.actions.apply'),
+    actionLoading: t('messageTree.actions.actionLoading'),
     actionSuccess: t('messageTree.actions.actionSuccess'),
     actionError: t('messageTree.actions.actionError'),
+    refreshError: t('messageTree.actions.refreshError'),
     editContentRequired: t('messageTree.actions.editContentRequired'),
   }
 

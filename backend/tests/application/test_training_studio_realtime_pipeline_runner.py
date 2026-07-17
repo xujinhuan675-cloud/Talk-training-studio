@@ -13,6 +13,7 @@ from application.ports.realtime import (
     TrainingVoiceContext,
 )
 from application.services.training_studio.realtime_pipeline_runner import (
+    RealtimePipelineStartError,
     RealtimePipelineRunnerStateError,
     RealtimePipelineSessionRunner,
 )
@@ -163,13 +164,21 @@ async def test_runner_closes_adapter_when_start_fails():
         transcript_sink=FakeTrainingTranscriptSink(),
     )
 
-    with pytest.raises(RuntimeError, match="Pipecat OpenAI STT"):
+    with pytest.raises(RealtimePipelineStartError, match="Pipecat OpenAI STT") as exc_info:
         await runner.start(
             binding=_binding(),
             provider="pipecat",
             realtime_session_id="rt-1",
         )
 
+    error = exc_info.value.to_realtime_error()
+    assert error["code"] == "PIPECAT_FEATURE_UNAVAILABLE"
+    assert error["phase"] == "pipeline_start"
+    assert error["provider"] == "pipecat"
+    assert error["feature"] == "stt:openai"
+    assert error["trainingSessionId"] == "training-1"
+    assert error["roomId"] == 42
+    assert error["realtimeSessionId"] == "rt-1"
     assert adapter.close_count == 1
 
 
@@ -384,8 +393,12 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
 
     await asyncio.wait_for(_wait_for_error(), timeout=1)
 
-    with pytest.raises(RealtimePipelineRunnerStateError, match=expected_message):
+    with pytest.raises(RealtimePipelineRunnerStateError, match=expected_message) as exc_info:
         await runner.commit_audio()
 
+    assert exc_info.value.code == "PIPECAT_PROVIDER_ERROR"
+    assert exc_info.value.phase == "provider_event"
+    assert exc_info.value.provider == "pipecat"
+    assert exc_info.value.metadata["eventType"] == provider_event["type"]
     await runner.close()
     assert event_sink.events == []
