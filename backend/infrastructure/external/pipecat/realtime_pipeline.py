@@ -457,23 +457,42 @@ def build_pipecat_voice_processors(
 ) -> tuple[Any, ...]:
     """Build Pipecat-owned voice processors declared by provider-neutral config."""
 
+    validate_pipecat_voice_config(config)
     processors: list[Any] = []
     metadata = dict(config.metadata)
 
     if _feature_provider(metadata, "vad") == "silero":
         if runtime.SileroVADAnalyzer is None or runtime.VADProcessor is None:
             raise RuntimeError("Pipecat Silero VAD processor is unavailable")
+        vad_config = _feature_config(metadata, "vad")
+        vad_sample_rate = _metadata_int(
+            vad_config,
+            "sampleRate",
+            "sample_rate",
+            "vadSampleRate",
+            "vad_sample_rate",
+        ) or _metadata_int(
+            metadata,
+            "vadSampleRate",
+            "vad_sample_rate",
+            "sampleRate",
+            "sample_rate",
+        )
+        vad_kwargs = _processor_kwargs(
+            vad_config,
+            allowed={
+                "speechActivityPeriod": "speech_activity_period",
+                "speech_activity_period": "speech_activity_period",
+                "audioIdleTimeout": "audio_idle_timeout",
+                "audio_idle_timeout": "audio_idle_timeout",
+            },
+        )
         processors.append(
             runtime.VADProcessor(
                 vad_analyzer=runtime.SileroVADAnalyzer(
-                    sample_rate=_metadata_int(
-                        metadata,
-                        "vadSampleRate",
-                        "vad_sample_rate",
-                        "sampleRate",
-                        "sample_rate",
-                    )
-                )
+                    sample_rate=vad_sample_rate,
+                ),
+                **vad_kwargs,
             )
         )
 
@@ -481,37 +500,78 @@ def build_pipecat_voice_processors(
     if stt_provider == "openai":
         if runtime.OpenAIRealtimeSTTService is None:
             raise RuntimeError("Pipecat OpenAI realtime STT service is unavailable")
+        stt_config = _feature_config(metadata, "stt")
         api_key = _openai_api_key(metadata)
         if not api_key:
             raise RuntimeError("OpenAI API key is required for Pipecat OpenAI STT")
         processors.append(
             runtime.OpenAIRealtimeSTTService(
                 api_key=api_key,
-                model=_metadata_text(metadata, "sttModel", "stt_model") or config.model,
+                model=_metadata_text(stt_config, "model")
+                or _metadata_text(metadata, "sttModel", "stt_model")
+                or config.model,
+                base_url=_metadata_text(stt_config, "baseUrl", "base_url")
+                or "wss://api.openai.com/v1/realtime",
+                language=_metadata_text(stt_config, "language"),
+                prompt=_metadata_text(stt_config, "prompt"),
                 turn_detection=_turn_detection_config(metadata),
-                noise_reduction=_metadata_text(metadata, "noiseReduction", "noise_reduction"),
+                noise_reduction=_metadata_text(
+                    stt_config,
+                    "noiseReduction",
+                    "noise_reduction",
+                )
+                or _metadata_text(metadata, "noiseReduction", "noise_reduction"),
+                should_interrupt=_metadata_bool(
+                    stt_config,
+                    "shouldInterrupt",
+                    "should_interrupt",
+                    default=True,
+                ),
             )
         )
 
     if _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat":
         if runtime.UserTurnProcessor is None:
             raise RuntimeError("Pipecat user turn processor is unavailable")
-        processors.append(runtime.UserTurnProcessor())
+        turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
+        processors.append(
+            runtime.UserTurnProcessor(
+                user_turn_stop_timeout=_metadata_float(
+                    turn_config,
+                    "userTurnStopTimeout",
+                    "user_turn_stop_timeout",
+                    default=5.0,
+                ),
+                user_idle_timeout=_metadata_float(
+                    turn_config,
+                    "userIdleTimeout",
+                    "user_idle_timeout",
+                    default=0,
+                ),
+            )
+        )
 
     tts_provider = _feature_provider(metadata, "tts")
     if tts_provider == "openai":
         if runtime.OpenAITTSService is None:
             raise RuntimeError("Pipecat OpenAI TTS service is unavailable")
+        tts_config = _feature_config(metadata, "tts")
         api_key = _openai_api_key(metadata)
         if not api_key:
             raise RuntimeError("OpenAI API key is required for Pipecat OpenAI TTS")
         processors.append(
             runtime.OpenAITTSService(
                 api_key=api_key,
-                model=_metadata_text(metadata, "ttsModel", "tts_model"),
-                voice=config.voice or _metadata_text(metadata, "voice"),
-                instructions=config.instructions,
-                sample_rate=_metadata_int(metadata, "outputSampleRate", "output_sample_rate"),
+                base_url=_metadata_text(tts_config, "baseUrl", "base_url"),
+                model=_metadata_text(tts_config, "model")
+                or _metadata_text(metadata, "ttsModel", "tts_model"),
+                voice=config.voice
+                or _metadata_text(tts_config, "voice")
+                or _metadata_text(metadata, "voice"),
+                instructions=config.instructions or _metadata_text(tts_config, "instructions"),
+                sample_rate=_metadata_int(tts_config, "sampleRate", "sample_rate")
+                or _metadata_int(metadata, "outputSampleRate", "output_sample_rate"),
+                speed=_metadata_float(tts_config, "speed"),
             )
         )
 
@@ -551,7 +611,18 @@ def pipecat_pipeline_capability(
         turn_detection=_feature_provider(metadata, "turnDetection", "turn_detection"),
         missing_features=tuple(missing),
         metadata={
+            "coreAvailable": capability.core_available,
             "websocketAvailable": capability.websocket_available,
+            "sttAvailable": capability.stt_available,
+            "ttsAvailable": capability.tts_available,
+            "vadAvailable": capability.vad_available,
+            "turnDetectionAvailable": capability.turn_detection_available,
+            "requestedFeatures": {
+                "stt": _feature_provider(metadata, "stt"),
+                "tts": _feature_provider(metadata, "tts"),
+                "vad": _feature_provider(metadata, "vad"),
+                "turnDetection": _feature_provider(metadata, "turnDetection", "turn_detection"),
+            },
             "optionalMissingModules": capability.optional_missing_modules,
             "runtimeLoaded": runtime is not None,
             "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
@@ -599,7 +670,7 @@ def _event_from_pipecat_frame(
             "language": str(getattr(frame, "language", "") or "") or None,
             "timestamp": getattr(frame, "timestamp", None),
         }
-        return _with_frame_metadata(event, frame)
+        return _with_frame_metadata(event, frame, config=config)
     if isinstance(frame, runtime.LLMContextAssistantTurnFrame):
         event = {
             "type": "response.audio_transcript.done",
@@ -608,12 +679,22 @@ def _event_from_pipecat_frame(
             "source": "pipecat",
             "timestamp": getattr(frame, "timestamp", None),
         }
-        return _with_frame_metadata(event, frame)
+        return _with_frame_metadata(event, frame, config=config)
     return None
 
 
-def _with_frame_metadata(event: dict[str, Any], frame: Any) -> dict[str, Any]:
+def _with_frame_metadata(
+    event: dict[str, Any],
+    frame: Any,
+    *,
+    config: RealtimePipelineConfig,
+) -> dict[str, Any]:
     metadata = _frame_event_metadata(frame)
+    talkwise_metadata = _json_safe_metadata(
+        config.metadata.get("talkwise") or config.metadata.get("talkwiseMetadata")
+    )
+    if isinstance(talkwise_metadata, Mapping):
+        metadata.setdefault("talkwise", dict(talkwise_metadata))
     if metadata:
         event["metadata"] = metadata
     return event
@@ -725,6 +806,14 @@ def _feature_provider(metadata: Mapping[str, Any], *keys: str) -> str | None:
     return None
 
 
+def _feature_config(metadata: Mapping[str, Any], *keys: str) -> Mapping[str, Any]:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, Mapping):
+            return value
+    return {}
+
+
 def _metadata_text(metadata: Mapping[str, Any], *keys: str) -> str | None:
     for key in keys:
         value = metadata.get(key)
@@ -743,16 +832,77 @@ def _metadata_int(metadata: Mapping[str, Any], *keys: str) -> int | None:
     return None
 
 
+def _metadata_float(
+    metadata: Mapping[str, Any],
+    *keys: str,
+    default: float | None = None,
+) -> float | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None:
+            return float(value)
+    return default
+
+
+def _metadata_bool(
+    metadata: Mapping[str, Any],
+    *keys: str,
+    default: bool | None = None,
+) -> bool | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in {"1", "true", "yes", "on"}:
+                return True
+            if text in {"0", "false", "no", "off"}:
+                return False
+    return default
+
+
+def _processor_kwargs(
+    metadata: Mapping[str, Any],
+    *,
+    allowed: Mapping[str, str],
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    for source_key, target_key in allowed.items():
+        if source_key in metadata:
+            kwargs[target_key] = metadata[source_key]
+    return kwargs
+
+
 def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
     return (
         _metadata_text(metadata, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
+        or _settings_openai_api_key()
         or os.getenv("REALTIME_OPENAI_API_KEY")
         or os.getenv("OPENAI_API_KEY")
     )
 
 
+def _settings_openai_api_key() -> str | None:
+    try:
+        from core.config import settings as app_settings
+    except Exception:
+        return None
+    return (
+        app_settings.REALTIME_OPENAI_API_KEY
+        or getattr(app_settings.llm, "api_key", None)
+        or getattr(app_settings, "OPENAI_API_KEY", None)
+    )
+
+
 def _turn_detection_config(metadata: Mapping[str, Any]) -> Mapping[str, Any] | bool | None:
-    value = metadata.get("sttTurnDetection") or metadata.get("stt_turn_detection")
+    stt_config = _feature_config(metadata, "stt")
+    value = (
+        stt_config.get("turnDetection")
+        or stt_config.get("turn_detection")
+        or metadata.get("sttTurnDetection")
+        or metadata.get("stt_turn_detection")
+    )
     if isinstance(value, Mapping):
         return dict(value)
     if isinstance(value, bool) or value is None:
@@ -764,6 +914,61 @@ def _turn_detection_config(metadata: Mapping[str, Any]) -> Mapping[str, Any] | b
         if text in {"disabled", "false", "local"}:
             return False
     return False
+
+
+def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
+    """Validate supported Pipecat-owned voice chain options before constructing services."""
+
+    metadata = dict(config.metadata)
+    _validate_provider(metadata, "stt", supported={"openai"})
+    _validate_provider(metadata, "tts", supported={"openai"})
+    _validate_provider(metadata, "vad", supported={"silero"})
+    _validate_provider(metadata, "turnDetection", "turn_detection", supported={"pipecat"})
+
+    vad_provider = _feature_provider(metadata, "vad")
+    stt_provider = _feature_provider(metadata, "stt")
+    stt_turn_detection = _turn_detection_config(metadata)
+    if vad_provider == "silero" and stt_provider == "openai" and stt_turn_detection is not False:
+        raise ValueError(
+            "Pipecat OpenAI STT server-side turn detection cannot be combined with Silero VAD"
+        )
+
+    vad_config = _feature_config(metadata, "vad")
+    vad_sample_rate = _metadata_int(
+        vad_config,
+        "sampleRate",
+        "sample_rate",
+        "vadSampleRate",
+        "vad_sample_rate",
+    ) or _metadata_int(metadata, "vadSampleRate", "vad_sample_rate")
+    if vad_provider == "silero" and vad_sample_rate not in {None, 8000, 16000}:
+        raise ValueError("Silero VAD sample rate must be 8000 or 16000")
+
+    noise_reduction = _metadata_text(
+        _feature_config(metadata, "stt"),
+        "noiseReduction",
+        "noise_reduction",
+    ) or _metadata_text(metadata, "noiseReduction", "noise_reduction")
+    if noise_reduction is not None and noise_reduction not in {"near_field", "far_field"}:
+        raise ValueError("OpenAI realtime STT noise reduction must be near_field or far_field")
+
+    tts_speed = _metadata_float(_feature_config(metadata, "tts"), "speed")
+    if tts_speed is not None and not 0.25 <= tts_speed <= 4.0:
+        raise ValueError("OpenAI TTS speed must be between 0.25 and 4.0")
+
+
+def _validate_provider(
+    metadata: Mapping[str, Any],
+    *keys: str,
+    supported: set[str],
+) -> None:
+    provider = _feature_provider(metadata, *keys)
+    if provider is not None and provider not in supported:
+        feature = keys[0]
+        supported_text = ", ".join(sorted(supported))
+        raise ValueError(
+            f"Unsupported Pipecat {feature} provider '{provider}'; expected {supported_text}"
+        )
 
 
 def pipecat_source_snapshot() -> Mapping[str, Any]:
@@ -812,4 +1017,5 @@ __all__ = [
     "is_pipecat_available",
     "pipecat_pipeline_capability",
     "pipecat_source_snapshot",
+    "validate_pipecat_voice_config",
 ]

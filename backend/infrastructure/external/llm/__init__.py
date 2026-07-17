@@ -1,7 +1,7 @@
 # input: core.config.settings.llm, core.config.settings.stakeholder, OpenAI SDK, Anthropic SDK
-# output: init_llm_client, shutdown_llm_client, get_llm_client, init_anthropic_client, shutdown_anthropic_client, get_anthropic_client 生命周期函数
+# output: LLM client lifecycle functions for OpenAI-compatible and Anthropic providers
 # owner: unknown
-# pos: 基础设施层 - LLM 客户端生命周期管理（OpenAI + Anthropic）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+# pos: infrastructure - LLM client lifecycle management; update this header and folder docs when changed
 """LLM client lifecycle management."""
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ async def init_llm_client() -> None:
             api_key=llm_cfg.api_key,
             base_url=llm_cfg.base_url,
             wire_api=llm_cfg.wire_api,
+            provider_name=llm_cfg.provider,
             default_model=llm_cfg.default_model,
             default_temperature=llm_cfg.temperature,
             default_max_tokens=llm_cfg.max_tokens,

@@ -140,17 +140,23 @@ class _FakeRealtimePipelineAdapter:
         self.audio_chunks: list[RealtimeAudioChunk] = []
         self.commits = 0
         self.closed = False
+        self.start_error: Exception | None = None
+        self.events_on_commit: list[Mapping[str, Any]] = []
         self._events: asyncio.Queue[Mapping[str, Any] | None] = asyncio.Queue()
 
     async def start(self, context: TrainingVoiceContext, config: RealtimePipelineConfig) -> None:
         self.started_context = context
         self.started_config = config
+        if self.start_error is not None:
+            raise self.start_error
 
     async def append_audio(self, chunk: RealtimeAudioChunk) -> None:
         self.audio_chunks.append(chunk)
 
     async def commit_audio(self) -> None:
         self.commits += 1
+        for event in self.events_on_commit:
+            await self._events.put(event)
 
     async def events(self) -> AsyncIterator[Mapping[str, Any]]:
         while True:
@@ -757,12 +763,109 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> Non
     assert adapter.started_context is not None
     assert adapter.started_context.binding.training_session_id == "session-1"
     assert adapter.started_context.binding.room_id == 42
+    assert "Sales Associate" in str(adapter.started_context.task_goal)
+    assert isinstance(adapter.started_context.rubric, dict)
+    assert adapter.started_context.metadata["runtime"] == "realtime_voice"
+    assert adapter.started_context.metadata["trainingSessionId"] == "session-1"
+    assert adapter.started_context.metadata["provider"] == "pipecat"
+    assert adapter.started_context.metadata["transport"] == "websocket"
+    assert adapter.started_context.metadata["roomId"] == 42
     assert adapter.started_config is not None
     assert adapter.started_config.provider == "pipecat"
+    assert adapter.started_config.instructions
+    assert adapter.started_config.metadata["transport"] == "websocket"
+    stt_metadata = adapter.started_config.metadata["stt"]
+    assert isinstance(stt_metadata, dict)
+    assert stt_metadata["provider"] == "openai"
+    assert stt_metadata["turnDetection"] == "disabled"
+    if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
+        assert stt_metadata["model"] == settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
+    assert adapter.started_config.metadata["tts"] == {"provider": "openai"}
+    assert adapter.started_config.metadata["vad"] == {"provider": "silero", "sampleRate": 16000}
+    assert adapter.started_config.metadata["turnDetection"] == {"provider": "pipecat"}
+    assert adapter.started_config.metadata["talkwise"] == {
+        "trainingSessionId": "session-1",
+        "roomId": 42,
+        "runtime": "realtime_voice",
+    }
     assert adapter.audio_chunks == [
         RealtimeAudioChunk(data=audio, mime_type="audio/pcm", sequence=1)
     ]
     assert adapter.commits == 1
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_pipecat_provider_rejects_invalid_base64_audio() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "audio.input", "audio": "not-base64!"})
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "INVALID_AUDIO"
+    assert "Invalid base64 audio frame" in error["payload"]["message"]
+    assert adapter.audio_chunks == []
+
+
+def test_realtime_websocket_pipecat_provider_surfaces_pipeline_error_on_commit() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "pipeline.error",
+            "error": {"message": "Pipecat provider disconnected"},
+        }
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "audio.commit"})
+        committed = ws.receive_json()
+        error = ws.receive_json()
+
+    assert committed["status"] == "processing"
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "SESSION_ERROR"
+    assert "Pipecat provider disconnected" in error["payload"]["message"]
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_pipecat_provider_surfaces_pipeline_start_error() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.start_error = RuntimeError("Pipecat OpenAI realtime STT service is unavailable")
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "SESSION_ERROR"
+    assert "Pipecat OpenAI realtime STT service is unavailable" in error["payload"]["message"]
     assert adapter.closed is True
 
 

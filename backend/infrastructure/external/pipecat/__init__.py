@@ -14,6 +14,7 @@ from infrastructure.external.pipecat.realtime_pipeline import (
     is_pipecat_available,
     pipecat_pipeline_capability,
     pipecat_source_snapshot,
+    validate_pipecat_voice_config,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "is_pipecat_available",
     "pipecat_pipeline_capability",
     "pipecat_source_snapshot",
+    "validate_pipecat_voice_config",
 ]

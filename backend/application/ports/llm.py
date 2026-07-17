@@ -1,7 +1,7 @@
-# input: LLM provider SDKs (OpenAI, Azure, vLLM)
-# output: LLMPort Protocol, LLMMessage, LLMResponse, LLMChunk data types
+# input: LLM provider SDKs (OpenAI, Azure, Anthropic, vLLM)
+# output: LLMPort Protocol, LLMProviderMetadata, LLMMessage, LLMResponse, LLMChunk data types
 # owner: unknown
-# pos: 应用层端口 - LLM 调用抽象接口；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+# pos: application port - provider-neutral LLM invocation boundary; update this header and folder docs when changed
 """Application-owned LLM port abstraction (hexagonal architecture).
 
 Defines the minimal protocol needed by application use cases so that
@@ -12,6 +12,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional, Protocol, runtime_checkable
+
+
+@dataclass
+class LLMProviderMetadata:
+    """Stable provider identity exposed by an LLM adapter."""
+
+    provider: str
+    default_model: Optional[str] = None
+    endpoint: Optional[str] = None
+    wire_api: Optional[str] = None
+    max_retries: Optional[int] = None
+    extra: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -41,7 +53,7 @@ class LLMChunk:
     content: str = ""
     model: str = ""
     finish_reason: Optional[str] = None
-    # Token usage is typically available only in the final chunk
+    # Token usage is typically available only in the final chunk.
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -50,6 +62,9 @@ class LLMChunk:
 @runtime_checkable
 class LLMPort(Protocol):
     """Port for interacting with a Large Language Model."""
+
+    @property
+    def provider_metadata(self) -> LLMProviderMetadata: ...
 
     async def generate(
         self,

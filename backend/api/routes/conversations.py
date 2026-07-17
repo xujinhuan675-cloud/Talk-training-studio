@@ -1,7 +1,7 @@
-# input: ConversationApplicationService 依赖注入
-# output: 对话 + Agent 配置 CRUD HTTP 端点
+# input: ConversationApplicationService dependency injection
+# output: conversation, message, search, run, and AgentConfig HTTP endpoints
 # owner: unknown
-# pos: 表示层路由 - 对话管理与 Agent 配置 CRUD API；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+# pos: API routes - text conversation management and run/history query boundary; update this header and folder docs when changed
 """Conversation and AgentConfig CRUD routes."""
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from application.dto import (
     CreateAgentConfigDTO,
     CreateConversationDTO,
     EditMessageDTO,
+    ForkConversationDTO,
+    ForkConversationResultDTO,
     MessageLocationDTO,
     MessageDTO_Agent,
     MessageSearchResultDTO,
@@ -35,15 +37,15 @@ from core.response import paginated_response, success_response
 # TODO: Add authentication dependency (get_current_user) to all routes
 # when user/auth module is implemented. Currently matches project baseline
 # where no routes require auth (see files.py, storage.py).
-router = APIRouter(tags=["对话管理"])
+router = APIRouter(tags=["Conversations"])
 
 
-# ── Conversations ──────────────────────────────────────────────────
+# Conversations
 
 
 @router.post(
     "/conversations",
-    summary="创建对话",
+    summary="Create conversation",
     response_model=ApiResponse[ConversationDTO],
 )
 async def create_conversation(
@@ -56,7 +58,7 @@ async def create_conversation(
 
 @router.get(
     "/conversations",
-    summary="对话列表",
+    summary="List conversations",
     response_model=ApiResponse[PaginatedData[ConversationDTO]],
 )
 async def list_conversations(
@@ -72,7 +74,7 @@ async def list_conversations(
 
 @router.get(
     "/conversations/{conversation_id}",
-    summary="对话详情",
+    summary="Get conversation",
     response_model=ApiResponse[ConversationDTO],
 )
 async def get_conversation(
@@ -85,7 +87,7 @@ async def get_conversation(
 
 @router.patch(
     "/conversations/{conversation_id}",
-    summary="更新对话",
+    summary="Update conversation",
     response_model=ApiResponse[ConversationDTO],
 )
 async def update_conversation(
@@ -99,7 +101,7 @@ async def update_conversation(
 
 @router.delete(
     "/conversations/{conversation_id}",
-    summary="删除对话（软删除）",
+    summary="Soft delete conversation",
     response_model=ApiResponse[ConversationDTO],
 )
 async def delete_conversation(
@@ -112,17 +114,27 @@ async def delete_conversation(
 
 @router.get(
     "/conversations/{conversation_id}/messages",
-    summary="消息历史",
+    summary="List conversation messages",
     response_model=ApiResponse[PaginatedData[MessageDTO_Agent]],
 )
 async def list_messages(
     conversation_id: int,
     page: int = Query(1, ge=1),
     size: int = Query(default=100, ge=1, le=500),
+    branch_id: Optional[str] = Query(default=None),
+    statuses: list[str] | None = Query(default=None),
+    include_deleted: bool = Query(default=False),
     service: ConversationApplicationService = Depends(get_conversation_service),
 ):
     skip = (page - 1) * size
-    items, total = await service.list_messages(conversation_id, skip=skip, limit=size)
+    items, total = await service.list_messages(
+        conversation_id,
+        skip=skip,
+        limit=size,
+        branch_id=branch_id,
+        statuses=statuses,
+        include_deleted=include_deleted,
+    )
     return paginated_response(items=items, total=total, page=page, size=size)
 
 
@@ -138,6 +150,9 @@ async def search_messages(
     limit: int = Query(20, ge=1, le=100),
     branch_id: Optional[str] = Query(default=None),
     roles: list[str] | None = Query(default=None),
+    statuses: list[str] | None = Query(default=None),
+    provider: Optional[str] = Query(default=None),
+    model: Optional[str] = Query(default=None),
     include_path: bool = Query(default=True),
     context_before: int = Query(1, ge=0, le=20),
     context_after: int = Query(1, ge=0, le=20),
@@ -150,6 +165,9 @@ async def search_messages(
         limit=limit,
         branch_id=branch_id,
         roles=roles,
+        statuses=statuses,
+        provider=provider,
+        model=model,
         include_path=include_path,
         context_before=context_before,
         context_after=context_after,
@@ -159,15 +177,22 @@ async def search_messages(
 
 @router.get(
     "/conversations/{conversation_id}/messages/{message_public_id}/path",
-    summary="消息树路径",
+    summary="Message tree path",
     response_model=ApiResponse[list[MessageDTO_Agent]],
 )
 async def get_message_path(
     conversation_id: int,
     message_public_id: str,
+    include_deleted: bool = Query(default=False),
+    statuses: list[str] | None = Query(default=None),
     service: ConversationApplicationService = Depends(get_conversation_service),
 ):
-    items = await service.get_message_path(conversation_id, message_public_id)
+    items = await service.get_message_path(
+        conversation_id,
+        message_public_id,
+        include_deleted=include_deleted,
+        statuses=statuses,
+    )
     return success_response(items, message=t("ok"))
 
 
@@ -194,16 +219,38 @@ async def locate_message(
 
 @router.get(
     "/conversations/{conversation_id}/messages/{message_public_id}/children",
-    summary="消息子分支",
+    summary="Message tree children",
     response_model=ApiResponse[list[MessageDTO_Agent]],
 )
 async def list_message_children(
     conversation_id: int,
     message_public_id: str,
+    statuses: list[str] | None = Query(default=None),
+    include_deleted: bool = Query(default=False),
     service: ConversationApplicationService = Depends(get_conversation_service),
 ):
-    items = await service.list_message_children(conversation_id, message_public_id)
+    items = await service.list_message_children(
+        conversation_id,
+        message_public_id,
+        statuses=statuses,
+        include_deleted=include_deleted,
+    )
     return success_response(items, message=t("ok"))
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_public_id}/fork",
+    summary="Fork conversation from message",
+    response_model=ApiResponse[ForkConversationResultDTO],
+)
+async def fork_conversation(
+    conversation_id: int,
+    message_public_id: str,
+    payload: ForkConversationDTO,
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    item = await service.fork_conversation(conversation_id, message_public_id, payload)
+    return success_response(item, message=t("ok"))
 
 
 @router.post(
@@ -238,25 +285,35 @@ async def retry_message(
 
 @router.get(
     "/conversations/{conversation_id}/runs",
-    summary="Run 列表",
+    summary="List runs",
     response_model=ApiResponse[list[RunDTO]],
 )
 async def list_runs(
     conversation_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    provider: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    trigger_message_id: Optional[str] = Query(default=None),
     service: ConversationApplicationService = Depends(get_conversation_service),
 ):
-    items = await service.list_runs(conversation_id, skip=skip, limit=limit)
+    items = await service.list_runs(
+        conversation_id,
+        skip=skip,
+        limit=limit,
+        provider=provider,
+        status=status,
+        trigger_message_id=trigger_message_id,
+    )
     return success_response(items, message=t("ok"))
 
 
-# ── Agent Configs ──────────────────────────────────────────────────
+# Agent Configs
 
 
 @router.post(
     "/agent-configs",
-    summary="创建 Agent 配置",
+    summary="Create agent config",
     response_model=ApiResponse[AgentConfigDTO],
 )
 async def create_agent_config(
@@ -269,7 +326,7 @@ async def create_agent_config(
 
 @router.get(
     "/agent-configs",
-    summary="Agent 配置列表",
+    summary="List agent configs",
     response_model=ApiResponse[PaginatedData[AgentConfigDTO]],
 )
 async def list_agent_configs(
@@ -284,7 +341,7 @@ async def list_agent_configs(
 
 @router.get(
     "/agent-configs/{config_id}",
-    summary="Agent 配置详情",
+    summary="Get agent config",
     response_model=ApiResponse[AgentConfigDTO],
 )
 async def get_agent_config(
@@ -297,7 +354,7 @@ async def get_agent_config(
 
 @router.patch(
     "/agent-configs/{config_id}",
-    summary="更新 Agent 配置",
+    summary="Update agent config",
     response_model=ApiResponse[AgentConfigDTO],
 )
 async def update_agent_config(
@@ -311,7 +368,7 @@ async def update_agent_config(
 
 @router.delete(
     "/agent-configs/{config_id}",
-    summary="删除 Agent 配置",
+    summary="Delete agent config",
     response_model=ApiResponse[dict],
 )
 async def delete_agent_config(

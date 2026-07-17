@@ -25,11 +25,14 @@ class FakeRealtimePipelineAdapter:
         self.appended_chunks: list[RealtimeAudioChunk] = []
         self.commit_count = 0
         self.close_count = 0
+        self.start_error: Exception | None = None
         self._events: asyncio.Queue[Mapping[str, Any] | None] = asyncio.Queue()
 
     async def start(self, context: TrainingVoiceContext, config: RealtimePipelineConfig) -> None:
         self.started_context = context
         self.started_config = config
+        if self.start_error is not None:
+            raise self.start_error
 
     async def append_audio(self, chunk: RealtimeAudioChunk) -> None:
         self.appended_chunks.append(chunk)
@@ -126,6 +129,25 @@ async def test_runner_start_builds_context_and_config_for_adapter():
     assert runner.realtime_session_id == "rt-1"
 
     await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_adapter_when_start_fails():
+    adapter = FakeRealtimePipelineAdapter()
+    adapter.start_error = RuntimeError("Pipecat OpenAI STT is unavailable")
+    runner = RealtimePipelineSessionRunner(
+        adapter=adapter,
+        transcript_sink=FakeTrainingTranscriptSink(),
+    )
+
+    with pytest.raises(RuntimeError, match="Pipecat OpenAI STT"):
+        await runner.start(
+            binding=_binding(),
+            provider="pipecat",
+            realtime_session_id="rt-1",
+        )
+
+    assert adapter.close_count == 1
 
 
 @pytest.mark.asyncio
@@ -232,3 +254,26 @@ async def test_runner_rejects_audio_commands_after_close():
         await runner.append_audio(RealtimeAudioChunk(data=b"late-pcm"))
     with pytest.raises(RealtimePipelineRunnerStateError, match="closed"):
         await runner.commit_audio()
+
+
+@pytest.mark.asyncio
+async def test_runner_surfaces_provider_error_events_to_later_commands():
+    runner, adapter, _sink = await _started_runner()
+
+    await adapter.emit(
+        {
+            "type": "pipeline.error",
+            "error": {"message": "provider websocket disconnected"},
+        }
+    )
+
+    async def _wait_for_error() -> None:
+        while runner.events_error is None:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_wait_for_error(), timeout=1)
+
+    with pytest.raises(RealtimePipelineRunnerStateError, match="provider websocket disconnected"):
+        await runner.commit_audio()
+
+    await runner.close()

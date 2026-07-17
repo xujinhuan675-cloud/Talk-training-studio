@@ -40,6 +40,7 @@ class RealtimePipelineSessionRunner:
         self._config: RealtimePipelineConfig | None = None
         self._realtime_session_id: str | None = None
         self._events_task: asyncio.Task[None] | None = None
+        self._events_error: BaseException | None = None
         self._closed = True
 
     @property
@@ -53,6 +54,10 @@ class RealtimePipelineSessionRunner:
     @property
     def realtime_session_id(self) -> str | None:
         return self._realtime_session_id
+
+    @property
+    def events_error(self) -> BaseException | None:
+        return self._events_error
 
     async def start(
         self,
@@ -96,7 +101,13 @@ class RealtimePipelineSessionRunner:
         self._context = context
         self._config = config
         self._realtime_session_id = realtime_session_id or str(uuid4())
-        await self._adapter.start(context, config)
+        self._events_error = None
+        try:
+            await self._adapter.start(context, config)
+        except Exception:
+            with suppress(Exception):
+                await self._adapter.close()
+            raise
         self._closed = False
         self._events_task = asyncio.create_task(
             self._pump_events(),
@@ -114,6 +125,9 @@ class RealtimePipelineSessionRunner:
     async def commit_audio(self) -> None:
         await self.commit()
 
+    def raise_if_failed(self) -> None:
+        self._raise_events_error()
+
     async def close(self) -> None:
         if self._closed and self._events_task is None:
             return
@@ -130,8 +144,17 @@ class RealtimePipelineSessionRunner:
         if context is None or config is None or realtime_session_id is None:
             raise RealtimePipelineRunnerStateError("Realtime pipeline runner is not started")
 
-        async for event in self._adapter.events():
-            await self._persist_final_transcript(dict(event), context, config, realtime_session_id)
+        try:
+            async for event in self._adapter.events():
+                payload = dict(event)
+                if _is_provider_error(payload):
+                    raise RuntimeError(_provider_error_message(payload))
+                await self._persist_final_transcript(payload, context, config, realtime_session_id)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            self._events_error = exc
+            raise
 
     async def _persist_final_transcript(
         self,
@@ -162,8 +185,13 @@ class RealtimePipelineSessionRunner:
                     )
                 except TimeoutError:
                     task.cancel()
-            with suppress(asyncio.CancelledError):
+            try:
                 await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                if self._events_error is None:
+                    self._events_error = exc
         finally:
             self._events_task = None
 
@@ -175,6 +203,30 @@ class RealtimePipelineSessionRunner:
         self._require_started()
         if self._closed:
             raise RealtimePipelineRunnerStateError("Realtime pipeline runner is closed")
+        self._raise_events_error()
+
+    def _raise_events_error(self) -> None:
+        if self._events_error is not None:
+            raise RealtimePipelineRunnerStateError(
+                f"Realtime pipeline event pump failed: {self._events_error}"
+            ) from self._events_error
+
+
+def _is_provider_error(payload: Mapping[str, object]) -> bool:
+    event_type = str(payload.get("type") or "").lower()
+    return event_type in {"error", "pipeline.error", "realtime.error"}
+
+
+def _provider_error_message(payload: Mapping[str, object]) -> str:
+    for key in ("message", "detail", "error"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, Mapping):
+            nested = value.get("message") or value.get("detail")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return "Realtime pipeline provider error"
 
 
 __all__ = [

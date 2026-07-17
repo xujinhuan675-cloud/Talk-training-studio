@@ -5,7 +5,13 @@ from fastapi.testclient import TestClient
 
 from api.dependencies import get_conversation_service
 from api.routes.conversations import router
-from application.dto import MessageDTO_Agent, MessageLocationDTO, MessageSearchResultDTO
+from application.dto import (
+    ConversationDTO,
+    ForkConversationResultDTO,
+    MessageDTO_Agent,
+    MessageLocationDTO,
+    MessageSearchResultDTO,
+)
 
 
 def _message(content: str, public_id: str = "msg_1") -> MessageDTO_Agent:
@@ -22,10 +28,25 @@ def _message(content: str, public_id: str = "msg_1") -> MessageDTO_Agent:
     )
 
 
+def _conversation() -> ConversationDTO:
+    now = datetime.now(timezone.utc)
+    return ConversationDTO(
+        id=8,
+        title="Forked conversation",
+        system_prompt=None,
+        model="gpt-test",
+        status="active",
+        metadata={},
+        created_at=now,
+        updated_at=now,
+    )
+
+
 class _FakeChatService:
     def __init__(self) -> None:
         self.search_call = None
         self.locate_call = None
+        self.fork_call = None
         self.edit_call = None
         self.retry_call = None
 
@@ -57,6 +78,15 @@ class _FakeChatService:
         self.retry_call = (conversation_id, message_public_id, payload)
         return _message(payload.content, public_id="msg_retry")
 
+    async def fork_conversation(self, conversation_id: int, message_public_id: str, payload):
+        self.fork_call = (conversation_id, message_public_id, payload)
+        message = _message("Forked root", public_id="msg_forked")
+        return ForkConversationResultDTO(
+            conversation=_conversation(),
+            messages=[message],
+            source_to_forked_id={message_public_id: "msg_forked"},
+        )
+
 
 def _client(service: _FakeChatService) -> TestClient:
     app = FastAPI()
@@ -75,6 +105,7 @@ def test_search_messages_route_returns_branch_context() -> None:
             "q": "pilot",
             "branch_id": "main",
             "roles": ["user", "assistant"],
+            "statuses": ["active"],
             "limit": 10,
             "context_before": 2,
             "context_after": 3,
@@ -93,6 +124,9 @@ def test_search_messages_route_returns_branch_context() -> None:
             "limit": 10,
             "branch_id": "main",
             "roles": ["user", "assistant"],
+            "statuses": ["active"],
+            "provider": None,
+            "model": None,
             "include_path": True,
             "context_before": 2,
             "context_after": 3,
@@ -114,6 +148,32 @@ def test_locate_message_route_returns_message_location() -> None:
     assert data["message"]["public_id"] == "msg_selected"
     assert data["context"][0]["content"] == "Selected branch turn"
     assert service.locate_call == (7, "msg_selected", {"before": 1, "after": 4})
+
+
+def test_fork_conversation_route_creates_copied_tree() -> None:
+    service = _FakeChatService()
+    client = _client(service)
+
+    response = client.post(
+        "/api/v1/conversations/7/messages/msg_selected/fork",
+        json={
+            "title": "Forked conversation",
+            "option": "includeBranches",
+            "include_deleted": True,
+            "statuses": ["active", "superseded"],
+            "metadata": {"source": "test"},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["conversation"]["id"] == 8
+    assert data["messages"][0]["public_id"] == "msg_forked"
+    assert data["source_to_forked_id"] == {"msg_selected": "msg_forked"}
+    assert service.fork_call[0:2] == (7, "msg_selected")
+    assert service.fork_call[2].option == "includeBranches"
+    assert service.fork_call[2].include_deleted is True
+    assert service.fork_call[2].statuses == ["active", "superseded"]
 
 
 def test_edit_message_route_creates_branch_message() -> None:

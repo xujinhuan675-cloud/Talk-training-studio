@@ -68,10 +68,18 @@ class MessageRepository(ABC):
         skip: int = 0,
         limit: int = 100,
         branch_id: Optional[str] = None,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
     ) -> list[Message]: ...
 
     @abstractmethod
-    async def list_children(self, parent_message_id: str) -> list[Message]: ...
+    async def list_children(
+        self,
+        parent_message_id: str,
+        *,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
+    ) -> list[Message]: ...
 
     @abstractmethod
     async def list_path_to_message(
@@ -81,6 +89,7 @@ class MessageRepository(ABC):
         *,
         limit: int = 200,
         include_deleted: bool = False,
+        statuses: Optional[Sequence[str]] = None,
     ) -> list[Message]: ...
 
     @abstractmethod
@@ -94,6 +103,8 @@ class MessageRepository(ABC):
         branch_id: Optional[str] = None,
         roles: Optional[Sequence[str]] = None,
         statuses: Optional[Sequence[str]] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> list[Message]: ...
 
     @abstractmethod
@@ -109,7 +120,14 @@ class MessageRepository(ABC):
     ) -> list[Message]: ...
 
     @abstractmethod
-    async def count_by_conversation(self, conversation_id: int) -> int: ...
+    async def count_by_conversation(
+        self,
+        conversation_id: int,
+        *,
+        branch_id: Optional[str] = None,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
+    ) -> int: ...
 
 
 class RunRepository(ABC):

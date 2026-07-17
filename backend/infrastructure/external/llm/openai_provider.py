@@ -1,7 +1,7 @@
-# input: openai SDK, LLMPort 接口
-# output: OpenAIProvider LLM 实现（Chat Completions / Responses API）
+# input: openai SDK, LLMPort interface
+# output: OpenAIProvider LLM implementation (Chat Completions / Responses API)
 # owner: unknown
-# pos: 基础设施层 - OpenAI SDK LLM 提供者实现（兼容 Azure/vLLM）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+# pos: infrastructure - OpenAI-compatible LLM provider implementation; update this header and folder docs when changed
 """OpenAI SDK implementation of LLMPort."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from openai import AsyncOpenAI
 
-from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMResponse
+from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMProviderMetadata, LLMResponse
 from core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -32,6 +32,7 @@ class OpenAIProvider:
         api_key: str,
         base_url: Optional[str] = None,
         wire_api: str = "chat_completions",
+        provider_name: str = "openai",
         default_model: str = "gpt-4o-mini",
         default_temperature: float = 0.7,
         default_max_tokens: int = 4096,
@@ -39,17 +40,32 @@ class OpenAIProvider:
         max_retries: int = 2,
         user_agent: str = "TalkTrainingStudio/1.0",
     ) -> None:
+        normalized_base_url = self._normalize_base_url(base_url)
         self._client = AsyncOpenAI(
             api_key=api_key,
-            base_url=self._normalize_base_url(base_url),
+            base_url=normalized_base_url,
             timeout=timeout,
             max_retries=max_retries,
             default_headers={"User-Agent": user_agent},
         )
+        self.provider = (provider_name or "openai").strip() or "openai"
         self._default_model = default_model
         self._default_temperature = default_temperature
         self._default_max_tokens = default_max_tokens
         self._wire_api = wire_api.lower().replace("-", "_")
+        self._endpoint = normalized_base_url
+        self._max_retries = max_retries
+
+    @property
+    def provider_metadata(self) -> LLMProviderMetadata:
+        """Return stable provider identity for run/message tracking."""
+        return LLMProviderMetadata(
+            provider=self.provider,
+            default_model=self._default_model,
+            endpoint=str(self._endpoint) if self._endpoint else None,
+            wire_api=self._wire_api,
+            max_retries=self._max_retries,
+        )
 
     def _build_messages(self, messages: list[LLMMessage]) -> list[dict]:
         return [{"role": m.role, "content": m.content} for m in messages]

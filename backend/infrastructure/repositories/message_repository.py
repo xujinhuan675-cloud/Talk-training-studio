@@ -133,6 +133,8 @@ class SQLAlchemyMessageRepository(MessageRepository):
         skip: int = 0,
         limit: int = 100,
         branch_id: Optional[str] = None,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
     ) -> list[Message]:
         query = (
             select(MessageModel)
@@ -141,16 +143,24 @@ class SQLAlchemyMessageRepository(MessageRepository):
         )
         if branch_id is not None:
             query = query.where(MessageModel.branch_id == branch_id)
+        query = _apply_status_filter(query, statuses=statuses, include_deleted=include_deleted)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
 
-    async def list_children(self, parent_message_id: str) -> list[Message]:
+    async def list_children(
+        self,
+        parent_message_id: str,
+        *,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
+    ) -> list[Message]:
         query = (
             select(MessageModel)
             .where(MessageModel.parent_message_id == parent_message_id)
             .order_by(MessageModel.created_at.asc(), MessageModel.id.asc())
         )
+        query = _apply_status_filter(query, statuses=statuses, include_deleted=include_deleted)
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
 
@@ -161,9 +171,11 @@ class SQLAlchemyMessageRepository(MessageRepository):
         *,
         limit: int = 200,
         include_deleted: bool = False,
+        statuses: Optional[Sequence[str]] = None,
     ) -> list[Message]:
         messages: list[Message] = []
         seen: set[str] = set()
+        allowed_statuses = set(statuses or [])
         current_id: str | None = message_public_id
         while current_id and len(messages) < limit:
             if current_id in seen:
@@ -173,7 +185,12 @@ class SQLAlchemyMessageRepository(MessageRepository):
             message = await self.get_by_public_id(current_id)
             if message is None or message.conversation_id != conversation_id:
                 return []
-            if include_deleted or message.status != "deleted":
+            status_allowed = (
+                message.status in allowed_statuses
+                if allowed_statuses
+                else include_deleted or message.status != "deleted"
+            )
+            if status_allowed:
                 messages.append(message)
             current_id = message.parent_message_id
 
@@ -190,6 +207,8 @@ class SQLAlchemyMessageRepository(MessageRepository):
         branch_id: Optional[str] = None,
         roles: Optional[Sequence[str]] = None,
         statuses: Optional[Sequence[str]] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> list[Message]:
         normalized = query.strip().lower()
         if not normalized:
@@ -200,9 +219,6 @@ class SQLAlchemyMessageRepository(MessageRepository):
             select(MessageModel)
             .where(MessageModel.conversation_id == conversation_id)
             .where(func.lower(MessageModel.content).like(like_pattern, escape="\\"))
-            .order_by(MessageModel.created_at.desc(), MessageModel.id.desc())
-            .offset(skip)
-            .limit(limit)
         )
         if branch_id is not None:
             sql = sql.where(MessageModel.branch_id == branch_id)
@@ -212,6 +228,16 @@ class SQLAlchemyMessageRepository(MessageRepository):
             sql = sql.where(MessageModel.status.in_(list(statuses)))
         else:
             sql = sql.where(MessageModel.status != "deleted")
+        if provider is not None:
+            sql = sql.where(MessageModel.provider == provider)
+        if model is not None:
+            sql = sql.where(MessageModel.model == model)
+
+        sql = (
+            sql.order_by(MessageModel.created_at.desc(), MessageModel.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
 
         result = await self.session.execute(sql)
         return [self._to_entity(m) for m in result.scalars().all()]
@@ -294,15 +320,33 @@ class SQLAlchemyMessageRepository(MessageRepository):
 
         return messages
 
-    async def count_by_conversation(self, conversation_id: int) -> int:
+    async def count_by_conversation(
+        self,
+        conversation_id: int,
+        *,
+        branch_id: Optional[str] = None,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
+    ) -> int:
         query = (
             select(func.count())
             .select_from(MessageModel)
             .where(MessageModel.conversation_id == conversation_id)
         )
+        if branch_id is not None:
+            query = query.where(MessageModel.branch_id == branch_id)
+        query = _apply_status_filter(query, statuses=statuses, include_deleted=include_deleted)
         result = await self.session.execute(query)
         return int(result.scalar() or 0)
 
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _apply_status_filter(sql, *, statuses: Optional[Sequence[str]], include_deleted: bool):
+    if statuses:
+        return sql.where(MessageModel.status.in_(list(statuses)))
+    if include_deleted:
+        return sql
+    return sql.where(MessageModel.status != "deleted")

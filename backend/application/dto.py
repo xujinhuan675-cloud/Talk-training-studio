@@ -1,6 +1,4 @@
-"""
-数据传输对象（DTO）- 应用层与表现层之间的数据传输
-"""
+"""Application DTOs shared between use cases and API routes."""
 
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
@@ -280,6 +278,24 @@ class MessageSearchResultDTO(DTOBase):
     context: list[MessageDTO_Agent] = Field(default_factory=list)
 
 
+class ForkConversationDTO(DTOBase):
+    """Input for copying a message tree into a new conversation."""
+
+    title: Optional[str] = Field(default=None, max_length=255)
+    option: Literal["directPath", "includeBranches", "targetLevel"] = "targetLevel"
+    include_deleted: bool = False
+    statuses: list[str] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ForkConversationResultDTO(DTOBase):
+    """Result of forking a conversation message tree."""
+
+    conversation: ConversationDTO
+    messages: list[MessageDTO_Agent] = Field(default_factory=list)
+    source_to_forked_id: dict[str, str] = Field(default_factory=dict)
+
+
 class EditMessageDTO(DTOBase):
     """Input for creating an edited message branch."""
 
@@ -309,11 +325,40 @@ class RunDTO(DTOBase):
     total_tokens: int = 0
     error_message: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    trigger_message_id: Optional[str] = None
+    parent_message_id: Optional[str] = None
+    branch_id: Optional[str] = None
+    provider_endpoint: Optional[str] = None
+    provider_wire_api: Optional[str] = None
+    provider_max_retries: Optional[int] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _derive_run_metadata_fields(self):  # type: ignore[override]
+        metadata = self.metadata or {}
+        self.trigger_message_id = self.trigger_message_id or _metadata_text(
+            metadata, "trigger_message_id"
+        )
+        self.parent_message_id = self.parent_message_id or _metadata_text(
+            metadata, "parent_message_id"
+        )
+        self.branch_id = self.branch_id or _metadata_text(metadata, "branch_id")
+        provider_metadata = metadata.get("provider_metadata")
+        if isinstance(provider_metadata, dict):
+            self.provider_endpoint = self.provider_endpoint or _metadata_text(
+                provider_metadata, "endpoint"
+            )
+            self.provider_wire_api = self.provider_wire_api or _metadata_text(
+                provider_metadata, "wire_api"
+            )
+            retries = provider_metadata.get("max_retries")
+            if self.provider_max_retries is None and isinstance(retries, int):
+                self.provider_max_retries = retries
+        return self
 
 
 class ChatRequestDTO(DTOBase):
@@ -326,7 +371,16 @@ class ChatRequestDTO(DTOBase):
     model: Optional[str] = None
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)
+    history_limit: int = Field(default=200, ge=1, le=200)
     stream: bool = True
+
+
+def _metadata_text(metadata: dict[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
 
 
 class CreateAgentConfigDTO(DTOBase):

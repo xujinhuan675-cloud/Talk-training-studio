@@ -1,7 +1,7 @@
-# input: anthropic SDK, LLMPort 接口
-# output: AnthropicProvider LLM 实现（含 prompt caching 支持）
+# input: anthropic SDK, LLMPort interface
+# output: AnthropicProvider LLM implementation with prompt caching support
 # owner: wanhua.gu
-# pos: 基础设施层 - Anthropic SDK LLM 提供者实现（Claude API + cache_control）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+# pos: infrastructure - Anthropic Claude provider implementation; update this header and folder docs when changed
 """Anthropic SDK implementation of LLMPort."""
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator, Optional
 
 from anthropic import AsyncAnthropic
 
-from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMResponse
+from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMProviderMetadata, LLMResponse
 from core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -36,9 +36,21 @@ class AnthropicProvider:
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = AsyncAnthropic(**client_kwargs)
+        self.provider = "anthropic"
         self._default_model = default_model
         self._default_temperature = default_temperature
         self._default_max_tokens = default_max_tokens
+        self._endpoint = base_url
+
+    @property
+    def provider_metadata(self) -> LLMProviderMetadata:
+        """Return stable provider identity for run/message tracking."""
+        return LLMProviderMetadata(
+            provider=self.provider,
+            default_model=self._default_model,
+            endpoint=self._endpoint,
+            wire_api="messages",
+        )
 
     def _split_system_and_messages(
         self, messages: list[LLMMessage]

@@ -1,8 +1,8 @@
-# input: AbstractUnitOfWork, LLMPort, Conversation/Message/Run 领域实体
-# output: ChatApplicationService 聊天用例编排（流式 + 非流式）
+# input: AbstractUnitOfWork, LLMPort, Conversation/Message/Run domain entities
+# output: ChatApplicationService chat orchestration for streaming and non-streaming turns
 # owner: unknown
-# pos: 应用层服务 - 核心聊天流程编排，发消息→创建Run→调LLM→流式返回；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
-"""Application service for the chat workflow (send message → LLM → stream response)."""
+# pos: application service - text chat workflow, message tree history, run tracking, and LLM calls; update this header and folder docs when changed
+"""Application service for the chat workflow (send message -> LLM -> stream response)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from application.dto import (
     MessageDTO_Agent,
     RunDTO,
 )
-from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMResponse
+from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMProviderMetadata, LLMResponse
 from core.logging_config import get_logger
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import Message, Run
@@ -50,14 +50,16 @@ class ChatApplicationService:
         *,
         tail_message_id: str | None = None,
         branch_id: str | None = None,
+        limit: int = 200,
     ) -> list[LLMMessage]:
         """Load the active branch path as an LLMMessage list."""
 
+        limit = max(1, min(limit, 200))
         if tail_message_id:
             messages: list[Message] = []
             seen: set[str] = set()
             current_id: str | None = tail_message_id
-            while current_id and len(messages) < 200:
+            while current_id and len(messages) < limit:
                 if current_id in seen:
                     raise ValueError("Message tree contains a cycle")
                 seen.add(current_id)
@@ -71,7 +73,7 @@ class ChatApplicationService:
         else:
             messages = await uow.message_repository.list_by_conversation(
                 conversation_id,
-                limit=200,
+                limit=limit,
                 branch_id=branch_id,
             )
             messages = [message for message in messages if message.status == "active"]
@@ -110,8 +112,15 @@ class ChatApplicationService:
         now: datetime,
     ) -> tuple[Message, Run, list[LLMMessage]]:
         parent_message, branch_id = await self._resolve_parent_message(uow, conversation_id, dto)
+        provider_metadata = _llm_provider_metadata(self._llm)
         provider = _clean_optional_text(dto.provider) or _clean_optional_text(
-            getattr(self._llm, "provider", None)
+            provider_metadata.provider
+        )
+        resolved_model = model or provider_metadata.default_model
+        request_metadata = _run_request_metadata(
+            provider=provider,
+            model=resolved_model,
+            provider_metadata=provider_metadata,
         )
         user_msg = Message(
             id=None,
@@ -121,8 +130,8 @@ class ChatApplicationService:
             parent_message_id=parent_message.public_id if parent_message else None,
             branch_id=branch_id,
             provider=provider,
-            model=model,
-            metadata={"provider": provider, "model": model},
+            model=resolved_model,
+            metadata=request_metadata,
             created_at=now,
         )
         user_msg = await uow.message_repository.create(user_msg)
@@ -132,13 +141,13 @@ class ChatApplicationService:
             conversation_id=conversation_id,
             status="running",
             provider=provider,
-            model=model,
+            model=resolved_model,
             metadata={
                 "trigger_message_id": user_msg.public_id,
                 "branch_id": branch_id,
                 "parent_message_id": user_msg.parent_message_id,
-                "provider": provider,
-                "model": model,
+                **request_metadata,
+                "history_limit": dto.history_limit,
             },
             started_at=now,
             created_at=now,
@@ -150,6 +159,7 @@ class ChatApplicationService:
             conversation_id,
             tail_message_id=user_msg.public_id,
             branch_id=branch_id,
+            limit=dto.history_limit,
         )
         return user_msg, run, history
 
@@ -210,9 +220,10 @@ class ChatApplicationService:
         completion_tokens = 0
         total_tokens = 0
         finish_reason: Optional[str] = None
-        response_model = model
+        provider_metadata = _llm_provider_metadata(self._llm)
+        response_model = model or provider_metadata.default_model
         response_provider = _clean_optional_text(dto.provider) or _clean_optional_text(
-            getattr(self._llm, "provider", None)
+            provider_metadata.provider
         )
 
         try:
@@ -247,6 +258,7 @@ class ChatApplicationService:
                 run_entity = await uow.run_repository.get_by_id(run_id)
                 if run_entity:
                     run_entity.mark_failed(str(exc))
+                    run_entity.metadata = _failed_run_metadata(run_entity.metadata, exc)
                     await uow.run_repository.update(run_entity)
                 await uow.commit()
 
@@ -270,7 +282,11 @@ class ChatApplicationService:
                 model=response_model,
                 run_id=run_id,
                 token_count=completion_tokens,
-                metadata={"provider": response_provider, "model": response_model},
+                metadata=_run_request_metadata(
+                    provider=response_provider,
+                    model=response_model,
+                    provider_metadata=provider_metadata,
+                ),
                 created_at=_utcnow(),
             )
             assistant_msg = await uow.message_repository.create(assistant_msg)
@@ -355,16 +371,18 @@ class ChatApplicationService:
                 run_entity = await uow.run_repository.get_by_id(run_id)
                 if run_entity:
                     run_entity.mark_failed(str(exc))
+                    run_entity.metadata = _failed_run_metadata(run_entity.metadata, exc)
                     await uow.run_repository.update(run_entity)
                 await uow.commit()
             raise LLMProviderException(str(exc))
 
         # Phase 3: persist assistant message and complete run
         async with self._uow_factory() as uow:
+            provider_metadata = _llm_provider_metadata(self._llm)
             response_provider = _clean_optional_text(dto.provider) or _clean_optional_text(
-                getattr(self._llm, "provider", None)
+                provider_metadata.provider
             )
-            response_model = response.model or model
+            response_model = response.model or model or provider_metadata.default_model
             assistant_msg = Message(
                 id=None,
                 conversation_id=conversation_id,
@@ -377,10 +395,11 @@ class ChatApplicationService:
                 model=response_model,
                 run_id=run_id,
                 token_count=response.completion_tokens,
-                metadata={
-                    "provider": response_provider,
-                    "model": response_model,
-                },
+                metadata=_run_request_metadata(
+                    provider=response_provider,
+                    model=response_model,
+                    provider_metadata=provider_metadata,
+                ),
                 created_at=_utcnow(),
             )
             assistant_msg = await uow.message_repository.create(assistant_msg)
@@ -413,3 +432,61 @@ def _clean_optional_text(value: object | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _llm_provider_metadata(llm: LLMPort) -> LLMProviderMetadata:
+    metadata = getattr(llm, "provider_metadata", None)
+    if isinstance(metadata, LLMProviderMetadata):
+        return metadata
+    provider = _clean_optional_text(getattr(llm, "provider", None)) or "unknown"
+    default_model = _clean_optional_text(getattr(llm, "_default_model", None))
+    return LLMProviderMetadata(provider=provider, default_model=default_model)
+
+
+def _run_request_metadata(
+    *,
+    provider: str | None,
+    model: str | None,
+    provider_metadata: LLMProviderMetadata,
+) -> dict[str, object | None]:
+    metadata: dict[str, object | None] = {
+        "provider": provider,
+        "model": model,
+        "provider_metadata": {
+            "provider": provider_metadata.provider,
+            "default_model": provider_metadata.default_model,
+            "endpoint": provider_metadata.endpoint,
+            "wire_api": provider_metadata.wire_api,
+            "max_retries": provider_metadata.max_retries,
+            **provider_metadata.extra,
+        },
+    }
+    return metadata
+
+
+def _failed_run_metadata(
+    metadata: dict | None,
+    exc: Exception,
+) -> dict[str, object | None]:
+    return {
+        **(metadata or {}),
+        "error_type": type(exc).__name__,
+        "retryable": _is_retryable_llm_error(exc),
+    }
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code in {408, 409, 429} or 500 <= status_code < 600
+    name = type(exc).__name__.lower()
+    return any(
+        token in name
+        for token in (
+            "timeout",
+            "rate",
+            "connection",
+            "temporary",
+            "overload",
+        )
+    )

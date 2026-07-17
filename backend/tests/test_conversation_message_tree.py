@@ -87,6 +87,11 @@ async def test_message_repository_persists_tree_fields_and_queries_children(sess
     main_messages = await msg_repo.list_by_conversation(conv.id, branch_id="main")
     sibling_path = await msg_repo.list_path_to_message(conv.id, sibling.public_id)
     search_hits = await msg_repo.search_by_content(conv.id, "WORLD")
+    active_search_hits = await msg_repo.search_by_content(
+        conv.id,
+        "WORLD",
+        statuses=["active"],
+    )
     main_context = await msg_repo.list_context_window(
         conv.id,
         assistant.public_id,
@@ -106,6 +111,7 @@ async def test_message_repository_persists_tree_fields_and_queries_children(sess
     assert [m.public_id for m in main_messages] == [root.public_id, assistant.public_id]
     assert [m.public_id for m in sibling_path] == [root.public_id, sibling.public_id]
     assert [m.public_id for m in search_hits] == [assistant.public_id]
+    assert [m.public_id for m in active_search_hits] == [assistant.public_id]
     assert [m.public_id for m in main_context] == [root.public_id, assistant.public_id]
     assert [m.public_id for m in sibling_context] == [root.public_id, sibling.public_id]
     assert assistant.parent_message_id == root.public_id
@@ -113,6 +119,52 @@ async def test_message_repository_persists_tree_fields_and_queries_children(sess
     assert assistant.model == "gpt-test"
     assert assistant.finish_reason == "stop"
     assert root.content_parts == [{"type": "text", "text": "hello"}]
+
+
+@pytest.mark.asyncio
+async def test_message_repository_filters_tree_queries_by_status(session) -> None:
+    conv_repo = SQLAlchemyConversationRepository(session)
+    msg_repo = SQLAlchemyMessageRepository(session)
+
+    conv = await conv_repo.create(Conversation(id=None, title="Status filters"))
+    root = await msg_repo.create(
+        Message(id=None, conversation_id=conv.id, role="user", content="root")
+    )
+    active_child = await msg_repo.create(root.create_child(role="assistant", content="active hit"))
+    deleted_child = await msg_repo.create(root.create_child(role="assistant", content="deleted hit"))
+    deleted_child.status = "deleted"
+    deleted_child = await msg_repo.update(deleted_child)
+    superseded_child = await msg_repo.create(
+        root.create_child(role="assistant", content="superseded hit")
+    )
+    superseded_child.status = "superseded"
+    superseded_child = await msg_repo.update(superseded_child)
+
+    default_children = await msg_repo.list_children(root.public_id)
+    active_children = await msg_repo.list_children(root.public_id, statuses=["active"])
+    all_children = await msg_repo.list_children(root.public_id, include_deleted=True)
+    superseded_hits = await msg_repo.search_by_content(
+        conv.id,
+        "hit",
+        statuses=["superseded"],
+    )
+    active_messages = await msg_repo.list_by_conversation(conv.id, statuses=["active"])
+
+    assert [message.public_id for message in default_children] == [
+        active_child.public_id,
+        superseded_child.public_id,
+    ]
+    assert [message.public_id for message in active_children] == [active_child.public_id]
+    assert [message.public_id for message in all_children] == [
+        active_child.public_id,
+        deleted_child.public_id,
+        superseded_child.public_id,
+    ]
+    assert [message.public_id for message in superseded_hits] == [superseded_child.public_id]
+    assert [message.public_id for message in active_messages] == [
+        root.public_id,
+        active_child.public_id,
+    ]
 
 
 @pytest.mark.asyncio

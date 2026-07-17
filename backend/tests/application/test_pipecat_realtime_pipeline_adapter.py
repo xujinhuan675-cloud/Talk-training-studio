@@ -9,6 +9,7 @@ from application.ports.realtime import (
     RealtimeSessionBinding,
     TrainingVoiceContext,
 )
+from core.config import settings
 from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
 
 
@@ -356,7 +357,7 @@ def test_build_pipecat_voice_processors_uses_pipecat_stt_tts_and_turn_processors
             "vad": "silero",
             "turnDetection": "pipecat",
             "openaiApiKey": "sk-test",
-            "sttTurnDetection": "server_vad",
+            "sttTurnDetection": "local",
             "ttsModel": "gpt-4o-mini-tts",
             "outputSampleRate": 24000,
         },
@@ -375,14 +376,126 @@ def test_build_pipecat_voice_processors_uses_pipecat_stt_tts_and_turn_processors
     assert processors[1].kwargs == {
         "api_key": "sk-test",
         "model": "gpt-realtime-whisper",
-        "turn_detection": None,
+        "base_url": "wss://api.openai.com/v1/realtime",
+        "language": None,
+        "prompt": None,
+        "turn_detection": False,
         "noise_reduction": None,
+        "should_interrupt": True,
     }
     assert processors[3].kwargs["api_key"] == "sk-test"
+    assert processors[3].kwargs["base_url"] is None
     assert processors[3].kwargs["model"] == "gpt-4o-mini-tts"
     assert processors[3].kwargs["voice"] == "alloy"
     assert processors[3].kwargs["instructions"] == "Speak concisely."
     assert processors[3].kwargs["sample_rate"] == 24000
+    assert processors[3].kwargs["speed"] is None
+
+
+def test_build_pipecat_voice_processors_supports_nested_feature_config():
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        voice="fallback",
+        metadata={
+            "stt": {
+                "provider": "openai",
+                "model": "gpt-4o-mini-transcribe",
+                "baseUrl": "wss://example.test/realtime",
+                "language": "zh",
+                "prompt": "Sales coaching vocabulary.",
+                "turnDetection": "disabled",
+                "noiseReduction": "near_field",
+                "shouldInterrupt": False,
+            },
+            "tts": {
+                "provider": "openai",
+                "model": "gpt-4o-mini-tts",
+                "voice": "verse",
+                "instructions": "Warm and concise.",
+                "sampleRate": 24000,
+                "speed": 1.2,
+            },
+            "vad": {
+                "provider": "silero",
+                "sampleRate": 16000,
+                "speechActivityPeriod": 0.1,
+                "audioIdleTimeout": 0.8,
+            },
+            "turnDetection": {
+                "provider": "pipecat",
+                "userTurnStopTimeout": 3.0,
+                "userIdleTimeout": 10.0,
+            },
+            "openaiApiKey": "sk-test",
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(fake_runtime(False), config)
+
+    assert [type(processor) for processor in processors] == [
+        FakeVADProcessor,
+        FakeOpenAIRealtimeSTTService,
+        FakeUserTurnProcessor,
+        FakeOpenAITTSService,
+    ]
+    assert processors[0].kwargs["vad_analyzer"].kwargs == {"sample_rate": 16000}
+    assert processors[0].kwargs["speech_activity_period"] == 0.1
+    assert processors[0].kwargs["audio_idle_timeout"] == 0.8
+    assert processors[1].kwargs["model"] == "gpt-4o-mini-transcribe"
+    assert processors[1].kwargs["base_url"] == "wss://example.test/realtime"
+    assert processors[1].kwargs["language"] == "zh"
+    assert processors[1].kwargs["prompt"] == "Sales coaching vocabulary."
+    assert processors[1].kwargs["turn_detection"] is False
+    assert processors[1].kwargs["noise_reduction"] == "near_field"
+    assert processors[1].kwargs["should_interrupt"] is False
+    assert processors[2].kwargs == {
+        "user_turn_stop_timeout": 3.0,
+        "user_idle_timeout": 10.0,
+    }
+    assert processors[3].kwargs["model"] == "gpt-4o-mini-tts"
+    assert processors[3].kwargs["voice"] == "fallback"
+    assert processors[3].kwargs["instructions"] == "Warm and concise."
+    assert processors[3].kwargs["sample_rate"] == 24000
+    assert processors[3].kwargs["speed"] == 1.2
+
+
+def test_build_pipecat_voice_processors_rejects_local_and_server_vad_mix():
+    with pytest.raises(ValueError, match="server-side turn detection"):
+        pipecat_adapter.build_pipecat_voice_processors(
+            fake_runtime(False),
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={
+                    "stt": "openai",
+                    "vad": "silero",
+                    "sttTurnDetection": "server_vad",
+                    "openaiApiKey": "sk-test",
+                },
+            ),
+        )
+
+
+def test_build_pipecat_voice_processors_validates_supported_options():
+    with pytest.raises(ValueError, match="Unsupported Pipecat stt provider"):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(provider="pipecat", metadata={"stt": "homegrown"})
+        )
+
+    with pytest.raises(ValueError, match="Silero VAD sample rate"):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={"vad": {"provider": "silero", "sampleRate": 44100}},
+            )
+        )
+
+    with pytest.raises(ValueError, match="OpenAI TTS speed"):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={"tts": {"provider": "openai", "speed": 5.0}},
+            )
+        )
 
 
 def test_build_pipecat_voice_processors_reports_missing_optional_service():
@@ -399,6 +512,24 @@ def test_build_pipecat_voice_processors_reports_missing_optional_service():
                 metadata={"stt": "openai", "openaiApiKey": "sk-test"},
             ),
         )
+
+
+def test_build_pipecat_voice_processors_uses_settings_key_without_metadata(monkeypatch):
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", "sk-settings-realtime")
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(
+        fake_runtime(False),
+        RealtimePipelineConfig(
+            provider="pipecat",
+            metadata={
+                "stt": {"provider": "openai", "turnDetection": "disabled"},
+                "tts": {"provider": "openai"},
+            },
+        ),
+    )
+
+    assert processors[0].kwargs["api_key"] == "sk-settings-realtime"
+    assert processors[1].kwargs["api_key"] == "sk-settings-realtime"
 
 
 def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
@@ -438,6 +569,18 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
     assert capability.vad == "silero"
     assert capability.turn_detection == "pipecat"
     assert capability.missing_features == ("tts:openai", "vad:silero")
+    assert capability.metadata["coreAvailable"] is True
+    assert capability.metadata["websocketAvailable"] is True
+    assert capability.metadata["sttAvailable"] is True
+    assert capability.metadata["ttsAvailable"] is False
+    assert capability.metadata["vadAvailable"] is False
+    assert capability.metadata["turnDetectionAvailable"] is True
+    assert capability.metadata["requestedFeatures"] == {
+        "stt": "openai",
+        "tts": "openai",
+        "vad": "silero",
+        "turnDetection": "pipecat",
+    }
 
 
 @pytest.mark.asyncio
@@ -532,6 +675,41 @@ async def test_talkwise_event_processor_preserves_assistant_frame_metadata():
     assert event["text"] == "assistant final turn"
     assert event["metadata"]["responseId"] == "response-pipecat-1"
     assert event["metadata"]["pipecatFrame"]["frameName"] == "FakeLLMContextAssistantTurnFrame"
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_preserves_config_talkwise_metadata():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            metadata={
+                "talkwise": {
+                    "trainingSessionId": "training-1",
+                    "roomId": 7,
+                    "unsafe": object(),
+                }
+            },
+        ),
+    )
+
+    await processor.process_frame(
+        FakeTranscriptionFrame(
+            text="final user turn",
+            user_id="user",
+            timestamp="2026-07-16T00:00:00Z",
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+    assert event["metadata"]["talkwise"] == {
+        "trainingSessionId": "training-1",
+        "roomId": 7,
+    }
 
 
 def test_source_snapshot_documents_pipecat_first_boundaries():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import json
 import mimetypes
 import os
@@ -94,6 +95,7 @@ from application.services.training_studio.session_service import (
     TrainingSessionDTO,
     TrainingSessionService,
 )
+from application.services.training_studio.training_core import training_core_metadata_for_session
 from core.config import LLMSettings, VoiceSettings, settings
 from core.response import success_response
 from domain.common.exceptions import DomainValidationException
@@ -908,6 +910,29 @@ def _openai_realtime_session_config() -> dict[str, object]:
     }
 
 
+def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, object]:
+    stt: dict[str, object] = {
+        "provider": "openai",
+        "turnDetection": "disabled",
+    }
+    if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
+        stt["model"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
+
+    return {
+        "transport": "websocket",
+        "transcriptionModel": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+        "stt": stt,
+        "tts": {"provider": "openai"},
+        "vad": {"provider": "silero", "sampleRate": 16000},
+        "turnDetection": {"provider": "pipecat"},
+        "talkwise": {
+            "trainingSessionId": binding[0],
+            "roomId": binding[1],
+            "runtime": "realtime_voice",
+        },
+    }
+
+
 def _openai_realtime_capability_response() -> dict[str, object]:
     effective_key = _openai_realtime_api_key()
     return {
@@ -1075,6 +1100,35 @@ async def _resolve_realtime_binding(
         raise HTTPException(status_code=404, detail=f"Chat room {bound_room_id} not found")
 
     return session_id, bound_room_id
+
+
+async def _build_realtime_voice_context(
+    binding: tuple[str, int],
+    *,
+    provider: str,
+    svc: TrainingSessionService,
+) -> dict[str, object]:
+    """Build the TrainingCore-derived context shared by text and voice runtimes."""
+
+    try:
+        session = await svc.get_session(binding[0])
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+    metadata = training_core_metadata_for_session(
+        session,
+        runtime="realtime_voice",
+        extra={
+            "transport": "websocket",
+            "provider": provider,
+            "roomId": binding[1],
+        },
+    )
+    return {
+        "task_goal": _task_goal_for_guidance(session),
+        "rubric": _rubric_for_guidance(session),
+        "recent_turns": (),
+        "metadata": metadata,
+    }
 
 
 _FINAL_TRANSCRIPT_EVENT_TYPES = FINAL_TRANSCRIPT_EVENT_TYPES
@@ -2142,6 +2196,11 @@ async def realtime_training_session(
             uow_factory=uow_factory,
         )
         runner = RealtimePipelineSessionRunner(adapter=adapter, transcript_sink=sink)
+        voice_context = await _build_realtime_voice_context(
+            active_binding,
+            provider=provider,
+            svc=svc,
+        )
         await runner.start(
             binding=RealtimeSessionBinding(
                 training_session_id=active_binding[0],
@@ -2149,10 +2208,16 @@ async def realtime_training_session(
             ),
             provider=provider,
             realtime_session_id=session.session_id,
+            task_goal=voice_context["task_goal"],
+            rubric=voice_context["rubric"],
+            recent_turns=voice_context["recent_turns"],
             model=settings.REALTIME_OPENAI_MODEL,
             voice=settings.REALTIME_OPENAI_VOICE,
             input_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
-            context_metadata={"transport": "websocket"},
+            output_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
+            instructions=_default_realtime_agent_instructions(),
+            context_metadata=voice_context["metadata"],
+            config_metadata=_pipecat_realtime_pipeline_metadata(active_binding),
         )
         pipeline_runner = runner
 
@@ -2206,6 +2271,7 @@ async def realtime_training_session(
                             sequence=session.input_sequence,
                         )
                     )
+                    pipeline_runner.raise_if_failed()
                 await _send_event(websocket, audio_event)
                 continue
 
@@ -2248,7 +2314,17 @@ async def realtime_training_session(
                 await _send_event(websocket, session.listen())
             elif event_type == "audio.input":
                 audio = payload.get("audio", "")
-                audio_bytes = base64.b64decode(audio) if isinstance(audio, str) and audio else b""
+                try:
+                    audio_bytes = (
+                        base64.b64decode(audio, validate=True)
+                        if isinstance(audio, str) and audio
+                        else b""
+                    )
+                except (binascii.Error, ValueError):
+                    await _send_event(
+                        websocket, session.fail("Invalid base64 audio frame", "INVALID_AUDIO")
+                    )
+                    break
                 if openai_client is not None:
                     await openai_client.append_audio(audio_bytes)
                 mime_type = _coerce_optional_text(payload.get("mimeType"))
@@ -2261,6 +2337,7 @@ async def realtime_training_session(
                             sequence=session.input_sequence,
                         )
                     )
+                    pipeline_runner.raise_if_failed()
                 await _send_event(websocket, audio_event)
             elif event_type == "audio.commit":
                 await _send_event(websocket, session.commit_audio())
@@ -2268,6 +2345,8 @@ async def realtime_training_session(
                     await openai_client.commit_audio()
                 elif pipeline_runner is not None:
                     await pipeline_runner.commit_audio()
+                    await asyncio.sleep(0)
+                    pipeline_runner.raise_if_failed()
                     await _send_event(websocket, session.listen())
                 else:
                     await _send_event(websocket, session.transcript_delta(""))
@@ -2322,7 +2401,7 @@ async def realtime_training_session(
         if session.status.value != "error":
             await _send_event(websocket, session.fail(str(exc.detail), "BINDING_ERROR"))
         await websocket.close(code=1008)
-    except (RealtimeSessionStateError, ValueError) as exc:
+    except (RealtimeSessionStateError, RuntimeError, ValueError) as exc:
         if session.status.value != "error":
             await _send_event(websocket, session.fail(str(exc), "SESSION_ERROR"))
         await websocket.close(code=1011)
