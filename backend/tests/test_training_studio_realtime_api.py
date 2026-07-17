@@ -274,6 +274,7 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
         vad_available=True,
         stt_available=True,
         tts_available=True,
+        llm_available=True,
         turn_detection_available=True,
         missing_modules=(),
         optional_missing_modules=(),
@@ -317,6 +318,7 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
     assert data["pipecat"]["vadAvailable"] is True
     assert data["pipecat"]["sttAvailable"] is True
     assert data["pipecat"]["ttsAvailable"] is True
+    assert data["pipecat"]["llmAvailable"] is True
     assert data["pipecat"]["turnDetectionAvailable"] is True
     assert data["pipecat"]["missingModules"] == []
     assert data["pipecat"]["optionalMissingModules"] == []
@@ -347,6 +349,7 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
         vad_available=False,
         stt_available=False,
         tts_available=False,
+        llm_available=False,
         turn_detection_available=False,
         missing_modules=("pipecat.pipeline.pipeline", "pipecat.frames.frames"),
         optional_missing_modules=("onnxruntime",),
@@ -372,6 +375,7 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
     assert data["pipecat"]["available"] is False
     assert data["pipecat"]["coreAvailable"] is False
     assert data["pipecat"]["websocketAvailable"] is False
+    assert data["pipecat"]["llmAvailable"] is False
     assert data["pipecat"]["turnDetectionAvailable"] is False
     assert data["pipecat"]["missingModules"] == [
         "pipecat.pipeline.pipeline",
@@ -907,6 +911,12 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> Non
     if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
         assert stt_metadata["model"] == settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
     assert adapter.started_config.metadata["tts"] == {"provider": "openai"}
+    assert adapter.started_config.metadata["llm"]["provider"] == "openai"
+    assert adapter.started_config.metadata["llm"]["model"] == settings.llm.default_model
+    assert adapter.started_config.metadata["context"] == {
+        "provider": "pipecat",
+        "realtimeServiceMode": False,
+    }
     assert adapter.started_config.metadata["vad"] == {
         "provider": "silero",
         "source": "pipecat",

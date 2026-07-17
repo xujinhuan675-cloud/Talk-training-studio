@@ -106,6 +106,63 @@ class FakeOpenAITTSService:
         self.kwargs = kwargs
 
 
+class FakeOpenAILLMService:
+    class Settings:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeLLMContext:
+    def __init__(self, messages=None, **kwargs):
+        self.messages = messages or []
+        self.kwargs = kwargs
+
+
+class FakeLLMUserAggregatorParams:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeLLMAssistantAggregatorParams:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeLLMUserAggregator:
+    def __init__(self, context, params):
+        self.context = context
+        self.params = params
+
+
+class FakeLLMAssistantAggregator:
+    def __init__(self, context, params):
+        self.context = context
+        self.params = params
+
+
+class FakeLLMContextAggregatorPair:
+    def __init__(
+        self,
+        context,
+        *,
+        user_params=None,
+        assistant_params=None,
+        realtime_service_mode=None,
+    ):
+        self.context = context
+        self.user_params = user_params
+        self.assistant_params = assistant_params
+        self.realtime_service_mode = realtime_service_mode
+        self.user_aggregator = FakeLLMUserAggregator(context, user_params)
+        self.assistant_aggregator = FakeLLMAssistantAggregator(context, assistant_params)
+
+    def __iter__(self):
+        return iter((self.user_aggregator, self.assistant_aggregator))
+
+
 class FakeUserTurnProcessor:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -202,6 +259,11 @@ def fake_runtime(websocket=True):
         VADProcessor=FakeVADProcessor,
         OpenAIRealtimeSTTService=FakeOpenAIRealtimeSTTService,
         OpenAITTSService=FakeOpenAITTSService,
+        OpenAILLMService=FakeOpenAILLMService,
+        LLMContext=FakeLLMContext,
+        LLMContextAggregatorPair=FakeLLMContextAggregatorPair,
+        LLMUserAggregatorParams=FakeLLMUserAggregatorParams,
+        LLMAssistantAggregatorParams=FakeLLMAssistantAggregatorParams,
         UserTurnProcessor=FakeUserTurnProcessor,
         ExternalUserTurnStrategies=FakeExternalUserTurnStrategies,
         FilterIncompleteUserTurnStrategies=FakeFilterIncompleteUserTurnStrategies,
@@ -635,6 +697,11 @@ def test_build_pipecat_voice_processors_validates_supported_options():
             RealtimePipelineConfig(provider="pipecat", metadata={"stt": "homegrown"})
         )
 
+    with pytest.raises(ValueError, match="Unsupported Pipecat llm provider"):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(provider="pipecat", metadata={"llm": "homegrown"})
+        )
+
     with pytest.raises(ValueError, match="Silero VAD sample rate"):
         pipecat_adapter.validate_pipecat_voice_config(
             RealtimePipelineConfig(
@@ -648,6 +715,14 @@ def test_build_pipecat_voice_processors_validates_supported_options():
             RealtimePipelineConfig(
                 provider="pipecat",
                 metadata={"tts": {"provider": "openai", "speed": 5.0}},
+            )
+        )
+
+    with pytest.raises(ValueError, match="OpenAI LLM temperature"):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={"llm": {"provider": "openai", "temperature": 3}},
             )
         )
 
@@ -694,6 +769,87 @@ def test_build_pipecat_voice_processors_uses_settings_key_without_metadata(monke
     assert processors[1].kwargs["api_key"] == "sk-settings-realtime"
 
 
+def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
+    context = TrainingVoiceContext(
+        binding=RealtimeSessionBinding(training_session_id="training-1", room_id=7),
+        task_goal="Practice enterprise renewal discovery.",
+        rubric={"clarity": 1, "brevity": 2},
+        recent_turns=(
+            {"speaker": "user", "text": "Can we discuss renewal risk?"},
+            {"speaker": "assistant", "text": "Yes, what risk is most urgent?"},
+        ),
+        metadata={
+            "personaIds": ["buyer"],
+            "scenarioId": "renewal-1",
+            "dispatcher": {"selectedPersonaId": "buyer"},
+            "growthReport": {"internal": "not prompt material"},
+        },
+    )
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        model="fallback-realtime-model",
+        voice="alloy",
+        instructions="Stay in role as the counterpart.",
+        metadata={
+            "stt": {"provider": "openai", "turnDetection": "disabled"},
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-4.1-mini",
+                "baseUrl": "https://llm.example.test/v1",
+                "temperature": 0.2,
+                "maxCompletionTokens": 120,
+            },
+            "tts": "openai",
+            "vad": "silero",
+            "turnDetection": {
+                "provider": "pipecat",
+                "userTurnStopTimeout": 2.5,
+                "userIdleTimeout": 8.0,
+                "filterIncompleteUserTurns": True,
+            },
+            "context": {"provider": "pipecat", "realtimeServiceMode": False},
+            "openaiApiKey": "sk-test",
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(
+        fake_runtime(False),
+        config,
+        context=context,
+    )
+
+    assert [type(processor) for processor in processors] == [
+        FakeVADProcessor,
+        FakeOpenAIRealtimeSTTService,
+        FakeLLMUserAggregator,
+        FakeOpenAILLMService,
+        FakeOpenAITTSService,
+        FakeLLMAssistantAggregator,
+    ]
+    assert not any(isinstance(processor, FakeUserTurnProcessor) for processor in processors)
+    user_aggregator = processors[2]
+    assert user_aggregator.params.kwargs["user_turn_stop_timeout"] == 2.5
+    assert user_aggregator.params.kwargs["user_idle_timeout"] == 8.0
+    assert user_aggregator.params.kwargs["filter_incomplete_user_turns"] is True
+    assert user_aggregator.context.messages == [
+        {"role": "user", "content": "Can we discuss renewal risk?"},
+        {"role": "assistant", "content": "Yes, what risk is most urgent?"},
+    ]
+
+    llm = processors[3]
+    assert llm.kwargs["api_key"] == "sk-test"
+    assert llm.kwargs["base_url"] == "https://llm.example.test/v1"
+    llm_settings = llm.kwargs["settings"].kwargs
+    assert llm_settings["model"] == "gpt-4.1-mini"
+    assert llm_settings["temperature"] == 0.2
+    assert llm_settings["max_completion_tokens"] == 120
+    assert "Stay in role as the counterpart." in llm_settings["system_instruction"]
+    assert "Practice enterprise renewal discovery." in llm_settings["system_instruction"]
+    assert "Persona IDs" in llm_settings["system_instruction"]
+    assert "Scenario ID" in llm_settings["system_instruction"]
+    assert "not prompt material" not in llm_settings["system_instruction"]
+
+
 def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
     monkeypatch.setattr(
         pipecat_adapter,
@@ -704,6 +860,7 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
             websocket_available=require_websocket,
             stt_available=True,
             tts_available=False,
+            llm_available=True,
             vad_available=False,
             turn_detection_available=True,
             optional_missing_modules=("pipecat.services.openai.tts",),
@@ -735,11 +892,13 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
     assert capability.metadata["websocketAvailable"] is True
     assert capability.metadata["sttAvailable"] is True
     assert capability.metadata["ttsAvailable"] is False
+    assert capability.metadata["llmAvailable"] is True
     assert capability.metadata["vadAvailable"] is False
     assert capability.metadata["turnDetectionAvailable"] is True
     assert capability.metadata["requestedFeatures"] == {
         "stt": "openai",
         "tts": "openai",
+        "llm": None,
         "vad": "silero",
         "turnDetection": "pipecat",
     }
@@ -925,6 +1084,10 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
         in snapshot["talkwiseResponsibilities"]
     )
     assert "interim transcript frame mirroring" in snapshot["talkwiseResponsibilities"]
+    assert (
+        "TrainingVoiceContext to LLMContext seed adaptation"
+        in snapshot["talkwiseResponsibilities"]
+    )
     assert "pipecat.frames.frames.InterimTranscriptionFrame" in snapshot["frameEntrypoints"]
     assert "pipecat.audio.vad.silero.SileroVADAnalyzer" == snapshot["vadEntrypoint"]
     assert (
@@ -933,6 +1096,11 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     )
     assert "pipecat.services.openai.stt.OpenAIRealtimeSTTService" == snapshot["sttEntrypoint"]
     assert "pipecat.services.openai.tts.OpenAITTSService" == snapshot["ttsEntrypoint"]
+    assert "pipecat.services.openai.llm.OpenAILLMService" == snapshot["llmEntrypoint"]
+    assert (
+        "pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair"
+        in snapshot["llmContextEntrypoints"]
+    )
     assert (
         "pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies"
         in snapshot["turnStrategyEntrypoints"]

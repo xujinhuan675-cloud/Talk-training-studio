@@ -972,6 +972,12 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
     }
     if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
         stt["model"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
+    llm: dict[str, object] = {
+        "provider": "openai",
+        "model": settings.llm.default_model,
+    }
+    if settings.llm.base_url:
+        llm["baseUrl"] = settings.llm.base_url
 
     return {
         "transport": "websocket",
@@ -979,6 +985,8 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
         "inputSampleRate": 16000,
         "outputSampleRate": 24000,
         "stt": stt,
+        "llm": llm,
+        "context": {"provider": "pipecat", "realtimeServiceMode": False},
         "tts": {"provider": "openai"},
         "vad": {"provider": "silero", "source": "pipecat", "sampleRate": 16000},
         "turnDetection": {"provider": "pipecat", "source": "pipecat"},
@@ -1016,6 +1024,7 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
             "available": False,
             "coreAvailable": False,
             "websocketAvailable": False,
+            "llmAvailable": False,
             "missingModules": ["infrastructure.external.pipecat"],
             "error": str(exc),
         }
@@ -1027,6 +1036,7 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
             "available": False,
             "coreAvailable": False,
             "websocketAvailable": False,
+            "llmAvailable": False,
             "missingModules": [],
             "error": f"Pipecat capability check failed: {exc}",
         }
@@ -1038,6 +1048,7 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
         "vadAvailable": bool(getattr(capability, "vad_available", False)),
         "sttAvailable": bool(getattr(capability, "stt_available", False)),
         "ttsAvailable": bool(getattr(capability, "tts_available", False)),
+        "llmAvailable": bool(getattr(capability, "llm_available", False)),
         "turnDetectionAvailable": bool(
             getattr(capability, "turn_detection_available", False)
         ),

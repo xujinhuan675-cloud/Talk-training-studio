@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.util
+import json
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
@@ -39,6 +40,9 @@ VAD_ANALYZER_PIPECAT_MODULE = "pipecat.audio.vad.vad_analyzer"
 VAD_PROCESSOR_PIPECAT_MODULE = "pipecat.processors.audio.vad_processor"
 OPENAI_STT_PIPECAT_MODULE = "pipecat.services.openai.stt"
 OPENAI_TTS_PIPECAT_MODULE = "pipecat.services.openai.tts"
+OPENAI_LLM_PIPECAT_MODULE = "pipecat.services.openai.llm"
+LLM_CONTEXT_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_context"
+LLM_RESPONSE_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_response_universal"
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
@@ -51,6 +55,11 @@ OPTIONAL_PIPECAT_FEATURE_MODULES = {
     ),
     "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
     "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
+    "llm": (
+        OPENAI_LLM_PIPECAT_MODULE,
+        LLM_CONTEXT_PIPECAT_MODULE,
+        LLM_RESPONSE_PIPECAT_MODULE,
+    ),
     "turn_detection": (
         USER_TURN_PROCESSOR_PIPECAT_MODULE,
         USER_TURN_STRATEGIES_PIPECAT_MODULE,
@@ -70,6 +79,7 @@ class PipecatCapability:
     vad_available: bool = False
     stt_available: bool = False
     tts_available: bool = False
+    llm_available: bool = False
     turn_detection_available: bool = False
     optional_missing_modules: tuple[str, ...] = ()
     error: str | None = None
@@ -99,6 +109,11 @@ class PipecatRuntime:
     VADProcessor: type | None = None
     OpenAIRealtimeSTTService: type | None = None
     OpenAITTSService: type | None = None
+    OpenAILLMService: type | None = None
+    LLMContext: type | None = None
+    LLMContextAggregatorPair: type | None = None
+    LLMUserAggregatorParams: type | None = None
+    LLMAssistantAggregatorParams: type | None = None
     UserTurnProcessor: type | None = None
     UserTurnStrategies: type | None = None
     ExternalUserTurnStrategies: type | None = None
@@ -187,6 +202,7 @@ def _optional_feature_status() -> dict[str, bool | tuple[str, ...]]:
         "vad_available": not missing_by_feature["vad"],
         "stt_available": not missing_by_feature["stt"],
         "tts_available": not missing_by_feature["tts"],
+        "llm_available": not missing_by_feature["llm"],
         "turn_detection_available": not missing_by_feature["turn_detection"],
         "optional_missing_modules": tuple(
             module for modules in missing_by_feature.values() for module in modules
@@ -209,6 +225,12 @@ def _runtime_feature_status(
         and runtime.OpenAIRealtimeSTTService is not None,
         "tts_available": bool(module_status.get("tts_available"))
         and runtime.OpenAITTSService is not None,
+        "llm_available": bool(module_status.get("llm_available"))
+        and runtime.OpenAILLMService is not None
+        and runtime.LLMContext is not None
+        and runtime.LLMContextAggregatorPair is not None
+        and runtime.LLMUserAggregatorParams is not None
+        and runtime.LLMAssistantAggregatorParams is not None,
         "turn_detection_available": bool(module_status.get("turn_detection_available"))
         and (
             runtime.UserTurnProcessor is not None and runtime.UserTurnStrategies is not None
@@ -278,6 +300,17 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         OPENAI_STT_PIPECAT_MODULE, "OpenAIRealtimeSTTService"
     )
     openai_tts = _optional_pipecat_symbol(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService")
+    openai_llm = _optional_pipecat_symbol(OPENAI_LLM_PIPECAT_MODULE, "OpenAILLMService")
+    llm_context = _optional_pipecat_symbol(LLM_CONTEXT_PIPECAT_MODULE, "LLMContext")
+    llm_context_aggregator_pair = _optional_pipecat_symbol(
+        LLM_RESPONSE_PIPECAT_MODULE, "LLMContextAggregatorPair"
+    )
+    llm_user_aggregator_params = _optional_pipecat_symbol(
+        LLM_RESPONSE_PIPECAT_MODULE, "LLMUserAggregatorParams"
+    )
+    llm_assistant_aggregator_params = _optional_pipecat_symbol(
+        LLM_RESPONSE_PIPECAT_MODULE, "LLMAssistantAggregatorParams"
+    )
     user_turn_processor = _optional_pipecat_symbol(
         USER_TURN_PROCESSOR_PIPECAT_MODULE, "UserTurnProcessor"
     )
@@ -315,6 +348,11 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         VADProcessor=vad_processor,
         OpenAIRealtimeSTTService=openai_realtime_stt,
         OpenAITTSService=openai_tts,
+        OpenAILLMService=openai_llm,
+        LLMContext=llm_context,
+        LLMContextAggregatorPair=llm_context_aggregator_pair,
+        LLMUserAggregatorParams=llm_user_aggregator_params,
+        LLMAssistantAggregatorParams=llm_assistant_aggregator_params,
         UserTurnProcessor=user_turn_processor,
         UserTurnStrategies=user_turn_strategies,
         ExternalUserTurnStrategies=external_user_turn_strategies,
@@ -383,7 +421,10 @@ class PipecatRealtimePipelineAdapter:
             context=context,
             config=config,
             websocket=self._websocket,
-            processors=(*build_pipecat_voice_processors(runtime, config), *self._processors),
+            processors=(
+                *build_pipecat_voice_processors(runtime, config, context=context),
+                *self._processors,
+            ),
             serializer=self._serializer,
             transport_params=self._transport_params,
         )
@@ -505,12 +546,15 @@ def build_pipecat_pipeline_handle(
 def build_pipecat_voice_processors(
     runtime: PipecatRuntime,
     config: RealtimePipelineConfig,
+    *,
+    context: TrainingVoiceContext | None = None,
 ) -> tuple[Any, ...]:
     """Build Pipecat-owned voice processors declared by provider-neutral config."""
 
     validate_pipecat_voice_config(config)
     processors: list[Any] = []
     metadata = dict(config.metadata)
+    llm_provider = _feature_provider(metadata, "llm")
 
     if _feature_provider(metadata, "vad") == "silero":
         if runtime.SileroVADAnalyzer is None or runtime.VADProcessor is None:
@@ -582,7 +626,10 @@ def build_pipecat_voice_processors(
             )
         )
 
-    if _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat":
+    if (
+        _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat"
+        and llm_provider is None
+    ):
         if runtime.UserTurnProcessor is None:
             raise RuntimeError("Pipecat user turn processor is unavailable")
         turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
@@ -604,6 +651,16 @@ def build_pipecat_voice_processors(
         if user_turn_strategies is not None:
             turn_kwargs["user_turn_strategies"] = user_turn_strategies
         processors.append(runtime.UserTurnProcessor(**turn_kwargs))
+
+    assistant_aggregator = None
+    if llm_provider == "openai":
+        user_aggregator, llm, assistant_aggregator = build_pipecat_llm_processors(
+            runtime,
+            config,
+            context=context,
+        )
+        processors.append(user_aggregator)
+        processors.append(llm)
 
     tts_provider = _feature_provider(metadata, "tts")
     if tts_provider == "openai":
@@ -629,7 +686,83 @@ def build_pipecat_voice_processors(
             )
         )
 
+    if assistant_aggregator is not None:
+        processors.append(assistant_aggregator)
+
     return tuple(processors)
+
+
+def build_pipecat_llm_processors(
+    runtime: PipecatRuntime,
+    config: RealtimePipelineConfig,
+    *,
+    context: TrainingVoiceContext | None = None,
+) -> tuple[Any, Any, Any]:
+    """Build Pipecat-native LLM context, aggregators, and OpenAI LLM processor."""
+
+    if runtime.OpenAILLMService is None:
+        raise RuntimeError("Pipecat OpenAI LLM service is unavailable")
+    if (
+        runtime.LLMContext is None
+        or runtime.LLMContextAggregatorPair is None
+        or runtime.LLMUserAggregatorParams is None
+        or runtime.LLMAssistantAggregatorParams is None
+    ):
+        raise RuntimeError("Pipecat LLM context aggregators are unavailable")
+
+    metadata = dict(config.metadata)
+    llm_config = _feature_config(metadata, "llm")
+    api_key = (
+        _metadata_text(llm_config, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
+        or _openai_api_key(metadata)
+    )
+    if not api_key:
+        raise RuntimeError("OpenAI API key is required for Pipecat OpenAI LLM")
+
+    settings_kwargs: dict[str, Any] = {}
+    model = (
+        _metadata_text(llm_config, "model")
+        or _metadata_text(metadata, "llmModel", "llm_model")
+        or config.model
+    )
+    if model:
+        settings_kwargs["model"] = model
+    system_instruction = _llm_system_instruction(context, config)
+    if system_instruction:
+        settings_kwargs["system_instruction"] = system_instruction
+    temperature = _metadata_float(llm_config, "temperature")
+    if temperature is not None:
+        settings_kwargs["temperature"] = temperature
+    max_completion_tokens = _metadata_int(
+        llm_config,
+        "maxCompletionTokens",
+        "max_completion_tokens",
+        "maxTokens",
+        "max_tokens",
+    )
+    if max_completion_tokens is not None:
+        settings_kwargs["max_completion_tokens"] = max_completion_tokens
+
+    llm = runtime.OpenAILLMService(
+        api_key=api_key,
+        base_url=_metadata_text(llm_config, "baseUrl", "base_url")
+        or _metadata_text(metadata, "llmBaseUrl", "llm_base_url"),
+        settings=runtime.OpenAILLMService.Settings(**settings_kwargs),
+    )
+    llm_context = runtime.LLMContext(messages=_llm_context_messages(context))
+    context_config = _feature_config(metadata, "context")
+    user_aggregator, assistant_aggregator = runtime.LLMContextAggregatorPair(
+        llm_context,
+        user_params=_llm_user_aggregator_params(runtime, metadata),
+        assistant_params=runtime.LLMAssistantAggregatorParams(),
+        realtime_service_mode=_metadata_bool(
+            context_config,
+            "realtimeServiceMode",
+            "realtime_service_mode",
+            default=False,
+        ),
+    )
+    return user_aggregator, llm, assistant_aggregator
 
 
 def pipecat_pipeline_capability(
@@ -647,6 +780,8 @@ def pipecat_pipeline_capability(
         missing.append("stt:openai")
     if _feature_provider(metadata, "tts") == "openai" and not capability.tts_available:
         missing.append("tts:openai")
+    if _feature_provider(metadata, "llm") == "openai" and not capability.llm_available:
+        missing.append("llm:openai")
     if _feature_provider(metadata, "vad") == "silero" and not capability.vad_available:
         missing.append("vad:silero")
     if (
@@ -669,11 +804,13 @@ def pipecat_pipeline_capability(
             "websocketAvailable": capability.websocket_available,
             "sttAvailable": capability.stt_available,
             "ttsAvailable": capability.tts_available,
+            "llmAvailable": capability.llm_available,
             "vadAvailable": capability.vad_available,
             "turnDetectionAvailable": capability.turn_detection_available,
             "requestedFeatures": {
                 "stt": _feature_provider(metadata, "stt"),
                 "tts": _feature_provider(metadata, "tts"),
+                "llm": _feature_provider(metadata, "llm"),
                 "vad": _feature_provider(metadata, "vad"),
                 "turnDetection": _feature_provider(metadata, "turnDetection", "turn_detection"),
             },
@@ -682,6 +819,7 @@ def pipecat_pipeline_capability(
             "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
             "sttEntrypoint": OPENAI_STT_PIPECAT_MODULE,
             "ttsEntrypoint": OPENAI_TTS_PIPECAT_MODULE,
+            "llmEntrypoint": OPENAI_LLM_PIPECAT_MODULE,
             "turnDetectionEntrypoint": USER_TURN_PROCESSOR_PIPECAT_MODULE,
         },
     )
@@ -812,6 +950,87 @@ def _json_safe_metadata(value: Any) -> Any | None:
         ]
         return result or None
     return None
+
+
+def _llm_system_instruction(
+    context: TrainingVoiceContext | None,
+    config: RealtimePipelineConfig,
+) -> str | None:
+    parts: list[str] = []
+    if config.instructions and config.instructions.strip():
+        parts.append(config.instructions.strip())
+    if context is not None:
+        if context.task_goal:
+            parts.append(f"Training goal: {context.task_goal}")
+        if context.rubric:
+            rubric = _compact_json(context.rubric)
+            if rubric:
+                parts.append(f"Rubric: {rubric}")
+        metadata = dict(context.metadata)
+        persona_ids = metadata.get("personaIds") or metadata.get("persona_ids")
+        if persona_ids:
+            rendered = _compact_json(persona_ids)
+            if rendered:
+                parts.append(f"Persona IDs: {rendered}")
+        scenario_id = metadata.get("scenarioId") or metadata.get("scenario_id")
+        if scenario_id:
+            rendered = _compact_json(scenario_id)
+            if rendered:
+                parts.append(f"Scenario ID: {rendered}")
+        active_persona = _active_persona_from_metadata(metadata)
+        if active_persona:
+            parts.append(f"Active persona ID: {active_persona}")
+    if len(parts) > 1:
+        parts.append(
+            "Use this context to run the role-play; do not produce a long evaluation during the call."
+        )
+    return "\n\n".join(parts) or None
+
+
+def _llm_context_messages(context: TrainingVoiceContext | None) -> list[dict[str, str]]:
+    if context is None:
+        return []
+
+    messages: list[dict[str, str]] = []
+    for turn in context.recent_turns:
+        text = _metadata_text(turn, "text", "content", "transcript")
+        if not text:
+            continue
+        messages.append({"role": _llm_message_role(turn), "content": text})
+    return messages
+
+
+def _llm_message_role(turn: Mapping[str, Any]) -> str:
+    raw_role = turn.get("role") or turn.get("speaker")
+    role = str(raw_role or "").strip().lower()
+    if role in {"assistant", "agent", "coach", "counterpart", "model", "persona"}:
+        return "assistant"
+    return "user"
+
+
+def _active_persona_from_metadata(metadata: Mapping[str, Any]) -> str | None:
+    dispatcher = metadata.get("dispatcher")
+    if not isinstance(dispatcher, Mapping):
+        return None
+    return _metadata_text(
+        dispatcher,
+        "activePersonaId",
+        "active_persona_id",
+        "selectedPersonaId",
+        "selected_persona_id",
+        "personaId",
+        "persona_id",
+    )
+
+
+def _compact_json(value: Any, *, max_chars: int = 1200) -> str | None:
+    safe_value = _json_safe_metadata(value)
+    if safe_value is None:
+        return None
+    text = json.dumps(safe_value, ensure_ascii=False, sort_keys=True)
+    if len(text) > max_chars:
+        return f"{text[:max_chars]}..."
+    return text
 
 
 def _coerce_websocket_params(
@@ -1009,6 +1228,41 @@ def _vad_params(runtime: PipecatRuntime, metadata: Mapping[str, Any]) -> Any | N
     return runtime.VADParams(**vad_kwargs)
 
 
+def _llm_user_aggregator_params(
+    runtime: PipecatRuntime,
+    metadata: Mapping[str, Any],
+) -> Any:
+    turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
+    kwargs: dict[str, Any] = {}
+    user_turn_stop_timeout = _metadata_float(
+        turn_config,
+        "userTurnStopTimeout",
+        "user_turn_stop_timeout",
+    )
+    if user_turn_stop_timeout is not None:
+        kwargs["user_turn_stop_timeout"] = user_turn_stop_timeout
+    user_idle_timeout = _metadata_float(
+        turn_config,
+        "userIdleTimeout",
+        "user_idle_timeout",
+    )
+    if user_idle_timeout is not None:
+        kwargs["user_idle_timeout"] = user_idle_timeout
+    if user_turn_strategies := _user_turn_strategies(runtime, turn_config):
+        kwargs["user_turn_strategies"] = user_turn_strategies
+    filter_incomplete = _metadata_bool(
+        turn_config,
+        "filterIncompleteUserTurns",
+        "filter_incomplete_user_turns",
+        default=None,
+    )
+    if filter_incomplete is not None:
+        kwargs["filter_incomplete_user_turns"] = filter_incomplete
+    if completion_config := _user_turn_completion_config(runtime, turn_config):
+        kwargs["user_turn_completion_config"] = completion_config
+    return runtime.LLMUserAggregatorParams(**kwargs)
+
+
 def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
     return (
         _metadata_text(metadata, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
@@ -1189,6 +1443,7 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
     metadata = dict(config.metadata)
     _validate_provider(metadata, "stt", supported={"openai"})
     _validate_provider(metadata, "tts", supported={"openai"})
+    _validate_provider(metadata, "llm", supported={"openai"})
     _validate_provider(metadata, "vad", supported={"silero"})
     _validate_provider(metadata, "turnDetection", "turn_detection", supported={"pipecat"})
     if _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat":
@@ -1224,6 +1479,10 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
     tts_speed = _metadata_float(_feature_config(metadata, "tts"), "speed")
     if tts_speed is not None and not 0.25 <= tts_speed <= 4.0:
         raise ValueError("OpenAI TTS speed must be between 0.25 and 4.0")
+
+    llm_temperature = _metadata_float(_feature_config(metadata, "llm"), "temperature")
+    if llm_temperature is not None and not 0 <= llm_temperature <= 2:
+        raise ValueError("OpenAI LLM temperature must be between 0 and 2")
 
 
 def _validate_provider(
@@ -1264,6 +1523,11 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         "vadProcessorEntrypoint": ("pipecat.processors.audio.vad_processor.VADProcessor"),
         "sttEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService"),
         "ttsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService"),
+        "llmEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService"),
+        "llmContextEntrypoints": (
+            "pipecat.processors.aggregators.llm_context.LLMContext",
+            "pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair",
+        ),
         "turnDetectionEntrypoint": ("pipecat.turns.user_turn_processor.UserTurnProcessor"),
         "turnStrategyEntrypoints": (
             "pipecat.turns.user_turn_strategies.ExternalUserTurnStrategies",
@@ -1273,6 +1537,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "optional import and capability detection",
             "pipeline factory configuration",
             "RealtimeAudioChunk to InputAudioRawFrame adaptation",
+            "TrainingVoiceContext to LLMContext seed adaptation",
             "interim transcript frame mirroring",
             "final transcript frame mirroring",
         ),
@@ -1285,6 +1550,7 @@ __all__ = [
     "PipecatRealtimePipelineAdapter",
     "PipecatRuntime",
     "build_pipecat_pipeline_handle",
+    "build_pipecat_llm_processors",
     "build_pipecat_voice_processors",
     "create_pipecat_realtime_pipeline",
     "create_talkwise_event_processor",

@@ -17,6 +17,7 @@ def test_real_pipecat_runtime_imports_declared_voice_symbols():
     assert capability.vad_available is True
     assert capability.stt_available is True
     assert capability.tts_available is True
+    assert capability.llm_available is True
     assert capability.turn_detection_available is True
     assert capability.optional_missing_modules == ()
 
@@ -24,6 +25,9 @@ def test_real_pipecat_runtime_imports_declared_voice_symbols():
     assert runtime.FastAPIWebsocketTransport is not None
     assert runtime.OpenAIRealtimeSTTService is not None
     assert runtime.OpenAITTSService is not None
+    assert runtime.OpenAILLMService is not None
+    assert runtime.LLMContext is not None
+    assert runtime.LLMContextAggregatorPair is not None
     assert runtime.SileroVADAnalyzer is not None
     assert runtime.VADProcessor is not None
     assert runtime.UserTurnProcessor is not None
