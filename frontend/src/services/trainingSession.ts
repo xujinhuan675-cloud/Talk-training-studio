@@ -1,4 +1,5 @@
 import type { TrainingMode } from './trainingMode'
+import type { ConversationTreeMessage } from './trainingConversation'
 import { getAuthRequestHeaders } from './auth'
 import { getErrorMessage } from '../utils/errors'
 
@@ -35,6 +36,7 @@ export interface TrainingSessionDTO {
   completed_at?: string | null
   message_count: number
   failure_reason?: string | null
+  metadata?: Record<string, unknown> | null
 }
 
 export interface CreateTrainingSessionRequest {
@@ -65,6 +67,29 @@ export interface TrainingSessionReportDTO {
   summary: string
   content: Record<string, unknown>
   created_at?: string | null
+  metadata?: Record<string, unknown> | null
+}
+
+export type TrainingConversationBranchPathItem = Pick<
+  ConversationTreeMessage,
+  'publicId' | 'role' | 'content' | 'branchId'
+>
+
+export interface TrainingConversationBranchInfo {
+  provider?: string
+  conversationId?: string
+  branchId?: string
+  selectedTailMessageId?: string
+  pathCount?: number
+  pathSummary?: string
+  selectedPath: TrainingConversationBranchPathItem[]
+  source: 'session' | 'report' | 'progress'
+}
+
+export interface TrainingConversationBranchInfoSources {
+  session?: TrainingSessionDTO | null
+  report?: TrainingSessionReportDTO | null
+  progress?: unknown
 }
 
 export interface TranscriptTurnDTO {
@@ -130,6 +155,13 @@ const TRAINING_SESSION_API_BASE = '/api/v1/training-studio/sessions'
 
 type TrainingSessionId = string | number
 
+type BranchInfoSource = TrainingConversationBranchInfo['source']
+
+interface BranchMetadataCandidate {
+  source: BranchInfoSource
+  metadata: Record<string, unknown>
+}
+
 export interface ListTrainingSessionsOptions {
   skip?: number
   limit?: number
@@ -188,6 +220,231 @@ function jsonRequest(method: 'POST' | 'PUT' | 'PATCH', body?: unknown): RequestI
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   }
+}
+
+function cleanText(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  const text = String(value).trim()
+  return text || undefined
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function firstText(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const text = cleanText(record[key])
+    if (text) return text
+  }
+  return undefined
+}
+
+function firstNumber(record: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key]
+    const number = typeof value === 'number' ? value : Number(cleanText(value))
+    if (Number.isFinite(number) && number > 0) return Math.round(number)
+  }
+  return undefined
+}
+
+function firstArray(record: Record<string, unknown>, keys: string[]): unknown[] {
+  for (const key of keys) {
+    const value = record[key]
+    if (Array.isArray(value)) return value
+  }
+  return []
+}
+
+function collectBranchMetadataCandidates(
+  sources: TrainingConversationBranchInfoSources,
+): BranchMetadataCandidate[] {
+  const candidates: BranchMetadataCandidate[] = []
+  const add = (source: BranchInfoSource, metadata: unknown) => {
+    const record = asRecord(metadata)
+    if (record) candidates.push({ source, metadata: record })
+  }
+
+  add('session', sources.session?.metadata)
+  add('session', sources.session?.task_config.metadata)
+  add('report', sources.report?.metadata)
+  add('report', asRecord(sources.report?.content)?.metadata)
+  add('report', sources.report?.content)
+  add('progress', asRecord(sources.progress)?.metadata)
+
+  return candidates
+}
+
+const branchRecordKeys = [
+  'conversation',
+  'conversationRef',
+  'conversation_ref',
+  'messageTree',
+  'message_tree',
+  'messageTreeSelection',
+  'message_tree_selection',
+  'conversationTree',
+  'conversation_tree',
+  'trainingConversation',
+  'training_conversation',
+  'selectedPath',
+  'selected_path',
+  'currentPath',
+  'current_path',
+  'branch',
+  'message',
+  'messageRef',
+  'message_ref',
+]
+
+const providerKeys = ['provider', 'conversationProvider', 'conversation_provider']
+const conversationIdKeys = ['conversationId', 'conversation_id']
+const branchIdKeys = ['branchId', 'branch_id', 'selectedBranchId', 'selected_branch_id']
+const selectedTailKeys = [
+  'selectedTailMessageId',
+  'selected_tail_message_id',
+  'selectedMessageId',
+  'selected_message_id',
+  'branchTailMessageId',
+  'branch_tail_message_id',
+  'messagePublicId',
+  'message_public_id',
+  'publicId',
+  'public_id',
+]
+const pathKeys = [
+  'path',
+  'selectedPath',
+  'selected_path',
+  'currentPath',
+  'current_path',
+  'messagePath',
+  'message_path',
+]
+const pathCountKeys = [
+  'pathCount',
+  'path_count',
+  'selectedPathCount',
+  'selected_path_count',
+  'selectedPathLength',
+  'selected_path_length',
+]
+const pathSummaryKeys = [
+  'pathSummary',
+  'path_summary',
+  'selectedPathSummary',
+  'selected_path_summary',
+  'pathLabel',
+  'path_label',
+]
+
+function branchRecords(metadata: Record<string, unknown>): Record<string, unknown>[] {
+  const records: Record<string, unknown>[] = [metadata]
+
+  branchRecordKeys.forEach((key) => {
+    const record = asRecord(metadata[key])
+    if (record) records.push(record)
+  })
+
+  return records
+}
+
+function normalizeBranchPathItem(value: unknown): TrainingConversationBranchPathItem | null {
+  const text = cleanText(value)
+  if (text && typeof value !== 'object') {
+    return {
+      publicId: text,
+      role: '',
+      content: '',
+      branchId: null,
+    }
+  }
+
+  const record = asRecord(value)
+  if (!record) return null
+  const publicId = firstText(record, [
+    'publicId',
+    'public_id',
+    'messagePublicId',
+    'message_public_id',
+    'id',
+    'messageId',
+    'message_id',
+  ])
+  if (!publicId) return null
+
+  return {
+    publicId,
+    role: firstText(record, ['role', 'speaker', 'sender', 'senderType', 'sender_type']) ?? '',
+    content: firstText(record, ['content', 'text', 'message', 'preview', 'title']) ?? '',
+    branchId: firstText(record, branchIdKeys) ?? null,
+  }
+}
+
+function normalizeBranchPath(records: Record<string, unknown>[]): TrainingConversationBranchPathItem[] {
+  for (const record of records) {
+    const path = firstArray(record, pathKeys)
+      .map(normalizeBranchPathItem)
+      .filter((item): item is TrainingConversationBranchPathItem => Boolean(item))
+    if (path.length > 0) return path
+  }
+  return []
+}
+
+function compactPathSummary(path: TrainingConversationBranchPathItem[]): string | undefined {
+  const parts = path
+    .slice(-3)
+    .map((item) => (item.content || item.publicId).replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  if (parts.length === 0) return undefined
+  const summary = parts.join(' / ')
+  return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary
+}
+
+function branchInfoFromCandidate(
+  candidate: BranchMetadataCandidate,
+): TrainingConversationBranchInfo | null {
+  const records = branchRecords(candidate.metadata)
+  const selectedPath = normalizeBranchPath(records)
+  const lastPathItem = selectedPath[selectedPath.length - 1]
+  const provider = records.map((record) => firstText(record, providerKeys)).find(Boolean)
+  const conversationId = records.map((record) => firstText(record, conversationIdKeys)).find(Boolean)
+  const branchId = records.map((record) => firstText(record, branchIdKeys)).find(Boolean)
+    ?? lastPathItem?.branchId
+    ?? undefined
+  const selectedTailMessageId = records.map((record) => firstText(record, selectedTailKeys)).find(Boolean)
+    ?? lastPathItem?.publicId
+  const explicitPathCount = records.map((record) => firstNumber(record, pathCountKeys)).find(Boolean)
+  const pathCount = selectedPath.length > 0 ? selectedPath.length : explicitPathCount
+  const pathSummary = records.map((record) => firstText(record, pathSummaryKeys)).find(Boolean)
+    ?? compactPathSummary(selectedPath)
+
+  if (!branchId && !selectedTailMessageId && !pathCount && !pathSummary) return null
+
+  return {
+    provider,
+    conversationId,
+    branchId,
+    selectedTailMessageId,
+    pathCount,
+    pathSummary,
+    selectedPath,
+    source: candidate.source,
+  }
+}
+
+export function getTrainingConversationBranchInfo(
+  sources: TrainingConversationBranchInfoSources,
+): TrainingConversationBranchInfo | null {
+  const candidates = collectBranchMetadataCandidates(sources)
+  for (const candidate of candidates) {
+    const info = branchInfoFromCandidate(candidate)
+    if (info) return info
+  }
+  return null
 }
 
 export async function createTrainingSession(

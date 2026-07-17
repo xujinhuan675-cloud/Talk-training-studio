@@ -1698,7 +1698,7 @@ function ChatArea() {
                 branch: messageTreeSelection.branchId || t('messageTree.actions.noBranch'),
               })}
             </span>
-            <em>{t('messageTree.actions.readonlyBadge')}</em>
+            <em>{t('messageTree.actions.controlledBadge')}</em>
           </div>
           <div className="message-tree-strip-path">
             <Route size={14} />

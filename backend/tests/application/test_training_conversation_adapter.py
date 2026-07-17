@@ -13,6 +13,7 @@ from application.services.training_studio.session_service import (
     TrainingSessionService,
 )
 from application.services.training_studio.training_core import (
+    ConversationRef,
     TrainingCoreOrchestrator,
     TrainingTurn,
 )
@@ -132,6 +133,12 @@ class _ConversationRepository:
 
     async def get_by_id(self, conversation_id: int) -> ConversationEntity | None:
         return self._state.conversations.get(conversation_id)
+
+    async def update(self, conversation: ConversationEntity) -> ConversationEntity:
+        if conversation.id is None:
+            raise AssertionError("Conversation id is required for update")
+        self._state.conversations[conversation.id] = conversation
+        return conversation
 
 
 class _ConversationMessageRepository:
@@ -350,7 +357,12 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
     )
     second_ref = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
-        conversation=first_ref,
+        conversation=ConversationRef(
+            provider=first_ref.provider,
+            conversation_id=first_ref.conversation_id,
+            legacy_room_id=first_ref.legacy_room_id,
+            metadata=first_ref.metadata,
+        ),
         turn=TrainingTurn(
             speaker="assistant",
             text="Yes, if we define a measurable success metric first.",
@@ -371,16 +383,42 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
     assert state.conversations[1].metadata["evaluation"] == {"rubric_id": "sales-v1"}
     assert state.conversations[1].metadata["growthReport"] == {"report_id": "growth-1"}
     assert state.conversations[1].metadata["liveGuidance"] == {"enabled": True}
+    assert state.conversations[1].metadata["branchId"] == "main"
+    assert state.conversations[1].metadata["branchPolicy"]["selectedPathPurpose"] == (
+        "training_replay_context"
+    )
+    assert state.conversations[1].metadata["selectedPath"] == {
+        "branchId": "main",
+        "tailMessageId": state.messages[1].public_id,
+        "messageIds": [
+            state.messages[0].public_id,
+            state.messages[1].public_id,
+        ],
+        "purpose": "training_replay_context",
+        "replayContextOnly": True,
+        "affectsScoring": False,
+        "affectsCompletion": False,
+    }
+    assert state.conversations[1].metadata["currentBranchTail"] == {
+        "branchId": "main",
+        "messageId": state.messages[1].public_id,
+    }
     assert started.conversation.metadata["runtime"] == "conversation_message_tree"
     assert started.conversation.metadata["personaIds"] == ["customer-1"]
     assert started.conversation.metadata["branchId"] == "main"
+    assert started.conversation.metadata["selectedPath"]["tailMessageId"] is None
+    assert started.conversation.metadata["currentBranchTail"]["messageId"] is None
     assert [message.role for message in state.messages] == ["user", "assistant"]
     assert state.messages[0].parent_message_id is None
+    assert state.messages[0].metadata["branch_id"] == "main"
     assert state.messages[0].provider == "openai"
     assert state.messages[0].model == "gpt-test"
     assert state.messages[1].parent_message_id == state.messages[0].public_id
     assert second_ref.provider == "talkwise-conversation"
     assert second_ref.branch_tail_message_id == state.messages[1].public_id
+    assert second_ref.metadata["selectedPath"]["purpose"] == "training_replay_context"
+    assert second_ref.metadata["selectedPath"]["affectsScoring"] is False
+    assert second_ref.metadata["currentBranchTail"]["messageId"] == state.messages[1].public_id
     assert [turn.text for turn in recent_turns] == [
         "Can we start with a smaller pilot?",
         "Yes, if we define a measurable success metric first.",
@@ -421,6 +459,10 @@ async def test_conversation_adapter_model_selection_metadata_cannot_shadow_train
             "scenarioId": 404,
             "growthReport": {"report_id": "generic-chat-growth"},
             "liveGuidance": {"enabled": False},
+            "branchId": "generic-chat-branch",
+            "branchPolicy": {"owner": "generic-chat"},
+            "selectedPath": {"branchId": "generic-chat-branch", "affectsScoring": True},
+            "currentBranchTail": {"branchId": "generic-chat-branch", "messageId": "shadow"},
             "provider": "openai",
             "model": "gpt-selected",
             "model_registry": {"default": "openai"},
@@ -443,10 +485,16 @@ async def test_conversation_adapter_model_selection_metadata_cannot_shadow_train
     assert state.conversations[1].metadata["evaluation"] == {"rubric_id": "sales-v1"}
     assert state.conversations[1].metadata["growthReport"] == {"report_id": "growth-1"}
     assert state.conversations[1].metadata["liveGuidance"] == {"enabled": True}
+    assert state.conversations[1].metadata["branchId"] == "main"
+    assert state.conversations[1].metadata["branchPolicy"]["owner"] == "training_core"
+    assert state.conversations[1].metadata["selectedPath"]["affectsScoring"] is False
+    assert state.conversations[1].metadata["currentBranchTail"]["messageId"] is None
     assert started.conversation.metadata["personaIds"] == ["customer-1"]
     assert started.conversation.metadata["scenarioId"] == 9
     assert started.conversation.metadata["growthReport"] == {"report_id": "growth-1"}
     assert started.conversation.metadata["liveGuidance"] == {"enabled": True}
+    assert started.conversation.metadata["branchId"] == "main"
+    assert started.conversation.metadata["branchPolicy"]["owner"] == "training_core"
 
 
 @pytest.mark.asyncio
@@ -496,6 +544,19 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
     original_assistant = state.messages[1]
     expected_semantics = _training_semantics(state.conversations[1].metadata)
 
+    assert assistant_ref.metadata["branchId"] == "branch-risk"
+    assert assistant_ref.metadata["selectedPath"]["messageIds"] == [
+        original_user.public_id,
+        original_assistant.public_id,
+    ]
+    assert assistant_ref.metadata["currentBranchTail"]["messageId"] == (
+        original_assistant.public_id
+    )
+    assert state.conversations[1].metadata["selectedPath"]["purpose"] == (
+        "training_replay_context"
+    )
+    assert state.conversations[1].metadata["selectedPath"]["affectsCompletion"] is False
+
     edited = await message_tree.edit_message(
         1,
         original_user.public_id,
@@ -543,5 +604,9 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
     assert forked.conversation.metadata["fork_reason"] == "manager review"
     assert forked.conversation.metadata["message_tree_status"] == "forked"
     assert forked.conversation.metadata["status"] == "review-draft"
+    assert forked.conversation.metadata["selectedPath"]["purpose"] == (
+        "training_replay_context"
+    )
+    assert forked.conversation.metadata["selectedPath"]["affectsScoring"] is False
     assert forked.conversation.status == "active"
     assert forked.messages[-1].metadata["forked_from_message_id"] == retry.public_id

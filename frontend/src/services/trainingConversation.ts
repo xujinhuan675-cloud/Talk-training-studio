@@ -102,6 +102,7 @@ export interface TrainingConversationPayload {
 }
 
 export type ConversationTreeActionKind =
+  | 'branch'
   | 'locate'
   | 'path'
   | 'children'
@@ -111,6 +112,7 @@ export type ConversationTreeActionKind =
   | 'search'
 
 export interface ConversationTreeMessageActionEndpoints {
+  actions: string
   locate: string
   path: string
   children: string
@@ -142,6 +144,20 @@ export interface ConversationTreeMessageActionContext {
   availableActions: ConversationTreeActionKind[]
 }
 
+export type ConversationTreeMessageWriteActionKind = 'branch' | 'edit' | 'retry' | 'fork'
+export type MessageActionForkOption = 'directPath' | 'includeBranches' | 'targetLevel'
+
+export interface ApplyConversationTreeMessageActionInput {
+  action: ConversationTreeMessageWriteActionKind
+  content?: string | null
+  title?: string | null
+  option?: MessageActionForkOption | null
+  includeDeleted?: boolean
+  statuses?: string[] | null
+  metadata?: Record<string, unknown> | null
+  signal?: AbortSignal
+}
+
 export interface ConversationTreeMessage {
   id: string | null
   conversationId: string | null
@@ -154,6 +170,17 @@ export interface ConversationTreeMessage {
   provider: string | null
   model: string | null
   createdAt: string | null
+  metadata: Record<string, unknown>
+}
+
+export interface ConversationTreeConversation {
+  id: string | null
+  title: string
+  status: string | null
+  model: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  deletedAt: string | null
   metadata: Record<string, unknown>
 }
 
@@ -172,6 +199,18 @@ export interface ConversationTreeSearchResult {
 export interface ConversationTreeBranchSnapshot extends ConversationTreeLocation {
   children: ConversationTreeMessage[]
   searchResults: ConversationTreeSearchResult[]
+}
+
+export interface MessageActionResult {
+  action: ConversationTreeMessageWriteActionKind
+  message: ConversationTreeMessage | null
+  path: ConversationTreeMessage[]
+  children: ConversationTreeMessage[]
+  siblings: ConversationTreeMessage[]
+  branchId: string | null
+  conversation: ConversationTreeConversation | null
+  messages: ConversationTreeMessage[]
+  sourceToForkedId: Record<string, string>
 }
 
 export interface ConversationTreeFetchOptions {
@@ -331,6 +370,7 @@ export function buildConversationTreeMessageActionContext(
     messagePublicId,
     branchId,
     endpoints: {
+      actions: `${messagePath}/actions`,
       locate: `${messagePath}/locate`,
       path: `${messagePath}/path`,
       children: `${messagePath}/children`,
@@ -339,7 +379,7 @@ export function buildConversationTreeMessageActionContext(
       retry: `${messagePath}/retry`,
       search: `${conversationPath}/messages/search`,
     },
-    availableActions: ['locate', 'path', 'children', 'search'],
+    availableActions: ['branch', 'locate', 'path', 'children', 'search', 'edit', 'retry', 'fork'],
   }
 }
 
@@ -439,6 +479,15 @@ export async function fetchConversationTreeBranchSnapshot(
   }
 }
 
+export async function applyConversationTreeMessageAction(
+  context: ConversationTreeMessageActionContext,
+  input: ApplyConversationTreeMessageActionInput,
+): Promise<MessageActionResult> {
+  const body = buildConversationTreeMessageActionPayload(input)
+  const data = await postConversationTreeData(context.endpoints.actions, body, input.signal)
+  return normalizeMessageActionResult(data)
+}
+
 export function resolveRuntimeEndpoint(options: ResolveRuntimeEndpointOptions): string {
   const mode = normalizeRuntimeMode(options.mode)
   const provider = normalizeProvider(options.provider ?? options.conversation?.provider, mode)
@@ -483,6 +532,57 @@ async function fetchConversationTreeData(endpoint: string, signal?: AbortSignal)
   return json.data
 }
 
+async function postConversationTreeData(
+  endpoint: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!resp.ok) {
+    throw new Error(`Failed to apply conversation tree action: ${resp.status}`)
+  }
+  const json = await resp.json() as { data?: unknown }
+  return json.data
+}
+
+function buildConversationTreeMessageActionPayload(
+  input: ApplyConversationTreeMessageActionInput,
+): Record<string, unknown> {
+  const action = normalizeMessageWriteAction(input.action)
+  const payload: Record<string, unknown> = { action }
+  const metadata = cloneMetadata(input.metadata)
+  if (Object.keys(metadata).length > 0) payload.metadata = metadata
+
+  if (action === 'edit') {
+    const content = cleanText(input.content)
+    if (!content) throw new Error('edit action content cannot be empty')
+    payload.content = content
+  }
+
+  if (action === 'retry') {
+    payload.content = input.content === undefined || input.content === null ? '' : String(input.content)
+  }
+
+  if (action === 'fork') {
+    const title = cleanText(input.title)
+    if (title) payload.title = title
+    payload.option = normalizeForkOption(input.option) ?? 'targetLevel'
+  }
+
+  if (action === 'branch' || action === 'fork') {
+    if (input.includeDeleted !== undefined) payload.include_deleted = input.includeDeleted
+    const statuses = normalizeStatuses(input.statuses)
+    if (statuses.length > 0) payload.statuses = statuses
+  }
+
+  return payload
+}
+
 function normalizeConversationTreeMessageList(value: unknown): ConversationTreeMessage[] {
   if (!Array.isArray(value)) return []
   return value.map(normalizeConversationTreeMessage).filter((message): message is ConversationTreeMessage => Boolean(message))
@@ -514,6 +614,22 @@ function normalizeConversationTreeSearchResults(value: unknown): ConversationTre
   return results
 }
 
+function normalizeMessageActionResult(value: unknown): MessageActionResult {
+  const data = recordValue(value) ?? {}
+  const action = normalizeMessageWriteAction(data.action)
+  return {
+    action,
+    message: normalizeConversationTreeMessage(data.message),
+    path: normalizeConversationTreeMessageList(data.path),
+    children: normalizeConversationTreeMessageList(data.children),
+    siblings: normalizeConversationTreeMessageList(data.siblings),
+    branchId: cleanText(data.branchId ?? data.branch_id),
+    conversation: normalizeConversationTreeConversation(data.conversation),
+    messages: normalizeConversationTreeMessageList(data.messages),
+    sourceToForkedId: normalizeStringRecord(data.sourceToForkedId ?? data.source_to_forked_id),
+  }
+}
+
 function normalizeConversationTreeMessage(value: unknown): ConversationTreeMessage | null {
   const data = recordValue(value)
   if (!data) return null
@@ -536,6 +652,22 @@ function normalizeConversationTreeMessage(value: unknown): ConversationTreeMessa
   }
 }
 
+function normalizeConversationTreeConversation(value: unknown): ConversationTreeConversation | null {
+  const data = recordValue(value)
+  if (!data) return null
+
+  return {
+    id: cleanText(data.id),
+    title: cleanText(data.title) ?? '',
+    status: cleanText(data.status),
+    model: cleanText(data.model),
+    createdAt: cleanText(data.createdAt ?? data.created_at),
+    updatedAt: cleanText(data.updatedAt ?? data.updated_at),
+    deletedAt: cleanText(data.deletedAt ?? data.deleted_at),
+    metadata: cloneMetadata(recordValue(data.metadata)),
+  }
+}
+
 function appendUrlQuery(
   endpoint: string,
   params: Array<[string, string | number | boolean | null | undefined]>,
@@ -550,11 +682,15 @@ function appendUrlQuery(
 }
 
 function statusParams(statuses: string[] | undefined): Array<[string, string]> {
+  return normalizeStatuses(statuses)
+    .map((status) => ['statuses', status])
+}
+
+function normalizeStatuses(statuses: string[] | null | undefined): string[] {
   if (!statuses) return []
   return statuses
     .map((status) => cleanText(status))
     .filter((status): status is string => Boolean(status))
-    .map((status) => ['statuses', status])
 }
 
 function normalizeProvider(provider: string | null | undefined, mode: TrainingRuntimeMode): string {
@@ -681,6 +817,20 @@ function normalizeToken(value: string | null | undefined): string | null {
   return cleanText(value)?.toLowerCase().replace(/[\s-]+/g, '_') ?? null
 }
 
+function normalizeMessageWriteAction(value: unknown): ConversationTreeMessageWriteActionKind {
+  const normalized = normalizeToken(cleanText(value))
+  if (normalized === 'branch' || normalized === 'edit' || normalized === 'retry' || normalized === 'fork') {
+    return normalized
+  }
+  throw new Error(`unsupported conversation tree message action: ${String(value)}`)
+}
+
+function normalizeForkOption(value: unknown): MessageActionForkOption | null {
+  const text = cleanText(value)
+  if (text === 'directPath' || text === 'includeBranches' || text === 'targetLevel') return text
+  return null
+}
+
 function cleanText(value: unknown): string | null {
   if (value === undefined || value === null) return null
   const text = String(value).trim()
@@ -713,4 +863,15 @@ function recordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  const data = recordValue(value)
+  if (!data) return {}
+  const result: Record<string, string> = {}
+  for (const [key, rawValue] of Object.entries(data)) {
+    const text = cleanText(rawValue)
+    if (text) result[key] = text
+  }
+  return result
 }

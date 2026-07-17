@@ -238,6 +238,95 @@ test('getTrainingGuidanceStreamUrl builds an EventSource endpoint', () => {
   )
 })
 
+test('getTrainingConversationBranchInfo extracts selected path metadata from a session', () => {
+  const info = trainingSession.getTrainingConversationBranchInfo({
+    session: {
+      task_config: {
+        metadata: {
+          messageTreeSelection: {
+            provider: 'talkwise-conversation',
+            conversationId: 'conv-1',
+            selectedMessageId: 'msg-leaf',
+            branchId: 'branch-main',
+            path: [
+              { publicId: 'msg-root', role: 'system', content: 'Start here' },
+              { public_id: 'msg-leaf', role: 'assistant', text: 'Selected answer', branch_id: 'branch-main' },
+            ],
+          },
+        },
+      },
+    },
+  })
+
+  assert.equal(info.source, 'session')
+  assert.equal(info.provider, 'talkwise-conversation')
+  assert.equal(info.conversationId, 'conv-1')
+  assert.equal(info.branchId, 'branch-main')
+  assert.equal(info.selectedTailMessageId, 'msg-leaf')
+  assert.equal(info.pathCount, 2)
+  assert.deepEqual(info.selectedPath.map((item) => item.publicId), ['msg-root', 'msg-leaf'])
+  assert.match(info.pathSummary, /Selected answer/)
+})
+
+test('getTrainingConversationBranchInfo reads report and progress branch metadata fallbacks', () => {
+  const reportInfo = trainingSession.getTrainingConversationBranchInfo({
+    report: {
+      content: {},
+      metadata: {
+        conversationTree: {
+          conversation_id: 'conv-report',
+          branch_tail_message_id: 'msg-report-tail',
+          branch_id: 'branch-report',
+          path_count: 4,
+          path_summary: 'Root / Objection / Selected close',
+        },
+      },
+    },
+  })
+  const progressInfo = trainingSession.getTrainingConversationBranchInfo({
+    progress: {
+      metadata: {
+        conversation_ref: {
+          provider: 'message-tree',
+          conversation_id: 'conv-progress',
+          branch_tail_message_id: 'msg-progress-tail',
+          branch_id: 'branch-progress',
+        },
+      },
+    },
+  })
+
+  assert.equal(reportInfo.source, 'report')
+  assert.equal(reportInfo.conversationId, 'conv-report')
+  assert.equal(reportInfo.selectedTailMessageId, 'msg-report-tail')
+  assert.equal(reportInfo.pathCount, 4)
+  assert.equal(reportInfo.pathSummary, 'Root / Objection / Selected close')
+  assert.equal(progressInfo.source, 'progress')
+  assert.equal(progressInfo.provider, 'message-tree')
+  assert.equal(progressInfo.branchId, 'branch-progress')
+})
+
+test('getTrainingConversationBranchInfo hides when metadata has no branch context', () => {
+  const info = trainingSession.getTrainingConversationBranchInfo({
+    session: {
+      task_config: {
+        metadata: {
+          source: 'scenario_training',
+          scenario_training: { id: 'new-customer-discount' },
+        },
+      },
+    },
+    report: {
+      summary: 'Report summary',
+      content: {
+        communication_suggestions: [{ suggestion: 'Ask a follow-up question.' }],
+      },
+    },
+  })
+
+  assert.equal(info, null)
+})
+
 test('persistTrainingGuidanceEvents posts structured coach events', async () => {
   const data = {
     batch_id: 'batch-1',

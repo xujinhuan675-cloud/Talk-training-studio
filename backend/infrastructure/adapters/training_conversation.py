@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from application.services.training_studio.live_guidance_service import TranscriptSpeaker
 from application.services.training_studio.training_core import (
     ConversationRef,
     TrainingTurn,
+    training_branch_metadata,
     training_core_metadata_for_session,
 )
 from domain.common.unit_of_work import AbstractUnitOfWork
@@ -49,13 +50,11 @@ class ConversationTrainingConversationAdapter:
         return ConversationRef(
             provider=self.provider,
             conversation_id=str(conversation.id),
-            metadata={
-                **training_core_metadata_for_session(
-                    session,
-                    runtime="conversation_message_tree",
-                    extra={"branchId": "main"},
-                ),
-            },
+            metadata=_training_conversation_metadata_for_session(
+                session,
+                branch_id="main",
+                branch_tail_message_id=None,
+            ),
         )
 
     async def append_turn(
@@ -64,13 +63,17 @@ class ConversationTrainingConversationAdapter:
         turn: TrainingTurn,
     ) -> ConversationRef:
         conversation_id = _require_conversation_id(conversation)
+        turn_metadata = dict(turn.metadata)
         metadata = {
-            **dict(turn.metadata),
-            "source": turn.metadata.get("source", "training_core"),
+            **turn_metadata,
+            "source": turn_metadata.get("source", "training_core"),
             "trainingConversationProvider": self.provider,
         }
-        branch_id = str(
-            metadata.get("branch_id") or conversation.metadata.get("branchId") or "main"
+        branch_id = _branch_id_for_turn(metadata, conversation.metadata)
+        metadata["branch_id"] = branch_id
+        parent_message_id = (
+            conversation.branch_tail_message_id
+            or _branch_tail_message_id_for_branch(conversation.metadata, branch_id)
         )
         async with self._uow_factory() as uow:
             saved = await uow.message_repository.create(
@@ -79,19 +82,42 @@ class ConversationTrainingConversationAdapter:
                     conversation_id=conversation_id,
                     role=_conversation_role_for_turn(turn),
                     content=turn.text,
-                    parent_message_id=conversation.branch_tail_message_id,
+                    parent_message_id=parent_message_id,
                     branch_id=branch_id,
                     provider=_optional_metadata_text(metadata, "provider"),
                     model=_optional_metadata_text(metadata, "model"),
                     metadata=metadata,
                 )
             )
+            selected_message_ids = _selected_message_ids_for_append(
+                conversation.metadata,
+                branch_id=branch_id,
+                parent_message_id=parent_message_id,
+                saved_message_id=saved.public_id,
+            )
+            persisted = await uow.conversation_repository.get_by_id(conversation_id)
+            if persisted is None:
+                raise ValueError(f"Conversation {conversation_id} not found")
+            persisted.metadata = _conversation_metadata_with_branch_state(
+                persisted.metadata,
+                branch_id=branch_id,
+                branch_tail_message_id=saved.public_id,
+                selected_message_ids=selected_message_ids,
+            )
+            persisted._touch()
+            await uow.conversation_repository.update(persisted)
+        updated_metadata = _conversation_metadata_with_branch_state(
+            conversation.metadata,
+            branch_id=branch_id,
+            branch_tail_message_id=saved.public_id,
+            selected_message_ids=selected_message_ids,
+        )
         return ConversationRef(
             provider=conversation.provider,
             conversation_id=conversation.conversation_id,
             branch_tail_message_id=saved.public_id,
             legacy_room_id=conversation.legacy_room_id,
-            metadata={**dict(conversation.metadata), "branchId": branch_id},
+            metadata=updated_metadata,
         )
 
     async def recent_turns(
@@ -101,7 +127,7 @@ class ConversationTrainingConversationAdapter:
         limit: int,
     ) -> Sequence[TrainingTurn]:
         conversation_id = _require_conversation_id(conversation)
-        branch_id = str(conversation.metadata.get("branchId") or "main")
+        branch_id = _branch_id_from_metadata(conversation.metadata)
         async with self._uow_factory(readonly=True) as uow:
             messages = await uow.message_repository.list_by_conversation(
                 conversation_id,
@@ -303,9 +329,45 @@ def _conversation_title_for_session(session: TrainingSession) -> str:
 def _conversation_metadata_for_session(session: TrainingSession) -> dict[str, object]:
     return {
         **dict(session.task_config.metadata or {}),
-        **training_core_metadata_for_session(
+        **_training_conversation_metadata_for_session(
             session,
-            runtime="conversation_message_tree",
+            branch_id="main",
+            branch_tail_message_id=None,
+        ),
+    }
+
+
+def _training_conversation_metadata_for_session(
+    session: TrainingSession,
+    *,
+    branch_id: object | None,
+    branch_tail_message_id: object | None,
+    selected_message_ids: Sequence[object] | None = None,
+) -> dict[str, object]:
+    return training_core_metadata_for_session(
+        session,
+        runtime="conversation_message_tree",
+        extra=training_branch_metadata(
+            branch_id=branch_id,
+            branch_tail_message_id=branch_tail_message_id,
+            selected_message_ids=selected_message_ids,
+        ),
+    )
+
+
+def _conversation_metadata_with_branch_state(
+    metadata: Mapping[str, object] | None,
+    *,
+    branch_id: object | None,
+    branch_tail_message_id: object | None,
+    selected_message_ids: Sequence[object] | None = None,
+) -> dict[str, object]:
+    return {
+        **dict(metadata or {}),
+        **training_branch_metadata(
+            branch_id=branch_id,
+            branch_tail_message_id=branch_tail_message_id,
+            selected_message_ids=selected_message_ids,
         ),
     }
 
@@ -322,7 +384,84 @@ def _metadata_text(session: TrainingSession, *keys: str) -> str | None:
     return None
 
 
-def _optional_metadata_text(metadata: dict[str, object], key: str) -> str | None:
+def _branch_id_for_turn(
+    turn_metadata: Mapping[str, object],
+    conversation_metadata: Mapping[str, object],
+) -> str:
+    return (
+        _optional_metadata_text(turn_metadata, "branch_id")
+        or _optional_metadata_text(turn_metadata, "branchId")
+        or _branch_id_from_metadata(conversation_metadata)
+    )
+
+
+def _branch_id_from_metadata(metadata: Mapping[str, object]) -> str:
+    selected_path = metadata.get("selectedPath")
+    if isinstance(selected_path, Mapping):
+        selected_branch_id = _optional_metadata_text(selected_path, "branchId")
+        if selected_branch_id:
+            return selected_branch_id
+    current_tail = metadata.get("currentBranchTail")
+    if isinstance(current_tail, Mapping):
+        current_branch_id = _optional_metadata_text(current_tail, "branchId")
+        if current_branch_id:
+            return current_branch_id
+    return _optional_metadata_text(metadata, "branchId") or "main"
+
+
+def _branch_tail_message_id_for_branch(
+    metadata: Mapping[str, object],
+    branch_id: str,
+) -> str | None:
+    current_tail = metadata.get("currentBranchTail")
+    if isinstance(current_tail, Mapping):
+        current_branch_id = _optional_metadata_text(current_tail, "branchId") or "main"
+        if current_branch_id == branch_id:
+            return _optional_metadata_text(current_tail, "messageId")
+
+    selected_path = metadata.get("selectedPath")
+    if isinstance(selected_path, Mapping):
+        selected_branch_id = _optional_metadata_text(selected_path, "branchId") or "main"
+        if selected_branch_id == branch_id:
+            return _optional_metadata_text(selected_path, "tailMessageId")
+
+    return None
+
+
+def _selected_message_ids_for_append(
+    metadata: Mapping[str, object],
+    *,
+    branch_id: str,
+    parent_message_id: str | None,
+    saved_message_id: str | None,
+) -> list[str]:
+    selected_ids = _selected_message_ids_for_branch(metadata, branch_id)
+    if parent_message_id:
+        if selected_ids and selected_ids[-1] != parent_message_id:
+            selected_ids = [parent_message_id]
+        elif not selected_ids:
+            selected_ids = [parent_message_id]
+    elif selected_ids:
+        selected_ids = []
+    if saved_message_id:
+        selected_ids.append(saved_message_id)
+    return selected_ids
+
+
+def _selected_message_ids_for_branch(
+    metadata: Mapping[str, object],
+    branch_id: str,
+) -> list[str]:
+    selected_path = metadata.get("selectedPath")
+    if not isinstance(selected_path, Mapping):
+        return []
+    selected_branch_id = _optional_metadata_text(selected_path, "branchId") or "main"
+    if selected_branch_id != branch_id:
+        return []
+    return _string_list(selected_path.get("messageIds"))
+
+
+def _optional_metadata_text(metadata: Mapping[str, object], key: str) -> str | None:
     value = metadata.get(key)
     if value is None:
         return None

@@ -278,7 +278,7 @@ test('buildTrainingConversationPayload maps branch tail to chat parent message',
   assert.equal(payload.turns[0].branchId, 'branch-selected')
 })
 
-test('buildConversationTreeMessageActionContext exposes readonly conversation action endpoints', () => {
+test('buildConversationTreeMessageActionContext exposes controlled conversation action endpoints', () => {
   const context = trainingConversation.buildConversationTreeMessageActionContext({
     provider: 'talkwise-conversation',
     conversationId: 42,
@@ -291,11 +291,16 @@ test('buildConversationTreeMessageActionContext exposes readonly conversation ac
   assert.equal(context.messagePublicId, 'msg_leaf')
   assert.equal(context.branchId, 'branch-selected')
   assert.deepEqual(context.availableActions, [
+    'branch',
     'locate',
     'path',
     'children',
     'search',
+    'edit',
+    'retry',
+    'fork',
   ])
+  assert.equal(context.endpoints.actions, '/api/v1/conversations/42/messages/msg_leaf/actions')
   assert.equal(context.endpoints.locate, '/api/v1/conversations/42/messages/msg_leaf/locate')
   assert.equal(context.endpoints.path, '/api/v1/conversations/42/messages/msg_leaf/path')
   assert.equal(context.endpoints.children, '/api/v1/conversations/42/messages/msg_leaf/children')
@@ -332,6 +337,200 @@ test('buildConversationTreeMessageActionContext ignores stakeholder room local m
   })
 
   assert.equal(context, null)
+})
+
+test('applyConversationTreeMessageAction posts branch payload to unified action endpoint', async () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 7,
+    messagePublicId: 'msg_selected',
+  })
+
+  await withMockFetch(
+    (url, init) => {
+      assert.equal(url, '/api/v1/conversations/7/messages/msg_selected/actions')
+      assert.equal(init.method, 'POST')
+      assert.equal(init.headers['Content-Type'], 'application/json')
+      assert.deepEqual(JSON.parse(init.body), {
+        action: 'branch',
+        metadata: { source: 'training_room' },
+        include_deleted: true,
+        statuses: ['active', 'superseded'],
+      })
+      return {
+        action: 'branch',
+        message: {
+          id: 2,
+          conversation_id: 7,
+          role: 'assistant',
+          content: 'Selected branch',
+          public_id: 'msg_selected',
+          branch_id: 'main',
+          status: 'active',
+          created_at: '2026-07-17T00:01:00Z',
+        },
+        path: [],
+        children: [],
+        siblings: [],
+        branch_id: 'main',
+      }
+    },
+    async () => {
+      const result = await trainingConversation.applyConversationTreeMessageAction(context, {
+        action: 'branch',
+        includeDeleted: true,
+        statuses: [' active ', '', 'superseded'],
+        metadata: { source: 'training_room' },
+      })
+
+      assert.equal(result.action, 'branch')
+      assert.equal(result.message.publicId, 'msg_selected')
+      assert.equal(result.branchId, 'main')
+    },
+  )
+})
+
+test('applyConversationTreeMessageAction supports edit and retry write payloads', async () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 7,
+    messagePublicId: 'msg_answer',
+  })
+
+  const expectedBodies = [
+    {
+      action: 'edit',
+      content: 'Edited answer',
+      metadata: { source: 'message_tree_panel' },
+    },
+    {
+      action: 'retry',
+      content: '',
+      metadata: { source: 'message_tree_panel' },
+    },
+  ]
+
+  await withMockFetch(
+    (url, init) => {
+      assert.equal(url, '/api/v1/conversations/7/messages/msg_answer/actions')
+      const expected = expectedBodies.shift()
+      assert.deepEqual(JSON.parse(init.body), expected)
+      return {
+        action: expected.action,
+        message: {
+          id: expected.action === 'edit' ? 3 : 4,
+          conversation_id: 7,
+          role: 'assistant',
+          content: expected.action === 'edit' ? 'Edited answer' : '',
+          public_id: expected.action === 'edit' ? 'msg_edit' : 'msg_retry',
+          parent_message_id: 'msg_parent',
+          branch_id: expected.action === 'edit' ? 'branch_edit' : 'branch_retry',
+          status: 'active',
+          created_at: '2026-07-17T00:02:00Z',
+        },
+        path: [],
+        children: [],
+        siblings: [],
+        branch_id: expected.action === 'edit' ? 'branch_edit' : 'branch_retry',
+      }
+    },
+    async () => {
+      const editResult = await trainingConversation.applyConversationTreeMessageAction(context, {
+        action: 'edit',
+        content: ' Edited answer ',
+        metadata: { source: 'message_tree_panel' },
+      })
+      const retryResult = await trainingConversation.applyConversationTreeMessageAction(context, {
+        action: 'retry',
+        metadata: { source: 'message_tree_panel' },
+      })
+
+      assert.equal(editResult.message.publicId, 'msg_edit')
+      assert.equal(editResult.branchId, 'branch_edit')
+      assert.equal(retryResult.message.publicId, 'msg_retry')
+      assert.equal(retryResult.message.content, '')
+      assert.equal(expectedBodies.length, 0)
+    },
+  )
+})
+
+test('applyConversationTreeMessageAction normalizes fork action result', async () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 7,
+    messagePublicId: 'msg_selected',
+  })
+
+  await withMockFetch(
+    (url, init) => {
+      assert.equal(url, '/api/v1/conversations/7/messages/msg_selected/actions')
+      assert.deepEqual(JSON.parse(init.body), {
+        action: 'fork',
+        metadata: { source: 'message_tree_panel' },
+        title: 'Forked path',
+        option: 'includeBranches',
+        include_deleted: false,
+        statuses: ['active'],
+      })
+      return {
+        action: 'fork',
+        message: {
+          id: 21,
+          conversation_id: 8,
+          role: 'assistant',
+          content: 'Forked selected answer',
+          public_id: 'msg_forked',
+          branch_id: 'main',
+          status: 'active',
+          created_at: '2026-07-17T00:03:00Z',
+        },
+        path: [],
+        children: [],
+        siblings: [],
+        branch_id: 'main',
+        conversation: {
+          id: 8,
+          title: 'Forked path',
+          system_prompt: null,
+          model: null,
+          status: 'active',
+          metadata: { source: 'message_tree_panel' },
+          created_at: '2026-07-17T00:03:00Z',
+          updated_at: '2026-07-17T00:03:00Z',
+        },
+        messages: [
+          {
+            id: 21,
+            conversation_id: 8,
+            role: 'assistant',
+            content: 'Forked selected answer',
+            public_id: 'msg_forked',
+            branch_id: 'main',
+            status: 'active',
+            created_at: '2026-07-17T00:03:00Z',
+          },
+        ],
+        source_to_forked_id: { msg_selected: 'msg_forked' },
+      }
+    },
+    async () => {
+      const result = await trainingConversation.applyConversationTreeMessageAction(context, {
+        action: 'fork',
+        title: ' Forked path ',
+        option: 'includeBranches',
+        includeDeleted: false,
+        statuses: ['active'],
+        metadata: { source: 'message_tree_panel' },
+      })
+
+      assert.equal(result.action, 'fork')
+      assert.equal(result.message.publicId, 'msg_forked')
+      assert.equal(result.conversation.id, '8')
+      assert.equal(result.conversation.title, 'Forked path')
+      assert.deepEqual(result.sourceToForkedId, { msg_selected: 'msg_forked' })
+      assert.deepEqual(result.messages.map((item) => item.publicId), ['msg_forked'])
+    },
+  )
 })
 
 test('fetchConversationTreeMessagePath normalizes readonly path messages', async () => {

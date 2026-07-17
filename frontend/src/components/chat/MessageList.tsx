@@ -1,15 +1,34 @@
 import React from 'react'
 import Markdown from 'react-markdown'
-import { ListTree, MapPin, MessageCircle, ClipboardList, Route, Search, Volume2, Video, Loader2 } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  GitFork,
+  ListTree,
+  Loader2,
+  MapPin,
+  MessageCircle,
+  ClipboardList,
+  PencilLine,
+  RotateCw,
+  Route,
+  Search,
+  Volume2,
+  Video,
+} from 'lucide-react'
 import Avatar from '../Avatar'
 import type { Message, DispatchPhase, PersonaSummary } from '../../services/api'
 import {
+  applyConversationTreeMessageAction,
   buildConversationTreeMessageActionContext,
   fetchConversationTreeBranchSnapshot,
   type ConversationTreeBranchSnapshot,
   type ConversationTreeActionKind,
   type ConversationTreeMessageActionContext,
   type ConversationTreeMessage,
+  type ConversationTreeMessageWriteActionKind,
+  type MessageActionForkOption,
+  type MessageActionResult,
 } from '../../services/trainingConversation'
 import { useI18n } from '../../i18n'
 import './MessageList.css'
@@ -202,6 +221,7 @@ type MessageTreeActionLabels = {
   group: string
   title: string
   readonlyBadge: string
+  controlledBadge: string
   hint: string
   branchLabel: string
   noBranch: string
@@ -229,6 +249,29 @@ type MessageTreeActionLabels = {
   roleAssistant: string
   roleSystem: string
   statusLabel: string
+  writesTitle: string
+  writesToggle: string
+  writesToggleOpen: string
+  edit: string
+  editDesc: string
+  editContentLabel: string
+  editPlaceholder: string
+  retry: string
+  retryDesc: string
+  retryContentLabel: string
+  retryPlaceholder: string
+  fork: string
+  forkDesc: string
+  forkTitleLabel: string
+  forkTitlePlaceholder: string
+  forkOptionLabel: string
+  forkOptionDirectPath: string
+  forkOptionIncludeBranches: string
+  forkOptionTargetLevel: string
+  apply: string
+  actionSuccess: string
+  actionError: string
+  editContentRequired: string
 }
 
 export interface MessageTreePathSelection {
@@ -280,6 +323,36 @@ function contextForTreeMessage(
     conversationId: baseContext.conversationId,
     messagePublicId: message.publicId,
     branchId: message.branchId ?? baseContext.branchId,
+  })
+}
+
+type MessageTreeWriteAction = Extract<ConversationTreeMessageWriteActionKind, 'edit' | 'retry' | 'fork'>
+
+const MESSAGE_TREE_WRITE_SOURCE = 'training_message_tree_panel'
+
+function snapshotFromMessageActionResult(result: MessageActionResult): ConversationTreeBranchSnapshot | null {
+  if (!result.message && result.path.length === 0) return null
+  return {
+    message: result.message,
+    path: result.path.length > 0 ? result.path : result.message ? [result.message] : [],
+    context: [],
+    children: result.children,
+    searchResults: [],
+  }
+}
+
+function contextForMessageActionResult(
+  baseContext: ConversationTreeMessageActionContext,
+  result: MessageActionResult,
+): ConversationTreeMessageActionContext | null {
+  const selectedMessage = result.message ?? result.path[result.path.length - 1]
+  if (!selectedMessage) return null
+
+  return buildConversationTreeMessageActionContext({
+    provider: baseContext.provider,
+    conversationId: result.conversation?.id ?? selectedMessage.conversationId ?? baseContext.conversationId,
+    messagePublicId: selectedMessage.publicId,
+    branchId: selectedMessage.branchId ?? result.branchId ?? baseContext.branchId,
   })
 }
 
@@ -347,6 +420,15 @@ function MessageTreeActions({
   const [focusedContext, setFocusedContext] = React.useState(context)
   const [snapshot, setSnapshot] = React.useState<ConversationTreeBranchSnapshot | null>(null)
   const [loadingAction, setLoadingAction] = React.useState<'focus' | 'children' | 'search' | null>(null)
+  const [writeExpanded, setWriteExpanded] = React.useState(false)
+  const [writeAction, setWriteAction] = React.useState<MessageTreeWriteAction>('edit')
+  const [editContent, setEditContent] = React.useState(message.content)
+  const [retryContent, setRetryContent] = React.useState('')
+  const [forkTitle, setForkTitle] = React.useState('')
+  const [forkOption, setForkOption] = React.useState<MessageActionForkOption>('targetLevel')
+  const [applyingAction, setApplyingAction] = React.useState<MessageTreeWriteAction | null>(null)
+  const [writeError, setWriteError] = React.useState<string | null>(null)
+  const [writeStatus, setWriteStatus] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const searchQuery = messageSearchQuery(message, context)
   const {
@@ -358,6 +440,7 @@ function MessageTreeActions({
     provider,
   } = context
   const {
+    actions: actionsEndpoint,
     children: childrenEndpoint,
     edit: editEndpoint,
     fork: forkEndpoint,
@@ -374,6 +457,7 @@ function MessageTreeActions({
     branchId,
     conversationId,
     endpoints: {
+      actions: actionsEndpoint,
       children: childrenEndpoint,
       edit: editEndpoint,
       fork: forkEndpoint,
@@ -386,6 +470,7 @@ function MessageTreeActions({
     provider,
   }), [
     availableActionsKey,
+    actionsEndpoint,
     branchId,
     childrenEndpoint,
     conversationId,
@@ -410,7 +495,16 @@ function MessageTreeActions({
     setSnapshot(null)
     setError(null)
     setSearchText(searchQuery)
-  }, [resetContext, searchQuery])
+    setWriteExpanded(false)
+    setWriteAction('edit')
+    setEditContent(message.content)
+    setRetryContent('')
+    setForkTitle('')
+    setForkOption('targetLevel')
+    setApplyingAction(null)
+    setWriteError(null)
+    setWriteStatus(null)
+  }, [message.content, resetContext, searchQuery])
 
   React.useEffect(() => () => {
     requestSeqRef.current += 1
@@ -459,10 +553,91 @@ function MessageTreeActions({
     void loadSnapshot(focusedContext, 'search', searchText.trim() || searchQuery)
   }, [focusedContext, loadSnapshot, searchQuery, searchText])
 
+  const writeActions = React.useMemo(() => {
+    const allowed = new Set(focusedContext.availableActions)
+    return [
+      { action: 'edit' as const, label: labels.edit, description: labels.editDesc, icon: PencilLine },
+      { action: 'retry' as const, label: labels.retry, description: labels.retryDesc, icon: RotateCw },
+      { action: 'fork' as const, label: labels.fork, description: labels.forkDesc, icon: GitFork },
+    ].filter((item) => allowed.has(item.action))
+  }, [
+    focusedContext.availableActions,
+    labels.edit,
+    labels.editDesc,
+    labels.fork,
+    labels.forkDesc,
+    labels.retry,
+    labels.retryDesc,
+  ])
+
+  const handleSubmitWriteAction = React.useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (applyingAction) return
+
+    const nextAction = writeAction
+    const nextContent = nextAction === 'edit'
+      ? editContent.trim()
+      : nextAction === 'retry'
+        ? retryContent.trim()
+        : null
+    if (nextAction === 'edit' && !nextContent) {
+      setWriteError(labels.editContentRequired)
+      setWriteStatus(null)
+      return
+    }
+
+    setExpanded(true)
+    setApplyingAction(nextAction)
+    setWriteError(null)
+    setWriteStatus(null)
+    try {
+      const result = await applyConversationTreeMessageAction(focusedContext, {
+        action: nextAction,
+        content: nextContent,
+        title: nextAction === 'fork' ? forkTitle.trim() : null,
+        option: nextAction === 'fork' ? forkOption : null,
+        metadata: { source: MESSAGE_TREE_WRITE_SOURCE },
+      })
+      const resultSnapshot = snapshotFromMessageActionResult(result)
+      const nextContext = contextForMessageActionResult(focusedContext, result)
+      if (resultSnapshot && nextContext) {
+        setFocusedContext(nextContext)
+        setSnapshot(resultSnapshot)
+        const selection = buildMessageTreeSelection(resultSnapshot, nextContext, message.id)
+        if (selection) onSelectPath?.(selection)
+      }
+      setWriteStatus(labels.actionSuccess)
+      if (nextContext) {
+        await loadSnapshot(nextContext, 'focus', null)
+      }
+    } catch (err) {
+      console.error('Failed to apply message tree action:', err)
+      setWriteError(labels.actionError)
+    } finally {
+      setApplyingAction(null)
+    }
+  }, [
+    applyingAction,
+    editContent,
+    focusedContext,
+    forkOption,
+    forkTitle,
+    labels.actionError,
+    labels.actionSuccess,
+    labels.editContentRequired,
+    loadSnapshot,
+    message.id,
+    onSelectPath,
+    retryContent,
+    writeAction,
+  ])
+
   const hasSnapshot = Boolean(snapshot)
   const currentNodeId = snapshot?.message?.publicId ?? focusedContext.messagePublicId
   const isSelectedCurrentNode = selectedTreeNodeId === focusedContext.messagePublicId
     || selectedTreeNodeId === currentNodeId
+  const canSubmitWrite = !applyingAction && (writeAction !== 'edit' || editContent.trim().length > 0)
 
   return (
     <section className="message-tree-actions" aria-label={labels.group}>
@@ -473,7 +648,7 @@ function MessageTreeActions({
         </span>
         <span className="message-tree-badges">
           {isSelectedCurrentNode && <span className="message-tree-selected-badge">{labels.selectedBadge}</span>}
-          <span className="message-tree-readonly-badge">{labels.readonlyBadge}</span>
+          <span className="message-tree-readonly-badge">{labels.controlledBadge}</span>
         </span>
       </div>
       <p className="message-tree-actions-hint">{labels.hint}</p>
@@ -542,6 +717,132 @@ function MessageTreeActions({
           </button>
         </form>
       </div>
+      {writeActions.length > 0 && (
+        <div className="message-tree-write">
+          <button
+            type="button"
+            className="message-tree-write-toggle"
+            aria-expanded={writeExpanded}
+            onClick={(event) => {
+              event.stopPropagation()
+              setWriteExpanded((value) => !value)
+            }}
+          >
+            <span className="message-tree-write-toggle-title">
+              <GitFork size={13} aria-hidden="true" />
+              {labels.writesTitle}
+            </span>
+            <span className="message-tree-write-toggle-copy">
+              {writeExpanded ? labels.writesToggleOpen : labels.writesToggle}
+              <ChevronDown
+                size={13}
+                aria-hidden="true"
+                className={writeExpanded ? 'expanded' : undefined}
+              />
+            </span>
+          </button>
+          {writeExpanded && (
+            <form
+              className="message-tree-write-panel"
+              onSubmit={handleSubmitWriteAction}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="message-tree-write-tabs" role="tablist" aria-label={labels.writesTitle}>
+                {writeActions.map(({ action, label, description, icon: Icon }) => (
+                  <button
+                    key={action}
+                    type="button"
+                    className={writeAction === action ? 'active' : undefined}
+                    title={description}
+                    aria-pressed={writeAction === action}
+                    onClick={() => {
+                      setWriteAction(action)
+                      setWriteError(null)
+                      setWriteStatus(null)
+                    }}
+                  >
+                    <Icon size={13} aria-hidden="true" />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              {writeAction === 'edit' && (
+                <label className="message-tree-write-field">
+                  <span>{labels.editContentLabel}</span>
+                  <textarea
+                    rows={3}
+                    value={editContent}
+                    placeholder={labels.editPlaceholder}
+                    onChange={(event) => {
+                      setEditContent(event.target.value)
+                      setWriteError(null)
+                      setWriteStatus(null)
+                    }}
+                  />
+                </label>
+              )}
+              {writeAction === 'retry' && (
+                <label className="message-tree-write-field">
+                  <span>{labels.retryContentLabel}</span>
+                  <textarea
+                    rows={2}
+                    value={retryContent}
+                    placeholder={labels.retryPlaceholder}
+                    onChange={(event) => {
+                      setRetryContent(event.target.value)
+                      setWriteError(null)
+                      setWriteStatus(null)
+                    }}
+                  />
+                </label>
+              )}
+              {writeAction === 'fork' && (
+                <div className="message-tree-write-grid">
+                  <label className="message-tree-write-field">
+                    <span>{labels.forkTitleLabel}</span>
+                    <input
+                      value={forkTitle}
+                      placeholder={labels.forkTitlePlaceholder}
+                      onChange={(event) => {
+                        setForkTitle(event.target.value)
+                        setWriteStatus(null)
+                      }}
+                    />
+                  </label>
+                  <label className="message-tree-write-field">
+                    <span>{labels.forkOptionLabel}</span>
+                    <select
+                      value={forkOption}
+                      onChange={(event) => {
+                        setForkOption(event.target.value as MessageActionForkOption)
+                        setWriteStatus(null)
+                      }}
+                    >
+                      <option value="targetLevel">{labels.forkOptionTargetLevel}</option>
+                      <option value="directPath">{labels.forkOptionDirectPath}</option>
+                      <option value="includeBranches">{labels.forkOptionIncludeBranches}</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+              <div className="message-tree-write-footer">
+                <div className="message-tree-write-feedback" aria-live="polite">
+                  {writeError && <span className="error">{writeError}</span>}
+                  {writeStatus && !writeError && <span className="success">{writeStatus}</span>}
+                </div>
+                <button
+                  type="submit"
+                  className="message-tree-write-submit"
+                  disabled={!canSubmitWrite}
+                >
+                  {applyingAction ? <Loader2 size={13} className="spin" /> : <Check size={13} />}
+                  <span>{labels.apply}</span>
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
       {loadingAction && <div className="message-tree-status">{labels.loading}</div>}
       {error && <div className="message-tree-error">{error}</div>}
       {expanded && !loadingAction && !error && (
@@ -668,6 +969,7 @@ export default function MessageList({
     group: t('messageTree.actions.group'),
     title: t('messageTree.actions.title'),
     readonlyBadge: t('messageTree.actions.readonlyBadge'),
+    controlledBadge: t('messageTree.actions.controlledBadge'),
     hint: t('messageTree.actions.hint'),
     branchLabel: t('messageTree.actions.branchLabel'),
     noBranch: t('messageTree.actions.noBranch'),
@@ -695,6 +997,29 @@ export default function MessageList({
     roleAssistant: t('messageTree.actions.roleAssistant'),
     roleSystem: t('messageTree.actions.roleSystem'),
     statusLabel: t('messageTree.actions.statusLabel'),
+    writesTitle: t('messageTree.actions.writesTitle'),
+    writesToggle: t('messageTree.actions.writesToggle'),
+    writesToggleOpen: t('messageTree.actions.writesToggleOpen'),
+    edit: t('messageTree.actions.edit'),
+    editDesc: t('messageTree.actions.editDesc'),
+    editContentLabel: t('messageTree.actions.editContentLabel'),
+    editPlaceholder: t('messageTree.actions.editPlaceholder'),
+    retry: t('messageTree.actions.retry'),
+    retryDesc: t('messageTree.actions.retryDesc'),
+    retryContentLabel: t('messageTree.actions.retryContentLabel'),
+    retryPlaceholder: t('messageTree.actions.retryPlaceholder'),
+    fork: t('messageTree.actions.fork'),
+    forkDesc: t('messageTree.actions.forkDesc'),
+    forkTitleLabel: t('messageTree.actions.forkTitleLabel'),
+    forkTitlePlaceholder: t('messageTree.actions.forkTitlePlaceholder'),
+    forkOptionLabel: t('messageTree.actions.forkOptionLabel'),
+    forkOptionDirectPath: t('messageTree.actions.forkOptionDirectPath'),
+    forkOptionIncludeBranches: t('messageTree.actions.forkOptionIncludeBranches'),
+    forkOptionTargetLevel: t('messageTree.actions.forkOptionTargetLevel'),
+    apply: t('messageTree.actions.apply'),
+    actionSuccess: t('messageTree.actions.actionSuccess'),
+    actionError: t('messageTree.actions.actionError'),
+    editContentRequired: t('messageTree.actions.editContentRequired'),
   }
 
   React.useEffect(() => {

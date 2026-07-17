@@ -15,6 +15,7 @@ from application.services.training_studio.training_core import (
     ConversationRef,
     TrainingCoreOrchestrator,
     TrainingTurn,
+    training_branch_metadata,
     training_core_metadata_for_session,
 )
 from domain.training_studio.session import TrainingSession
@@ -234,7 +235,7 @@ async def test_training_core_metadata_keeps_talkwise_semantics_inside_core_bound
     metadata = training_core_metadata_for_session(
         session,
         runtime="conversation_message_tree",
-        extra={"branchId": "main"},
+        extra=training_branch_metadata(branch_id="main"),
     )
 
     assert metadata == {
@@ -250,6 +251,27 @@ async def test_training_core_metadata_keeps_talkwise_semantics_inside_core_bound
         "growthReport": {"report_id": "growth-1"},
         "liveGuidance": {"enabled": True},
         "branchId": "main",
+        "branchPolicy": {
+            "version": 1,
+            "owner": "training_core",
+            "mainBranchId": "main",
+            "selectedPathPurpose": "training_replay_context",
+            "editRetryForkPolicy": "preserve_training_semantics",
+            "genericTreeMetadataCanOverrideTrainingSemantics": False,
+        },
+        "selectedPath": {
+            "branchId": "main",
+            "tailMessageId": None,
+            "messageIds": [],
+            "purpose": "training_replay_context",
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "currentBranchTail": {
+            "branchId": "main",
+            "messageId": None,
+        },
     }
 
 
@@ -290,6 +312,7 @@ async def test_training_core_metadata_keeps_core_fields_when_extra_collides():
             "dispatcher": {"policy": "adapter-shadow"},
             "evaluation": {"rubric_id": "adapter-shadow"},
             "growthReport": {"report_id": "adapter-shadow"},
+            "report": {"report_id": "adapter-shadow"},
             "liveGuidance": {"enabled": False},
             "provider": "pipecat",
             "model": "gpt-shadow",
@@ -313,6 +336,34 @@ async def test_training_core_metadata_keeps_core_fields_when_extra_collides():
     assert metadata["model"] == "gpt-shadow"
     assert metadata["model_registry"] == {"selected": "shadow-registry"}
     assert metadata["model_spec"] == {"id": "shadow-spec"}
+    assert "report" not in metadata
+
+
+def test_training_branch_metadata_marks_selected_path_as_replay_context_only():
+    metadata = training_branch_metadata(
+        branch_id=" branch-risk ",
+        branch_tail_message_id=" msg-tail ",
+        selected_message_ids=["msg-root", " msg-tail "],
+    )
+
+    assert metadata["branchId"] == "branch-risk"
+    assert metadata["branchPolicy"]["editRetryForkPolicy"] == (
+        "preserve_training_semantics"
+    )
+    assert metadata["branchPolicy"]["genericTreeMetadataCanOverrideTrainingSemantics"] is False
+    assert metadata["selectedPath"] == {
+        "branchId": "branch-risk",
+        "tailMessageId": "msg-tail",
+        "messageIds": ["msg-root", "msg-tail"],
+        "purpose": "training_replay_context",
+        "replayContextOnly": True,
+        "affectsScoring": False,
+        "affectsCompletion": False,
+    }
+    assert metadata["currentBranchTail"] == {
+        "branchId": "branch-risk",
+        "messageId": "msg-tail",
+    }
 
 
 @pytest.mark.asyncio

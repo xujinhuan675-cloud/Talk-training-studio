@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Clock3,
   ExternalLink,
+  GitBranch,
   Loader2,
   MessageCircle,
   RotateCcw,
@@ -13,8 +14,10 @@ import {
 } from 'lucide-react'
 import { fetchRoomDetail, type ChatRoomDetail, type Message } from '../services/api'
 import {
+  getTrainingConversationBranchInfo,
   getTrainingSession,
   getTrainingSessionReport,
+  type TrainingConversationBranchInfo,
   type TrainingSessionDTO,
   type TrainingSessionReportDTO,
 } from '../services/trainingSession'
@@ -352,7 +355,20 @@ function coachEventFromMessage(message: Message): CoachReplayEvent | null {
   }
 }
 
-export function coachEventTypeLabel(eventType: string, tr: TranslateInline): string {
+function compactBranchText(value: string, maxLength = 72): string {
+  const text = value.replace(/\s+/g, ' ').trim()
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength - 3)}...`
+}
+
+function branchPathNodeText(
+  item: TrainingConversationBranchInfo['selectedPath'][number],
+  index: number,
+): string {
+  return `${index + 1}. ${compactBranchText(item.content || item.publicId)}`
+}
+
+function coachEventTypeLabel(eventType: string, tr: TranslateInline): string {
   if (eventType === 'risk') return tr('风险提醒', 'Risk alert')
   if (eventType === 'next_reply') return tr('下一句建议', 'Next reply')
   if (eventType === 'delivery_nudge') return tr('表达提醒', 'Delivery nudge')
@@ -361,7 +377,7 @@ export function coachEventTypeLabel(eventType: string, tr: TranslateInline): str
   return eventType.replace(/_/g, ' ')
 }
 
-export function coachSeverityLabel(severity: string, tr: TranslateInline): string {
+function coachSeverityLabel(severity: string, tr: TranslateInline): string {
   if (severity === 'warning') return tr('需要注意', 'Needs attention')
   if (severity === 'error' || severity === 'critical') return tr('高风险', 'High risk')
   if (severity === 'success') return tr('已捕捉', 'Captured')
@@ -456,6 +472,14 @@ export default function TrainingResultPage() {
   const scenarioId = session?.scenario_template_id || ''
   const scenarioProgress = scenarioId ? progress[scenarioId] : undefined
   const content = useMemo(() => asRecord(report?.content) ?? {}, [report])
+  const branchInfo = useMemo(
+    () => getTrainingConversationBranchInfo({ session, report, progress: scenarioProgress }),
+    [report, scenarioProgress, session],
+  )
+  const branchPathPreview = branchInfo?.selectedPath.slice(-5) ?? []
+  const branchPathPreviewOffset = branchInfo
+    ? Math.max(0, branchInfo.selectedPath.length - branchPathPreview.length)
+    : 0
   const progressScore = coerceScore(scenarioProgress?.score)
   const dimensions = useMemo(
     () => collectDimensions(content, progressScore, tr),
@@ -492,7 +516,7 @@ export default function TrainingResultPage() {
         },
       )
     : null
-  const messages = roomDetail?.messages ?? []
+  const messages = useMemo(() => roomDetail?.messages ?? [], [roomDetail?.messages])
   const coachEvents = useMemo(
     () => messages.flatMap((message) => {
       const event = coachEventFromMessage(message)
@@ -631,6 +655,59 @@ export default function TrainingResultPage() {
           )}
         </article>
       </section>
+
+      {branchInfo && (
+        <section
+          className="training-result-card training-result-branch"
+          aria-label={tr('训练路径/分支', 'Training path / branch')}
+        >
+          <div className="training-result-card-head training-result-branch-head">
+            <h2>
+              <GitBranch size={15} />
+              {tr('训练路径/分支', 'Training path / branch')}
+            </h2>
+            <span>{tr('只读上下文', 'Read-only context')}</span>
+          </div>
+          <div className="training-result-branch-grid">
+            {branchInfo.branchId && (
+              <div className="training-result-branch-item">
+                <span>{tr('分支', 'Branch')}</span>
+                <strong title={branchInfo.branchId}>{compactBranchText(branchInfo.branchId, 48)}</strong>
+              </div>
+            )}
+            {branchInfo.selectedTailMessageId && (
+              <div className="training-result-branch-item">
+                <span>{tr('选中尾节点', 'Selected tail')}</span>
+                <strong title={branchInfo.selectedTailMessageId}>
+                  {compactBranchText(branchInfo.selectedTailMessageId, 48)}
+                </strong>
+              </div>
+            )}
+            {(branchInfo.pathCount || branchInfo.pathSummary) && (
+              <div className="training-result-branch-item wide">
+                <span>{tr('选中路径', 'Selected path')}</span>
+                <strong>
+                  {branchInfo.pathCount
+                    ? tr('{count} 个节点', '{count} nodes', { count: branchInfo.pathCount })
+                    : tr('已记录', 'Recorded')}
+                </strong>
+                {branchInfo.pathSummary && (
+                  <em title={branchInfo.pathSummary}>{compactBranchText(branchInfo.pathSummary, 96)}</em>
+                )}
+              </div>
+            )}
+          </div>
+          {branchPathPreview.length > 0 && (
+            <div className="training-result-branch-path" aria-label={tr('已选择路径摘要', 'Selected path summary')}>
+              {branchPathPreview.map((item, index) => (
+                <span key={`${item.publicId}-${index}`} title={item.content || item.publicId}>
+                  {branchPathNodeText(item, branchPathPreviewOffset + index)}
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {reportError && (
         <section className="training-result-notice">

@@ -21,6 +21,30 @@ from application.services.training_studio.session_service import (
     TrainingSessionService,
 )
 
+_DEFAULT_TRAINING_BRANCH_ID = "main"
+_TRAINING_REPLAY_CONTEXT = "training_replay_context"
+_TRAINING_SEMANTIC_EXTRA_RESERVED_KEYS = {
+    "runtime",
+    "trainingSessionId",
+    "mode",
+    "scenarioTemplateId",
+    "category",
+    "personaIds",
+    "persona_ids",
+    "scenarioId",
+    "scenario_id",
+    "dispatcher",
+    "dispatcher_state",
+    "evaluation",
+    "rubric",
+    "growthReport",
+    "growth_report",
+    "report",
+    "liveGuidance",
+    "live_guidance",
+    "guidance",
+}
+
 
 @dataclass(frozen=True)
 class ConversationRef:
@@ -123,9 +147,49 @@ def training_core_metadata_for_session(
         ),
     }
     for key, value in dict(extra or {}).items():
-        if key not in metadata:
+        if key not in metadata and key not in _TRAINING_SEMANTIC_EXTRA_RESERVED_KEYS:
             metadata[key] = _copy_metadata_value(value)
     return {key: value for key, value in metadata.items() if _metadata_value_present(value)}
+
+
+def training_branch_metadata(
+    *,
+    branch_id: object | None = None,
+    branch_tail_message_id: object | None = None,
+    selected_message_ids: Sequence[object] | None = None,
+) -> dict[str, object]:
+    """Normalize message-tree branch state as replay context, not scoring state."""
+
+    normalized_branch_id = _normalize_optional_text(branch_id) or _DEFAULT_TRAINING_BRANCH_ID
+    normalized_tail_id = _normalize_optional_text(branch_tail_message_id)
+    selected_ids = _normalize_text_list(selected_message_ids or [])
+    if normalized_tail_id and normalized_tail_id not in selected_ids:
+        selected_ids.append(normalized_tail_id)
+
+    return {
+        "branchId": normalized_branch_id,
+        "branchPolicy": {
+            "version": 1,
+            "owner": "training_core",
+            "mainBranchId": _DEFAULT_TRAINING_BRANCH_ID,
+            "selectedPathPurpose": _TRAINING_REPLAY_CONTEXT,
+            "editRetryForkPolicy": "preserve_training_semantics",
+            "genericTreeMetadataCanOverrideTrainingSemantics": False,
+        },
+        "selectedPath": {
+            "branchId": normalized_branch_id,
+            "tailMessageId": normalized_tail_id,
+            "messageIds": selected_ids,
+            "purpose": _TRAINING_REPLAY_CONTEXT,
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "currentBranchTail": {
+            "branchId": normalized_branch_id,
+            "messageId": normalized_tail_id,
+        },
+    }
 
 
 @runtime_checkable

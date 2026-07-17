@@ -123,6 +123,44 @@ async def test_session_service_progress_preserves_failed_status_and_reason():
     assert progress[0].score_status == "pending"
 
 
+async def test_session_service_selected_branch_metadata_is_not_scoring_completion_state():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+            "user_id": "user-sales-001",
+            "metadata": {
+                "branchPolicy": {"owner": "training_core"},
+                "selectedPath": {
+                    "branchId": "branch-review",
+                    "tailMessageId": "msg-tail",
+                    "purpose": "training_replay_context",
+                    "affectsScoring": True,
+                    "affectsCompletion": True,
+                },
+                "currentBranchTail": {
+                    "branchId": "branch-review",
+                    "messageId": "msg-tail",
+                },
+                "evaluation": {"status": "completed", "overall_score": 5},
+                "growth_report": {"status": "completed", "report_id": "shadow-report"},
+            },
+        }
+    )
+    await service.start_session(session.session_id, room_id="42")
+
+    progress = await service.list_scenario_progress(user_id="user-sales-001")
+
+    assert len(progress) == 1
+    assert progress[0].status == "in_progress"
+    assert progress[0].score is None
+    assert progress[0].score_status == "pending"
+    assert progress[0].report_id is None
+    assert progress[0].score_id is None
+
+
 class FakeTrainingUow:
     def __init__(self, repository, evaluations):
         self.training_session_repository = repository

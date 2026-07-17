@@ -6,6 +6,7 @@ import {
   Clock3,
   ExternalLink,
   FileText,
+  GitBranch,
   History,
   Loader2,
   Search,
@@ -13,7 +14,9 @@ import {
 } from 'lucide-react'
 import { fetchScenarioTrainingProgress } from '../services/scenarioTraining'
 import {
+  getTrainingConversationBranchInfo,
   listTrainingSessions,
+  type TrainingConversationBranchInfo,
   type TrainingSessionDTO,
   type TrainingSessionStatus,
 } from '../services/trainingSession'
@@ -52,6 +55,7 @@ interface HistoryEntry {
   startedAt?: string | null
   completedAt?: string | null
   lastPracticedAt?: string
+  branchInfo?: TrainingConversationBranchInfo
   source: 'session' | 'progress'
 }
 
@@ -159,6 +163,21 @@ function formatClock(value: string | null | undefined, locale: Locale): string {
   })
 }
 
+function compactHistoryBranchText(value: string, maxLength = 30): string {
+  const text = value.replace(/\s+/g, ' ').trim()
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength - 3)}...`
+}
+
+function historyBranchTitle(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  return [
+    info.branchId ? tr('分支：{value}', 'Branch: {value}', { value: info.branchId }) : '',
+    info.selectedTailMessageId ? tr('尾节点：{value}', 'Tail: {value}', { value: info.selectedTailMessageId }) : '',
+    info.pathCount ? tr('路径节点：{count}', 'Path nodes: {count}', { count: info.pathCount }) : '',
+    info.pathSummary ? compactHistoryBranchText(info.pathSummary, 90) : '',
+  ].filter(Boolean).join(' · ')
+}
+
 function gradeKey(score?: number): string {
   if (score === undefined) return 'pending'
   if (score >= 90) return 'excellent'
@@ -255,6 +274,10 @@ function buildHistoryEntries(
       startedAt: session.started_at,
       completedAt: session.completed_at,
       lastPracticedAt: progressForSession?.lastPracticedAt,
+      branchInfo: getTrainingConversationBranchInfo({
+        session,
+        progress: progressForSession,
+      }) ?? undefined,
       source: 'session',
     }
     entries.push(entry)
@@ -296,6 +319,9 @@ function matchesEntry(
     entry.category,
     entry.difficulty,
     entry.mode,
+    entry.branchInfo?.branchId,
+    entry.branchInfo?.selectedTailMessageId,
+    entry.branchInfo?.pathSummary,
     statusLabels[entry.status].join(' '),
   ].some((value) => String(value || '').toLowerCase().includes(needle))
 }
@@ -525,6 +551,17 @@ export default function TrainingHistoryPage() {
                     <span>{translatedRecordLabel(categoryLabels, entry.category, tr)}</span>
                   )}
                   {entry.mode && <span>{translatedRecordLabel(modeLabels, entry.mode, tr)}</span>}
+                  {entry.branchInfo && (
+                    <span
+                      className="training-history-branch-tag"
+                      title={historyBranchTitle(entry.branchInfo, tr)}
+                    >
+                      <GitBranch size={12} />
+                      {entry.branchInfo.branchId
+                        ? compactHistoryBranchText(entry.branchInfo.branchId)
+                        : tr('路径分支', 'Path branch')}
+                    </span>
+                  )}
                 </div>
               </div>
 

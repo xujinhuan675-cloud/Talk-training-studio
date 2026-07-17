@@ -13,6 +13,7 @@
 .training-result-state,
 .training-result-insights,
 .training-result-coach-events,
+.training-result-branch,
 .training-result-replay {
   max-width: var(--page-max-width);
   margin-left: auto;
@@ -318,6 +319,89 @@
 
 .training-result-dual-grid .training-result-card {
   margin: 0;
+}
+
+.training-result-branch {
+  margin-bottom: 14px;
+}
+
+.training-result-branch-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.training-result-branch-head svg {
+  color: var(--green);
+}
+
+.training-result-branch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.training-result-branch-item {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-base);
+}
+
+.training-result-branch-item.wide {
+  grid-column: span 1;
+}
+
+.training-result-branch-item span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.training-result-branch-item strong,
+.training-result-branch-item em {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-result-branch-item em {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.training-result-branch-path {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  margin-top: 10px;
+  padding-bottom: 2px;
+}
+
+.training-result-branch-path span {
+  min-width: 120px;
+  max-width: 240px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .training-result-summary {
@@ -680,6 +764,10 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 5px;
+  }
+
+  .training-result-branch-grid {
+    grid-template-columns: 1fr;
   }
 
   .training-result-message > div:last-child,

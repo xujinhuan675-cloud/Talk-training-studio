@@ -244,6 +244,7 @@
 .training-history-tags span {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   min-height: 22px;
   border-radius: 7px;
   padding: 0 8px;
@@ -252,6 +253,15 @@
   font-size: 11px;
   font-weight: 850;
   white-space: nowrap;
+}
+
+.training-history-tags span svg {
+  flex: 0 0 auto;
+}
+
+.training-history-tags .training-history-branch-tag {
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .training-history-status,
