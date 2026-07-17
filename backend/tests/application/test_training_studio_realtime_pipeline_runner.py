@@ -74,6 +74,24 @@ class FakeTrainingTranscriptSink:
         await asyncio.wait_for(_wait(), timeout=1)
 
 
+class FakeRealtimeEventSink:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+        self._forwarded_event = asyncio.Event()
+
+    async def __call__(self, event: Mapping[str, Any]) -> None:
+        self.events.append(dict(event))
+        self._forwarded_event.set()
+
+    async def wait_for_events(self, count: int = 1) -> None:
+        async def _wait() -> None:
+            while len(self.events) < count:
+                self._forwarded_event.clear()
+                await self._forwarded_event.wait()
+
+        await asyncio.wait_for(_wait(), timeout=1)
+
+
 def _binding() -> RealtimeSessionBinding:
     return RealtimeSessionBinding(training_session_id="training-1", room_id=42)
 
@@ -82,10 +100,15 @@ async def _started_runner(
     *,
     adapter: FakeRealtimePipelineAdapter | None = None,
     sink: FakeTrainingTranscriptSink | None = None,
+    event_sink: FakeRealtimeEventSink | None = None,
 ) -> tuple[RealtimePipelineSessionRunner, FakeRealtimePipelineAdapter, FakeTrainingTranscriptSink]:
     fake_adapter = adapter or FakeRealtimePipelineAdapter()
     fake_sink = sink or FakeTrainingTranscriptSink()
-    runner = RealtimePipelineSessionRunner(adapter=fake_adapter, transcript_sink=fake_sink)
+    runner = RealtimePipelineSessionRunner(
+        adapter=fake_adapter,
+        transcript_sink=fake_sink,
+        event_sink=event_sink,
+    )
     await runner.start(
         binding=_binding(),
         provider="pipecat",
@@ -180,7 +203,8 @@ async def test_runner_commit_flushes_adapter_audio():
 
 @pytest.mark.asyncio
 async def test_runner_persists_final_transcripts_from_adapter_events():
-    runner, adapter, sink = await _started_runner()
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, sink = await _started_runner(event_sink=event_sink)
 
     await adapter.emit(
         {
@@ -200,6 +224,49 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
     assert transcript.event_id == "evt-1"
 
     await runner.close()
+    assert event_sink.events == []
+
+
+@pytest.mark.asyncio
+async def test_runner_forwards_non_transcript_adapter_events_to_event_sink():
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, sink = await _started_runner(event_sink=event_sink)
+
+    await adapter.emit(
+        {
+            "type": "audio.output",
+            "event_id": "evt-audio-1",
+            "audio": "base64-pcm",
+            "mime_type": "audio/pcm",
+            "sequence": 2,
+        }
+    )
+    await event_sink.wait_for_events()
+
+    assert event_sink.events == [
+        {
+            "type": "audio.output",
+            "event_id": "evt-audio-1",
+            "audio": "base64-pcm",
+            "mime_type": "audio/pcm",
+            "sequence": 2,
+        }
+    ]
+    assert sink.persisted == []
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_forward_non_final_transcript_events_to_event_sink():
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, sink = await _started_runner(event_sink=event_sink)
+
+    await adapter.emit({"type": "transcript.delta", "text": "draft"})
+    await runner.close()
+
+    assert event_sink.events == []
+    assert sink.persisted == []
 
 
 @pytest.mark.asyncio
@@ -287,7 +354,8 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
     provider_event,
     expected_message,
 ):
-    runner, adapter, _sink = await _started_runner()
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, _sink = await _started_runner(event_sink=event_sink)
 
     await adapter.emit(provider_event)
 
@@ -301,3 +369,4 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
         await runner.commit_audio()
 
     await runner.close()
+    assert event_sink.events == []

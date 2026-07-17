@@ -9,7 +9,7 @@ import json
 import mimetypes
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -1339,6 +1339,136 @@ class _WebSocketTrainingTranscriptSink:
         return persisted
 
 
+def _pipeline_event_type(payload: Mapping[str, object]) -> str:
+    return str(payload.get("type") or "").strip().lower()
+
+
+def _pipeline_event_value(payload: Mapping[str, object], *keys: str) -> object | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    nested = payload.get("payload")
+    if isinstance(nested, Mapping):
+        for key in keys:
+            value = nested.get(key)
+            if value is not None:
+                return value
+    return None
+
+
+def _decode_pipeline_audio_bytes(payload: Mapping[str, object]) -> bytes:
+    value = _pipeline_event_value(payload, "audio", "audioData", "data", "chunk", "base64")
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return b""
+        if "," in text and text.lower().startswith("data:"):
+            text = text.split(",", 1)[1].strip()
+        try:
+            return base64.b64decode(text, validate=True)
+        except ValueError:
+            return b""
+    if isinstance(value, list) and all(isinstance(item, int) for item in value):
+        try:
+            return bytes(value)
+        except ValueError:
+            return b""
+    return b""
+
+
+def _coerce_optional_int(value: object | None) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_safe_realtime_value(value: object) -> object | None:
+    if isinstance(value, str | int | float | bool) or value is None:
+        return value
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            safe_item = _json_safe_realtime_value(item)
+            if safe_item is not None:
+                result[str(key)] = safe_item
+        return result or None
+    if isinstance(value, list | tuple):
+        result = [
+            safe_item
+            for item in value
+            if (safe_item := _json_safe_realtime_value(item)) is not None
+        ]
+        return result or None
+    return None
+
+
+def _pipeline_audio_output_payload(
+    payload: Mapping[str, object],
+    *,
+    audio_bytes: bytes,
+    mime_type: str | None,
+    sequence: int | None,
+) -> dict[str, object]:
+    output: dict[str, object] = {}
+    nested = payload.get("payload")
+    if isinstance(nested, Mapping):
+        for key, value in nested.items():
+            safe_value = _json_safe_realtime_value(value)
+            if safe_value is not None:
+                output[str(key)] = safe_value
+    for key, value in payload.items():
+        if key in {"type", "payload"}:
+            continue
+        safe_value = _json_safe_realtime_value(value)
+        if safe_value is not None:
+            output[str(key)] = safe_value
+
+    for key in ("audio", "audioData", "data", "chunk", "base64"):
+        output.pop(key, None)
+    output["audio"] = base64.b64encode(audio_bytes).decode("ascii")
+    output["bytes"] = len(audio_bytes)
+    if mime_type:
+        output["mime_type"] = mime_type
+        output["mimeType"] = mime_type
+    if sequence is not None:
+        output["sequence"] = sequence
+    return output
+
+
+async def _send_pipeline_audio_output_event(
+    *,
+    websocket: WebSocket,
+    session: RealtimeSession,
+    payload: Mapping[str, object],
+) -> None:
+    audio_bytes = _decode_pipeline_audio_bytes(payload)
+    mime_type = _coerce_optional_text(
+        _pipeline_event_value(payload, "mimeType", "mime_type", "contentType", "content_type")
+    )
+    try:
+        event = session.send_audio(audio_bytes, mime_type)
+        wire_event = _event_to_wire(event)
+        sequence = _coerce_optional_int(event.payload.get("sequence"))
+    except RealtimeSessionStateError:
+        wire_event = _realtime_wire_event("audio.output", session)
+        sequence = _coerce_optional_int(_pipeline_event_value(payload, "sequence"))
+    wire_event["payload"] = _pipeline_audio_output_payload(
+        payload,
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+        sequence=sequence,
+    )
+    await websocket.send_json(wire_event)
+
+
 async def _pump_openai_realtime_events(
     *,
     openai_client: OpenAIRealtimeTranscriptionClient,
@@ -2277,7 +2407,19 @@ async def realtime_training_session(
             svc=svc,
             uow_factory=uow_factory,
         )
-        runner = RealtimePipelineSessionRunner(adapter=adapter, transcript_sink=sink)
+        async def _relay_pipeline_event(payload: Mapping[str, Any]) -> None:
+            if _pipeline_event_type(payload) == "audio.output":
+                await _send_pipeline_audio_output_event(
+                    websocket=websocket,
+                    session=session,
+                    payload=payload,
+                )
+
+        runner = RealtimePipelineSessionRunner(
+            adapter=adapter,
+            transcript_sink=sink,
+            event_sink=_relay_pipeline_event,
+        )
         voice_context = await _build_realtime_voice_context(
             active_binding,
             provider=provider,

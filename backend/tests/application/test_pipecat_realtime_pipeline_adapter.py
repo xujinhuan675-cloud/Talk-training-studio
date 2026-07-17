@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -36,6 +37,23 @@ class FakeInputAudioRawFrame:
     audio: bytes
     sample_rate: int
     num_channels: int
+
+
+@dataclass
+class FakeOutputAudioRawFrame:
+    audio: bytes
+    sample_rate: int
+    num_channels: int
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 404
+    name: str = "FakeOutputAudioRawFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeTTSAudioRawFrame(FakeOutputAudioRawFrame):
+    context_id: str | None = None
+    name: str = "FakeTTSAudioRawFrame"
 
 
 class FakeEndFrame:
@@ -262,6 +280,7 @@ def fake_runtime(websocket=True):
         TextFrame=FakeTextFrame,
         TranscriptionFrame=FakeTranscriptionFrame,
         LLMContextAssistantTurnFrame=FakeLLMContextAssistantTurnFrame,
+        TTSAudioRawFrame=FakeTTSAudioRawFrame,
         FrameProcessor=FakeFrameProcessor,
         FrameDirection=FakeFrameDirection,
         InterimTranscriptionFrame=FakeInterimTranscriptionFrame,
@@ -474,7 +493,10 @@ def test_pipecat_capability_reports_missing_core_symbol(monkeypatch):
     assert capability.available is False
     assert capability.core_available is False
     assert capability.websocket_available is True
-    assert capability.missing_modules == ("pipecat.pipeline.worker.PipelineWorker",)
+    assert capability.missing_modules == (
+        "pipecat.pipeline.worker.PipelineWorker",
+        "pipecat.frames.frames.TTSAudioRawFrame",
+    )
     assert "Missing Pipecat runtime symbol" in capability.error
 
 
@@ -1190,6 +1212,110 @@ async def test_talkwise_event_processor_preserves_assistant_frame_metadata():
 
 
 @pytest.mark.asyncio
+async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_event():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            output_audio_format="pcm16",
+            metadata={"talkwise": {"trainingSessionId": "training-1", "roomId": 7}},
+        ),
+    )
+    audio = b"\x01\x02\x03\x04"
+
+    await processor.process_frame(
+        FakeTTSAudioRawFrame(
+            audio=audio,
+            sample_rate=24000,
+            num_channels=1,
+            context_id="tts-context-1",
+            pts=1234,
+            metadata={"voice": "alloy", "unsafe": object()},
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+    payload = event["payload"]
+    encoded = base64.b64encode(audio).decode("ascii")
+    assert event["type"] == "audio.output"
+    assert event["source"] == "pipecat"
+    assert event["audio"] == encoded
+    assert event["mimeType"] == "audio/pcm"
+    assert event["sampleRate"] == 24000
+    assert event["channels"] == 1
+    assert event["sequence"] == 1
+    assert event["bytes"] == len(audio)
+    assert event["contextId"] == "tts-context-1"
+    assert payload["audio"] == encoded
+    assert payload["encoding"] == "base64"
+    assert payload["mimeType"] == "audio/pcm"
+    assert payload["sampleRate"] == 24000
+    assert payload["channels"] == 1
+    assert payload["sequence"] == 1
+    assert payload["bytes"] == len(audio)
+    assert payload["contextId"] == "tts-context-1"
+    assert payload["metadata"]["voice"] == "alloy"
+    assert payload["metadata"]["talkwise"] == {"trainingSessionId": "training-1", "roomId": 7}
+    assert payload["metadata"]["pipecatFrame"] == {
+        "frameId": 404,
+        "frameName": "FakeTTSAudioRawFrame",
+        "pts": 1234,
+    }
+    assert "unsafe" not in payload["metadata"]
+    assert processor.pushed[0][0].audio == audio
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_uses_frame_audio_sequence_when_present():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+    )
+
+    await processor.process_frame(
+        FakeTTSAudioRawFrame(
+            audio=b"pcm",
+            sample_rate=16000,
+            num_channels=2,
+            metadata={"sequence": 42, "mimeType": "audio/l16"},
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+    assert event["sequence"] == 42
+    assert event["payload"]["sequence"] == 42
+    assert event["payload"]["channels"] == 2
+    assert event["payload"]["mimeType"] == "audio/l16"
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_does_not_mirror_generic_output_audio_frame():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+    )
+
+    await processor.process_frame(
+        FakeOutputAudioRawFrame(audio=b"pcm", sample_rate=16000, num_channels=1),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    assert queue.empty()
+    assert processor.pushed[0][0].audio == b"pcm"
+
+
+@pytest.mark.asyncio
 async def test_talkwise_event_processor_preserves_config_talkwise_metadata():
     runtime = fake_runtime(websocket=False)
     queue = asyncio.Queue()
@@ -1248,6 +1374,20 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
         in snapshot["talkwiseResponsibilities"]
     )
     assert "pipecat.frames.frames.InterimTranscriptionFrame" in snapshot["frameEntrypoints"]
+    assert "pipecat.frames.frames.TTSAudioRawFrame" in snapshot["frameEntrypoints"]
+    assert snapshot["audioFrameFields"]["pipecat.frames.frames.OutputAudioRawFrame"] == (
+        "audio",
+        "sample_rate",
+        "num_channels",
+        "num_frames",
+    )
+    assert snapshot["audioFrameFields"]["pipecat.frames.frames.TTSAudioRawFrame"] == (
+        "context_id",
+    )
+    assert (
+        "TTSAudioRawFrame to provider-neutral audio.output event mirroring"
+        in snapshot["talkwiseResponsibilities"]
+    )
     assert "pipecat.audio.vad.silero.SileroVADAnalyzer" == snapshot["vadEntrypoint"]
     assert (
         "pipecat.processors.audio.vad_processor.VADProcessor" == snapshot["vadProcessorEntrypoint"]

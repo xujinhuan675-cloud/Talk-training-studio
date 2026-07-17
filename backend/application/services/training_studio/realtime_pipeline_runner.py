@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from typing import Any
 from uuid import uuid4
@@ -19,6 +19,7 @@ from application.ports.realtime import (
 from application.services.training_studio.realtime_pipeline import build_realtime_transcript
 
 _EVENT_PUMP_CLOSE_TIMEOUT_SECONDS = 1.0
+RealtimePipelineEventSink = Callable[[Mapping[str, Any]], Awaitable[None] | None]
 
 
 class RealtimePipelineRunnerStateError(ValueError):
@@ -33,9 +34,11 @@ class RealtimePipelineSessionRunner:
         *,
         adapter: RealtimePipelineAdapter,
         transcript_sink: TrainingTranscriptSink,
+        event_sink: RealtimePipelineEventSink | None = None,
     ) -> None:
         self._adapter = adapter
         self._transcript_sink = transcript_sink
+        self._event_sink = event_sink
         self._context: TrainingVoiceContext | None = None
         self._config: RealtimePipelineConfig | None = None
         self._realtime_session_id: str | None = None
@@ -149,7 +152,16 @@ class RealtimePipelineSessionRunner:
                 payload = dict(event)
                 if _is_provider_error(payload):
                     raise RuntimeError(_provider_error_message(payload))
-                await self._persist_final_transcript(payload, context, config, realtime_session_id)
+                persisted = await self._persist_final_transcript(
+                    payload,
+                    context,
+                    config,
+                    realtime_session_id,
+                )
+                if persisted:
+                    continue
+                if not _is_transcript_event(payload):
+                    await self._forward_event(payload)
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
@@ -162,7 +174,7 @@ class RealtimePipelineSessionRunner:
         context: TrainingVoiceContext,
         config: RealtimePipelineConfig,
         realtime_session_id: str,
-    ) -> None:
+    ) -> bool:
         transcript = build_realtime_transcript(
             payload,
             binding=context.binding,
@@ -170,8 +182,16 @@ class RealtimePipelineSessionRunner:
             realtime_session_id=realtime_session_id,
         )
         if transcript is None:
-            return
+            return False
         await self._transcript_sink.persist(transcript)
+        return True
+
+    async def _forward_event(self, payload: Mapping[str, Any]) -> None:
+        if self._event_sink is None:
+            return
+        maybe_awaitable = self._event_sink(dict(payload))
+        if maybe_awaitable is not None:
+            await maybe_awaitable
 
     async def _stop_events_task(self) -> None:
         task = self._events_task
@@ -217,6 +237,11 @@ def _is_provider_error(payload: Mapping[str, object]) -> bool:
     return event_type in {"error", "pipeline.error", "realtime.error"}
 
 
+def _is_transcript_event(payload: Mapping[str, object]) -> bool:
+    event_type = str(payload.get("type") or "").lower()
+    return "transcript" in event_type or "transcription" in event_type
+
+
 def _provider_error_message(payload: Mapping[str, object]) -> str:
     for key in ("message", "detail", "error"):
         value = payload.get(key)
@@ -230,6 +255,7 @@ def _provider_error_message(payload: Mapping[str, object]) -> str:
 
 
 __all__ = [
+    "RealtimePipelineEventSink",
     "RealtimePipelineRunnerStateError",
     "RealtimePipelineSessionRunner",
 ]

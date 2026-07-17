@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -895,6 +894,80 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
     assert state.messages[0].metadata["realtime"]["provider"] == "pipecat"
     assert state.messages[0].metadata["realtime"]["role"] == "assistant"
     assert state.messages[0].metadata["realtime"]["responseId"] == "response_pipecat_1"
+
+
+def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_final_transcript() -> None:
+    app, state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    output_audio = b"\x10\x20\x30"
+    adapter.events_on_commit.extend(
+        [
+            {
+                "type": "audio.output",
+                "audio": output_audio,
+                "mimeType": "audio/pcm",
+                "sequence": 99,
+                "metadata": {"providerFrame": "tts"},
+            },
+            {
+                "type": "response.audio_transcript.done",
+                "text": "Let's define the pilot metric before we begin.",
+                "response_id": "response_pipecat_2",
+                "source": "pipecat",
+            },
+        ]
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        assert started["payload"]["provider"] == "pipecat"
+        assert listening["status"] == "listening"
+
+        ws.send_json({"type": "audio.commit"})
+        committed = ws.receive_json()
+        events = [ws.receive_json() for _ in range(3)]
+
+        assert committed["status"] == "processing"
+        audio_output = next(event for event in events if event["type"] == "audio.output")
+        persisted = next(event for event in events if event["type"] == "transcript.persisted")
+        assert any(
+            event["type"] == "status.changed" and event["status"] == "listening"
+            for event in events
+        )
+        assert audio_output["status"] == "speaking"
+        assert audio_output["payload"]["audio"] == base64.b64encode(output_audio).decode("ascii")
+        assert audio_output["payload"]["bytes"] == len(output_audio)
+        assert audio_output["payload"]["mimeType"] == "audio/pcm"
+        assert audio_output["payload"]["mime_type"] == "audio/pcm"
+        assert audio_output["payload"]["sequence"] == 1
+        assert audio_output["payload"]["metadata"] == {"providerFrame": "tts"}
+        assert persisted["payload"]["message"]["content"] == (
+            "Let's define the pilot metric before we begin."
+        )
+
+        ws.send_json({"type": "session.close", "reason": "audio-output"})
+        closed = ws.receive_json()
+        assert closed["type"] == "session.closed"
+
+    assert adapter.commits == 1
+    assert adapter.closed is True
+    assert [message.content for message in state.messages] == [
+        "Let's define the pilot metric before we begin."
+    ]
+    assert state.messages[0].sender_type == "persona"
+    assert state.messages[0].sender_id == "assistant"
+    assert state.messages[0].metadata["source"] == "pipecat"
+    assert state.messages[0].metadata["trainingMode"] == "voice"
+    assert state.messages[0].metadata["interactionMode"] == "realtime"
+    assert state.messages[0].metadata["realtime"]["provider"] == "pipecat"
+    assert state.messages[0].metadata["realtime"]["responseId"] == "response_pipecat_2"
 
 
 def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> None:

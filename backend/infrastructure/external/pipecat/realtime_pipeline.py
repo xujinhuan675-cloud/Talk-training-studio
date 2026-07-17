@@ -8,6 +8,7 @@ dependency-safe factories, and DTO-to-frame adaptation only.
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib
 import importlib.util
 import json
@@ -57,6 +58,7 @@ CORE_PIPECAT_SYMBOLS: Mapping[str, tuple[str, ...]] = {
         "TextFrame",
         "TranscriptionFrame",
         "LLMContextAssistantTurnFrame",
+        "TTSAudioRawFrame",
     ),
     "pipecat.processors.frame_processor": ("FrameProcessor", "FrameDirection"),
 }
@@ -143,6 +145,7 @@ class PipecatRuntime:
     TextFrame: type
     TranscriptionFrame: type
     LLMContextAssistantTurnFrame: type
+    TTSAudioRawFrame: type
     FrameProcessor: type
     FrameDirection: type
     InterimTranscriptionFrame: type | None = None
@@ -500,6 +503,9 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         ),
         LLMContextAssistantTurnFrame=_required_pipecat_symbol(
             frames_module, "pipecat.frames.frames", "LLMContextAssistantTurnFrame"
+        ),
+        TTSAudioRawFrame=_required_pipecat_symbol(
+            frames_module, "pipecat.frames.frames", "TTSAudioRawFrame"
         ),
         FrameProcessor=_required_pipecat_symbol(
             processor_module, "pipecat.processors.frame_processor", "FrameProcessor"
@@ -1053,12 +1059,25 @@ def create_talkwise_event_processor(
     *,
     config: RealtimePipelineConfig,
 ) -> Any:
-    """Create a small Pipecat processor that mirrors final transcript frames."""
+    """Create a small Pipecat processor that mirrors transcript and TTS audio frames."""
 
     class TalkWiseEventProcessor(runtime.FrameProcessor):  # type: ignore[misc, valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._audio_output_sequence = 0
+
         async def process_frame(self, frame: Any, direction: Any) -> None:
             await super().process_frame(frame, direction)
-            event = _event_from_pipecat_frame(runtime, frame, config=config)
+            audio_sequence = None
+            if isinstance(frame, runtime.TTSAudioRawFrame):
+                self._audio_output_sequence += 1
+                audio_sequence = self._audio_output_sequence
+            event = _event_from_pipecat_frame(
+                runtime,
+                frame,
+                config=config,
+                audio_sequence=audio_sequence,
+            )
             if event is not None:
                 await event_queue.put(event)
             await self.push_frame(frame, direction)
@@ -1071,7 +1090,14 @@ def _event_from_pipecat_frame(
     frame: Any,
     *,
     config: RealtimePipelineConfig,
+    audio_sequence: int | None = None,
 ) -> Mapping[str, Any] | None:
+    if isinstance(frame, runtime.TTSAudioRawFrame):
+        return _tts_audio_event_from_pipecat_frame(
+            frame,
+            config=config,
+            audio_sequence=audio_sequence,
+        )
     if runtime.InterimTranscriptionFrame is not None and isinstance(
         frame, runtime.InterimTranscriptionFrame
     ):
@@ -1112,6 +1138,145 @@ def _event_from_pipecat_frame(
         }
         return _with_frame_metadata(event, frame, config=config)
     return None
+
+
+def _tts_audio_event_from_pipecat_frame(
+    frame: Any,
+    *,
+    config: RealtimePipelineConfig,
+    audio_sequence: int | None,
+) -> Mapping[str, Any] | None:
+    audio = _bytes_from_audio_frame(frame)
+    if audio is None:
+        return None
+
+    sequence = _frame_audio_sequence(frame, fallback=audio_sequence)
+    payload: dict[str, Any] = {
+        "audio": base64.b64encode(audio).decode("ascii"),
+        "encoding": "base64",
+        "mimeType": _output_audio_mime_type(config, frame),
+        "sampleRate": _frame_sample_rate(frame, config),
+        "channels": _frame_channels(frame, config),
+        "sequence": sequence,
+        "bytes": len(audio),
+    }
+    context_id = _json_safe_metadata(getattr(frame, "context_id", None))
+    if context_id is not None:
+        payload["contextId"] = context_id
+
+    event: dict[str, Any] = {
+        "type": "audio.output",
+        "provider": config.provider,
+        "source": "pipecat",
+        "payload": payload,
+        "audio": payload["audio"],
+        "encoding": payload["encoding"],
+        "mimeType": payload["mimeType"],
+        "sampleRate": payload["sampleRate"],
+        "channels": payload["channels"],
+        "sequence": payload["sequence"],
+        "bytes": payload["bytes"],
+    }
+    if context_id is not None:
+        event["contextId"] = context_id
+    event = _with_frame_metadata(event, frame, config=config)
+    if "metadata" in event:
+        payload["metadata"] = event["metadata"]
+    return event
+
+
+def _bytes_from_audio_frame(frame: Any) -> bytes | None:
+    audio = getattr(frame, "audio", None)
+    if isinstance(audio, bytes):
+        return audio
+    if isinstance(audio, bytearray):
+        return bytes(audio)
+    if isinstance(audio, memoryview):
+        return audio.tobytes()
+    return None
+
+
+def _frame_audio_sequence(frame: Any, *, fallback: int | None) -> int | None:
+    raw_metadata = getattr(frame, "metadata", None)
+    if isinstance(raw_metadata, Mapping):
+        for key in ("sequence", "audioSequence", "audio_sequence"):
+            if key in raw_metadata:
+                try:
+                    return int(raw_metadata[key])
+                except (TypeError, ValueError):
+                    break
+    return fallback
+
+
+def _frame_sample_rate(frame: Any, config: RealtimePipelineConfig) -> int:
+    value = getattr(frame, "sample_rate", None)
+    if value is None:
+        value = _audio_out_sample_rate(config) or _audio_in_sample_rate(config)
+    return int(value or 16000)
+
+
+def _frame_channels(frame: Any, config: RealtimePipelineConfig) -> int:
+    value = getattr(frame, "num_channels", None)
+    if value is None:
+        value = getattr(frame, "channels", None)
+    if value is None:
+        value = config.metadata.get("outputChannels") or config.metadata.get("channels")
+    return int(value or 1)
+
+
+def _output_audio_mime_type(config: RealtimePipelineConfig, frame: Any) -> str:
+    raw_metadata = getattr(frame, "metadata", None)
+    if isinstance(raw_metadata, Mapping):
+        mime_type = _metadata_text(raw_metadata, "mimeType", "mime_type")
+        if mime_type:
+            return _normalize_audio_mime_type(mime_type)
+
+    metadata = dict(config.metadata)
+    mime_type = _metadata_text(
+        metadata,
+        "outputMimeType",
+        "output_mime_type",
+        "audioOutputMimeType",
+        "audio_output_mime_type",
+    )
+    if mime_type:
+        return _normalize_audio_mime_type(mime_type)
+
+    tts_config = _feature_config(metadata, "tts")
+    mime_type = _metadata_text(tts_config, "mimeType", "mime_type", "outputMimeType")
+    if mime_type:
+        return _normalize_audio_mime_type(mime_type)
+
+    audio_format = (
+        config.output_audio_format
+        or _metadata_text(metadata, "outputAudioFormat", "output_audio_format")
+        or _metadata_text(tts_config, "format", "audioFormat", "audio_format")
+    )
+    if audio_format:
+        return _normalize_audio_mime_type(audio_format)
+    return "audio/pcm"
+
+
+def _normalize_audio_mime_type(value: str) -> str:
+    text = value.strip().lower()
+    if not text:
+        return "audio/pcm"
+    if "/" in text:
+        return text
+    aliases = {
+        "pcm": "audio/pcm",
+        "pcm16": "audio/pcm",
+        "s16le": "audio/pcm",
+        "l16": "audio/l16",
+        "wav": "audio/wav",
+        "wave": "audio/wav",
+        "mp3": "audio/mpeg",
+        "mpeg": "audio/mpeg",
+        "opus": "audio/opus",
+        "ogg": "audio/ogg",
+        "webm": "audio/webm",
+    }
+    return aliases.get(text, f"audio/{text}")
 
 
 def _with_frame_metadata(
@@ -1740,9 +1905,19 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "pipecat.frames.frames.InterimTranscriptionFrame",
             "pipecat.frames.frames.TranscriptionFrame",
             "pipecat.frames.frames.LLMContextAssistantTurnFrame",
+            "pipecat.frames.frames.TTSAudioRawFrame",
             "pipecat.frames.frames.UserStartedSpeakingFrame",
             "pipecat.frames.frames.UserStoppedSpeakingFrame",
         ),
+        "audioFrameFields": {
+            "pipecat.frames.frames.OutputAudioRawFrame": (
+                "audio",
+                "sample_rate",
+                "num_channels",
+                "num_frames",
+            ),
+            "pipecat.frames.frames.TTSAudioRawFrame": ("context_id",),
+        },
         "websocketEntrypoint": ("pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport"),
         "vadParamsEntrypoint": ("pipecat.audio.vad.vad_analyzer.VADParams"),
         "vadEntrypoint": ("pipecat.audio.vad.silero.SileroVADAnalyzer"),
@@ -1775,6 +1950,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "TrainingVoiceContext to LLMContext seed adaptation",
             "interim transcript frame mirroring",
             "final transcript frame mirroring",
+            "TTSAudioRawFrame to provider-neutral audio.output event mirroring",
         ),
     }
 
