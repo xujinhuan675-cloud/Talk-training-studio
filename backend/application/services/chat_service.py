@@ -26,6 +26,7 @@ from domain.conversation.exceptions import (
 )
 
 logger = get_logger(__name__)
+_HISTORY_MESSAGE_STATUSES = {"active", "superseded"}
 
 
 def _utcnow() -> datetime:
@@ -66,8 +67,9 @@ class ChatApplicationService:
                 message = await uow.message_repository.get_by_public_id(current_id)
                 if message is None or message.conversation_id != conversation_id:
                     raise ValueError("Message tree path contains an invalid message")
-                if message.status == "active":
-                    messages.append(message)
+                if message.status not in _HISTORY_MESSAGE_STATUSES:
+                    raise ValueError("Message tree path contains an inactive message")
+                messages.append(message)
                 current_id = message.parent_message_id
             messages.reverse()
         else:
@@ -76,7 +78,9 @@ class ChatApplicationService:
                 limit=limit,
                 branch_id=branch_id,
             )
-            messages = [message for message in messages if message.status == "active"]
+            messages = [
+                message for message in messages if message.status in _HISTORY_MESSAGE_STATUSES
+            ]
         return [LLMMessage(role=m.role, content=m.content) for m in messages]
 
     async def _resolve_parent_message(
@@ -91,14 +95,15 @@ class ChatApplicationService:
             parent = await uow.message_repository.get_by_public_id(parent_public_id)
             if parent is None or parent.conversation_id != conversation_id:
                 raise ValueError("parent_message_id does not reference this conversation")
-            if parent.status == "deleted":
-                raise ValueError("parent_message_id references a deleted message")
+            if parent.status not in _HISTORY_MESSAGE_STATUSES:
+                raise ValueError("parent_message_id references an inactive message")
             return parent, requested_branch or parent.branch_id or "main"
 
         branch_id = requested_branch or "main"
         parent = await uow.message_repository.get_latest_by_conversation(
             conversation_id,
             branch_id=branch_id,
+            statuses=tuple(_HISTORY_MESSAGE_STATUSES),
         )
         return parent, branch_id
 

@@ -58,6 +58,8 @@ class MessageRepository(ABC):
         conversation_id: int,
         *,
         branch_id: Optional[str] = None,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
     ) -> Optional[Message]: ...
 
     @abstractmethod
@@ -149,6 +151,9 @@ class RunRepository(ABC):
         *,
         skip: int = 0,
         limit: int = 50,
+        provider: Optional[str] = None,
+        status: Optional[str] = None,
+        trigger_message_id: Optional[str] = None,
     ) -> list[Run]: ...
 
 

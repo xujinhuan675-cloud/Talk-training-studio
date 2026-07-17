@@ -113,6 +113,8 @@ class SQLAlchemyMessageRepository(MessageRepository):
         conversation_id: int,
         *,
         branch_id: Optional[str] = None,
+        statuses: Optional[Sequence[str]] = None,
+        include_deleted: bool = False,
     ) -> Optional[Message]:
         query = (
             select(MessageModel)
@@ -122,6 +124,7 @@ class SQLAlchemyMessageRepository(MessageRepository):
         )
         if branch_id is not None:
             query = query.where(MessageModel.branch_id == branch_id)
+        query = _apply_status_filter(query, statuses=statuses, include_deleted=include_deleted)
         result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
@@ -190,9 +193,13 @@ class SQLAlchemyMessageRepository(MessageRepository):
                 if allowed_statuses
                 else include_deleted or message.status != "deleted"
             )
-            if status_allowed:
-                messages.append(message)
+            if not status_allowed:
+                return []
+            messages.append(message)
             current_id = message.parent_message_id
+
+        if current_id:
+            return []
 
         messages.reverse()
         return messages

@@ -98,11 +98,20 @@ class SQLAlchemyRunRepository(RunRepository):
         *,
         skip: int = 0,
         limit: int = 50,
+        provider: Optional[str] = None,
+        status: Optional[str] = None,
+        trigger_message_id: Optional[str] = None,
     ) -> list[Run]:
+        query = select(RunModel).where(RunModel.conversation_id == conversation_id)
+        if provider is not None:
+            query = query.where(RunModel.provider == provider)
+        if status is not None:
+            query = query.where(RunModel.status == status)
+        if trigger_message_id is not None:
+            trigger_expr = RunModel.extra_metadata["trigger_message_id"].as_string()
+            query = query.where(trigger_expr == trigger_message_id)
         query = (
-            select(RunModel)
-            .where(RunModel.conversation_id == conversation_id)
-            .order_by(RunModel.created_at.desc(), RunModel.id.desc())
+            query.order_by(RunModel.created_at.desc(), RunModel.id.desc())
             .offset(skip)
             .limit(limit)
         )

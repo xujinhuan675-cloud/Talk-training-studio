@@ -13,7 +13,15 @@ from urllib.parse import urlsplit, urlunsplit
 
 from openai import AsyncOpenAI
 
-from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMProviderMetadata, LLMResponse
+from application.ports.llm import (
+    LLMChunk,
+    LLMEndpointMetadata,
+    LLMMessage,
+    LLMModelMetadata,
+    LLMPort,
+    LLMProviderMetadata,
+    LLMResponse,
+)
 from core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -59,12 +67,29 @@ class OpenAIProvider:
     @property
     def provider_metadata(self) -> LLMProviderMetadata:
         """Return stable provider identity for run/message tracking."""
+        endpoint = str(self._endpoint) if self._endpoint else None
+        default_model = LLMModelMetadata(
+            name=self._default_model,
+            provider=self.provider,
+            endpoint=endpoint,
+            is_default=True,
+            max_output_tokens=self._default_max_tokens,
+        )
+        endpoint_metadata = LLMEndpointMetadata(
+            provider=self.provider,
+            endpoint=endpoint,
+            wire_api=self._wire_api,
+            default_model=self._default_model,
+            models=[default_model],
+        )
         return LLMProviderMetadata(
             provider=self.provider,
             default_model=self._default_model,
-            endpoint=str(self._endpoint) if self._endpoint else None,
+            endpoint=endpoint,
             wire_api=self._wire_api,
             max_retries=self._max_retries,
+            models=[default_model],
+            endpoints=[endpoint_metadata],
         )
 
     def _build_messages(self, messages: list[LLMMessage]) -> list[dict]:

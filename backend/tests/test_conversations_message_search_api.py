@@ -45,6 +45,8 @@ def _conversation() -> ConversationDTO:
 class _FakeChatService:
     def __init__(self) -> None:
         self.search_call = None
+        self.path_call = None
+        self.children_call = None
         self.locate_call = None
         self.fork_call = None
         self.edit_call = None
@@ -60,6 +62,14 @@ class _FakeChatService:
                 context=[message],
             )
         ]
+
+    async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):
+        self.path_call = (conversation_id, message_public_id, kwargs)
+        return [_message("Path root", public_id=message_public_id)]
+
+    async def list_message_children(self, conversation_id: int, message_public_id: str, **kwargs):
+        self.children_call = (conversation_id, message_public_id, kwargs)
+        return [_message("Child turn", public_id="msg_child")]
 
     async def locate_message(self, conversation_id: int, message_public_id: str, **kwargs):
         self.locate_call = (conversation_id, message_public_id, kwargs)
@@ -131,6 +141,55 @@ def test_search_messages_route_returns_branch_context() -> None:
             "context_before": 2,
             "context_after": 3,
         },
+    )
+
+
+def test_get_message_path_route_passes_tree_filters() -> None:
+    service = _FakeChatService()
+    client = _client(service)
+
+    response = client.get(
+        "/api/v1/conversations/7/messages/msg_selected/path",
+        params={
+            "limit": 5,
+            "include_deleted": True,
+            "statuses": ["active", "superseded"],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data[0]["public_id"] == "msg_selected"
+    assert service.path_call == (
+        7,
+        "msg_selected",
+        {
+            "limit": 5,
+            "include_deleted": True,
+            "statuses": ["active", "superseded"],
+        },
+    )
+
+
+def test_list_message_children_route_passes_tree_filters() -> None:
+    service = _FakeChatService()
+    client = _client(service)
+
+    response = client.get(
+        "/api/v1/conversations/7/messages/msg_parent/children",
+        params={
+            "include_deleted": True,
+            "statuses": ["active"],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data[0]["public_id"] == "msg_child"
+    assert service.children_call == (
+        7,
+        "msg_parent",
+        {"statuses": ["active"], "include_deleted": True},
     )
 
 

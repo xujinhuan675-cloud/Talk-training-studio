@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -251,6 +253,128 @@ async def test_chat_sync_respects_history_limit(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_chat_sync_keeps_superseded_ancestors_in_selected_branch_history(
+    session_factory,
+):
+    conversation, first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        first_user.mark_superseded()
+        await uow.message_repository.update(first_user)
+        await uow.commit()
+
+    llm = _FakeLLM()
+    service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    await service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Continue the visible old branch.",
+            parent_message_id=first_assistant.public_id,
+            stream=False,
+        ),
+    )
+
+    assert [message.content for message in llm.calls[0]] == [
+        "Stay concise.",
+        "Root user turn.",
+        "Root assistant turn.",
+        "Continue the visible old branch.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_omitted_parent_uses_latest_non_deleted_branch_message(
+    session_factory,
+):
+    conversation, first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        first_assistant.status = "deleted"
+        await uow.message_repository.update(first_assistant)
+        await uow.commit()
+
+    llm = _FakeLLM()
+    service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    await service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Continue after deleted tail.",
+            branch_id="main",
+            stream=False,
+        ),
+    )
+
+    assert [message.content for message in llm.calls[0]] == [
+        "Stay concise.",
+        "Root user turn.",
+        "Continue after deleted tail.",
+    ]
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        messages = await uow.message_repository.list_by_conversation(
+            conversation.id,
+            branch_id="main",
+        )
+
+    assert messages[-2].content == "Continue after deleted tail."
+    assert messages[-2].parent_message_id == first_user.public_id
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_rejects_selected_branch_with_inactive_ancestor(
+    session_factory,
+):
+    conversation, _first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        leaf = await uow.message_repository.create(
+            first_assistant.create_child(role="user", content="Leaf after deleted middle.")
+        )
+        middle = await uow.message_repository.get_by_public_id(first_assistant.public_id)
+        assert middle is not None
+        middle.status = "deleted"
+        await uow.message_repository.update(middle)
+        await uow.commit()
+
+    llm = _FakeLLM()
+    service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    with pytest.raises(ValueError, match="inactive message"):
+        await service.send_message_sync(
+            conversation.id,
+            ChatRequestDTO(
+                message="This path is disconnected.",
+                parent_message_id=leaf.public_id,
+                stream=False,
+            ),
+        )
+
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
 async def test_chat_sync_failure_marks_run_retryable(session_factory):
     conversation, *_ = await _seed_conversation(session_factory)
     llm = _FailingLLM()
@@ -496,3 +620,65 @@ async def test_conversation_service_fork_direct_path_excludes_siblings(session_f
         off_path_user.public_id,
     }
     assert first_assistant.public_id not in result.source_to_forked_id
+
+
+@pytest.mark.asyncio
+async def test_conversation_service_fork_preserves_parent_before_child_order(
+    session_factory,
+):
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        conversation = await uow.conversation_repository.create(
+            Conversation(
+                id=None,
+                title="Out-of-order source",
+                system_prompt=None,
+                model="gpt-test",
+            )
+        )
+        parent = await uow.message_repository.create(
+            Message(
+                id=None,
+                conversation_id=conversation.id,
+                role="user",
+                content="Parent created later.",
+                branch_id="main",
+                created_at=base_time + timedelta(seconds=10),
+            )
+        )
+        child = await uow.message_repository.create(
+            Message(
+                id=None,
+                conversation_id=conversation.id,
+                role="assistant",
+                content="Child created earlier.",
+                parent_message_id=parent.public_id,
+                branch_id="main",
+                created_at=base_time,
+            )
+        )
+        await uow.commit()
+
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    result = await service.fork_conversation(
+        conversation.id,
+        child.public_id,
+        ForkConversationDTO(option="directPath"),
+    )
+
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        forked_messages = await uow.message_repository.list_by_conversation(
+            result.conversation.id,
+        )
+
+    assert [message.content for message in forked_messages] == [
+        "Parent created later.",
+        "Child created earlier.",
+    ]
+    assert forked_messages[1].created_at > forked_messages[0].created_at

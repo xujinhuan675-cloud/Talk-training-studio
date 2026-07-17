@@ -168,6 +168,65 @@ async def test_message_repository_filters_tree_queries_by_status(session) -> Non
 
 
 @pytest.mark.asyncio
+async def test_message_repository_does_not_return_disconnected_filtered_paths(session) -> None:
+    conv_repo = SQLAlchemyConversationRepository(session)
+    msg_repo = SQLAlchemyMessageRepository(session)
+
+    conv = await conv_repo.create(Conversation(id=None, title="Filtered path"))
+    root = await msg_repo.create(
+        Message(id=None, conversation_id=conv.id, role="user", content="root")
+    )
+    deleted_middle = await msg_repo.create(
+        root.create_child(role="assistant", content="deleted middle")
+    )
+    leaf = await msg_repo.create(
+        deleted_middle.create_child(role="user", content="visible leaf")
+    )
+    deleted_middle.status = "deleted"
+    deleted_middle = await msg_repo.update(deleted_middle)
+
+    default_path = await msg_repo.list_path_to_message(conv.id, leaf.public_id)
+    full_path = await msg_repo.list_path_to_message(
+        conv.id,
+        leaf.public_id,
+        include_deleted=True,
+    )
+
+    assert default_path == []
+    assert [message.public_id for message in full_path] == [
+        root.public_id,
+        deleted_middle.public_id,
+        leaf.public_id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_message_repository_latest_ignores_deleted_branch_tail(session) -> None:
+    conv_repo = SQLAlchemyConversationRepository(session)
+    msg_repo = SQLAlchemyMessageRepository(session)
+
+    conv = await conv_repo.create(Conversation(id=None, title="Latest status"))
+    root = await msg_repo.create(
+        Message(id=None, conversation_id=conv.id, role="user", content="root")
+    )
+    deleted_tail = await msg_repo.create(
+        root.create_child(role="assistant", content="deleted tail")
+    )
+    deleted_tail.status = "deleted"
+    await msg_repo.update(deleted_tail)
+
+    latest = await msg_repo.get_latest_by_conversation(conv.id, branch_id="main")
+    latest_with_deleted = await msg_repo.get_latest_by_conversation(
+        conv.id,
+        branch_id="main",
+        include_deleted=True,
+    )
+
+    assert latest.public_id == root.public_id
+    assert latest_with_deleted.public_id == deleted_tail.public_id
+
+
+@pytest.mark.asyncio
 async def test_run_repository_persists_public_provider_finish_and_metadata(session) -> None:
     conv_repo = SQLAlchemyConversationRepository(session)
     run_repo = SQLAlchemyRunRepository(session)

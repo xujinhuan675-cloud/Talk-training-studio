@@ -11,7 +11,15 @@ from typing import Any, AsyncIterator, Optional
 
 from anthropic import AsyncAnthropic
 
-from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMProviderMetadata, LLMResponse
+from application.ports.llm import (
+    LLMChunk,
+    LLMEndpointMetadata,
+    LLMMessage,
+    LLMModelMetadata,
+    LLMPort,
+    LLMProviderMetadata,
+    LLMResponse,
+)
 from core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -45,11 +53,27 @@ class AnthropicProvider:
     @property
     def provider_metadata(self) -> LLMProviderMetadata:
         """Return stable provider identity for run/message tracking."""
+        default_model = LLMModelMetadata(
+            name=self._default_model,
+            provider=self.provider,
+            endpoint=self._endpoint,
+            is_default=True,
+            max_output_tokens=self._default_max_tokens,
+        )
+        endpoint_metadata = LLMEndpointMetadata(
+            provider=self.provider,
+            endpoint=self._endpoint,
+            wire_api="messages",
+            default_model=self._default_model,
+            models=[default_model],
+        )
         return LLMProviderMetadata(
             provider=self.provider,
             default_model=self._default_model,
             endpoint=self._endpoint,
             wire_api="messages",
+            models=[default_model],
+            endpoints=[endpoint_metadata],
         )
 
     def _split_system_and_messages(

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional, Sequence, Tuple
 
 from application.dto import (
@@ -176,6 +176,17 @@ def _dedupe_messages(messages: Sequence[Message]) -> list[Message]:
     return deduped
 
 
+def _forked_created_at_after_parent(
+    source_created_at: datetime | None,
+    parent_created_at: datetime | None,
+) -> datetime | None:
+    if source_created_at is None or parent_created_at is None:
+        return source_created_at
+    if source_created_at > parent_created_at:
+        return source_created_at
+    return parent_created_at + timedelta(microseconds=1)
+
+
 class ConversationApplicationService:
     """High-level conversation workflows bridging API and domain layers."""
 
@@ -321,6 +332,8 @@ class ConversationApplicationService:
             parent = await uow.message_repository.get_by_public_id(message_public_id)
             if parent is None or parent.conversation_id != conversation_id:
                 raise MessageNotFoundException()
+            if parent.status == "deleted" and not include_deleted:
+                raise MessageNotFoundException()
             children = await uow.message_repository.list_children(
                 message_public_id,
                 statuses=_clean_statuses(statuses),
@@ -385,10 +398,16 @@ class ConversationApplicationService:
 
             id_map: dict[str, str] = {}
             created_messages: list[Message] = []
+            created_at_by_source_id: dict[str, datetime | None] = {}
             selected_ids = {message.public_id for message in selected if message.public_id}
             for source in _parent_first(selected):
                 parent_id = (
                     id_map.get(source.parent_message_id)
+                    if source.parent_message_id in selected_ids
+                    else None
+                )
+                parent_created_at = (
+                    created_at_by_source_id.get(source.parent_message_id)
                     if source.parent_message_id in selected_ids
                     else None
                 )
@@ -411,10 +430,14 @@ class ConversationApplicationService:
                         **(source.metadata or {}),
                         "forked_from_message_id": source.public_id,
                     },
-                    created_at=source.created_at,
+                    created_at=_forked_created_at_after_parent(
+                        source.created_at,
+                        parent_created_at,
+                    ),
                 )
                 created = await uow.message_repository.create(forked)
                 id_map[source.public_id] = created.public_id
+                created_at_by_source_id[source.public_id] = created.created_at
                 created_messages.append(created)
 
             return ForkConversationResultDTO(
@@ -579,24 +602,14 @@ class ConversationApplicationService:
             conv = await uow.conversation_repository.get_by_id(conversation_id)
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
-            fetch_limit = max(skip + limit, 500)
             items = await uow.run_repository.list_by_conversation(
-                conversation_id, skip=0, limit=fetch_limit
+                conversation_id,
+                skip=skip,
+                limit=limit,
+                provider=_clean_optional_text(provider),
+                status=_clean_optional_text(status),
+                trigger_message_id=_clean_optional_text(trigger_message_id),
             )
-            provider_filter = _clean_optional_text(provider)
-            status_filter = _clean_optional_text(status)
-            trigger_filter = _clean_optional_text(trigger_message_id)
-            if provider_filter is not None:
-                items = [run for run in items if run.provider == provider_filter]
-            if status_filter is not None:
-                items = [run for run in items if run.status == status_filter]
-            if trigger_filter is not None:
-                items = [
-                    run
-                    for run in items
-                    if (run.metadata or {}).get("trigger_message_id") == trigger_filter
-                ]
-            items = items[skip : skip + limit]
             return [RunDTO.model_validate(r) for r in items]
 
     # Agent Config CRUD

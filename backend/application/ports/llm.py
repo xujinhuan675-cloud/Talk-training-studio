@@ -15,6 +15,32 @@ from typing import AsyncIterator, Optional, Protocol, runtime_checkable
 
 
 @dataclass
+class LLMModelMetadata:
+    """Provider-neutral model descriptor for endpoint/model registries."""
+
+    name: str
+    provider: Optional[str] = None
+    endpoint: Optional[str] = None
+    display_name: Optional[str] = None
+    is_default: bool = False
+    context_window: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    extra: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
+class LLMEndpointMetadata:
+    """Provider-neutral endpoint descriptor with its available models."""
+
+    provider: str
+    endpoint: Optional[str] = None
+    wire_api: Optional[str] = None
+    default_model: Optional[str] = None
+    models: list[LLMModelMetadata] = field(default_factory=list)
+    extra: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
 class LLMProviderMetadata:
     """Stable provider identity exposed by an LLM adapter."""
 
@@ -23,6 +49,8 @@ class LLMProviderMetadata:
     endpoint: Optional[str] = None
     wire_api: Optional[str] = None
     max_retries: Optional[int] = None
+    models: list[LLMModelMetadata] = field(default_factory=list)
+    endpoints: list[LLMEndpointMetadata] = field(default_factory=list)
     extra: dict[str, object] = field(default_factory=dict)
 
 

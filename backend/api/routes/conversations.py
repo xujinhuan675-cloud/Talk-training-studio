@@ -183,6 +183,7 @@ async def search_messages(
 async def get_message_path(
     conversation_id: int,
     message_public_id: str,
+    limit: int = Query(200, ge=1, le=500),
     include_deleted: bool = Query(default=False),
     statuses: list[str] | None = Query(default=None),
     service: ConversationApplicationService = Depends(get_conversation_service),
@@ -190,6 +191,7 @@ async def get_message_path(
     items = await service.get_message_path(
         conversation_id,
         message_public_id,
+        limit=limit,
         include_deleted=include_deleted,
         statuses=statuses,
     )

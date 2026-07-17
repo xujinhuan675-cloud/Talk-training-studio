@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from application.ports.llm import LLMEndpointMetadata, LLMModelMetadata, LLMProviderMetadata
 from application.services.conversation_service import ConversationApplicationService
 from domain.conversation.entity import Conversation, Message, Run
 from infrastructure.external.llm.openai_provider import OpenAIProvider
@@ -137,6 +140,56 @@ async def test_list_runs_filters_provider_status_and_trigger_message(session_fac
     assert runs[0].provider_max_retries == 1
 
 
+@pytest.mark.asyncio
+async def test_list_runs_filters_before_pagination(session_factory):
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        conversation = await uow.conversation_repository.create(
+            Conversation(id=None, title="Run filter pagination", model="gpt-test")
+        )
+        matching = await uow.run_repository.create(
+            Run(
+                id=None,
+                conversation_id=conversation.id,
+                status="completed",
+                provider="openai",
+                model="gpt-4o",
+                metadata={"trigger_message_id": "msg_oldest"},
+                created_at=base_time,
+            )
+        )
+        for index in range(505):
+            await uow.run_repository.create(
+                Run(
+                    id=None,
+                    conversation_id=conversation.id,
+                    status="failed",
+                    provider="anthropic",
+                    model="claude-sonnet",
+                    metadata={"trigger_message_id": f"msg_other_{index}"},
+                    created_at=base_time + timedelta(seconds=index + 1),
+                )
+            )
+        await uow.commit()
+
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    runs = await service.list_runs(
+        conversation.id,
+        provider="openai",
+        status="completed",
+        trigger_message_id="msg_oldest",
+        limit=1,
+    )
+
+    assert [run.id for run in runs] == [matching.id]
+
+
 def test_openai_compatible_provider_metadata_uses_configured_provider_name():
     provider = OpenAIProvider(
         api_key="test-key",
@@ -154,3 +207,47 @@ def test_openai_compatible_provider_metadata_uses_configured_provider_name():
     assert metadata.endpoint == "https://gateway.example/v1"
     assert metadata.wire_api == "responses"
     assert metadata.max_retries == 3
+    assert [model.name for model in metadata.models] == ["llama-test"]
+    assert metadata.models[0].is_default is True
+    assert [endpoint.provider for endpoint in metadata.endpoints] == ["vllm"]
+    assert metadata.endpoints[0].default_model == "llama-test"
+    assert [model.name for model in metadata.endpoints[0].models] == ["llama-test"]
+
+
+def test_llm_provider_metadata_can_represent_multiple_provider_endpoints():
+    openai_model = LLMModelMetadata(
+        name="gpt-4o",
+        provider="openai",
+        endpoint="https://api.openai.com/v1",
+        is_default=True,
+    )
+    anthropic_model = LLMModelMetadata(
+        name="claude-sonnet",
+        provider="anthropic",
+        endpoint="https://api.anthropic.com",
+        is_default=True,
+    )
+    registry = LLMProviderMetadata(
+        provider="talkwise",
+        default_model="gpt-4o",
+        models=[openai_model, anthropic_model],
+        endpoints=[
+            LLMEndpointMetadata(
+                provider="openai",
+                endpoint="https://api.openai.com/v1",
+                wire_api="responses",
+                default_model="gpt-4o",
+                models=[openai_model],
+            ),
+            LLMEndpointMetadata(
+                provider="anthropic",
+                endpoint="https://api.anthropic.com",
+                wire_api="messages",
+                default_model="claude-sonnet",
+                models=[anthropic_model],
+            ),
+        ],
+    )
+
+    assert [endpoint.provider for endpoint in registry.endpoints] == ["openai", "anthropic"]
+    assert [model.name for model in registry.models] == ["gpt-4o", "claude-sonnet"]
