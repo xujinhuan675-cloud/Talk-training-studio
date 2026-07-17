@@ -14,9 +14,11 @@ from application.dto import (
     ConversationDTO,
     CreateAgentConfigDTO,
     CreateConversationDTO,
+    EditMessageDTO,
     MessageLocationDTO,
     MessageDTO_Agent,
     MessageSearchResultDTO,
+    RetryMessageDTO,
     RunDTO,
     UpdateAgentConfigDTO,
     UpdateConversationDTO,
@@ -174,6 +176,50 @@ class ConversationApplicationService:
                 if child.conversation_id == conversation_id and child.status != "deleted"
             ]
             return [MessageDTO_Agent.model_validate(child) for child in children]
+
+    async def edit_message(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        dto: EditMessageDTO,
+    ) -> MessageDTO_Agent:
+        async with self._uow_factory() as uow:
+            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            if conv is None:
+                raise ConversationNotFoundException(conversation_id)
+            source = await uow.message_repository.get_by_public_id(message_public_id)
+            if source is None or source.conversation_id != conversation_id:
+                raise MessageNotFoundException()
+            if source.status == "deleted":
+                raise MessageNotFoundException()
+
+            edited = source.create_edit(content=dto.content, metadata=dto.metadata)
+            source.mark_superseded()
+            await uow.message_repository.update(source)
+            created = await uow.message_repository.create(edited)
+            return MessageDTO_Agent.model_validate(created)
+
+    async def retry_message(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        dto: RetryMessageDTO,
+    ) -> MessageDTO_Agent:
+        async with self._uow_factory() as uow:
+            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            if conv is None:
+                raise ConversationNotFoundException(conversation_id)
+            source = await uow.message_repository.get_by_public_id(message_public_id)
+            if source is None or source.conversation_id != conversation_id:
+                raise MessageNotFoundException()
+            if source.status == "deleted":
+                raise MessageNotFoundException()
+
+            retry = source.create_retry(content=dto.content, metadata=dto.metadata)
+            source.mark_superseded()
+            await uow.message_repository.update(source)
+            created = await uow.message_repository.create(retry)
+            return MessageDTO_Agent.model_validate(created)
 
     async def locate_message(
         self,

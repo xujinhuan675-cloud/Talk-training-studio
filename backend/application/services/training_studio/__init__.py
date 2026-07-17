@@ -22,6 +22,7 @@ from application.services.training_studio.training_core import (
     TrainingConversationAdapter,
     TrainingCoreOrchestrator,
     TrainingTurn,
+    training_core_metadata_for_session,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "TrainingScenarioConfigService",
     "TrainingTaskConfigDTO",
     "TrainingTurn",
+    "training_core_metadata_for_session",
 ]

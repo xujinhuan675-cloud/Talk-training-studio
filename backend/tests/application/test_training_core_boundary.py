@@ -1,5 +1,9 @@
+import ast
+import inspect
+
 import pytest
 
+import application.services.training_studio.training_core as training_core_module
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
 from application.services.training_studio.live_guidance_service import (
     TrainingLiveGuidanceService,
@@ -9,6 +13,7 @@ from application.services.training_studio.training_core import (
     ConversationRef,
     TrainingCoreOrchestrator,
     TrainingTurn,
+    training_core_metadata_for_session,
 )
 from domain.training_studio.session import TrainingSession
 
@@ -87,6 +92,72 @@ def _task_config() -> TrainingTaskConfigDTO:
         question_type_ratios={"behavioral": 2, "craft": 1},
         question_count=6,
     )
+
+
+def test_training_core_module_does_not_own_conversation_or_voice_runtimes():
+    tree = ast.parse(inspect.getsource(training_core_module))
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+
+    assert not any(module.startswith("domain.conversation") for module in imported_modules)
+    assert not any(module.startswith("domain.stakeholder") for module in imported_modules)
+    assert not any(module.startswith("infrastructure.adapters") for module in imported_modules)
+    assert not any(module.lower().startswith("pipecat") for module in imported_modules)
+    assert not any(module.lower().startswith("librechat") for module in imported_modules)
+
+
+@pytest.mark.asyncio
+async def test_training_core_metadata_keeps_talkwise_semantics_inside_core_boundary():
+    session_service = TrainingSessionService(id_factory=lambda: "session-semantic-1")
+    session = await session_service.create_session(
+        {
+            "role": "Product Manager",
+            "level": "Senior",
+            "tech_stack": ["Roadmap"],
+            "question_type_ratios": {"craft": 1},
+            "question_count": 3,
+            "category": "sales",
+            "scenario_template_id": "enterprise-renewal",
+            "metadata": {
+                "persona_ids": ["buyer", " cfo "],
+                "scenario_id": 9,
+                "dispatcher": {"policy": "round_robin"},
+                "evaluation": {"rubric_id": "sales-v1"},
+                "growth_report": {"report_id": "growth-1"},
+                "live_guidance": {"enabled": True},
+            },
+        }
+    )
+
+    metadata = training_core_metadata_for_session(
+        session,
+        runtime="conversation_message_tree",
+        extra={"branchId": "main"},
+    )
+
+    assert metadata == {
+        "runtime": "conversation_message_tree",
+        "trainingSessionId": "session-semantic-1",
+        "mode": "text",
+        "scenarioTemplateId": "enterprise-renewal",
+        "category": "sales",
+        "personaIds": ["buyer", "cfo"],
+        "scenarioId": 9,
+        "dispatcher": {"policy": "round_robin"},
+        "evaluation": {"rubric_id": "sales-v1"},
+        "growthReport": {"report_id": "growth-1"},
+        "liveGuidance": {"enabled": True},
+        "branchId": "main",
+    }
 
 
 @pytest.mark.asyncio

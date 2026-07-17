@@ -26,6 +26,8 @@ class _FakeChatService:
     def __init__(self) -> None:
         self.search_call = None
         self.locate_call = None
+        self.edit_call = None
+        self.retry_call = None
 
     async def search_messages(self, conversation_id: int, query: str, **kwargs):
         self.search_call = (conversation_id, query, kwargs)
@@ -46,6 +48,14 @@ class _FakeChatService:
             path=[message],
             context=[message],
         )
+
+    async def edit_message(self, conversation_id: int, message_public_id: str, payload):
+        self.edit_call = (conversation_id, message_public_id, payload)
+        return _message(payload.content, public_id="msg_edit")
+
+    async def retry_message(self, conversation_id: int, message_public_id: str, payload):
+        self.retry_call = (conversation_id, message_public_id, payload)
+        return _message(payload.content, public_id="msg_retry")
 
 
 def _client(service: _FakeChatService) -> TestClient:
@@ -104,3 +114,35 @@ def test_locate_message_route_returns_message_location() -> None:
     assert data["message"]["public_id"] == "msg_selected"
     assert data["context"][0]["content"] == "Selected branch turn"
     assert service.locate_call == (7, "msg_selected", {"before": 1, "after": 4})
+
+
+def test_edit_message_route_creates_branch_message() -> None:
+    service = _FakeChatService()
+    client = _client(service)
+
+    response = client.post(
+        "/api/v1/conversations/7/messages/msg_original/edit",
+        json={"content": "Edited turn", "metadata": {"reason": "typo"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["public_id"] == "msg_edit"
+    assert service.edit_call[0:2] == (7, "msg_original")
+    assert service.edit_call[2].content == "Edited turn"
+    assert service.edit_call[2].metadata == {"reason": "typo"}
+
+
+def test_retry_message_route_creates_branch_message() -> None:
+    service = _FakeChatService()
+    client = _client(service)
+
+    response = client.post(
+        "/api/v1/conversations/7/messages/msg_answer/retry",
+        json={"content": "Retry answer", "metadata": {"temperature": 0.2}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["public_id"] == "msg_retry"
+    assert service.retry_call[0:2] == (7, "msg_answer")
+    assert service.retry_call[2].content == "Retry answer"
+    assert service.retry_call[2].metadata == {"temperature": 0.2}

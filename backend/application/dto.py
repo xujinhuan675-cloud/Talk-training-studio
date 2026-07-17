@@ -280,6 +280,20 @@ class MessageSearchResultDTO(DTOBase):
     context: list[MessageDTO_Agent] = Field(default_factory=list)
 
 
+class EditMessageDTO(DTOBase):
+    """Input for creating an edited message branch."""
+
+    content: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RetryMessageDTO(DTOBase):
+    """Input for creating a retry branch from an existing message."""
+
+    content: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunDTO(DTOBase):
     """Run tracking DTO."""
 
@@ -308,6 +322,7 @@ class ChatRequestDTO(DTOBase):
     message: str = Field(min_length=1)
     parent_message_id: Optional[str] = None
     branch_id: Optional[str] = None
+    provider: Optional[str] = None
     model: Optional[str] = None
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)

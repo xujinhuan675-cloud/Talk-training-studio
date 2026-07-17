@@ -6,7 +6,11 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from application.services.training_studio.live_guidance_service import TranscriptSpeaker
-from application.services.training_studio.training_core import ConversationRef, TrainingTurn
+from application.services.training_studio.training_core import (
+    ConversationRef,
+    TrainingTurn,
+    training_core_metadata_for_session,
+)
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import Conversation as ConversationEntity
 from domain.conversation.entity import Message as ConversationMessage
@@ -46,10 +50,11 @@ class ConversationTrainingConversationAdapter:
             provider=self.provider,
             conversation_id=str(conversation.id),
             metadata={
-                "runtime": "conversation_message_tree",
-                "trainingSessionId": session.session_id,
-                "mode": session.mode.value,
-                "branchId": "main",
+                **training_core_metadata_for_session(
+                    session,
+                    runtime="conversation_message_tree",
+                    extra={"branchId": "main"},
+                ),
             },
         )
 
@@ -193,12 +198,10 @@ def _conversation_ref_for_room(room: ChatRoom, *, session: TrainingSession) -> C
         provider=StakeholderRoomTrainingConversationAdapter.provider,
         conversation_id=str(room.id),
         legacy_room_id=str(room.id),
-        metadata={
-            "runtime": "stakeholder_room",
-            "trainingSessionId": session.session_id,
-            "mode": session.mode.value,
-            "scenarioTemplateId": session.scenario_template_id,
-        },
+        metadata=training_core_metadata_for_session(
+            session,
+            runtime="stakeholder_room",
+        ),
     )
 
 
@@ -300,11 +303,10 @@ def _conversation_title_for_session(session: TrainingSession) -> str:
 def _conversation_metadata_for_session(session: TrainingSession) -> dict[str, object]:
     return {
         **dict(session.task_config.metadata or {}),
-        "runtime": "conversation_message_tree",
-        "trainingSessionId": session.session_id,
-        "mode": session.mode.value,
-        "scenarioTemplateId": session.scenario_template_id,
-        "category": session.task_config.category.value,
+        **training_core_metadata_for_session(
+            session,
+            runtime="conversation_message_tree",
+        ),
     }
 
 

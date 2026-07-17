@@ -92,6 +92,40 @@ class StartedTrainingSession:
     conversation: ConversationRef
 
 
+def training_core_metadata_for_session(
+    session: TrainingSession,
+    *,
+    runtime: str,
+    extra: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Build the TalkWise-owned training semantic metadata shared by adapters."""
+
+    source = dict(session.task_config.metadata or {})
+    metadata: dict[str, object] = {
+        "runtime": _normalize_required_text(runtime, "runtime"),
+        "trainingSessionId": session.session_id,
+        "mode": session.mode.value,
+        "scenarioTemplateId": session.scenario_template_id,
+        "category": session.task_config.category.value,
+        "personaIds": _normalize_text_list(source.get("persona_ids")),
+        "scenarioId": _copy_metadata_value(source.get("scenario_id")),
+        "dispatcher": _copy_metadata_value(
+            source.get("dispatcher") or source.get("dispatcher_state")
+        ),
+        "evaluation": _copy_metadata_value(
+            source.get("evaluation") or source.get("rubric")
+        ),
+        "growthReport": _copy_metadata_value(
+            source.get("growth_report") or source.get("report")
+        ),
+        "liveGuidance": _copy_metadata_value(
+            source.get("live_guidance") or source.get("guidance")
+        ),
+    }
+    metadata.update(dict(extra or {}))
+    return {key: value for key, value in metadata.items() if _metadata_value_present(value)}
+
+
 @runtime_checkable
 class TrainingConversationAdapter(Protocol):
     """Adapter implemented by current rooms, LibreChat-style text, or Pipecat sinks."""
@@ -206,6 +240,20 @@ def _normalize_speaker(speaker: TranscriptSpeaker | str) -> TranscriptSpeaker | 
 
 def _copy_metadata(metadata: Mapping[str, object] | None) -> dict[str, object]:
     return deepcopy(dict(metadata or {}))
+
+
+def _copy_metadata_value(value: object) -> object:
+    return deepcopy(value)
+
+
+def _normalize_text_list(value: object) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, str):
+        return []
+    return [text for item in value if (text := str(item).strip())]
+
+
+def _metadata_value_present(value: object) -> bool:
+    return value is not None and value != "" and value != [] and value != {}
 
 
 def _require_conversation_ref(value: object) -> ConversationRef:

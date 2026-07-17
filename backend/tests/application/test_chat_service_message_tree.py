@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from application.dto import ChatRequestDTO
+from application.dto import ChatRequestDTO, EditMessageDTO, RetryMessageDTO
 from application.ports.llm import LLMMessage, LLMResponse
 from application.services.chat_service import ChatApplicationService
 from application.services.conversation_service import ConversationApplicationService
@@ -15,6 +15,7 @@ from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
 class _FakeLLM:
     def __init__(self) -> None:
+        self.provider = "fake-provider"
         self.calls: list[list[LLMMessage]] = []
 
     async def generate(self, messages, **_kwargs) -> LLMResponse:
@@ -112,15 +113,25 @@ async def test_chat_sync_uses_explicit_parent_message_path_for_llm_history(sessi
     assert "Unrelated branch turn." not in [message.content for message in llm.calls[0]]
     assert result["message"]["parent_message_id"].startswith("msg_")
     assert result["message"]["branch_id"] == "branch-selected"
+    assert result["message"]["provider"] == "fake-provider"
+    assert result["message"]["metadata"] == {
+        "provider": "fake-provider",
+        "model": "gpt-test",
+    }
 
     async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
         messages = await uow.message_repository.list_by_conversation(
             conversation.id,
             branch_id="branch-selected",
         )
+        runs = await uow.run_repository.list_by_conversation(conversation.id)
     assert [message.role for message in messages] == ["user", "assistant"]
     assert messages[0].parent_message_id == first_assistant.public_id
+    assert messages[0].provider == "fake-provider"
+    assert messages[0].metadata["provider"] == "fake-provider"
     assert messages[1].parent_message_id == messages[0].public_id
+    assert runs[0].provider == "fake-provider"
+    assert runs[0].metadata["branch_id"] == "branch-selected"
     assert off_path_user.public_id not in {message.public_id for message in messages}
 
 
@@ -257,3 +268,55 @@ async def test_conversation_service_returns_message_path_and_children(session_fa
         first_assistant.public_id,
         off_path_user.public_id,
     }
+
+
+@pytest.mark.asyncio
+async def test_conversation_service_creates_edit_and_retry_branches(session_factory):
+    conversation, first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    edited = await service.edit_message(
+        conversation.id,
+        first_user.public_id,
+        EditMessageDTO(content="Edited root user turn.", metadata={"reason": "clarity"}),
+    )
+    retry = await service.retry_message(
+        conversation.id,
+        first_assistant.public_id,
+        RetryMessageDTO(content="Retry assistant turn.", metadata={"temperature": 0.1}),
+    )
+
+    assert edited.parent_message_id == first_user.parent_message_id
+    assert edited.branch_id.startswith("branch_")
+    assert edited.metadata["edit_of"] == first_user.public_id
+    assert edited.metadata["reason"] == "clarity"
+    assert retry.parent_message_id == first_assistant.parent_message_id
+    assert retry.branch_id.startswith("branch_")
+    assert retry.metadata["retry_of"] == first_assistant.public_id
+    assert retry.metadata["temperature"] == 0.1
+
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        original_user = await uow.message_repository.get_by_public_id(first_user.public_id)
+        original_assistant = await uow.message_repository.get_by_public_id(
+            first_assistant.public_id
+        )
+        edited_path = await uow.message_repository.list_path_to_message(
+            conversation.id,
+            edited.public_id,
+        )
+        retry_path = await uow.message_repository.list_path_to_message(
+            conversation.id,
+            retry.public_id,
+        )
+
+    assert original_user.status == "superseded"
+    assert original_assistant.status == "superseded"
+    assert [message.public_id for message in edited_path] == [edited.public_id]
+    assert [message.public_id for message in retry_path] == [first_user.public_id, retry.public_id]

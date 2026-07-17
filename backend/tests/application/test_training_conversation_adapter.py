@@ -192,6 +192,10 @@ def _task_config() -> TrainingTaskConfigDTO:
             "room_name": "Renewal practice",
             "persona_ids": ["customer-1"],
             "scenario_id": 9,
+            "dispatcher": {"strategy": "stakeholder_turns"},
+            "evaluation": {"rubric_id": "sales-v1"},
+            "growth_report": {"report_id": "growth-1"},
+            "live_guidance": {"enabled": True},
         },
     )
 
@@ -224,6 +228,13 @@ async def test_stakeholder_room_adapter_binds_training_core_to_current_room_runt
 
     assert started.session.room_id == "1"
     assert started.conversation.provider == "talkwise-stakeholder-room"
+    assert started.conversation.metadata["runtime"] == "stakeholder_room"
+    assert started.conversation.metadata["personaIds"] == ["customer-1"]
+    assert started.conversation.metadata["scenarioId"] == 9
+    assert started.conversation.metadata["dispatcher"] == {"strategy": "stakeholder_turns"}
+    assert started.conversation.metadata["evaluation"] == {"rubric_id": "sales-v1"}
+    assert started.conversation.metadata["growthReport"] == {"report_id": "growth-1"}
+    assert started.conversation.metadata["liveGuidance"] == {"enabled": True}
     assert state.rooms[1].name == "Renewal practice"
     assert state.rooms[1].persona_ids == ["customer-1"]
     assert state.rooms[1].scenario_id == 9
@@ -306,6 +317,15 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
     assert state.conversations[1].model == "gpt-training"
     assert state.conversations[1].metadata["runtime"] == "conversation_message_tree"
     assert state.conversations[1].metadata["trainingSessionId"] == "training-text-1"
+    assert state.conversations[1].metadata["personaIds"] == ["customer-1"]
+    assert state.conversations[1].metadata["scenarioId"] == 9
+    assert state.conversations[1].metadata["dispatcher"] == {"strategy": "stakeholder_turns"}
+    assert state.conversations[1].metadata["evaluation"] == {"rubric_id": "sales-v1"}
+    assert state.conversations[1].metadata["growthReport"] == {"report_id": "growth-1"}
+    assert state.conversations[1].metadata["liveGuidance"] == {"enabled": True}
+    assert started.conversation.metadata["runtime"] == "conversation_message_tree"
+    assert started.conversation.metadata["personaIds"] == ["customer-1"]
+    assert started.conversation.metadata["branchId"] == "main"
     assert [message.role for message in state.messages] == ["user", "assistant"]
     assert state.messages[0].parent_message_id is None
     assert state.messages[0].provider == "openai"

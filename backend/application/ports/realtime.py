@@ -41,6 +41,21 @@ class RealtimePipelineConfig:
 
 
 @dataclass(frozen=True)
+class RealtimePipelineCapability:
+    """Declared capability boundary for a realtime voice pipeline provider."""
+
+    provider: str
+    core_available: bool
+    media_transport: str
+    stt: str | None = None
+    tts: str | None = None
+    vad: str | None = None
+    turn_detection: str | None = None
+    missing_features: Sequence[str] = field(default_factory=tuple)
+    metadata: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RealtimeAudioChunk:
     """Audio chunk accepted by a realtime transport or pipeline."""
 

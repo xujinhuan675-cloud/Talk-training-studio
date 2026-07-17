@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.util
+import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from typing import Any
 from application.ports.realtime import (
     RealtimeAudioChunk,
     RealtimePipelineAdapter,
+    RealtimePipelineCapability,
     RealtimePipelineConfig,
     TrainingVoiceContext,
 )
@@ -33,12 +35,19 @@ CORE_PIPECAT_MODULES = (
 )
 WEBSOCKET_PIPECAT_MODULE = "pipecat.transports.websocket.fastapi"
 SILERO_VAD_PIPECAT_MODULE = "pipecat.audio.vad.silero"
+VAD_PROCESSOR_PIPECAT_MODULE = "pipecat.processors.audio.vad_processor"
 OPENAI_STT_PIPECAT_MODULE = "pipecat.services.openai.stt"
 OPENAI_TTS_PIPECAT_MODULE = "pipecat.services.openai.tts"
+USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
+USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 OPTIONAL_PIPECAT_FEATURE_MODULES = {
-    "vad": (SILERO_VAD_PIPECAT_MODULE, "onnxruntime"),
+    "vad": (SILERO_VAD_PIPECAT_MODULE, VAD_PROCESSOR_PIPECAT_MODULE, "onnxruntime"),
     "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
     "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
+    "turn_detection": (
+        USER_TURN_PROCESSOR_PIPECAT_MODULE,
+        USER_TURN_STRATEGIES_PIPECAT_MODULE,
+    ),
 }
 
 
@@ -53,6 +62,7 @@ class PipecatCapability:
     vad_available: bool = False
     stt_available: bool = False
     tts_available: bool = False
+    turn_detection_available: bool = False
     optional_missing_modules: tuple[str, ...] = ()
     error: str | None = None
 
@@ -75,6 +85,12 @@ class PipecatRuntime:
     FrameDirection: type
     FastAPIWebsocketParams: type | None = None
     FastAPIWebsocketTransport: type | None = None
+    SileroVADAnalyzer: type | None = None
+    VADProcessor: type | None = None
+    OpenAIRealtimeSTTService: type | None = None
+    OpenAITTSService: type | None = None
+    UserTurnProcessor: type | None = None
+    UserTurnStrategies: type | None = None
 
     @property
     def websocket_available(self) -> bool:
@@ -158,6 +174,7 @@ def _optional_feature_status() -> dict[str, bool | tuple[str, ...]]:
         "vad_available": not missing_by_feature["vad"],
         "stt_available": not missing_by_feature["stt"],
         "tts_available": not missing_by_feature["tts"],
+        "turn_detection_available": not missing_by_feature["turn_detection"],
         "optional_missing_modules": tuple(
             module for modules in missing_by_feature.values() for module in modules
         ),
@@ -216,6 +233,21 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
                 "Pipecat websocket transport is unavailable; install pipecat with websocket extras"
             ) from exc
 
+    silero_vad_analyzer = _optional_pipecat_symbol(
+        SILERO_VAD_PIPECAT_MODULE, "SileroVADAnalyzer"
+    )
+    vad_processor = _optional_pipecat_symbol(VAD_PROCESSOR_PIPECAT_MODULE, "VADProcessor")
+    openai_realtime_stt = _optional_pipecat_symbol(
+        OPENAI_STT_PIPECAT_MODULE, "OpenAIRealtimeSTTService"
+    )
+    openai_tts = _optional_pipecat_symbol(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService")
+    user_turn_processor = _optional_pipecat_symbol(
+        USER_TURN_PROCESSOR_PIPECAT_MODULE, "UserTurnProcessor"
+    )
+    user_turn_strategies = _optional_pipecat_symbol(
+        USER_TURN_STRATEGIES_PIPECAT_MODULE, "UserTurnStrategies"
+    )
+
     return PipecatRuntime(
         Pipeline=pipeline_module.Pipeline,
         PipelineParams=worker_module.PipelineParams,
@@ -231,7 +263,21 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         FrameDirection=processor_module.FrameDirection,
         FastAPIWebsocketParams=websocket_params,
         FastAPIWebsocketTransport=websocket_transport,
+        SileroVADAnalyzer=silero_vad_analyzer,
+        VADProcessor=vad_processor,
+        OpenAIRealtimeSTTService=openai_realtime_stt,
+        OpenAITTSService=openai_tts,
+        UserTurnProcessor=user_turn_processor,
+        UserTurnStrategies=user_turn_strategies,
     )
+
+
+def _optional_pipecat_symbol(module_name: str, symbol_name: str) -> type | None:
+    try:
+        module = importlib.import_module(module_name)
+    except (ImportError, ModuleNotFoundError):
+        return None
+    return getattr(module, symbol_name, None)
 
 
 class PipecatRealtimePipelineAdapter:
@@ -262,6 +308,14 @@ class PipecatRealtimePipelineAdapter:
 
         return self._handle
 
+    def capability(self) -> RealtimePipelineCapability:
+        runtime = self._runtime
+        return pipecat_pipeline_capability(
+            runtime=runtime,
+            config=self._config or RealtimePipelineConfig(provider="pipecat"),
+            websocket=self._websocket,
+        )
+
     async def start(self, context: TrainingVoiceContext, config: RealtimePipelineConfig) -> None:
         if self._handle is not None and not self._closed:
             raise RuntimeError("Pipecat realtime pipeline is already started")
@@ -278,7 +332,7 @@ class PipecatRealtimePipelineAdapter:
             context=context,
             config=config,
             websocket=self._websocket,
-            processors=self._processors,
+            processors=(*build_pipecat_voice_processors(runtime, config), *self._processors),
             serializer=self._serializer,
             transport_params=self._transport_params,
         )
@@ -394,6 +448,117 @@ def build_pipecat_pipeline_handle(
         event_queue=event_queue,
         transport=transport,
         event_processor=event_processor,
+    )
+
+
+def build_pipecat_voice_processors(
+    runtime: PipecatRuntime,
+    config: RealtimePipelineConfig,
+) -> tuple[Any, ...]:
+    """Build Pipecat-owned voice processors declared by provider-neutral config."""
+
+    processors: list[Any] = []
+    metadata = dict(config.metadata)
+
+    if _feature_provider(metadata, "vad") == "silero":
+        if runtime.SileroVADAnalyzer is None or runtime.VADProcessor is None:
+            raise RuntimeError("Pipecat Silero VAD processor is unavailable")
+        processors.append(
+            runtime.VADProcessor(
+                vad_analyzer=runtime.SileroVADAnalyzer(
+                    sample_rate=_metadata_int(
+                        metadata,
+                        "vadSampleRate",
+                        "vad_sample_rate",
+                        "sampleRate",
+                        "sample_rate",
+                    )
+                )
+            )
+        )
+
+    stt_provider = _feature_provider(metadata, "stt")
+    if stt_provider == "openai":
+        if runtime.OpenAIRealtimeSTTService is None:
+            raise RuntimeError("Pipecat OpenAI realtime STT service is unavailable")
+        api_key = _openai_api_key(metadata)
+        if not api_key:
+            raise RuntimeError("OpenAI API key is required for Pipecat OpenAI STT")
+        processors.append(
+            runtime.OpenAIRealtimeSTTService(
+                api_key=api_key,
+                model=_metadata_text(metadata, "sttModel", "stt_model") or config.model,
+                turn_detection=_turn_detection_config(metadata),
+                noise_reduction=_metadata_text(metadata, "noiseReduction", "noise_reduction"),
+            )
+        )
+
+    if _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat":
+        if runtime.UserTurnProcessor is None:
+            raise RuntimeError("Pipecat user turn processor is unavailable")
+        processors.append(runtime.UserTurnProcessor())
+
+    tts_provider = _feature_provider(metadata, "tts")
+    if tts_provider == "openai":
+        if runtime.OpenAITTSService is None:
+            raise RuntimeError("Pipecat OpenAI TTS service is unavailable")
+        api_key = _openai_api_key(metadata)
+        if not api_key:
+            raise RuntimeError("OpenAI API key is required for Pipecat OpenAI TTS")
+        processors.append(
+            runtime.OpenAITTSService(
+                api_key=api_key,
+                model=_metadata_text(metadata, "ttsModel", "tts_model"),
+                voice=config.voice or _metadata_text(metadata, "voice"),
+                instructions=config.instructions,
+                sample_rate=_metadata_int(metadata, "outputSampleRate", "output_sample_rate"),
+            )
+        )
+
+    return tuple(processors)
+
+
+def pipecat_pipeline_capability(
+    *,
+    runtime: PipecatRuntime | None,
+    config: RealtimePipelineConfig,
+    websocket: Any | None = None,
+) -> RealtimePipelineCapability:
+    """Describe which realtime pieces Pipecat, not TalkWise, is expected to own."""
+
+    capability = get_pipecat_capability(require_websocket=websocket is not None)
+    metadata = dict(config.metadata)
+    missing: list[str] = []
+    if _feature_provider(metadata, "stt") == "openai" and not capability.stt_available:
+        missing.append("stt:openai")
+    if _feature_provider(metadata, "tts") == "openai" and not capability.tts_available:
+        missing.append("tts:openai")
+    if _feature_provider(metadata, "vad") == "silero" and not capability.vad_available:
+        missing.append("vad:silero")
+    if (
+        _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat"
+        and not capability.turn_detection_available
+    ):
+        missing.append("turn_detection:pipecat")
+
+    return RealtimePipelineCapability(
+        provider=config.provider,
+        core_available=capability.core_available,
+        media_transport="pipecat.websocket" if websocket is not None else "talkwise.audio_chunks",
+        stt=_feature_provider(metadata, "stt"),
+        tts=_feature_provider(metadata, "tts"),
+        vad=_feature_provider(metadata, "vad"),
+        turn_detection=_feature_provider(metadata, "turnDetection", "turn_detection"),
+        missing_features=tuple(missing),
+        metadata={
+            "websocketAvailable": capability.websocket_available,
+            "optionalMissingModules": capability.optional_missing_modules,
+            "runtimeLoaded": runtime is not None,
+            "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
+            "sttEntrypoint": OPENAI_STT_PIPECAT_MODULE,
+            "ttsEntrypoint": OPENAI_TTS_PIPECAT_MODULE,
+            "turnDetectionEntrypoint": USER_TURN_PROCESSOR_PIPECAT_MODULE,
+        },
     )
 
 
@@ -548,6 +713,59 @@ def _audio_channels(
     return int(value or 1)
 
 
+def _feature_provider(metadata: Mapping[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, Mapping):
+            value = value.get("provider")
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text and text not in {"none", "false", "disabled"}:
+                return text
+    return None
+
+
+def _metadata_text(metadata: Mapping[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return None
+
+
+def _metadata_int(metadata: Mapping[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None:
+            return int(value)
+    return None
+
+
+def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
+    return (
+        _metadata_text(metadata, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
+        or os.getenv("REALTIME_OPENAI_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+    )
+
+
+def _turn_detection_config(metadata: Mapping[str, Any]) -> Mapping[str, Any] | bool | None:
+    value = metadata.get("sttTurnDetection") or metadata.get("stt_turn_detection")
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"server", "server_vad"}:
+            return None
+        if text in {"disabled", "false", "local"}:
+            return False
+    return False
+
+
 def pipecat_source_snapshot() -> Mapping[str, Any]:
     """Summarize the Pipecat entrypoints this adapter intentionally reuses."""
 
@@ -567,8 +785,10 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         ),
         "websocketEntrypoint": ("pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport"),
         "vadEntrypoint": ("pipecat.audio.vad.silero.SileroVADAnalyzer"),
+        "vadProcessorEntrypoint": ("pipecat.processors.audio.vad_processor.VADProcessor"),
         "sttEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService"),
         "ttsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService"),
+        "turnDetectionEntrypoint": ("pipecat.turns.user_turn_processor.UserTurnProcessor"),
         "talkwiseResponsibilities": (
             "optional import and capability detection",
             "pipeline factory configuration",
@@ -584,10 +804,12 @@ __all__ = [
     "PipecatRealtimePipelineAdapter",
     "PipecatRuntime",
     "build_pipecat_pipeline_handle",
+    "build_pipecat_voice_processors",
     "create_pipecat_realtime_pipeline",
     "create_talkwise_event_processor",
     "get_pipecat_capability",
     "import_pipecat_runtime",
     "is_pipecat_available",
+    "pipecat_pipeline_capability",
     "pipecat_source_snapshot",
 ]

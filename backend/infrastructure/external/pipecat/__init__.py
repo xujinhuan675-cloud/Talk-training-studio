@@ -6,11 +6,13 @@ from infrastructure.external.pipecat.realtime_pipeline import (
     PipecatRealtimePipelineAdapter,
     PipecatRuntime,
     build_pipecat_pipeline_handle,
+    build_pipecat_voice_processors,
     create_pipecat_realtime_pipeline,
     create_talkwise_event_processor,
     get_pipecat_capability,
     import_pipecat_runtime,
     is_pipecat_available,
+    pipecat_pipeline_capability,
     pipecat_source_snapshot,
 )
 
@@ -20,10 +22,12 @@ __all__ = [
     "PipecatRealtimePipelineAdapter",
     "PipecatRuntime",
     "build_pipecat_pipeline_handle",
+    "build_pipecat_voice_processors",
     "create_pipecat_realtime_pipeline",
     "create_talkwise_event_processor",
     "get_pipecat_capability",
     "import_pipecat_runtime",
     "is_pipecat_available",
+    "pipecat_pipeline_capability",
     "pipecat_source_snapshot",
 ]

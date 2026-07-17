@@ -16,9 +16,11 @@ from application.dto import (
     ConversationDTO,
     CreateAgentConfigDTO,
     CreateConversationDTO,
+    EditMessageDTO,
     MessageLocationDTO,
     MessageDTO_Agent,
     MessageSearchResultDTO,
+    RetryMessageDTO,
     RunDTO,
     UpdateAgentConfigDTO,
     UpdateConversationDTO,
@@ -202,6 +204,36 @@ async def list_message_children(
 ):
     items = await service.list_message_children(conversation_id, message_public_id)
     return success_response(items, message=t("ok"))
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_public_id}/edit",
+    summary="Create edited message branch",
+    response_model=ApiResponse[MessageDTO_Agent],
+)
+async def edit_message(
+    conversation_id: int,
+    message_public_id: str,
+    payload: EditMessageDTO,
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    item = await service.edit_message(conversation_id, message_public_id, payload)
+    return success_response(item, message=t("ok"))
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_public_id}/retry",
+    summary="Create retry message branch",
+    response_model=ApiResponse[MessageDTO_Agent],
+)
+async def retry_message(
+    conversation_id: int,
+    message_public_id: str,
+    payload: RetryMessageDTO,
+    service: ConversationApplicationService = Depends(get_conversation_service),
+):
+    item = await service.retry_message(conversation_id, message_public_id, payload)
+    return success_response(item, message=t("ok"))
 
 
 @router.get(

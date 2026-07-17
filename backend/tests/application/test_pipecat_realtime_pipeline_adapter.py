@@ -68,6 +68,31 @@ class FakeTextFrame:
     text: str
 
 
+class FakeOpenAIRealtimeSTTService:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeSileroVADAnalyzer:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeVADProcessor:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeOpenAITTSService:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeUserTurnProcessor:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
 class FakePipeline:
     def __init__(self, processors):
         self.processors = processors
@@ -139,6 +164,11 @@ def fake_runtime(websocket=True):
         FrameDirection=FakeFrameDirection,
         FastAPIWebsocketParams=FakeFastAPIWebsocketParams if websocket else None,
         FastAPIWebsocketTransport=FakeFastAPIWebsocketTransport if websocket else None,
+        SileroVADAnalyzer=FakeSileroVADAnalyzer,
+        VADProcessor=FakeVADProcessor,
+        OpenAIRealtimeSTTService=FakeOpenAIRealtimeSTTService,
+        OpenAITTSService=FakeOpenAITTSService,
+        UserTurnProcessor=FakeUserTurnProcessor,
     )
 
 
@@ -314,6 +344,102 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
     assert handle.pipeline.processors[-1] is handle.transport.output_processor
 
 
+def test_build_pipecat_voice_processors_uses_pipecat_stt_tts_and_turn_processors():
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        model="gpt-realtime-whisper",
+        voice="alloy",
+        instructions="Speak concisely.",
+        metadata={
+            "stt": {"provider": "openai"},
+            "tts": "openai",
+            "vad": "silero",
+            "turnDetection": "pipecat",
+            "openaiApiKey": "sk-test",
+            "sttTurnDetection": "server_vad",
+            "ttsModel": "gpt-4o-mini-tts",
+            "outputSampleRate": 24000,
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(fake_runtime(False), config)
+
+    assert [type(processor) for processor in processors] == [
+        FakeVADProcessor,
+        FakeOpenAIRealtimeSTTService,
+        FakeUserTurnProcessor,
+        FakeOpenAITTSService,
+    ]
+    assert isinstance(processors[0].kwargs["vad_analyzer"], FakeSileroVADAnalyzer)
+    assert processors[0].kwargs["vad_analyzer"].kwargs == {"sample_rate": None}
+    assert processors[1].kwargs == {
+        "api_key": "sk-test",
+        "model": "gpt-realtime-whisper",
+        "turn_detection": None,
+        "noise_reduction": None,
+    }
+    assert processors[3].kwargs["api_key"] == "sk-test"
+    assert processors[3].kwargs["model"] == "gpt-4o-mini-tts"
+    assert processors[3].kwargs["voice"] == "alloy"
+    assert processors[3].kwargs["instructions"] == "Speak concisely."
+    assert processors[3].kwargs["sample_rate"] == 24000
+
+
+def test_build_pipecat_voice_processors_reports_missing_optional_service():
+    runtime = fake_runtime(False)
+    runtime = pipecat_adapter.PipecatRuntime(
+        **{**runtime.__dict__, "OpenAIRealtimeSTTService": None}
+    )
+
+    with pytest.raises(RuntimeError, match="OpenAI realtime STT"):
+        pipecat_adapter.build_pipecat_voice_processors(
+            runtime,
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={"stt": "openai", "openaiApiKey": "sk-test"},
+            ),
+        )
+
+
+def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "get_pipecat_capability",
+        lambda require_websocket=False: pipecat_adapter.PipecatCapability(
+            available=True,
+            core_available=True,
+            websocket_available=require_websocket,
+            stt_available=True,
+            tts_available=False,
+            vad_available=False,
+            turn_detection_available=True,
+            optional_missing_modules=("pipecat.services.openai.tts",),
+        ),
+    )
+
+    capability = pipecat_adapter.pipecat_pipeline_capability(
+        runtime=fake_runtime(False),
+        websocket=object(),
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            metadata={
+                "stt": "openai",
+                "tts": "openai",
+                "vad": "silero",
+                "turnDetection": "pipecat",
+            },
+        ),
+    )
+
+    assert capability.provider == "pipecat"
+    assert capability.media_transport == "pipecat.websocket"
+    assert capability.stt == "openai"
+    assert capability.tts == "openai"
+    assert capability.vad == "silero"
+    assert capability.turn_detection == "pipecat"
+    assert capability.missing_features == ("tts:openai", "vad:silero")
+
+
 @pytest.mark.asyncio
 async def test_talkwise_event_processor_mirrors_pipecat_transcription_frames():
     runtime = fake_runtime(websocket=False)
@@ -421,5 +547,9 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
         in snapshot["talkwiseResponsibilities"]
     )
     assert "pipecat.audio.vad.silero.SileroVADAnalyzer" == snapshot["vadEntrypoint"]
+    assert (
+        "pipecat.processors.audio.vad_processor.VADProcessor"
+        == snapshot["vadProcessorEntrypoint"]
+    )
     assert "pipecat.services.openai.stt.OpenAIRealtimeSTTService" == snapshot["sttEntrypoint"]
     assert "pipecat.services.openai.tts.OpenAITTSService" == snapshot["ttsEntrypoint"]

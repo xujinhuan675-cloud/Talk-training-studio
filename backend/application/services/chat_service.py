@@ -110,6 +110,9 @@ class ChatApplicationService:
         now: datetime,
     ) -> tuple[Message, Run, list[LLMMessage]]:
         parent_message, branch_id = await self._resolve_parent_message(uow, conversation_id, dto)
+        provider = _clean_optional_text(dto.provider) or _clean_optional_text(
+            getattr(self._llm, "provider", None)
+        )
         user_msg = Message(
             id=None,
             conversation_id=conversation_id,
@@ -117,7 +120,9 @@ class ChatApplicationService:
             content=dto.message,
             parent_message_id=parent_message.public_id if parent_message else None,
             branch_id=branch_id,
+            provider=provider,
             model=model,
+            metadata={"provider": provider, "model": model},
             created_at=now,
         )
         user_msg = await uow.message_repository.create(user_msg)
@@ -126,8 +131,15 @@ class ChatApplicationService:
             id=None,
             conversation_id=conversation_id,
             status="running",
+            provider=provider,
             model=model,
-            metadata={"trigger_message_id": user_msg.public_id},
+            metadata={
+                "trigger_message_id": user_msg.public_id,
+                "branch_id": branch_id,
+                "parent_message_id": user_msg.parent_message_id,
+                "provider": provider,
+                "model": model,
+            },
             started_at=now,
             created_at=now,
         )
@@ -199,6 +211,9 @@ class ChatApplicationService:
         total_tokens = 0
         finish_reason: Optional[str] = None
         response_model = model
+        response_provider = _clean_optional_text(dto.provider) or _clean_optional_text(
+            getattr(self._llm, "provider", None)
+        )
 
         try:
             async for chunk in self._llm.stream(
@@ -251,9 +266,11 @@ class ChatApplicationService:
                 parent_message_id=user_msg.public_id,
                 branch_id=user_msg.branch_id,
                 finish_reason=finish_reason,
+                provider=response_provider,
                 model=response_model,
                 run_id=run_id,
                 token_count=completion_tokens,
+                metadata={"provider": response_provider, "model": response_model},
                 created_at=_utcnow(),
             )
             assistant_msg = await uow.message_repository.create(assistant_msg)
@@ -344,6 +361,10 @@ class ChatApplicationService:
 
         # Phase 3: persist assistant message and complete run
         async with self._uow_factory() as uow:
+            response_provider = _clean_optional_text(dto.provider) or _clean_optional_text(
+                getattr(self._llm, "provider", None)
+            )
+            response_model = response.model or model
             assistant_msg = Message(
                 id=None,
                 conversation_id=conversation_id,
@@ -352,9 +373,14 @@ class ChatApplicationService:
                 parent_message_id=user_msg.public_id,
                 branch_id=user_msg.branch_id,
                 finish_reason=response.finish_reason,
-                model=response.model or model,
+                provider=response_provider,
+                model=response_model,
                 run_id=run_id,
                 token_count=response.completion_tokens,
+                metadata={
+                    "provider": response_provider,
+                    "model": response_model,
+                },
                 created_at=_utcnow(),
             )
             assistant_msg = await uow.message_repository.create(assistant_msg)
