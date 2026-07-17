@@ -921,6 +921,8 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
     return {
         "transport": "websocket",
         "transcriptionModel": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+        "inputSampleRate": 16000,
+        "outputSampleRate": 24000,
         "stt": stt,
         "tts": {"provider": "openai"},
         "vad": {"provider": "silero", "sampleRate": 16000},

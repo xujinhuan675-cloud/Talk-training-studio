@@ -79,6 +79,11 @@ class FakeSileroVADAnalyzer:
         self.kwargs = kwargs
 
 
+class FakeVADParams:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
 class FakeVADProcessor:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -166,6 +171,7 @@ def fake_runtime(websocket=True):
         FastAPIWebsocketParams=FakeFastAPIWebsocketParams if websocket else None,
         FastAPIWebsocketTransport=FakeFastAPIWebsocketTransport if websocket else None,
         SileroVADAnalyzer=FakeSileroVADAnalyzer,
+        VADParams=FakeVADParams,
         VADProcessor=FakeVADProcessor,
         OpenAIRealtimeSTTService=FakeOpenAIRealtimeSTTService,
         OpenAITTSService=FakeOpenAITTSService,
@@ -326,11 +332,15 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
     runtime = fake_runtime(websocket=True)
     custom_processor = object()
     websocket = object()
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        metadata={"inputSampleRate": 16000, "outputSampleRate": 24000},
+    )
 
     handle = pipecat_adapter.build_pipecat_pipeline_handle(
         runtime=runtime,
         context=voice_context(),
-        config=realtime_config(),
+        config=config,
         websocket=websocket,
         processors=[custom_processor],
         serializer=object(),
@@ -343,6 +353,27 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
     assert handle.pipeline.processors[1] is custom_processor
     assert handle.pipeline.processors[-2] is handle.event_processor
     assert handle.pipeline.processors[-1] is handle.transport.output_processor
+    assert handle.worker.kwargs["params"].kwargs["audio_in_sample_rate"] == 16000
+    assert handle.worker.kwargs["params"].kwargs["audio_out_sample_rate"] == 24000
+    assert handle.worker.kwargs["params"].kwargs["start_metadata"]["provider"] == "pipecat"
+
+
+@pytest.mark.asyncio
+async def test_adapter_uses_configured_input_sample_rate_when_chunk_omits_it():
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(runtime=fake_runtime(websocket=False))
+
+    await adapter.start(
+        voice_context(),
+        RealtimePipelineConfig(provider="pipecat", metadata={"inputSampleRate": 24000}),
+    )
+    await asyncio.sleep(0)
+    await adapter.append_audio(RealtimeAudioChunk(data=b"pcm"))
+
+    assert adapter.handle is not None
+    frame = adapter.handle.worker.queued_frames[0]
+    assert frame.sample_rate == 24000
+
+    await adapter.close()
 
 
 def test_build_pipecat_voice_processors_uses_pipecat_stt_tts_and_turn_processors():
@@ -418,6 +449,10 @@ def test_build_pipecat_voice_processors_supports_nested_feature_config():
             "vad": {
                 "provider": "silero",
                 "sampleRate": 16000,
+                "confidence": 0.75,
+                "startSecs": 0.15,
+                "stopSecs": 0.45,
+                "minVolume": 0.2,
                 "speechActivityPeriod": 0.1,
                 "audioIdleTimeout": 0.8,
             },
@@ -438,7 +473,14 @@ def test_build_pipecat_voice_processors_supports_nested_feature_config():
         FakeUserTurnProcessor,
         FakeOpenAITTSService,
     ]
-    assert processors[0].kwargs["vad_analyzer"].kwargs == {"sample_rate": 16000}
+    assert processors[0].kwargs["vad_analyzer"].kwargs["sample_rate"] == 16000
+    assert isinstance(processors[0].kwargs["vad_analyzer"].kwargs["params"], FakeVADParams)
+    assert processors[0].kwargs["vad_analyzer"].kwargs["params"].kwargs == {
+        "confidence": 0.75,
+        "start_secs": 0.15,
+        "stop_secs": 0.45,
+        "min_volume": 0.2,
+    }
     assert processors[0].kwargs["speech_activity_period"] == 0.1
     assert processors[0].kwargs["audio_idle_timeout"] == 0.8
     assert processors[1].kwargs["model"] == "gpt-4o-mini-transcribe"

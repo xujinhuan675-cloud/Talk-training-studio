@@ -35,13 +35,19 @@ CORE_PIPECAT_MODULES = (
 )
 WEBSOCKET_PIPECAT_MODULE = "pipecat.transports.websocket.fastapi"
 SILERO_VAD_PIPECAT_MODULE = "pipecat.audio.vad.silero"
+VAD_ANALYZER_PIPECAT_MODULE = "pipecat.audio.vad.vad_analyzer"
 VAD_PROCESSOR_PIPECAT_MODULE = "pipecat.processors.audio.vad_processor"
 OPENAI_STT_PIPECAT_MODULE = "pipecat.services.openai.stt"
 OPENAI_TTS_PIPECAT_MODULE = "pipecat.services.openai.tts"
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 OPTIONAL_PIPECAT_FEATURE_MODULES = {
-    "vad": (SILERO_VAD_PIPECAT_MODULE, VAD_PROCESSOR_PIPECAT_MODULE, "onnxruntime"),
+    "vad": (
+        SILERO_VAD_PIPECAT_MODULE,
+        VAD_ANALYZER_PIPECAT_MODULE,
+        VAD_PROCESSOR_PIPECAT_MODULE,
+        "onnxruntime",
+    ),
     "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
     "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
     "turn_detection": (
@@ -86,6 +92,7 @@ class PipecatRuntime:
     FastAPIWebsocketParams: type | None = None
     FastAPIWebsocketTransport: type | None = None
     SileroVADAnalyzer: type | None = None
+    VADParams: type | None = None
     VADProcessor: type | None = None
     OpenAIRealtimeSTTService: type | None = None
     OpenAITTSService: type | None = None
@@ -236,6 +243,7 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     silero_vad_analyzer = _optional_pipecat_symbol(
         SILERO_VAD_PIPECAT_MODULE, "SileroVADAnalyzer"
     )
+    vad_params = _optional_pipecat_symbol(VAD_ANALYZER_PIPECAT_MODULE, "VADParams")
     vad_processor = _optional_pipecat_symbol(VAD_PROCESSOR_PIPECAT_MODULE, "VADProcessor")
     openai_realtime_stt = _optional_pipecat_symbol(
         OPENAI_STT_PIPECAT_MODULE, "OpenAIRealtimeSTTService"
@@ -264,6 +272,7 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         FastAPIWebsocketParams=websocket_params,
         FastAPIWebsocketTransport=websocket_transport,
         SileroVADAnalyzer=silero_vad_analyzer,
+        VADParams=vad_params,
         VADProcessor=vad_processor,
         OpenAIRealtimeSTTService=openai_realtime_stt,
         OpenAITTSService=openai_tts,
@@ -435,7 +444,7 @@ def build_pipecat_pipeline_handle(
     pipeline = runtime.Pipeline(pipecat_processors)
     worker = runtime.PipelineWorker(
         pipeline,
-        params=runtime.PipelineParams(start_metadata=_start_metadata(context, config)),
+        params=_pipeline_params(runtime, context, config),
         enable_rtvi=False,
         name=f"talkwise-training-{context.binding.training_session_id}",
     )
@@ -487,11 +496,12 @@ def build_pipecat_voice_processors(
                 "audio_idle_timeout": "audio_idle_timeout",
             },
         )
+        vad_analyzer_kwargs: dict[str, Any] = {"sample_rate": vad_sample_rate}
+        if vad_params := _vad_params(runtime, vad_config):
+            vad_analyzer_kwargs["params"] = vad_params
         processors.append(
             runtime.VADProcessor(
-                vad_analyzer=runtime.SileroVADAnalyzer(
-                    sample_rate=vad_sample_rate,
-                ),
+                vad_analyzer=runtime.SileroVADAnalyzer(**vad_analyzer_kwargs),
                 **vad_kwargs,
             )
         )
@@ -774,13 +784,57 @@ def _start_metadata(
     }
 
 
+def _pipeline_params(
+    runtime: PipecatRuntime,
+    context: TrainingVoiceContext,
+    config: RealtimePipelineConfig,
+) -> Any:
+    values: dict[str, Any] = {"start_metadata": _start_metadata(context, config)}
+    audio_in_sample_rate = _audio_in_sample_rate(config)
+    audio_out_sample_rate = _audio_out_sample_rate(config)
+    if audio_in_sample_rate is not None:
+        values["audio_in_sample_rate"] = audio_in_sample_rate
+    if audio_out_sample_rate is not None:
+        values["audio_out_sample_rate"] = audio_out_sample_rate
+    return runtime.PipelineParams(**values)
+
+
+def _audio_in_sample_rate(config: RealtimePipelineConfig) -> int | None:
+    metadata = dict(config.metadata)
+    return _metadata_int(
+        metadata,
+        "audioInSampleRate",
+        "audio_in_sample_rate",
+        "inputSampleRate",
+        "input_sample_rate",
+        "sampleRate",
+        "sample_rate",
+    )
+
+
+def _audio_out_sample_rate(config: RealtimePipelineConfig) -> int | None:
+    metadata = dict(config.metadata)
+    return _metadata_int(
+        metadata,
+        "audioOutSampleRate",
+        "audio_out_sample_rate",
+        "outputSampleRate",
+        "output_sample_rate",
+    )
+
+
 def _audio_sample_rate(
     chunk: RealtimeAudioChunk,
     config: RealtimePipelineConfig | None,
 ) -> int:
-    value = chunk.metadata.get("sample_rate") or chunk.metadata.get("sampleRate")
+    value = (
+        chunk.metadata.get("sample_rate")
+        or chunk.metadata.get("sampleRate")
+        or chunk.metadata.get("input_sample_rate")
+        or chunk.metadata.get("inputSampleRate")
+    )
     if value is None and config is not None:
-        value = config.metadata.get("sample_rate") or config.metadata.get("sampleRate")
+        value = _audio_in_sample_rate(config)
     return int(value or 16000)
 
 
@@ -872,6 +926,26 @@ def _processor_kwargs(
         if source_key in metadata:
             kwargs[target_key] = metadata[source_key]
     return kwargs
+
+
+def _vad_params(runtime: PipecatRuntime, metadata: Mapping[str, Any]) -> Any | None:
+    vad_kwargs = _processor_kwargs(
+        metadata,
+        allowed={
+            "confidence": "confidence",
+            "startSecs": "start_secs",
+            "start_secs": "start_secs",
+            "stopSecs": "stop_secs",
+            "stop_secs": "stop_secs",
+            "minVolume": "min_volume",
+            "min_volume": "min_volume",
+        },
+    )
+    if not vad_kwargs:
+        return None
+    if runtime.VADParams is None:
+        raise RuntimeError("Pipecat VAD params are unavailable")
+    return runtime.VADParams(**vad_kwargs)
 
 
 def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
@@ -989,6 +1063,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "pipecat.frames.frames.UserStoppedSpeakingFrame",
         ),
         "websocketEntrypoint": ("pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport"),
+        "vadParamsEntrypoint": ("pipecat.audio.vad.vad_analyzer.VADParams"),
         "vadEntrypoint": ("pipecat.audio.vad.silero.SileroVADAnalyzer"),
         "vadProcessorEntrypoint": ("pipecat.processors.audio.vad_processor.VADProcessor"),
         "sttEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService"),
