@@ -265,7 +265,7 @@
 }
 
 .chat-page-llm-selector label:last-of-type {
-  flex: 1 1 280px;
+  flex: 0 1 300px;
 }
 
 .chat-page-llm-selector label > span {
@@ -298,6 +298,58 @@
 .chat-page-llm-selector select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.chat-page-llm-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 300px;
+  min-width: 180px;
+  min-height: 30px;
+  overflow: hidden;
+}
+
+.chat-page-llm-description {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-page-llm-tags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 58%;
+  min-height: 22px;
+  overflow: hidden;
+}
+
+.chat-page-llm-tags span {
+  flex: 0 0 auto;
+  max-width: 120px;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-page-llm-tags span.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
 }
 
 .chat-page-training-details-toggle {
@@ -1388,6 +1440,20 @@
   .chat-page-llm-selector label:first-of-type,
   .chat-page-llm-selector label:last-of-type {
     flex: 1 1 180px;
+  }
+
+  .chat-page-llm-details {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .chat-page-llm-description {
+    max-width: 52%;
+  }
+
+  .chat-page-llm-tags {
+    max-width: 100%;
   }
 
   .chat-page-training-scene.collapsed {

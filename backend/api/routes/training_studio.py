@@ -49,6 +49,7 @@ from application.ports.llm import (
     LLMModelMetadata,
     LLMPort,
     LLMProviderMetadata,
+    build_llm_registry_artifacts,
     build_llm_provider_registry,
 )
 from application.ports.realtime import (
@@ -422,7 +423,9 @@ def _llm_registry_response(llm: LLMPort | None) -> dict[str, object]:
             "source": source,
         },
     )
-    return registry.to_dict()
+    payload = registry.to_dict()
+    payload.update(build_llm_registry_artifacts(registry))
+    return payload
 
 
 async def _reload_voice_clients() -> None:

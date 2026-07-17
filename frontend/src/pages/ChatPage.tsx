@@ -63,6 +63,7 @@ import { uploadVideoAnswer } from '../services/trainingStudio'
 import {
   fetchLlmRegistry,
   getLlmRegistryModelChoices,
+  isLlmModelChoiceSelectable,
   selectDefaultLlmModelChoice,
   type LLMModelChoice,
   type LLMProviderMetadata,
@@ -87,7 +88,7 @@ import {
 } from '../data/trainingScenarios'
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useAuthContext } from '../contexts/AuthContext'
-import { useI18n, type TranslateInline } from '../i18n'
+import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { getErrorMessage } from '../utils/errors'
 import '../App.css'
 import './ChatPage.css'
@@ -182,11 +183,78 @@ function buildLlmSelectionMetadata(choice: LLMModelChoice | null): Record<string
     llm: {
       provider: choice.provider,
       model: choice.model,
+      model_spec: choice.modelSpec?.name ?? null,
       endpoint: choice.endpoint,
       wire_api: choice.wireApi,
+      capabilities: choice.capabilities,
+      context_window: choice.contextWindow,
+      max_output_tokens: choice.maxOutputTokens,
       source: 'training_room_selector',
     },
   }
+}
+
+function formatCompactTokenCount(value: number | null): string | null {
+  if (!value || value <= 0) return null
+  const formatUnit = (amount: number, suffix: string) => {
+    const rounded = Math.round(amount * 10) / 10
+    return `${Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)}${suffix}`
+  }
+  if (value >= 1_000_000) return formatUnit(value / 1_000_000, 'M')
+  if (value >= 1_000) return formatUnit(value / 1_000, 'K')
+  return String(value)
+}
+
+function getLlmCapabilityLabel(capability: string, t: Translate): string {
+  const normalized = capability.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  switch (normalized) {
+    case 'vision':
+      return t('training.llm.capability.vision')
+    case 'tools':
+    case 'tool_use':
+    case 'function_calling':
+      return t('training.llm.capability.tools')
+    case 'reasoning':
+      return t('training.llm.capability.reasoning')
+    case 'audio':
+      return t('training.llm.capability.audio')
+    case 'realtime':
+      return t('training.llm.capability.realtime')
+    case 'image':
+    case 'image_generation':
+      return t('training.llm.capability.image')
+    default:
+      return capability.replace(/[_-]+/g, ' ')
+  }
+}
+
+type LlmDetailTag = {
+  key: string
+  label: string
+  tone?: 'warning'
+}
+
+function buildLlmDetailTags(choice: LLMModelChoice | null, t: Translate): LlmDetailTag[] {
+  if (!choice) return []
+  const contextCount = formatCompactTokenCount(choice.contextWindow)
+  const outputCount = formatCompactTokenCount(choice.maxOutputTokens)
+  const tags: LlmDetailTag[] = compactStrings([
+    contextCount ? t('training.llm.contextTag', { count: contextCount }) : null,
+    outputCount ? t('training.llm.maxOutputTag', { count: outputCount }) : null,
+    ...choice.capabilities.slice(0, 4).map((capability) => getLlmCapabilityLabel(capability, t)),
+  ]).map((label) => ({ key: label, label }))
+  if (choice.disabled) {
+    tags.push({ key: 'unavailable', label: t('training.llm.unavailableTag'), tone: 'warning' })
+  }
+  return tags
+}
+
+function formatLlmOptionLabel(choice: LLMModelChoice, t: Translate): string {
+  const badges = compactStrings([
+    choice.isDefault ? t('training.llm.defaultBadge') : null,
+    choice.disabled ? t('training.llm.unavailableTag') : null,
+  ])
+  return badges.length > 0 ? `${choice.modelLabel} (${badges.join(' / ')})` : choice.modelLabel
 }
 
 function coercePercentScore(value: unknown): number | undefined {
@@ -490,11 +558,18 @@ function ChatArea() {
     () => getLlmRegistryModelChoices(llmRegistry),
     [llmRegistry],
   )
+  const firstSelectableLlmChoice = React.useMemo(
+    () => llmModelChoices.find(isLlmModelChoiceSelectable) ?? null,
+    [llmModelChoices],
+  )
   const selectedLlmChoice = React.useMemo(
-    () => llmModelChoices.find((choice) => choice.key === selectedLlmChoiceKey) ?? null,
+    () => {
+      const choice = llmModelChoices.find((item) => item.key === selectedLlmChoiceKey) ?? null
+      return isLlmModelChoiceSelectable(choice) ? choice : null
+    },
     [llmModelChoices, selectedLlmChoiceKey],
   )
-  const selectedLlmProvider = selectedLlmChoice?.provider ?? llmModelChoices[0]?.provider ?? ''
+  const selectedLlmProvider = selectedLlmChoice?.provider ?? firstSelectableLlmChoice?.provider ?? llmModelChoices[0]?.provider ?? ''
   const llmProviderOptions = React.useMemo(() => {
     const providers = new Map<string, string>()
     for (const choice of llmModelChoices) {
@@ -508,6 +583,11 @@ function ChatArea() {
     () => llmModelChoices.filter((choice) => choice.provider === selectedLlmProvider),
     [llmModelChoices, selectedLlmProvider],
   )
+  const displayedLlmChoice = selectedLlmChoice ?? selectedProviderModelChoices[0] ?? null
+  const llmDetailTags = React.useMemo(
+    () => buildLlmDetailTags(displayedLlmChoice, t),
+    [displayedLlmChoice, t],
+  )
   const llmSelectionMetadata = React.useMemo(
     () => buildLlmSelectionMetadata(selectedLlmChoice),
     [selectedLlmChoice],
@@ -520,23 +600,27 @@ function ChatArea() {
   useEffect(() => {
     setSelectedLlmChoiceKey((currentKey) => {
       if (llmModelChoices.length === 0) return null
-      if (currentKey && llmModelChoices.some((choice) => choice.key === currentKey)) {
+      if (currentKey && llmModelChoices.some((choice) => choice.key === currentKey && isLlmModelChoiceSelectable(choice))) {
         return currentKey
       }
-      return selectDefaultLlmModelChoice(llmRegistry)?.key ?? llmModelChoices[0].key
+      return selectDefaultLlmModelChoice(llmRegistry)?.key ?? null
     })
   }, [llmModelChoices, llmRegistry])
 
   const handleLlmProviderChange = React.useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     const provider = event.target.value
     const providerChoices = llmModelChoices.filter((choice) => choice.provider === provider)
-    const nextChoice = providerChoices.find((choice) => choice.isDefault) ?? providerChoices[0] ?? null
+    const nextChoice = providerChoices.find((choice) => choice.isDefault && isLlmModelChoiceSelectable(choice))
+      ?? providerChoices.find(isLlmModelChoiceSelectable)
+      ?? null
     setSelectedLlmChoiceKey(nextChoice?.key ?? null)
   }, [llmModelChoices])
 
   const handleLlmModelChange = React.useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedLlmChoiceKey(event.target.value || null)
-  }, [])
+    const nextKey = event.target.value || null
+    const nextChoice = llmModelChoices.find((choice) => choice.key === nextKey) ?? null
+    setSelectedLlmChoiceKey(nextChoice && isLlmModelChoiceSelectable(nextChoice) ? nextChoice.key : null)
+  }, [llmModelChoices])
 
   useEffect(() => {
     setTrainingSessionCompleted(false)
@@ -1428,17 +1512,42 @@ function ChatArea() {
                 <span>{t('training.llm.model')}</span>
                 <select
                   aria-label={t('training.llm.modelAria')}
-                  value={selectedLlmChoice?.key ?? selectedProviderModelChoices[0]?.key ?? ''}
+                  value={selectedLlmChoice?.key
+                    ?? selectedProviderModelChoices.find(isLlmModelChoiceSelectable)?.key
+                    ?? selectedProviderModelChoices[0]?.key
+                    ?? ''}
                   onChange={handleLlmModelChange}
                   disabled={chat.sending}
                 >
                   {selectedProviderModelChoices.map((choice) => (
-                    <option key={choice.key} value={choice.key}>
-                      {choice.modelLabel}{choice.isDefault ? ` (${t('training.llm.defaultBadge')})` : ''}
+                    <option key={choice.key} value={choice.key} disabled={choice.disabled}>
+                      {formatLlmOptionLabel(choice, t)}
                     </option>
                   ))}
                 </select>
               </label>
+              <div
+                className="chat-page-llm-details"
+                aria-label={t('training.llm.detailsAria')}
+              >
+                {displayedLlmChoice?.description && (
+                  <span className="chat-page-llm-description" title={displayedLlmChoice.description}>
+                    {displayedLlmChoice.description}
+                  </span>
+                )}
+                {llmDetailTags.length > 0 && (
+                  <span className="chat-page-llm-tags">
+                    {llmDetailTags.map((tag) => (
+                      <span
+                        key={tag.key}
+                        className={tag.tone === 'warning' ? 'warning' : undefined}
+                      >
+                        {tag.label}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
             </div>
           )}
 

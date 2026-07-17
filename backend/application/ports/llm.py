@@ -10,9 +10,63 @@ the application layer does not depend on specific LLM provider details.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import AsyncIterator, Optional, Protocol, runtime_checkable
+
+
+_SENSITIVE_METADATA_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "auth_header",
+    "authtoken",
+    "auth_token",
+    "bearer_token",
+    "bearertoken",
+    "client_secret",
+    "clientsecret",
+    "credential",
+    "credentials",
+    "default_headers",
+    "password",
+    "private_key",
+    "privatekey",
+    "proxy_authorization",
+    "refresh_token",
+    "refreshtoken",
+    "secret",
+    "token",
+}
+
+
+def _metadata_key_forms(key: object) -> tuple[str, str]:
+    lowered = str(key).lower()
+    snake = "".join(ch if ch.isalnum() else "_" for ch in lowered).strip("_")
+    compact = "".join(ch for ch in lowered if ch.isalnum())
+    return snake, compact
+
+
+def _is_sensitive_metadata_key(key: object) -> bool:
+    snake, compact = _metadata_key_forms(key)
+    if snake in _SENSITIVE_METADATA_KEYS or compact in _SENSITIVE_METADATA_KEYS:
+        return True
+    return snake.endswith(("_api_key", "_authorization", "_password", "_secret", "_token"))
+
+
+def _sanitize_metadata_extra(value: object) -> object:
+    if isinstance(value, Mapping):
+        sanitized: dict[str, object] = {}
+        for raw_key, nested_value in value.items():
+            if _is_sensitive_metadata_key(raw_key):
+                continue
+            sanitized[str(raw_key)] = _sanitize_metadata_extra(nested_value)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_metadata_extra(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_metadata_extra(item) for item in value]
+    return value
 
 
 def _metadata_payload(
@@ -23,7 +77,9 @@ def _metadata_payload(
 ) -> dict[str, object]:
     payload = {key: value for key, value in fields.items() if value is not None or include_none}
     for key, value in extra.items():
-        payload.setdefault(key, value)
+        if _is_sensitive_metadata_key(key):
+            continue
+        payload.setdefault(key, _sanitize_metadata_extra(value))
     return payload
 
 
@@ -223,6 +279,184 @@ def build_llm_provider_registry(
     )
 
 
+def build_llm_model_specs(registry: LLMProviderMetadata) -> list[dict[str, object]]:
+    """Build TalkWise model specs from a provider registry.
+
+    Each spec is a stable, UI-ready model selection profile.
+    """
+    specs: list[dict[str, object]] = []
+    seen: set[str] = set()
+    endpoint_model_keys: set[tuple[str, Optional[str], str]] = set()
+
+    def append_model(model: LLMModelMetadata, endpoint: LLMEndpointMetadata | None = None) -> None:
+        provider = (model.provider or endpoint.provider) if endpoint else model.provider
+        provider = provider or registry.provider
+        endpoint_url = model.endpoint if model.endpoint is not None else (
+            endpoint.endpoint if endpoint else registry.endpoint
+        )
+        wire_api = endpoint.wire_api if endpoint else registry.wire_api
+        endpoint_model_key = (provider, endpoint_url, model.name)
+        if endpoint is None and endpoint_model_key in endpoint_model_keys:
+            return
+        if endpoint is not None:
+            endpoint_model_keys.add(endpoint_model_key)
+        endpoint_default = endpoint.default_model if endpoint else registry.default_model
+        capabilities = _safe_string_list(
+            model.extra.get("capabilities")
+            or (endpoint.extra.get("capabilities") if endpoint else None)
+            or ["text", "streaming"]
+        )
+        tags = _safe_string_list(model.extra.get("tags") or capabilities)
+        endpoint_enabled = _safe_bool(endpoint.extra.get("enabled"), default=True) if endpoint else True
+        endpoint_selectable = (
+            _safe_bool(endpoint.extra.get("selectable"), default=endpoint_enabled)
+            if endpoint
+            else endpoint_enabled
+        )
+        enabled = endpoint_enabled and _safe_bool(model.extra.get("enabled"), default=True)
+        selectable = _safe_bool(model.extra.get("selectable"), default=enabled)
+        show_in_menu = _safe_bool(
+            model.extra.get("show_in_menu", model.extra.get("showInMenu")),
+            default=True,
+        )
+        if not show_in_menu:
+            return
+        endpoint_key = _llm_endpoint_config_key(provider, endpoint_url, wire_api)
+        spec_name = _llm_model_spec_name(provider, endpoint_url, wire_api, model.name)
+        if spec_name in seen:
+            return
+        seen.add(spec_name)
+
+        label = _safe_text(model.display_name) or _safe_text(model.extra.get("label")) or model.name
+        is_default = bool(model.is_default or (endpoint_default and model.name == endpoint_default))
+        spec: dict[str, object] = {
+            "id": spec_name,
+            "model_spec_id": spec_name,
+            "model_spec_name": spec_name,
+            "name": spec_name,
+            "label": label,
+            "display_label": label,
+            "provider": provider,
+            "endpoint": endpoint_url,
+            "endpoint_key": endpoint_key,
+            "wire_api": wire_api,
+            "model": model.name,
+            "group": provider,
+            "default": is_default,
+            "is_default": is_default,
+            "enabled": enabled,
+            "selectable": enabled and endpoint_selectable and selectable and show_in_menu,
+            "show_in_menu": show_in_menu,
+            "capabilities": capabilities,
+            "tags": tags,
+        }
+        description = _safe_text(model.extra.get("description"))
+        if description:
+            spec["description"] = description
+        if model.context_window is not None:
+            spec["context_window"] = model.context_window
+        if model.max_output_tokens is not None:
+            spec["max_output_tokens"] = model.max_output_tokens
+        pricing = _safe_mapping(model.extra.get("pricing") or model.extra.get("tokenomics"))
+        if pricing:
+            spec["pricing"] = pricing
+        cost = _safe_mapping(model.extra.get("cost"))
+        if cost:
+            spec["cost"] = cost
+        for cost_key in (
+            "input_cost_per_token",
+            "output_cost_per_token",
+            "prompt_cost_per_token",
+            "completion_cost_per_token",
+            "input_cost_per_1m_tokens",
+            "output_cost_per_1m_tokens",
+        ):
+            if cost_key in model.extra:
+                spec[cost_key] = _sanitize_metadata_extra(model.extra[cost_key])
+        specs.append(spec)
+
+    for endpoint in registry.endpoints:
+        for model in endpoint.models:
+            append_model(model, endpoint)
+    for model in registry.models:
+        append_model(model)
+    return specs
+
+
+def build_llm_endpoints_config(registry: LLMProviderMetadata) -> dict[str, dict[str, object]]:
+    """Build endpoint config descriptors keyed by provider/endpoint/wire API."""
+    config: dict[str, dict[str, object]] = {}
+    endpoints = registry.endpoints or [
+        LLMEndpointMetadata(
+            provider=registry.provider,
+            endpoint=registry.endpoint,
+            wire_api=registry.wire_api,
+            default_model=registry.default_model,
+            models=registry.models,
+        )
+    ]
+    for order, endpoint in enumerate(endpoints):
+        key = _llm_endpoint_config_key(endpoint.provider, endpoint.endpoint, endpoint.wire_api)
+        endpoint_enabled = _safe_bool(endpoint.extra.get("enabled"), default=True)
+        endpoint_selectable = _safe_bool(endpoint.extra.get("selectable"), default=endpoint_enabled)
+        model_names: list[str] = []
+        model_spec_ids: list[str] = []
+        for model in endpoint.models:
+            if not _safe_bool(model.extra.get("enabled"), default=True):
+                continue
+            if not _safe_bool(
+                model.extra.get("show_in_menu", model.extra.get("showInMenu")),
+                default=True,
+            ):
+                continue
+            model_names.append(model.name)
+            model_spec_ids.append(
+                _llm_model_spec_name(
+                    model.provider or endpoint.provider,
+                    model.endpoint if model.endpoint is not None else endpoint.endpoint,
+                    endpoint.wire_api,
+                    model.name,
+                )
+            )
+        model_display_label = _safe_text(endpoint.extra.get("model_display_label")) or _safe_text(
+            endpoint.extra.get("modelDisplayLabel")
+        )
+        label = _safe_text(endpoint.extra.get("label")) or endpoint.provider
+        config[key] = {
+            "key": key,
+            "order": order,
+            "provider": endpoint.provider,
+            "label": label,
+            "display_label": label,
+            "endpoint": endpoint.endpoint,
+            "wire_api": endpoint.wire_api,
+            "default_model": endpoint.default_model,
+            "enabled": endpoint_enabled,
+            "selectable": endpoint_enabled and endpoint_selectable,
+            "model_display_label": model_display_label or endpoint.provider,
+            "available_models": model_names,
+            "models": model_names,
+            "model_spec_ids": model_spec_ids,
+            "capabilities": _safe_string_list(endpoint.extra.get("capabilities") or ["text", "streaming"]),
+            "tags": _safe_string_list(endpoint.extra.get("tags")),
+        }
+        pricing = _safe_mapping(endpoint.extra.get("pricing") or endpoint.extra.get("tokenomics"))
+        if pricing:
+            config[key]["pricing"] = pricing
+        cost = _safe_mapping(endpoint.extra.get("cost"))
+        if cost:
+            config[key]["cost"] = cost
+    return config
+
+
+def build_llm_registry_artifacts(registry: LLMProviderMetadata) -> dict[str, object]:
+    """Return model specs and endpoint configs for registry API payloads."""
+    return {
+        "model_specs": build_llm_model_specs(registry),
+        "endpoints_config": build_llm_endpoints_config(registry),
+    }
+
+
 def _normalize_model_metadata(
     model: LLMModelMetadata,
     *,
@@ -236,6 +470,60 @@ def _normalize_model_metadata(
         endpoint=model.endpoint if model.endpoint is not None else endpoint,
         is_default=model.is_default or bool(default_model and model.name == default_model),
     )
+
+
+def _safe_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _safe_bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _safe_string_list(value: object) -> list[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = _safe_text(item)
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _safe_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    sanitized = _sanitize_metadata_extra(value)
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _llm_endpoint_config_key(
+    provider: str,
+    endpoint: Optional[str],
+    wire_api: Optional[str],
+) -> str:
+    return "::".join([provider, endpoint or "", wire_api or ""])
+
+
+def _llm_model_spec_name(
+    provider: str,
+    endpoint: Optional[str],
+    wire_api: Optional[str],
+    model: str,
+) -> str:
+    return "::".join([provider, endpoint or "", wire_api or "", model])
 
 
 @dataclass
