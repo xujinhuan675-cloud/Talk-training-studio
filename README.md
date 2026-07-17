@@ -175,7 +175,7 @@ open http://localhost:5173
 ```bash
 # 本地开发
 # 后端
-cd backend && uv sync && uv run python main.py
+cd backend && uv sync --extra voice && uv run python main.py
 
 # 前端（新终端）
 cd frontend && npm install && npm run dev

@@ -1,0 +1,235 @@
+---
+stage: plan
+status: active
+owner: codex
+created_by: codex
+created: 2026-07-17
+related:
+  - docs/plans/2026-07-13-training-studio-long-term-roadmap.md
+  - AGENTS.md
+---
+
+# LibreChat / Pipecat 成熟底座适配审计
+
+## 结论
+
+Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 的训练闭环站到两个成熟底座上：
+
+- 文本、历史、分支、搜索、模型配置、认证、Agent/MCP 优先对齐 LibreChat。
+- 实时语音、多模态、STT/TTS/LLM 编排、VAD、turn detection、interruption、transport 优先对齐 Pipecat。
+- TalkWise 保留的是训练产品语义：training goal、scenario、persona/stakeholder、dispatcher、evaluation、growth/report/progress、live guidance、branch-aware review。
+- 当前 TalkWise 核心可以重构、迁移或重建。判断标准是能否更稳地完成训练闭环，而不是保护当前实现形状。
+
+当前代码已经有这个概念，但还没有完成系统性迁移。TrainingCore、conversation tree、realtime pipeline、branch-aware result/history、mock auth boundary 都已有雏形；缺口是 LibreChat 尚未成为文本底座，Pipecat 尚未成为唯一语音 runtime，认证/权限/MCP/Agent 还没有进入统一产品架构。
+
+## 图谱快照
+
+本轮使用三个 code-review graph 独立查看，避免当前仓库根目录下的 `outside-project` 污染当前项目判断。
+
+| 仓库 | 文件 | 节点 | 边 | 关键热点 |
+|:---|---:|---:|---:|:---|
+| Talk Training Studio | 4843 | 54130 | 559795 | `App`、`startQuickSession`、`create_session`、`generate_report`、`start_training_session`、`list_scenario_progress` |
+| LibreChat | 3312 | 35157 | 412967 | OAuth flow、MCP discovery/call、ChatRoute、SSE、AgentPanel、ConvoOptions、Search |
+| Pipecat | 1163 | 14661 | 117462 | pipeline `start`、`process_frame`、interruption、turn callbacks、TTS/STT/LLM services、transports |
+
+图谱结论：
+
+- LibreChat 的成熟度集中在通用聊天平台能力，不应把它的通用语义直接塞进 TalkWise scoring/growth。
+- Pipecat 的成熟度集中在实时 frame pipeline 和服务编排，适合作为 TalkWise voice/realtime 的运行层。
+- TalkWise 的价值层应保持在训练语义，不继续自研完整 chat runtime 或完整 realtime runtime。
+
+## 当前项目程度
+
+整体判断：概念已经成立，工程迁移处于中段。
+
+| 维度 | 当前完成度 | 判断 |
+|:---|:---:|:---|
+| 产品目标对齐 | 80% | `AGENTS.md` 已写入成熟底座优先规则，长期路线已明确。 |
+| TalkWise 训练语义 | 65% | TrainingCore、session、scenario、report、live guidance 已有，但还没有完全统一文本/语音/视频。 |
+| 文本分支体验 | 65% | 已有 message tree action、edit/retry/fork、path/tail/fork point UI，离 LibreChat 的长期分支稳定性还有差距。 |
+| 训练复盘/历史 | 65% | 已展示 session/report/progress 来源、当前路径、最后回复和空状态，仍需稳定为数据契约。 |
+| Pipecat/realtime | 45% | 已有 readiness、provider-neutral transcript、audio output、runner，Pipecat 还不是唯一 runtime。 |
+| 认证/隔离 | 30% | 只有 mock user/role 和 conversation 边界测试，未迁入成熟 auth/ACL。 |
+| MCP/Agent/Tool | 10% | 当前项目没有系统性 Agent/MCP 基底，应从 LibreChat 迁移或适配。 |
+| 成熟部署/运维 | 25% | 本地开发和测试可用，管理面板、权限覆盖、token/usage、审计不足。 |
+
+## LibreChat 功能域适配
+
+| 功能域 | LibreChat 成熟资产 | 适配等级 | TalkWise 落地方式 |
+|:---|:---|:---|:---|
+| conversation runtime | conversation/message 数据模型、ChatRoute、ConvoOptions、conversation management、search | 高 | 作为文本底座候选。先建立 TalkWise `TrainingConversationAdapter`，再决定迁移 schema 还是保留当前表加兼容层。 |
+| message tree / branch | regenerate、sibling branch、edit save-and-submit、fork visible/branches/all target、reload retain branch 的 E2E 覆盖 | 高 | 直接作为文本分支验收标准。TalkWise 分支 metadata 只作为 replay context，不影响 scoring/completion。 |
+| SSE / resumable streams | adaptive/resumable SSE、step handler、event handler、多 tab/恢复语义 | 高 | 替换或对齐当前文字流式回复，后续支撑训练过程中的稳定追问和断线恢复。 |
+| provider/model endpoint | OpenAI、Anthropic、Azure、Google、Bedrock、custom endpoints、model specs、presets | 高 | 迁为统一模型注册/选择层。TalkWise training prompt/rubric 作为上层配置，不直接绑定单 provider。 |
+| auth/session | OAuth2、LDAP、email login、2FA、JWT/session、social login | 高 | 中期迁入。短期继续 mock user/role，但 API 契约按未来真实用户/团队/权限设计。 |
+| roles/groups/ACL/admin | user/group/role、permission override、admin panel、resource permissions | 高 | 优先迁认证边界思想和 ACL 数据形状；完整 UI 管理面板分阶段迁入。 |
+| MCP/Agent/tools | MCP server 管理、OAuth MCP、tool discovery/call、Agent builder/marketplace、skills/subagents | 高 | 作为 TalkWise 教练工具、素材分析、外部资料检索、企业系统接入的扩展底座。不要先自研 MCP runtime。 |
+| files/RAG/uploads | files、file search、SharePoint/Google picker、upload ownership、agent file ownership | 中高 | 用于训练素材、会议纪要、邮件/聊天记录导入。先迁文件权限和引用模型，再迁复杂 RAG。 |
+| memory/projects/prompts/bookmarks | memory、projects、prompts、bookmarks、sharing | 中高 | 映射为用户训练档案、场景集合、可复用话术/训练模板。不要照搬通用收藏 UI。 |
+| import/export/share | ChatGPT/LibreChat import、markdown/json/screenshot export、shared links | 中 | 用于训练记录导入、复盘导出、教练/团队分享。注意训练隐私默认更严格。 |
+| artifacts/code interpreter/image | artifacts、code interpreter、image generation/editing | 中低 | 不是近期核心。仅在训练报告可视化、材料生成、案例演示需要时按工具迁入。 |
+| web search | search + scraper + reranker | 中 | 可作为训练资料增强或 live coach 工具，不放入第一批训练闭环。 |
+| token usage/moderation/balance | usage、token credits、moderation | 中 | 生产化需要，但在 auth/ACL 之后。 |
+| i18n/a11y/UI polish | 多语言、可访问性、成熟聊天 UI 组件 | 中高 | 借鉴交互和验收，不整站搬皮肤。TalkWise 保持训练工具型界面。 |
+| deployment/config | Docker、config yaml、CDN/S3、admin config override | 中 | 生产化阶段迁移配置思想，避免现阶段过早引入重量部署面。 |
+
+LibreChat 不应迁入的方式：
+
+- 不把 TalkWise 训练报告、评分、成长体系改成通用 chat history。
+- 不为了“像 LibreChat”重写全部前端；先迁运行时、权限、分支、模型、Agent/MCP。
+- 不先搬 Code Interpreter、image generation、marketplace UI 这类非训练闭环核心能力。
+
+## Pipecat 功能域适配
+
+| 功能域 | Pipecat 成熟资产 | 适配等级 | TalkWise 落地方式 |
+|:---|:---|:---|:---|
+| frame pipeline | `Pipeline`、`PipelineTask`、`FrameProcessor`、parallel/sync pipeline、service switcher | 高 | 作为 realtime voice 唯一运行抽象。当前 `RealtimePipelineAdapter` 应逐步变成 Pipecat adapter，而不是并存多个自研 runtime。 |
+| STT/TTS/LLM services | OpenAI、Deepgram、ElevenLabs、MiniMax、Google、Azure、Whisper、Ollama、OpenRouter 等 | 高 | 第一批只启用 OpenAI STT/TTS/LLM + 当前已有 provider；其它作为配置扩展，不重复写 adapter。 |
+| VAD/turn/interruption | Silero VAD、Krisp/AIC/RNNoise、smart turn、user turn start/stop、mute、idle、interruption | 高 | 直接支撑电话式训练：自动起止、打断、沉默、追问和压力升级。 |
+| WebSocket/FastAPI transport | FastAPI websocket、client/server websocket、base input/output transport | 高 | 优先替换当前薄 websocket 语音链路。前端保持 TalkWise UI，后端运行 Pipecat transport。 |
+| WebRTC/LiveKit/Daily | smallwebrtc、LiveKit、Daily、local transports | 中高 | WebSocket 先稳定；视频会议式训练进入 Phase 3/4 时再选 WebRTC/LiveKit/Daily。 |
+| OpenAI realtime/S2S | OpenAI realtime STT/S2S、Responses、Grok/Gemini/Nova Sonic 等 | 高 | OpenAI realtime 可以作为 Pipecat service 路径之一，避免维护独立 OpenAI websocket 分支。 |
+| RTVI | RTVI processor/observer/UI protocol | 中高 | 后续前端实时状态、配置、metrics 可对齐 RTVI；第一轮不强制引入完整客户端 SDK。 |
+| audio processing | resamplers、mixers、filters、audio buffer、word timestamp | 中高 | 用于语音复盘指标：停顿、语速、重叠、输出同步、环境音。 |
+| observability/metrics/tracing | latency observer、turn tracking、startup timing、OpenTelemetry、Sentry | 中高 | 进入 P1。实时训练必须有延迟、turn、错误原因和 provider 事件可观测。 |
+| evals | speech/eval harness/judge/scenario | 中 | 可反向支撑 TalkWise 自己的训练质量评估，但不替代 TalkWise rubric。 |
+| flows | structured conversations、stateful flow examples | 中 | 可参考训练回合/场景状态机，但 TalkWise scenario/dispatcher 是上层产品语义。 |
+| workers/bus/distributed | worker、LLM worker、UI worker、bus、Redis/PGMQ | 中 | 后续多 agent/并行 coach/企业部署可迁；第一轮不引入分布式复杂度。 |
+| phone/telephony serializers | Twilio、Vonage、Telnyx、Plivo、WhatsApp、Genesys | 低到中 | 只有当产品进入电话演练/客服场景时迁入。 |
+| avatar/video services | HeyGen、Tavus、Simli、LemonSlice | 低到中 | 视频虚拟人后置，不进入当前成熟底座第一轮。 |
+| CLI/project generation | `pipecat init`、service registry、template/tests | 中 | 可借鉴 readiness/service registry 和本地测试方式，不把 TalkWise 变成 Pipecat scaffold 项目。 |
+
+Pipecat 不应迁入的方式：
+
+- 不让 Pipecat 接管训练语义、评分、成长档案。
+- 不在第一轮启用所有 services/transports；先形成一个可测 OpenAI/Pipecat realtime path。
+- 不把视频虚拟人、电话运营商、分布式 workers 提前放进核心路径。
+
+## TalkWise 应保留的产品层
+
+以下能力是 TalkWise 的护城河，不从 LibreChat/Pipecat 通用能力中直接替代：
+
+- 训练目标配置：场景、难度、表达框架、角色、等级、问题配比。
+- persona/stakeholder：5-layer persona、组织关系、隐藏议程、压力风格。
+- scenario/dispatcher：首问、追问、压力升级、结束条件、多人/多角色调度。
+- evaluation/growth/report：六维评分、证据、建议、成长路径、复训计划。
+- live guidance：风险提醒、下一句建议、行动项、实时教练事件沉淀。
+- branch-aware review：当前路径、尾节点、分叉点、最后回复、metadata 来源、空状态。
+
+这些能力应实现为 mature runtime 之上的 adapter/workflow/plugin，而不是和 runtime 混在一起。
+
+## 目标架构
+
+```text
+LibreChat-style text runtime
+  -> TrainingConversationAdapter
+  -> TrainingCore / scenario / persona / dispatcher / evaluation
+  -> result/history/growth
+
+Pipecat realtime runtime
+  -> RealtimePipelineAdapter / TrainingTranscriptSink
+  -> TrainingCore / live guidance / transcript persistence
+  -> result/history/growth
+
+LibreChat auth/ACL/MCP/Agent
+  -> TalkWise resource policy / coach tools / training material tools
+  -> Training Studio product workflows
+```
+
+边界原则：
+
+- `TrainingCore` 不拥有完整聊天 runtime。
+- `TrainingCore` 不拥有完整语音 runtime。
+- branch selected path 是复盘上下文，不是评分完成状态。
+- realtime provider event 进入 TalkWise 前必须转成 provider-neutral event。
+- auth/ACL 最终要保护 conversation、training session、report、guidance、file/material、agent/tool resource。
+
+## 第一批落地优先级
+
+### P0: 迁移边界和契约
+
+1. 决定文本 runtime 的 source of truth：继续增强当前 conversation 表，还是迁到 LibreChat-style schema。
+2. 固化 `TrainingConversationAdapter`：create conversation、append turn、recent turns、selected path、branch tail、fork metadata。
+3. 固化 `RealtimePipelineAdapter`：Pipecat start/append/commit/events/close、audio output、final transcript、provider error。
+4. 固化 resource scope：conversation/session/report/progress/guidance 都必须带 user/team scope。
+5. 把 branch metadata schema 写成文档和测试 fixture，禁止 scoring/growth 被通用 branch metadata 覆盖。
+
+### P1: 文本底座对齐 LibreChat
+
+1. 用 LibreChat `message-tree.spec.ts` 的行为改写 TalkWise 文本分支验收：regenerate、edit branch、fork visible/direct/branch、reload 保留路径。
+2. 对齐 search/history：搜索结果必须能带 path context。
+3. 对齐 SSE：文字回复和重试不应因断线丢状态。
+4. 引入 model/provider/preset registry，避免训练页直接绑定单一 LLM 配置。
+
+### P1: Realtime 底座收敛 Pipecat
+
+1. 当前 `/realtime/capabilities` 保留，但 readiness 来源应优先来自 Pipecat adapter capability。
+2. OpenAI realtime 独立 websocket 路径降级为 Pipecat service 或 fallback。
+3. 接入 Pipecat VAD/turn/interruption，产生 TalkWise 可读事件：user_turn.started/stopped、assistant_speaking、interrupted、silence_timeout。
+4. audio output、transcript.done、guidance trigger 必须都落到同一 Training Session。
+
+### P1: API 鉴权/隔离
+
+1. 扩展现有 mock user/role 测试，覆盖 conversation/chat/training/report/guidance/realtime binding。
+2. 从 LibreChat ACL 迁概念：resource type、owner、group/team、role action。
+3. 先做最小 guard，不重构完整 auth 系统。
+
+### P2: Agent/MCP/工具层
+
+1. 迁 LibreChat MCP server registry、OAuth flow、tool discovery/call 的最小子集。
+2. 先落地训练相关工具：素材检索、会议纪要分析、persona builder、复盘报告生成、企业知识查询。
+3. Agent marketplace、skills/subagents 作为后续扩展，不进入第一轮训练闭环。
+
+### P2: 文件/素材/RAG
+
+1. 训练素材统一 file resource，带 owner/team/usage scope。
+2. Persona Builder 和 scenario import 使用同一文件权限模型。
+3. RAG/file search 接入 coach/agent，不直接污染核心训练 session。
+
+## 建议的多智能体切片
+
+后续一轮可以按下面拆：
+
+| Agent | 只读/写范围 | 目标 |
+|:---|:---|:---|
+| LibreChat/text branch agent | `frontend/src/components/chat`、`frontend/src/services/trainingConversation.ts`、`backend/application/services/conversation_service.py`、相关测试 | 对齐 message tree 行为和验收差距。 |
+| Review/history agent | `TrainingResultPage`、`TrainingHistoryPage`、`trainingSession.ts`、报告/进度测试 | 把 branch-aware review 固化为契约。 |
+| Pipecat/realtime agent | `application/ports/realtime.py`、`training_studio/realtime_*`、`api/routes/training_studio.py`、realtime tests | 收敛 Pipecat readiness/runtime/audio output。 |
+| API isolation agent | `api/conversation_scope.py`、`api/dependencies.py`、conversation/chat/training tests | 扩展 mock user/role 边界，不动完整 auth。 |
+| MCP/Agent explorer | LibreChat `packages/api/src/mcp`、`oauth`、`agents`、`client/src/components/MCP` | 先产出迁移边界，不直接写业务代码。 |
+
+主线程仍负责 code-review graph、合并、全量验证和暂存。
+
+## 验收命令
+
+每轮稳定改动后执行：
+
+```powershell
+cd frontend
+node --test tests\*.mjs
+npm run build
+
+cd ..\backend
+..\.venv-backend\Scripts\python.exe -m pytest tests
+
+cd ..
+git diff --check
+```
+
+文档或分析轮可只跑：
+
+```powershell
+git diff --check
+git diff --cached --check
+```
+
+## 下一步
+
+建议下一轮不是继续泛化讨论，而是做 P0 契约落地：
+
+1. 写 `docs/adr` 或 `docs/plans` 的 `TrainingConversationAdapter` / `RealtimePipelineAdapter` 数据契约。
+2. 用现有 tests 固化 branch metadata 不影响 scoring/growth/completion。
+3. 用 Pipecat readiness/capability 做后端单一真源，前端只展示结构化结果。
+4. 扩 API isolation tests 到 training session/report/guidance/realtime binding。
+
+这四件事完成后，再进入 LibreChat text runtime 和 Pipecat runtime 的具体迁移会更稳。

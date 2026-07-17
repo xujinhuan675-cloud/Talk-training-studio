@@ -1,5 +1,11 @@
 import pytest
 
+from application.ports.realtime import (
+    RealtimePipelineConfig,
+    RealtimeSessionBinding,
+    TrainingVoiceContext,
+)
+
 
 def test_real_pipecat_runtime_imports_declared_voice_symbols():
     pytest.importorskip("pipecat")
@@ -33,3 +39,52 @@ def test_real_pipecat_runtime_imports_declared_voice_symbols():
     assert runtime.UserTurnProcessor is not None
 
     assert create_pipecat_realtime_pipeline() is not None
+
+
+def test_real_pipecat_runtime_constructs_native_voice_processors():
+    pytest.importorskip("pipecat")
+
+    from infrastructure.external.pipecat.realtime_pipeline import (
+        build_pipecat_voice_processors,
+        import_pipecat_runtime,
+    )
+
+    runtime = import_pipecat_runtime(require_websocket=True)
+    context = TrainingVoiceContext(
+        binding=RealtimeSessionBinding(training_session_id="smoke-session", room_id=1),
+        task_goal="Practice a concise stakeholder response",
+        recent_turns=(
+            {"speaker": "user", "text": "Can we start with a pilot?"},
+            {"speaker": "assistant", "text": "Only if the success metric is clear."},
+        ),
+        metadata={"scenarioTemplateId": "native-pipecat-smoke"},
+    )
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        model="gpt-4o-mini",
+        voice="alloy",
+        instructions="Keep the live role-play concise.",
+        metadata={
+            "stt": {
+                "provider": "openai",
+                "model": "gpt-4o-mini-transcribe",
+                "turnDetection": "disabled",
+            },
+            "tts": {"provider": "openai", "model": "gpt-4o-mini-tts"},
+            "llm": {"provider": "openai", "model": "gpt-4o-mini"},
+            "vad": {"provider": "silero", "sampleRate": 16000},
+            "turnDetection": {"provider": "pipecat"},
+            "openaiApiKey": "sk-test",
+        },
+    )
+
+    processors = build_pipecat_voice_processors(runtime, config, context=context)
+
+    assert [type(processor).__name__ for processor in processors] == [
+        "VADProcessor",
+        "OpenAIRealtimeSTTService",
+        "LLMUserAggregator",
+        "OpenAILLMService",
+        "OpenAITTSService",
+        "LLMAssistantAggregator",
+    ]

@@ -15,7 +15,7 @@ lint-test:
     - uv --version
     - cd backend
     - uv lock --check
-    - uv sync --extra dev --locked
+    - uv sync --extra dev --extra voice --locked
     - |
       if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_SHA}" ]; then
         BASE_SHA="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA}"

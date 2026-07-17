@@ -25,10 +25,12 @@ jobs:
           uv --version
 
       - name: Verify uv.lock is up-to-date
+        working-directory: backend
         run: uv lock --check
 
       - name: Install dependencies (locked)
-        run: uv sync --extra dev --locked
+        working-directory: backend
+        run: uv sync --extra dev --extra voice --locked
 
       - name: Detect changed Python files
         id: changed-py
@@ -41,9 +43,9 @@ jobs:
           fi
 
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            PY_FILES="$(git ls-files '*.py')"
+            PY_FILES="$(git ls-files 'backend/*.py' | sed 's|^backend/||')"
           else
-            PY_FILES="$(git diff --name-only "${BASE_SHA}" HEAD -- '*.py')"
+            PY_FILES="$(git diff --name-only "${BASE_SHA}" HEAD -- 'backend/*.py' | sed 's|^backend/||')"
           fi
 
           {
@@ -54,6 +56,7 @@ jobs:
 
       - name: Lint & Security (changed files)
         if: steps.changed-py.outputs.files != ''
+        working-directory: backend
         shell: bash
         run: |
           mapfile -t PY_FILES < <(printf '%s\n' "${{ steps.changed-py.outputs.files }}" | sed '/^$/d')
@@ -68,6 +71,7 @@ jobs:
         run: echo "No Python file changes detected; skipping lint/security."
 
       - name: Test
+        working-directory: backend
         env:
           SECRET_KEY: test-secret-key
         run: uv run pytest
