@@ -380,18 +380,31 @@ function branchConversationRefText(info: TrainingConversationBranchInfo): string
 
 function branchPathStatusText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   const count = info.pathCount || info.selectedPath.length
-  if (count > 0) return tr('{count} 个节点', '{count} nodes', { count })
-  return tr('已记录引用', 'Reference recorded')
+  if (count > 0) return tr('当前路径 {count} 个节点', 'Current path, {count} nodes', { count })
+  if (info.selectedTailMessageId) return tr('已记录尾节点引用', 'Tail node reference recorded')
+  return tr('已记录分支引用', 'Branch reference recorded')
 }
 
 function branchPathNoticeText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   if (info.selectedPath.length === 0) {
-    return tr('只保存了分支引用；暂无可预览的路径节点。', 'Only branch references were saved; no path nodes are available to preview.')
+    return tr('metadata 只保存了分支或尾节点引用，暂时没有可预览的路径正文。', 'Only branch or tail references were saved in metadata; no path text is available to preview.')
   }
   if (!info.selectedPath.some((item) => item.content.trim())) {
-    return tr('已记录路径节点 ID；消息正文未随 metadata 保存。', 'Path node IDs are recorded; message text was not saved with the metadata.')
+    return tr('metadata 只保存了路径节点 ID，没有保存消息正文。', 'Only path node IDs were saved in metadata; message text was not included.')
   }
   return ''
+}
+
+function branchPathDetailText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  if (info.pathSummary) return compactBranchText(info.pathSummary, 96)
+  return branchPathNoticeText(info, tr)
+}
+
+function branchLastReplyEmptyText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  if (info.selectedPath.length > 0 && !info.selectedPath.some((item) => item.content.trim())) {
+    return tr('metadata 中只有消息 ID，无法显示最后回复正文。', 'Only message IDs are present in metadata, so the last reply text cannot be shown.')
+  }
+  return tr('metadata 中没有最后回复正文。', 'No last reply text was saved in metadata.')
 }
 
 function coachEventTypeLabel(eventType: string, tr: TranslateInline): string {
@@ -507,6 +520,7 @@ export default function TrainingResultPage() {
     ? Math.max(0, branchInfo.selectedPath.length - branchPathPreview.length)
     : 0
   const branchPathNotice = branchInfo ? branchPathNoticeText(branchInfo, tr) : ''
+  const branchPathDetail = branchInfo ? branchPathDetailText(branchInfo, tr) : ''
   const branchConversationRef = branchInfo ? branchConversationRefText(branchInfo) : ''
   const progressScore = coerceScore(scenarioProgress?.score)
   const dimensions = useMemo(
@@ -697,15 +711,22 @@ export default function TrainingResultPage() {
             <span>{branchSourceLabel(branchInfo.source, tr)}</span>
           </div>
           <div className="training-result-branch-grid">
-            {(branchInfo.pathCount || branchInfo.pathSummary || branchInfo.selectedPath.length > 0) && (
-              <div className="training-result-branch-item wide">
-                <span>{tr('当前路径', 'Current path')}</span>
-                <strong>{branchPathStatusText(branchInfo, tr)}</strong>
-                {branchInfo.pathSummary && (
-                  <em title={branchInfo.pathSummary}>{compactBranchText(branchInfo.pathSummary, 96)}</em>
-                )}
-              </div>
-            )}
+            <div className="training-result-branch-item wide">
+              <span>{tr('当前路径', 'Current path')}</span>
+              <strong>{branchPathStatusText(branchInfo, tr)}</strong>
+              {branchPathDetail && (
+                <em
+                  className={branchInfo.pathSummary ? undefined : 'empty'}
+                  title={branchInfo.pathSummary || branchPathDetail}
+                >
+                  {branchPathDetail}
+                </em>
+              )}
+            </div>
+            <div className="training-result-branch-item">
+              <span>{tr('metadata 来源', 'Metadata source')}</span>
+              <strong>{branchSourceLabel(branchInfo.source, tr)}</strong>
+            </div>
             {branchInfo.branchId && (
               <div className="training-result-branch-item">
                 <span>{tr('当前分支', 'Current branch')}</span>
@@ -728,12 +749,14 @@ export default function TrainingResultPage() {
                 </strong>
               </div>
             )}
-            {branchInfo.lastReplyPreview && (
-              <div className="training-result-branch-item wide">
-                <span>{tr('最后回复', 'Last reply')}</span>
+            <div className="training-result-branch-item wide">
+              <span>{tr('最后回复', 'Last reply')}</span>
+              {branchInfo.lastReplyPreview ? (
                 <strong title={branchInfo.lastReplyPreview}>{compactBranchText(branchInfo.lastReplyPreview, 96)}</strong>
-              </div>
-            )}
+              ) : (
+                <em className="empty">{branchLastReplyEmptyText(branchInfo, tr)}</em>
+              )}
+            </div>
             {branchConversationRef && (
               <div className="training-result-branch-item">
                 <span>{tr('会话引用', 'Conversation ref')}</span>
@@ -741,13 +764,17 @@ export default function TrainingResultPage() {
               </div>
             )}
           </div>
-          {branchPathNotice && (
+          {branchPathNotice && branchPathDetail !== branchPathNotice && (
             <p className="training-result-branch-note">{branchPathNotice}</p>
           )}
           {branchPathPreview.length > 0 && (
             <div className="training-result-branch-path" aria-label={tr('已选择路径摘要', 'Selected path summary')}>
               {branchPathPreview.map((item, index) => (
-                <span key={`${item.publicId}-${index}`} title={item.content || item.publicId}>
+                <span
+                  key={`${item.publicId}-${index}`}
+                  className={item.content.trim() ? undefined : 'id-only'}
+                  title={item.content || item.publicId}
+                >
                   {branchPathNodeText(item, branchPathPreviewOffset + index)}
                 </span>
               ))}

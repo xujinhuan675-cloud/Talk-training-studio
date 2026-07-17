@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from api.dependencies import get_conversation_service
 from api.routes.conversations import router
 from application.dto import (
+    ConversationDTO,
     EditMessageDTO,
     ForkConversationDTO,
     MessageDTO_Agent,
@@ -39,6 +40,20 @@ def _message(content: str, public_id: str = "msg_1") -> MessageDTO_Agent:
     )
 
 
+def _conversation(conversation_id: int = 7) -> ConversationDTO:
+    now = datetime.now(timezone.utc)
+    return ConversationDTO(
+        id=conversation_id,
+        title="Conversation",
+        system_prompt=None,
+        model="gpt-test",
+        status="active",
+        metadata={},
+        created_at=now,
+        updated_at=now,
+    )
+
+
 class _FakeActionService:
     def __init__(self) -> None:
         self.action_call = None
@@ -46,6 +61,9 @@ class _FakeActionService:
 
     async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):
         raise MessageNotFoundException()
+
+    async def get_conversation(self, conversation_id: int):
+        return _conversation(conversation_id=conversation_id)
 
     async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
         self.action_call = (conversation_id, message_public_id, payload)

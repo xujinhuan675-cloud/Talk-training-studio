@@ -2420,6 +2420,7 @@ async def stream_training_guidance(
                         svc=svc,
                         chatroom_svc=chatroom_svc,
                         guidance_svc=guidance_svc,
+                        current_user=current_user,
                     )
                 except HTTPException as exc:
                     yield _format_sse(

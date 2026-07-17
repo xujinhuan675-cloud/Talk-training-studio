@@ -29,15 +29,18 @@ def _message(content: str, public_id: str = "msg_1") -> MessageDTO_Agent:
     )
 
 
-def _conversation() -> ConversationDTO:
+def _conversation(
+    conversation_id: int = 8,
+    metadata: dict | None = None,
+) -> ConversationDTO:
     now = datetime.now(timezone.utc)
     return ConversationDTO(
-        id=8,
+        id=conversation_id,
         title="Forked conversation",
         system_prompt=None,
         model="gpt-test",
         status="active",
-        metadata={},
+        metadata=metadata or {},
         created_at=now,
         updated_at=now,
     )
@@ -64,6 +67,9 @@ class _FakeChatService:
                 context=[message],
             )
         ]
+
+    async def get_conversation(self, conversation_id: int):
+        return _conversation(conversation_id=conversation_id)
 
     async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):
         self.path_call = (conversation_id, message_public_id, kwargs)

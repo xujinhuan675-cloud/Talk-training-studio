@@ -169,12 +169,33 @@ function compactHistoryBranchText(value: string, maxLength = 30): string {
   return `${text.slice(0, maxLength - 3)}...`
 }
 
+function historyBranchSourceText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  if (info.source === 'session') return tr('metadata：会话', 'metadata: session')
+  if (info.source === 'report') return tr('metadata：报告', 'metadata: report')
+  return tr('metadata：进度', 'metadata: progress')
+}
+
+function historyBranchPathText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  const count = info.pathCount || info.selectedPath.length
+  if (count > 0) return tr('当前路径：{count} 节点', 'Current path: {count} nodes', { count })
+  if (info.selectedTailMessageId) return tr('当前路径：尾节点引用', 'Current path: tail ref')
+  return tr('当前路径：分支引用', 'Current path: branch ref')
+}
+
+function historyBranchEmptyText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
+  if (info.selectedPath.length > 0 && !info.selectedPath.some((item) => item.content.trim())) {
+    return tr('metadata 只有消息 ID，没有保存最后回复正文。', 'Metadata has message IDs only; no last reply text was saved.')
+  }
+  return tr('metadata 没有保存可预览的路径正文。', 'Metadata has no previewable path text.')
+}
+
 function historyBranchTitle(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   return [
+    historyBranchSourceText(info, tr),
+    historyBranchPathText(info, tr),
     info.branchId ? tr('分支：{value}', 'Branch: {value}', { value: info.branchId }) : '',
     info.forkPointMessageId ? tr('分叉点：{value}', 'Fork point: {value}', { value: info.forkPointMessageId }) : '',
     info.selectedTailMessageId ? tr('尾节点：{value}', 'Tail: {value}', { value: info.selectedTailMessageId }) : '',
-    info.pathCount ? tr('路径节点：{count}', 'Path nodes: {count}', { count: info.pathCount }) : '',
     info.pathSummary ? compactHistoryBranchText(info.pathSummary, 90) : '',
     info.lastReplyPreview ? tr('最后回复：{value}', 'Last reply: {value}', { value: compactHistoryBranchText(info.lastReplyPreview, 90) }) : '',
   ].filter(Boolean).join(' · ')
@@ -192,6 +213,7 @@ function historyBranchSummaryText(info: TrainingConversationBranchInfo, tr: Tran
       value: compactHistoryBranchText(info.lastReplyPreview, 72),
     })
   }
+  if (!info.pathSummary) return historyBranchEmptyText(info, tr)
   if (info.forkPointMessageId) {
     return tr('分叉点：{value}', 'Fork point: {value}', {
       value: compactHistoryBranchText(info.forkPointMessageId, 48),
@@ -265,6 +287,9 @@ function progressEntry(
     scoreStatus: item.scoreStatus,
     reportId: item.reportId,
     lastPracticedAt: item.lastPracticedAt,
+    branchInfo: getTrainingConversationBranchInfo({
+      progress: item,
+    }) ?? undefined,
     source: 'progress',
   }
 }
@@ -321,6 +346,9 @@ function buildHistoryEntries(
       entry.scoreStatus = item.scoreStatus ?? entry.scoreStatus
       entry.reportId = item.reportId ?? entry.reportId
       entry.lastPracticedAt = item.lastPracticedAt ?? entry.lastPracticedAt
+      entry.branchInfo = entry.branchInfo ?? getTrainingConversationBranchInfo({
+        progress: item,
+      }) ?? undefined
       return
     }
     entries.push(progressEntry(scenarioId, item))
@@ -591,10 +619,40 @@ export default function TrainingHistoryPage() {
                       {historyBranchTagText(entry.branchInfo, tr)}
                     </span>
                   )}
+                  {entry.branchInfo && (
+                    <span
+                      className="training-history-branch-source-tag"
+                      title={historyBranchTitle(entry.branchInfo, tr)}
+                    >
+                      {historyBranchSourceText(entry.branchInfo, tr)}
+                    </span>
+                  )}
                 </div>
+                {entry.branchInfo && (
+                  <div
+                    className="training-history-branch-context"
+                    title={historyBranchTitle(entry.branchInfo, tr)}
+                  >
+                    <span>{historyBranchPathText(entry.branchInfo, tr)}</span>
+                    {entry.branchInfo.forkPointMessageId && (
+                      <span>
+                        {tr('分叉点：{value}', 'Fork point: {value}', {
+                          value: compactHistoryBranchText(entry.branchInfo.forkPointMessageId, 34),
+                        })}
+                      </span>
+                    )}
+                    {entry.branchInfo.selectedTailMessageId && (
+                      <span>
+                        {tr('尾节点：{value}', 'Tail: {value}', {
+                          value: compactHistoryBranchText(entry.branchInfo.selectedTailMessageId, 34),
+                        })}
+                      </span>
+                    )}
+                  </div>
+                )}
                 {branchSummary && entry.branchInfo && (
                   <p
-                    className="training-history-branch-summary"
+                    className={`training-history-branch-summary${entry.branchInfo.lastReplyPreview ? '' : ' empty'}`}
                     title={historyBranchTitle(entry.branchInfo, tr)}
                   >
                     <GitBranch size={12} />

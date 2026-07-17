@@ -15,12 +15,28 @@ async function loadTrainingStudioModule() {
       target: ts.ScriptTarget.ES2022,
     },
   })
+  let outputText = output.outputText
+  const cleanupPaths = []
+  if (outputText.includes("from './auth'")) {
+    const authSource = fs.readFileSync(path.resolve('src/services/auth.ts'), 'utf8')
+    const authOutput = ts.transpileModule(authSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const authPath = path.join(os.tmpdir(), `auth-service-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(authPath, authOutput)
+    cleanupPaths.push(authPath)
+    outputText = outputText.replace("from './auth'", `from '${pathToFileURL(authPath).href}'`)
+  }
   const outputPath = path.join(os.tmpdir(), `training-studio-${process.pid}-${Date.now()}.mjs`)
-  fs.writeFileSync(outputPath, output.outputText)
+  fs.writeFileSync(outputPath, outputText)
   try {
     return await import(pathToFileURL(outputPath).href)
   } finally {
     fs.rmSync(outputPath, { force: true })
+    cleanupPaths.forEach((cleanupPath) => fs.rmSync(cleanupPath, { force: true }))
   }
 }
 

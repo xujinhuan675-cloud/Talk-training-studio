@@ -293,6 +293,12 @@ const branchRecordKeys = [
   'conversation_tree',
   'trainingConversation',
   'training_conversation',
+  'pathContext',
+  'path_context',
+  'branchContext',
+  'branch_context',
+  'replayContext',
+  'replay_context',
   'selectedPath',
   'selected_path',
   'currentPath',
@@ -321,6 +327,10 @@ const selectedTailKeys = [
   'public_id',
   'tailMessageId',
   'tail_message_id',
+  'tailId',
+  'tail_id',
+  'tailPublicId',
+  'tail_public_id',
   'currentTailMessageId',
   'current_tail_message_id',
   'messageId',
@@ -331,6 +341,12 @@ const forkPointKeys = [
   'fork_point_message_id',
   'forkedFromMessageId',
   'forked_from_message_id',
+  'forkPointPublicId',
+  'fork_point_public_id',
+  'forkParentMessageId',
+  'fork_parent_message_id',
+  'branchFromMessageId',
+  'branch_from_message_id',
   'splitFromMessageId',
   'split_from_message_id',
   'sourceMessageId',
@@ -362,10 +378,20 @@ const pathKeys = [
   'current_path',
   'messagePath',
   'message_path',
+  'pathMessages',
+  'path_messages',
+  'selectedMessages',
+  'selected_messages',
   'messageIds',
   'message_ids',
+  'messagePathIds',
+  'message_path_ids',
+  'pathMessageIds',
+  'path_message_ids',
   'selectedMessageIds',
   'selected_message_ids',
+  'nodeIds',
+  'node_ids',
 ]
 const pathCountKeys = [
   'pathCount',
@@ -431,9 +457,14 @@ function normalizeBranchPathItem(value: unknown): TrainingConversationBranchPath
 
 function normalizeBranchPath(records: Record<string, unknown>[]): TrainingConversationBranchPathItem[] {
   for (const record of records) {
+    const defaultBranchId = firstText(record, branchIdKeys) ?? null
     const path = firstArray(record, pathKeys)
       .map(normalizeBranchPathItem)
       .filter((item): item is TrainingConversationBranchPathItem => Boolean(item))
+      .map((item) => ({
+        ...item,
+        branchId: item.branchId ?? defaultBranchId,
+      }))
     if (path.length > 0) return path
   }
   return []
@@ -442,7 +473,7 @@ function normalizeBranchPath(records: Record<string, unknown>[]): TrainingConver
 function compactPathSummary(path: TrainingConversationBranchPathItem[]): string | undefined {
   const parts = path
     .slice(-3)
-    .map((item) => (item.content || item.publicId).replace(/\s+/g, ' ').trim())
+    .map((item) => item.content.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
   if (parts.length === 0) return undefined
   const summary = parts.join(' / ')

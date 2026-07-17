@@ -246,6 +246,19 @@ type MessageTreeActionLabels = {
   noPath: string
   noChildren: string
   noSearchResults: string
+  currentNode: string
+  tailNode: string
+  forkPoint: string
+  noForkPoint: string
+  currentSelection: string
+  selectionCurrent: string
+  selectionInPath: string
+  selectionHint: string
+  pathNodeCount: string
+  writeTarget: string
+  writeTargetDesc: string
+  keptCurrentPath: string
+  newTail: string
   roleUser: string
   roleAssistant: string
   roleSystem: string
@@ -378,6 +391,33 @@ function treeRoleLabel(role: string, labels: MessageTreeActionLabels): string {
   if (normalized === 'assistant' || normalized === 'persona') return labels.roleAssistant
   if (normalized === 'system') return labels.roleSystem
   return labels.roleUser
+}
+
+function treeMessageCompactLabel(
+  message: ConversationTreeMessage | null | undefined,
+  labels: MessageTreeActionLabels,
+): string {
+  if (!message) return labels.noPath
+  return `${treeRoleLabel(message.role, labels)} · ${treeMessagePreview(message)}`
+}
+
+function treeMessageTitle(message: ConversationTreeMessage | null | undefined): string | undefined {
+  if (!message) return undefined
+  return [
+    message.publicId,
+    message.branchId,
+    message.status,
+  ].filter(Boolean).join(' · ')
+}
+
+function findTreeForkPoint(path: ConversationTreeMessage[]): ConversationTreeMessage | null {
+  for (let index = 1; index < path.length; index += 1) {
+    const previous = path[index - 1]
+    const current = path[index]
+    if (!current.branchId || current.branchId === previous.branchId) continue
+    return previous
+  }
+  return null
 }
 
 function MessageTreeItem({
@@ -629,18 +669,19 @@ function MessageTreeActions({
       const resultSnapshot = snapshotFromMessageActionResult(result)
       const nextContext = contextForMessageActionResult(focusedContext, result)
       if (!resultSnapshot || !nextContext) {
-        setWriteError(`${nextActionLabel} ${labels.actionError}`)
+        setWriteError(`${nextActionLabel} ${labels.actionError} ${labels.keptCurrentPath}`)
         return
       }
       setFocusedContext(nextContext)
       setSnapshot(resultSnapshot)
       const selection = buildMessageTreeSelection(resultSnapshot, nextContext, message.id)
       if (selection) onSelectPath?.(selection)
-      setWriteStatus(`${nextActionLabel} ${labels.actionSuccess}`)
+      const resultTail = resultSnapshot.message?.publicId ?? nextContext.messagePublicId
+      setWriteStatus(`${nextActionLabel} ${labels.actionSuccess} ${labels.newTail}: ${resultTail}`)
       await loadSnapshot(nextContext, 'focus', null, labels.refreshError)
     } catch (err) {
       console.error('Failed to apply message tree action:', err)
-      setWriteError(`${nextActionLabel} ${labels.actionError}`)
+      setWriteError(`${nextActionLabel} ${labels.actionError} ${labels.keptCurrentPath}`)
     } finally {
       setApplyingAction(null)
     }
@@ -655,6 +696,8 @@ function MessageTreeActions({
     labels.edit,
     labels.editContentRequired,
     labels.fork,
+    labels.keptCurrentPath,
+    labels.newTail,
     labels.refreshError,
     labels.retry,
     loadSnapshot,
@@ -669,6 +712,19 @@ function MessageTreeActions({
   const currentNodeId = snapshot?.message?.publicId ?? focusedContext.messagePublicId
   const isSelectedCurrentNode = selectedTreeNodeId === focusedContext.messagePublicId
     || selectedTreeNodeId === currentNodeId
+  const currentPath = snapshot?.path ?? []
+  const currentNode = snapshot?.message
+    ?? currentPath.find((item) => item.publicId === focusedContext.messagePublicId)
+    ?? null
+  const currentTailNode = currentPath[currentPath.length - 1] ?? snapshot?.message ?? null
+  const currentForkPoint = findTreeForkPoint(currentPath)
+  const currentNodeLabel = currentNode ? treeMessageCompactLabel(currentNode, labels) : focusedContext.messagePublicId
+  const currentTailLabel = currentTailNode ? treeMessageCompactLabel(currentTailNode, labels) : focusedContext.messagePublicId
+  const selectionDescription = isSelectedCurrentNode
+    ? labels.selectionCurrent
+    : selectedTreeNodeId && selectedPathIds.has(selectedTreeNodeId)
+      ? labels.selectionInPath
+      : labels.selectionHint
   const currentWriteActionLabel = messageTreeWriteActionLabel(writeAction, labels)
   const applyingActionLabel = applyingAction ? messageTreeWriteActionLabel(applyingAction, labels) : null
   const applyingStatus = applyingActionLabel ? `${applyingActionLabel} ${labels.actionLoading}` : null
@@ -702,8 +758,36 @@ function MessageTreeActions({
           <span className="message-tree-meta-value">{focusedContext.branchId ?? labels.noBranch}</span>
         </span>
         <span className="message-tree-meta-item">
+          <span className="message-tree-meta-label">{labels.currentNode}</span>
+          <span className="message-tree-meta-value" title={treeMessageTitle(currentNode) ?? focusedContext.messagePublicId}>
+            {currentNodeLabel}
+          </span>
+        </span>
+        <span className="message-tree-meta-item">
+          <span className="message-tree-meta-label">{labels.tailNode}</span>
+          <span className="message-tree-meta-value" title={treeMessageTitle(currentTailNode) ?? focusedContext.messagePublicId}>
+            {currentTailLabel}
+          </span>
+        </span>
+        <span className="message-tree-meta-item">
+          <span className="message-tree-meta-label">{labels.forkPoint}</span>
+          <span className="message-tree-meta-value" title={treeMessageTitle(currentForkPoint)}>
+            {currentForkPoint ? treeMessageCompactLabel(currentForkPoint, labels) : labels.noForkPoint}
+          </span>
+        </span>
+        <span className="message-tree-meta-item">
           <span className="message-tree-meta-label">{labels.searchQueryLabel}</span>
           <span className="message-tree-meta-value">{searchText || searchQuery}</span>
+        </span>
+      </div>
+      <div className="message-tree-selection-context">
+        <Route size={13} aria-hidden="true" />
+        <span>
+          <strong>{labels.currentSelection}</strong>
+          <em>
+            {selectionDescription}
+            {currentPath.length > 0 ? ` ${labels.pathNodeCount}: ${currentPath.length}.` : ''}
+          </em>
         </span>
       </div>
       <div className="message-tree-action-links">
@@ -822,6 +906,16 @@ function MessageTreeActions({
                   </button>
                 ))}
               </div>
+              <div className="message-tree-write-target">
+                <GitFork size={13} aria-hidden="true" />
+                <span>
+                  <strong>{labels.writeTarget}</strong>
+                  <em title={treeMessageTitle(currentNode) ?? focusedContext.messagePublicId}>
+                    {currentNodeLabel}
+                  </em>
+                  <small>{labels.writeTargetDesc}</small>
+                </span>
+              </div>
               {writeAction === 'edit' && (
                 <label className="message-tree-write-field">
                   <span>{labels.editContentLabel}</span>
@@ -919,6 +1013,7 @@ function MessageTreeActions({
             <div className="message-tree-section-title">
               <Route size={13} aria-hidden="true" />
               <span>{labels.currentPath}</span>
+              {snapshot?.path.length ? <em>{labels.pathNodeCount}: {snapshot.path.length}</em> : null}
             </div>
             {hasSnapshot && snapshot?.path.length ? (
               <div className="message-tree-path-list">
@@ -1064,6 +1159,19 @@ export default function MessageList({
     noPath: t('messageTree.actions.noPath'),
     noChildren: t('messageTree.actions.noChildren'),
     noSearchResults: t('messageTree.actions.noSearchResults'),
+    currentNode: t('messageTree.actions.currentNode'),
+    tailNode: t('messageTree.actions.tailNode'),
+    forkPoint: t('messageTree.actions.forkPoint'),
+    noForkPoint: t('messageTree.actions.noForkPoint'),
+    currentSelection: t('messageTree.actions.currentSelection'),
+    selectionCurrent: t('messageTree.actions.selectionCurrent'),
+    selectionInPath: t('messageTree.actions.selectionInPath'),
+    selectionHint: t('messageTree.actions.selectionHint'),
+    pathNodeCount: t('messageTree.actions.pathNodeCount'),
+    writeTarget: t('messageTree.actions.writeTarget'),
+    writeTargetDesc: t('messageTree.actions.writeTargetDesc'),
+    keptCurrentPath: t('messageTree.actions.keptCurrentPath'),
+    newTail: t('messageTree.actions.newTail'),
     roleUser: t('messageTree.actions.roleUser'),
     roleAssistant: t('messageTree.actions.roleAssistant'),
     roleSystem: t('messageTree.actions.roleSystem'),

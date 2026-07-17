@@ -1,3 +1,4 @@
+import { getAuthRequestHeaders } from './auth'
 import type { Translate, TranslationKey, TranslationParams } from '../i18n'
 
 export type TrainingScenario = 'interview' | 'sales' | 'negotiation' | 'workplace' | 'product_management'
@@ -62,6 +63,60 @@ interface ApiResponse<T> {
 }
 
 const TRAINING_STUDIO_API_BASE = '/api/v1/training-studio'
+const REALTIME_CAPABILITIES_API = `${TRAINING_STUDIO_API_BASE}/realtime/capabilities`
+
+export interface OpenAIRealtimeCapability {
+  configured: boolean
+  effectiveKey: boolean
+  model: string | null
+  voice: string | null
+}
+
+export interface RealtimeReadinessIssue {
+  code?: string
+  message?: string
+  phase?: string
+  provider?: string
+  feature?: string
+  modules?: string[]
+  missingEnv?: string[]
+  metadata?: Record<string, unknown>
+}
+
+export interface PipecatRealtimeReadiness {
+  ready: boolean
+  status: string
+  checkedAt?: string
+  required?: {
+    transport?: string
+    features?: Record<string, string>
+    env?: string[]
+  }
+  blockingReasons?: RealtimeReadinessIssue[]
+}
+
+export interface PipecatRealtimeCapability {
+  available: boolean
+  coreAvailable: boolean
+  websocketAvailable: boolean
+  vadAvailable: boolean
+  sttAvailable: boolean
+  ttsAvailable: boolean
+  llmAvailable: boolean
+  turnDetectionAvailable: boolean
+  missingModules: string[]
+  optionalMissingModules: string[]
+  error: string | null
+  readyForCall: boolean
+  readiness?: PipecatRealtimeReadiness
+  errors?: RealtimeReadinessIssue[]
+  sourceSnapshot?: Record<string, unknown>
+}
+
+export interface RealtimeCapabilities {
+  openaiRealtime: OpenAIRealtimeCapability
+  pipecat: PipecatRealtimeCapability
+}
 
 interface LocalizedOption<T extends string> {
   value: T
@@ -736,6 +791,50 @@ function extensionForVideoMimeType(mimeType: string): string {
   if (clean === 'video/ogg') return '.ogv'
   if (clean === 'video/x-matroska') return '.mkv'
   return '.webm'
+}
+
+function hasObjectShape(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function unwrapApiResponse<T>(value: ApiResponse<T> | T): T {
+  if (hasObjectShape(value) && 'data' in value) {
+    return value.data as T
+  }
+  return value as T
+}
+
+function trainingStudioErrorText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text || null
+  }
+  if (!hasObjectShape(value)) return null
+  return (
+    trainingStudioErrorText(value.message)
+    || trainingStudioErrorText(value.detail)
+    || trainingStudioErrorText(value.details)
+  )
+}
+
+async function readTrainingStudioError(resp: Response, fallback: string): Promise<Error> {
+  const json = await resp.json().catch(() => null)
+  const message = (
+    trainingStudioErrorText(hasObjectShape(json) ? json.error : null)
+    || trainingStudioErrorText(hasObjectShape(json) ? json.detail : null)
+    || trainingStudioErrorText(hasObjectShape(json) ? json.message : null)
+  )
+  return new Error(message || `${fallback}: ${resp.status}`)
+}
+
+export async function fetchRealtimeCapabilities(): Promise<RealtimeCapabilities> {
+  const resp = await fetch(REALTIME_CAPABILITIES_API, {
+    headers: getAuthRequestHeaders(),
+  })
+  if (!resp.ok) {
+    throw await readTrainingStudioError(resp, 'Failed to fetch realtime capabilities')
+  }
+  return unwrapApiResponse<RealtimeCapabilities>(await resp.json())
 }
 
 export async function uploadVideoAnswer(

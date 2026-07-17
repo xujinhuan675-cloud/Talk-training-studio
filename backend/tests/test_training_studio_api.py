@@ -759,6 +759,63 @@ async def test_staff_cannot_access_other_user_training_session(client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_staff_cannot_mutate_other_user_training_session_boundaries(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    staff_headers = {"X-Mock-User": "sales"}
+
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"persona_ids": ["customer-1"], "room_name": "Forged room"},
+        headers=staff_headers,
+    )
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={"report_id": 777, "generate_report": False},
+        headers=staff_headers,
+    )
+    report_resp = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}/report",
+        headers=staff_headers,
+    )
+    guidance_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        json={"recent_turns": [{"speaker": "user", "text": "Please coach this answer."}]},
+        headers=staff_headers,
+    )
+    guidance_events_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance-events",
+        json={
+            "events": [
+                {
+                    "event_type": "risk",
+                    "severity": "warning",
+                    "title": "Blocked",
+                    "message": "This should not be persisted.",
+                }
+            ]
+        },
+        headers=staff_headers,
+    )
+
+    assert start_resp.status_code == 403
+    assert complete_resp.status_code == 403
+    assert report_resp.status_code == 403
+    assert guidance_resp.status_code == 403
+    assert guidance_events_resp.status_code == 403
+    assert app.state.chatroom_service.created_rooms == []
+    assert app.state.analysis_service.generated_for == []
+    assert app.state.growth_service.evaluated == []
+    assert app.state.chatroom_service.detail_calls == []
+
+
+@pytest.mark.asyncio
 async def test_leader_cannot_read_other_team_training_session(client: AsyncClient) -> None:
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
@@ -1261,6 +1318,85 @@ async def test_training_session_guidance_stream_follows_room_message_events(
     event_types = {event["event_type"] for event in events[1][1]["events"]}
     assert "risk" in event_types
     assert app.state.chatroom_service.detail_calls == [(42, 12), (42, 12)]
+
+
+@pytest.mark.asyncio
+async def test_training_guidance_stream_refresh_preserves_current_user_scope(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    from application.services.stakeholder.sse import room_event_bus
+
+    headers = {"X-Mock-User": "sales"}
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("text"),
+        headers=headers,
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+        headers=headers,
+    )
+    app.state.chatroom_service.details[42] = chat_detail(
+        42,
+        [
+            MessageDTO(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="me",
+                content="Can we start with a low-risk pilot?",
+            ),
+        ],
+    )
+
+    async def move_session_out_of_scope_and_publish() -> None:
+        await asyncio.sleep(0.05)
+        session = await app.state.training_session_service.get_session(session_id)
+        session.user_id = "user-cs-001"
+        session.team_id = "team-service"
+        app.state.chatroom_service.details[42] = chat_detail(
+            42,
+            [
+                MessageDTO(
+                    id=1,
+                    room_id=42,
+                    sender_type="user",
+                    sender_id="me",
+                    content="Can we start with a low-risk pilot?",
+                ),
+                MessageDTO(
+                    id=2,
+                    room_id=42,
+                    sender_type="persona",
+                    sender_id="customer-1",
+                    content="I am worried the budget still does not work.",
+                ),
+            ],
+        )
+        await room_event_bus.publish(
+            42,
+            "message",
+            {"id": 2, "room_id": 42, "sender_type": "persona", "sender_id": "customer-1"},
+        )
+
+    publish_task = asyncio.create_task(move_session_out_of_scope_and_publish())
+    async with client.stream(
+        "GET",
+        f"/api/v1/training-studio/sessions/{session_id}/guidance/stream",
+        params={"message_limit": 12, "max_events": 2},
+        headers=headers,
+    ) as resp:
+        assert resp.status_code == 200
+        body = (await resp.aread()).decode()
+    await publish_task
+
+    events = parse_sse_events(body)
+    assert [event for event, _ in events] == ["guidance_snapshot", "guidance_error"]
+    assert events[1][1]["status_code"] == 403
+    assert "current user scope" in events[1][1]["detail"]
 
 
 @pytest.mark.asyncio

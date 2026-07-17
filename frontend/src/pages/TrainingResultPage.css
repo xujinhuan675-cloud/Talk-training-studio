@@ -380,6 +380,12 @@
   font-weight: 700;
 }
 
+.training-result-branch-item em.empty {
+  color: var(--text-muted);
+  font-weight: 750;
+  white-space: normal;
+}
+
 .training-result-branch-note {
   margin: 10px 0 0;
   color: var(--text-muted);
@@ -410,6 +416,11 @@
   font-weight: 750;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.training-result-branch-path span.id-only {
+  border-style: dashed;
+  color: var(--text-muted);
 }
 
 .training-result-summary {

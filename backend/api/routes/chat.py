@@ -9,9 +9,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from starlette.responses import StreamingResponse
 
-from api.dependencies import get_chat_service
+from api.conversation_scope import require_conversation_access
+from api.dependencies import (
+    CurrentUser,
+    get_chat_service,
+    get_conversation_service,
+    require_system_roles,
+)
 from application.dto import ChatRequestDTO
 from application.services.chat_service import ChatApplicationService
+from application.services.conversation_service import ConversationApplicationService
 from core.i18n import t
 from core.response import Response as ApiResponse, success_response
 
@@ -19,6 +26,9 @@ from core.response import Response as ApiResponse, success_response
 # The chat endpoint invokes paid LLM API calls and MUST be auth-gated
 # before exposing to non-internal traffic.
 router = APIRouter(tags=["聊天"])
+
+
+_chat_user = require_system_roles("admin", "leader", "staff")
 
 
 @router.post(
@@ -29,7 +39,12 @@ async def chat(
     conversation_id: int,
     payload: ChatRequestDTO,
     service: ChatApplicationService = Depends(get_chat_service),
+    conversation_service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_chat_user),
 ):
+    conversation = await conversation_service.get_conversation(conversation_id)
+    require_conversation_access(conversation, current_user)
+
     if payload.stream:
         return StreamingResponse(
             service.send_message_stream(conversation_id, payload),

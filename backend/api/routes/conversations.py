@@ -10,7 +10,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from api.dependencies import get_conversation_service
+from api.conversation_scope import (
+    conversation_create_payload_for_user,
+    conversation_metadata_for_current_user,
+    require_conversation_access,
+    user_can_access_conversation,
+)
+from api.dependencies import CurrentUser, get_conversation_service, require_system_roles
 from application.dto import (
     AgentConfigDTO,
     ConversationDTO,
@@ -36,10 +42,17 @@ from core.response import PaginatedData
 from core.response import Response as ApiResponse
 from core.response import paginated_response, success_response
 
-# TODO: Add authentication dependency (get_current_user) to all routes
-# when user/auth module is implemented. Currently matches project baseline
-# where no routes require auth (see files.py, storage.py).
 router = APIRouter(tags=["Conversations"])
+_conversation_user = require_system_roles("admin", "leader", "staff")
+
+
+async def _get_accessible_conversation(
+    service: ConversationApplicationService,
+    conversation_id: int,
+    current_user: CurrentUser,
+) -> ConversationDTO:
+    conv = await service.get_conversation(conversation_id)
+    return require_conversation_access(conv, current_user)
 
 
 # Conversations
@@ -53,7 +66,9 @@ router = APIRouter(tags=["Conversations"])
 async def create_conversation(
     payload: CreateConversationDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    payload = conversation_create_payload_for_user(payload, current_user)
     conv = await service.create_conversation(payload)
     return success_response(conv, message=t("ok"))
 
@@ -68,9 +83,13 @@ async def list_conversations(
     size: int = Query(default=settings.DEFAULT_PAGE_SIZE, ge=1, le=settings.MAX_PAGE_SIZE),
     status: Optional[str] = Query(default=None),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
     skip = (page - 1) * size
     items, total = await service.list_conversations(status=status, skip=skip, limit=size)
+    if not current_user.is_admin:
+        items = [item for item in items if user_can_access_conversation(item, current_user)]
+        total = len(items)
     return paginated_response(items=items, total=total, page=page, size=size)
 
 
@@ -82,8 +101,10 @@ async def list_conversations(
 async def get_conversation(
     conversation_id: int,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
     conv = await service.get_conversation(conversation_id)
+    require_conversation_access(conv, current_user)
     return success_response(conv, message=t("ok"))
 
 
@@ -96,7 +117,9 @@ async def update_conversation(
     conversation_id: int,
     payload: UpdateConversationDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     conv = await service.update_conversation(conversation_id, payload)
     return success_response(conv, message=t("ok"))
 
@@ -109,7 +132,9 @@ async def update_conversation(
 async def delete_conversation(
     conversation_id: int,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     conv = await service.delete_conversation(conversation_id)
     return success_response(conv, message=t("ok"))
 
@@ -127,7 +152,9 @@ async def list_messages(
     statuses: list[str] | None = Query(default=None),
     include_deleted: bool = Query(default=False),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     skip = (page - 1) * size
     items, total = await service.list_messages(
         conversation_id,
@@ -159,7 +186,9 @@ async def search_messages(
     context_before: int = Query(1, ge=0, le=20),
     context_after: int = Query(1, ge=0, le=20),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     items = await service.search_messages(
         conversation_id,
         q,
@@ -187,7 +216,9 @@ async def apply_message_action(
     message_public_id: str,
     payload: MessageActionDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     item = await service.apply_message_action(conversation_id, message_public_id, payload)
     return success_response(item, message=t("ok"))
 
@@ -204,7 +235,9 @@ async def get_message_path(
     include_deleted: bool = Query(default=False),
     statuses: list[str] | None = Query(default=None),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     items = await service.get_message_path(
         conversation_id,
         message_public_id,
@@ -226,7 +259,9 @@ async def locate_message(
     before: int = Query(2, ge=0, le=50),
     after: int = Query(2, ge=0, le=50),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     item = await service.locate_message(
         conversation_id,
         message_public_id,
@@ -247,7 +282,9 @@ async def list_message_children(
     statuses: list[str] | None = Query(default=None),
     include_deleted: bool = Query(default=False),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     items = await service.list_message_children(
         conversation_id,
         message_public_id,
@@ -267,7 +304,18 @@ async def fork_conversation(
     message_public_id: str,
     payload: ForkConversationDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    source = await _get_accessible_conversation(service, conversation_id, current_user)
+    payload = payload.model_copy(
+        update={
+            "metadata": conversation_metadata_for_current_user(
+                payload.metadata,
+                current_user,
+                source_metadata=source.metadata,
+            ),
+        },
+    )
     item = await service.fork_conversation(conversation_id, message_public_id, payload)
     return success_response(item, message=t("ok"))
 
@@ -282,7 +330,9 @@ async def edit_message(
     message_public_id: str,
     payload: EditMessageDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     item = await service.edit_message(conversation_id, message_public_id, payload)
     return success_response(item, message=t("ok"))
 
@@ -297,7 +347,9 @@ async def retry_message(
     message_public_id: str,
     payload: RetryMessageDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     item = await service.retry_message(conversation_id, message_public_id, payload)
     return success_response(item, message=t("ok"))
 
@@ -315,7 +367,9 @@ async def list_runs(
     status: Optional[str] = Query(default=None),
     trigger_message_id: Optional[str] = Query(default=None),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(_conversation_user),
 ):
+    await _get_accessible_conversation(service, conversation_id, current_user)
     items = await service.list_runs(
         conversation_id,
         skip=skip,

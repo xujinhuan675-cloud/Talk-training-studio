@@ -295,6 +295,7 @@ test('getTrainingConversationBranchInfo extracts id-only selected path state wit
   assert.equal(info.selectedTailMessageId, 'msg-tail')
   assert.equal(info.pathCount, 2)
   assert.deepEqual(info.selectedPath.map((item) => item.publicId), ['msg-root', 'msg-tail'])
+  assert.equal(info.pathSummary, undefined)
   assert.equal(info.lastReplyPreview, undefined)
 })
 
