@@ -38,6 +38,7 @@ import {
   fetchRealtimeCapabilities,
   type RealtimeCapabilities,
   type RealtimeReadinessIssue,
+  type RuntimeCapabilityRegistry,
   type TrainingStudioCapabilityItem,
   type TrainingStudioConfig,
   type TrainingStudioReadinessStatus,
@@ -544,8 +545,9 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     () => buildTrainingStudioCapabilityReadiness({
       realtimeCapabilities,
       modelChoices: llmModelChoices,
+      capabilityRegistry: (llmRegistry?.capability_registry ?? null) as RuntimeCapabilityRegistry | null,
     }),
-    [llmModelChoices, realtimeCapabilities],
+    [llmModelChoices, llmRegistry, realtimeCapabilities],
   )
   const capabilityLoading = (realtimeCapabilitiesLoading && !realtimeCapabilities)
     || (llmRegistryLoading && !llmRegistry)

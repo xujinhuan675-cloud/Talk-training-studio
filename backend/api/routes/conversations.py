@@ -14,7 +14,9 @@ from api.conversation_scope import (
     conversation_create_payload_for_user,
     conversation_metadata_for_current_user,
     require_conversation_access,
+    require_owned_metadata_access,
     user_can_access_conversation,
+    user_can_access_owned_metadata,
 )
 from api.dependencies import CurrentUser, get_conversation_service, require_system_roles
 from application.dto import (
@@ -54,6 +56,21 @@ async def _get_accessible_conversation(
 ) -> ConversationDTO:
     conv = await service.get_conversation(conversation_id)
     return require_conversation_access(conv, current_user)
+
+
+async def _get_accessible_agent_config(
+    service: ConversationApplicationService,
+    config_id: int,
+    current_user: CurrentUser,
+) -> AgentConfigDTO:
+    config = await service.get_agent_config(config_id)
+    require_owned_metadata_access(
+        config.metadata,
+        current_user,
+        resource_name="Agent config",
+        allow_unscoped=False,
+    )
+    return config
 
 
 # Conversations
@@ -393,8 +410,13 @@ async def list_runs(
 async def create_agent_config(
     payload: CreateAgentConfigDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
-    _current_user: CurrentUser = Depends(_agent_config_user),
+    current_user: CurrentUser = Depends(_agent_config_user),
 ):
+    payload = payload.model_copy(
+        update={
+            "metadata": conversation_metadata_for_current_user(payload.metadata, current_user),
+        },
+    )
     config = await service.create_agent_config(payload)
     return success_response(config, message=t("ok"))
 
@@ -408,10 +430,21 @@ async def list_agent_configs(
     page: int = Query(1, ge=1),
     size: int = Query(default=settings.DEFAULT_PAGE_SIZE, ge=1, le=settings.MAX_PAGE_SIZE),
     service: ConversationApplicationService = Depends(get_conversation_service),
-    _current_user: CurrentUser = Depends(_agent_config_user),
+    current_user: CurrentUser = Depends(_agent_config_user),
 ):
     skip = (page - 1) * size
     items, total = await service.list_agent_configs(skip=skip, limit=size)
+    if not current_user.is_admin:
+        items = [
+            item
+            for item in items
+            if user_can_access_owned_metadata(
+                item.metadata,
+                current_user,
+                allow_unscoped=False,
+            )
+        ]
+        total = len(items)
     return paginated_response(items=items, total=total, page=page, size=size)
 
 
@@ -423,9 +456,9 @@ async def list_agent_configs(
 async def get_agent_config(
     config_id: int,
     service: ConversationApplicationService = Depends(get_conversation_service),
-    _current_user: CurrentUser = Depends(_agent_config_user),
+    current_user: CurrentUser = Depends(_agent_config_user),
 ):
-    config = await service.get_agent_config(config_id)
+    config = await _get_accessible_agent_config(service, config_id, current_user)
     return success_response(config, message=t("ok"))
 
 
@@ -438,8 +471,19 @@ async def update_agent_config(
     config_id: int,
     payload: UpdateAgentConfigDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
-    _current_user: CurrentUser = Depends(_agent_config_user),
+    current_user: CurrentUser = Depends(_agent_config_user),
 ):
+    current_config = await _get_accessible_agent_config(service, config_id, current_user)
+    if payload.metadata is not None:
+        payload = payload.model_copy(
+            update={
+                "metadata": conversation_metadata_for_current_user(
+                    payload.metadata,
+                    current_user,
+                    source_metadata=current_config.metadata,
+                ),
+            },
+        )
     config = await service.update_agent_config(config_id, payload)
     return success_response(config, message=t("ok"))
 
@@ -452,7 +496,8 @@ async def update_agent_config(
 async def delete_agent_config(
     config_id: int,
     service: ConversationApplicationService = Depends(get_conversation_service),
-    _current_user: CurrentUser = Depends(_agent_config_user),
+    current_user: CurrentUser = Depends(_agent_config_user),
 ):
+    await _get_accessible_agent_config(service, config_id, current_user)
     await service.delete_agent_config(config_id)
     return success_response({"deleted": True}, message=t("ok"))

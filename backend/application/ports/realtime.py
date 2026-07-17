@@ -14,6 +14,9 @@ REALTIME_RUNTIME_PIPECAT = "pipecat"
 REALTIME_RUNTIME_OPENAI = "openai_realtime"
 REALTIME_RUNTIME_TALKWISE_LOCAL = "talkwise_local"
 OPENAI_REALTIME_API_KEY_ENV_KEYS = ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY")
+OPENAI_REALTIME_MODEL_ENV_KEYS = ("REALTIME_OPENAI_MODEL",)
+OPENAI_REALTIME_VOICE_ENV_KEYS = ("REALTIME_OPENAI_VOICE",)
+OPENAI_REALTIME_INPUT_AUDIO_FORMAT_ENV_KEYS = ("REALTIME_OPENAI_INPUT_AUDIO_FORMAT",)
 _SENSITIVE_REALTIME_METADATA_KEYS = {
     "api_key",
     "apikey",
@@ -218,8 +221,13 @@ def build_openai_realtime_capability_response(
     effective_key: bool,
     model: str | None,
     voice: str | None,
+    input_audio_format: str | None = None,
 ) -> dict[str, object]:
     """Build the public OpenAI Realtime capability/readiness response shape."""
+
+    resolved_model = _clean_realtime_text(model)
+    resolved_voice = _clean_realtime_text(voice)
+    resolved_input_audio_format = _clean_realtime_text(input_audio_format)
 
     blockers: list[RealtimeReadinessIssue] = []
     if not effective_key:
@@ -235,7 +243,7 @@ def build_openai_realtime_capability_response(
                 missing_env=OPENAI_REALTIME_API_KEY_ENV_KEYS,
             )
         )
-    if not model:
+    if not resolved_model:
         blockers.append(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_MODEL",
@@ -243,9 +251,10 @@ def build_openai_realtime_capability_response(
                 phase="configuration",
                 provider="openaiRealtime",
                 feature="model",
+                missing_env=OPENAI_REALTIME_MODEL_ENV_KEYS,
             )
         )
-    if not voice:
+    if not resolved_voice:
         blockers.append(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_VOICE",
@@ -253,23 +262,51 @@ def build_openai_realtime_capability_response(
                 phase="configuration",
                 provider="openaiRealtime",
                 feature="voice",
+                missing_env=OPENAI_REALTIME_VOICE_ENV_KEYS,
+            )
+        )
+    if not resolved_input_audio_format:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
+                message=(
+                    "Configure REALTIME_OPENAI_INPUT_AUDIO_FORMAT before starting "
+                    "OpenAI realtime calls"
+                ),
+                phase="configuration",
+                provider="openaiRealtime",
+                feature="audioFormat",
+                missing_env=OPENAI_REALTIME_INPUT_AUDIO_FORMAT_ENV_KEYS,
             )
         )
     readiness = build_realtime_readiness(
-        required={"env": OPENAI_REALTIME_API_KEY_ENV_KEYS},
+        required={
+            "env": OPENAI_REALTIME_API_KEY_ENV_KEYS,
+            "model": resolved_model,
+            "voice": resolved_voice,
+            "inputAudioFormat": resolved_input_audio_format,
+        },
         blocking_reasons=blockers,
         runtime=REALTIME_RUNTIME_OPENAI,
     ).to_dict()
     return {
         "runtime": REALTIME_RUNTIME_OPENAI,
-        "configured": configured,
+        "configured": bool(configured and resolved_input_audio_format),
         "effectiveKey": effective_key,
-        "model": model,
-        "voice": voice,
+        "model": resolved_model,
+        "voice": resolved_voice,
+        "inputAudioFormat": resolved_input_audio_format,
         "readyForCall": readiness["ready"],
         "readiness": readiness,
         "errors": readiness["blockingReasons"],
     }
+
+
+def _clean_realtime_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _readiness_issue_payload(

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from api.dependencies import get_chat_service, get_conversation_service
 from api.routes.chat import router as chat_router
 from api.routes.conversations import router as conversation_router
-from application.dto import ConversationDTO
+from application.dto import AgentConfigDTO, ConversationDTO
 
 
 def _conversation(
@@ -29,9 +29,33 @@ def _conversation(
     )
 
 
+def _agent_config(
+    config_id: int,
+    *,
+    metadata: dict | None = None,
+) -> AgentConfigDTO:
+    now = datetime.now(timezone.utc)
+    return AgentConfigDTO(
+        id=config_id,
+        name=f"agent-{config_id}",
+        system_prompt=None,
+        model="gpt-test",
+        temperature=None,
+        max_tokens=None,
+        metadata=metadata or {},
+        created_at=now,
+        updated_at=now,
+    )
+
+
 class _FakeConversationService:
-    def __init__(self, conversations: dict[int, ConversationDTO] | None = None) -> None:
+    def __init__(
+        self,
+        conversations: dict[int, ConversationDTO] | None = None,
+        agent_configs: dict[int, AgentConfigDTO] | None = None,
+    ) -> None:
         self.conversations = conversations or {}
+        self.agent_configs = agent_configs or {}
         self.created_payload = None
         self.update_call = None
         self.delete_call = None
@@ -44,6 +68,7 @@ class _FakeConversationService:
         self.agent_config_update_call = None
         self.agent_config_delete_call = None
         self.get_calls: list[int] = []
+        self.agent_config_get_calls: list[int] = []
 
     async def create_conversation(self, payload):
         self.created_payload = payload
@@ -75,19 +100,22 @@ class _FakeConversationService:
 
     async def create_agent_config(self, payload):
         self.agent_config_create_call = payload
-        return None
+        return _agent_config(31, metadata=payload.metadata)
 
     async def list_agent_configs(self, **kwargs):
         self.agent_config_list_call = kwargs
-        return [], 0
+        return list(self.agent_configs.values()), len(self.agent_configs)
 
     async def get_agent_config(self, config_id: int):
         self.agent_config_get_call = config_id
-        return None
+        self.agent_config_get_calls.append(config_id)
+        return self.agent_configs.get(config_id) or _agent_config(config_id)
 
     async def update_agent_config(self, config_id: int, payload):
         self.agent_config_update_call = (config_id, payload)
-        return None
+        source = self.agent_configs.get(config_id) or _agent_config(config_id)
+        metadata = payload.metadata if payload.metadata is not None else source.metadata
+        return source.model_copy(update={"metadata": metadata})
 
     async def delete_agent_config(self, config_id: int):
         self.agent_config_delete_call = config_id
@@ -298,3 +326,111 @@ def test_agent_config_routes_reject_unsupported_system_roles_before_service_call
     assert conversation_service.agent_config_get_call is None
     assert conversation_service.agent_config_update_call is None
     assert conversation_service.agent_config_delete_call is None
+
+
+def test_create_agent_config_stamps_current_mock_user_scope() -> None:
+    conversation_service = _FakeConversationService()
+    client = _client(conversation_service)
+
+    response = client.post(
+        "/api/v1/agent-configs",
+        headers={"X-Mock-User": "sales"},
+        json={
+            "name": "sales-agent",
+            "metadata": {
+                "ownerUserId": "user-cs-001",
+                "teamId": "team-service",
+                "source": "test",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    metadata = response.json()["data"]["metadata"]
+    assert metadata["ownerUserId"] == "user-sales-001"
+    assert metadata["teamId"] == "team-revenue"
+    assert metadata["authScope"]["userId"] == "user-sales-001"
+    assert metadata["authScope"]["teamId"] == "team-revenue"
+    assert metadata["source"] == "test"
+    assert (
+        conversation_service.agent_config_create_call.metadata["ownerUserId"]
+        == "user-sales-001"
+    )
+
+
+def test_agent_config_routes_enforce_owner_metadata_scope() -> None:
+    conversation_service = _FakeConversationService(
+        agent_configs={
+            7: _agent_config(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            ),
+            8: _agent_config(
+                8,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+            9: _agent_config(9, metadata={}),
+        }
+    )
+    client = _client(conversation_service)
+    headers = {"X-Mock-User": "sales"}
+
+    list_resp = client.get("/api/v1/agent-configs", headers=headers)
+    get_resp = client.get("/api/v1/agent-configs/7", headers=headers)
+    update_resp = client.patch(
+        "/api/v1/agent-configs/7",
+        headers=headers,
+        json={"name": "forged-agent"},
+    )
+    delete_resp = client.delete("/api/v1/agent-configs/7", headers=headers)
+
+    assert list_resp.status_code == 200
+    assert [item["id"] for item in list_resp.json()["data"]["items"]] == [8]
+    assert get_resp.status_code == 403
+    assert update_resp.status_code == 403
+    assert delete_resp.status_code == 403
+    assert conversation_service.agent_config_get_calls == [7, 7, 7]
+    assert conversation_service.agent_config_update_call is None
+    assert conversation_service.agent_config_delete_call is None
+
+
+def test_agent_config_update_preserves_existing_owner_scope() -> None:
+    conversation_service = _FakeConversationService(
+        agent_configs={
+            8: _agent_config(
+                8,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                    "source": "original",
+                },
+            ),
+        }
+    )
+    client = _client(conversation_service)
+
+    response = client.patch(
+        "/api/v1/agent-configs/8",
+        headers={"X-Mock-User": "sales"},
+        json={
+            "metadata": {
+                "ownerUserId": "user-cs-001",
+                "teamId": "team-service",
+                "source": "updated",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    _, payload = conversation_service.agent_config_update_call
+    assert payload.metadata["ownerUserId"] == "user-sales-001"
+    assert payload.metadata["teamId"] == "team-revenue"
+    assert payload.metadata["authScope"]["userId"] == "user-sales-001"
+    assert payload.metadata["authScope"]["teamId"] == "team-revenue"
+    assert payload.metadata["source"] == "updated"

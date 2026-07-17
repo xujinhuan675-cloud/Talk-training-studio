@@ -122,6 +122,7 @@ def test_openai_realtime_capability_response_exposes_structured_readiness():
         effective_key=False,
         model="gpt-realtime",
         voice="marin",
+        input_audio_format="pcm16",
     )
 
     assert missing["configured"] is False
@@ -144,6 +145,7 @@ def test_openai_realtime_capability_response_exposes_structured_readiness():
         effective_key=True,
         model=None,
         voice=None,
+        input_audio_format="pcm16",
     )
 
     assert incomplete["readyForCall"] is False
@@ -152,11 +154,26 @@ def test_openai_realtime_capability_response_exposes_structured_readiness():
         "MISSING_OPENAI_REALTIME_VOICE",
     ]
 
+    missing_audio_format = build_openai_realtime_capability_response(
+        configured=False,
+        effective_key=True,
+        model="gpt-realtime",
+        voice="marin",
+        input_audio_format=None,
+    )
+
+    assert missing_audio_format["readyForCall"] is False
+    assert missing_audio_format["errors"][0]["code"] == "MISSING_OPENAI_REALTIME_AUDIO_FORMAT"
+    assert missing_audio_format["errors"][0]["missingEnv"] == [
+        "REALTIME_OPENAI_INPUT_AUDIO_FORMAT"
+    ]
+
     ready = build_openai_realtime_capability_response(
         configured=True,
         effective_key=True,
         model="gpt-realtime",
         voice="marin",
+        input_audio_format="pcm16",
     )
 
     assert ready["readyForCall"] is True

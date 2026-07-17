@@ -589,6 +589,45 @@ def test_pipecat_realtime_readiness_reports_structured_blockers_without_secrets(
     assert "secret-should-not-appear" not in json.dumps(readiness)
 
 
+def test_pipecat_realtime_readiness_reports_missing_openai_runtime_settings():
+    capability = pipecat_adapter.PipecatCapability(
+        available=True,
+        core_available=True,
+        websocket_available=True,
+        vad_available=True,
+        stt_available=True,
+        tts_available=True,
+        llm_available=True,
+        turn_detection_available=True,
+    )
+
+    readiness = pipecat_adapter.pipecat_realtime_readiness(
+        capability,
+        openai_api_key_available=True,
+        openai_model=None,
+        openai_voice=None,
+        input_audio_format=None,
+    ).to_dict()
+
+    assert readiness["ready"] is False
+    assert readiness["status"] == "blocked"
+    assert readiness["required"]["env"] == [
+        "REALTIME_OPENAI_API_KEY",
+        "LLM__API_KEY",
+        "OPENAI_API_KEY",
+    ]
+    assert [error["code"] for error in readiness["blockingReasons"]] == [
+        "MISSING_OPENAI_REALTIME_MODEL",
+        "MISSING_OPENAI_REALTIME_VOICE",
+        "MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
+    ]
+    assert [error["missingEnv"] for error in readiness["blockingReasons"]] == [
+        ["REALTIME_OPENAI_MODEL"],
+        ["REALTIME_OPENAI_VOICE"],
+        ["REALTIME_OPENAI_INPUT_AUDIO_FORMAT"],
+    ]
+
+
 def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
     capability = pipecat_adapter.PipecatCapability(
         available=True,
@@ -1240,6 +1279,9 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
         websocket=object(),
         config=RealtimePipelineConfig(
             provider="pipecat",
+            model="gpt-realtime",
+            voice="marin",
+            input_audio_format="pcm16",
             metadata={
                 "stt": "openai",
                 "tts": "openai",

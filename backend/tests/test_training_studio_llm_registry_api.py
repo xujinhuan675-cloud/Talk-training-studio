@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_stakeholder_llm_client
+from api.dependencies import get_conversation_service, get_stakeholder_llm_client
 from api.routes.training_studio import router
+from application.dto import AgentConfigDTO
 from application.ports.llm import LLMEndpointMetadata, LLMModelMetadata, LLMProviderMetadata
 from core.config import LLMSettings, settings
 
@@ -85,10 +88,34 @@ class _SecretBearingLLM:
         )
 
 
-def _client(llm) -> TestClient:
+def _agent_config(config_id: int, *, metadata: dict | None = None) -> AgentConfigDTO:
+    now = datetime.now(timezone.utc)
+    return AgentConfigDTO(
+        id=config_id,
+        name=f"agent-{config_id}",
+        system_prompt=None,
+        model="claude-sonnet-test",
+        temperature=None,
+        max_tokens=None,
+        metadata=metadata or {},
+        created_at=now,
+        updated_at=now,
+    )
+
+
+class _FakeConversationService:
+    def __init__(self, agent_configs: list[AgentConfigDTO] | None = None) -> None:
+        self.agent_configs = agent_configs or []
+
+    async def list_agent_configs(self, **_kwargs):
+        return self.agent_configs, len(self.agent_configs)
+
+
+def _client(llm, *, agent_configs: list[AgentConfigDTO] | None = None) -> TestClient:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_stakeholder_llm_client] = lambda: llm
+    app.dependency_overrides[get_conversation_service] = lambda: _FakeConversationService(agent_configs)
     return TestClient(app)
 
 
@@ -105,7 +132,19 @@ def test_llm_registry_uses_active_client_provider_metadata(monkeypatch) -> None:
         ),
     )
 
-    response = _client(_FakeLLM()).get("/api/v1/training-studio/llm-registry")
+    response = _client(
+        _FakeLLM(),
+        agent_configs=[
+            _agent_config(
+                12,
+                metadata={
+                    "ownerUserId": "user-admin-001",
+                    "teamId": "team-platform",
+                    "tool": "secret-safe-branch-review",
+                },
+            )
+        ],
+    ).get("/api/v1/training-studio/llm-registry")
 
     assert response.status_code == 200
     assert "sk-active-secret" not in response.text
@@ -193,6 +232,9 @@ def test_llm_registry_uses_active_client_provider_metadata(monkeypatch) -> None:
     assert capability_registry["by_kind"]["model"][0]["provider"] == "anthropic"
     assert capability_registry["by_kind"]["model"][0]["configured"] is True
     assert capability_registry["by_kind"]["agent"][0]["enabled"] is True
+    assert capability_registry["by_kind"]["agent"][0]["source"] == "agent_config"
+    assert capability_registry["by_kind"]["agent"][0]["name"] == "agent-12"
+    assert capability_registry["by_kind"]["agent"][0]["ready"] is True
     assert capability_registry["by_kind"]["tool"][0]["enabled"] is False
     assert capability_registry["by_kind"]["mcp_server"][0]["enabled"] is False
 

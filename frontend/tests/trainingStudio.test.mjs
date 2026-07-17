@@ -242,3 +242,97 @@ test('buildTrainingStudioCapabilityReadiness surfaces realtime blockers without 
     ],
   )
 })
+
+test('buildTrainingStudioCapabilityReadiness uses backend agent MCP inventory when present', () => {
+  const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
+    modelChoices: [
+      {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        capabilities: ['text'],
+        disabled: false,
+      },
+    ],
+    capabilityRegistry: {
+      provider: 'talkwise',
+      version: 1,
+      capabilities: [
+        {
+          id: 'agent:training-coach',
+          kind: 'agent',
+          name: 'Training Coach',
+          status: 'available',
+          enabled: true,
+          readiness: { ready: true, status: 'ready' },
+        },
+        {
+          id: 'tool:branch-review',
+          kind: 'tool',
+          name: 'Branch Review Tool',
+          status: 'available',
+          enabled: true,
+          readiness: { ready: true, status: 'ready' },
+        },
+        {
+          id: 'mcp:local-memory',
+          kind: 'mcp_server',
+          name: 'Local Memory',
+          status: 'available',
+          enabled: true,
+          readiness: { ready: true, status: 'ready' },
+        },
+      ],
+    },
+  })
+
+  assert.equal(readiness.agentMcp.status, 'ready')
+  assert.match(readiness.agentMcp.detail, /Backend agent and MCP inventory/)
+  assert.deepEqual(
+    readiness.agentMcp.metrics.map((metric) => [metric.label, metric.value]),
+    [
+      ['tool models', '0'],
+      ['MCP models', '0'],
+      ['inventory', '3'],
+      ['blocked', '0'],
+      ['selectable', '1'],
+    ],
+  )
+})
+
+test('buildTrainingStudioCapabilityReadiness redacts backend capability blockers', () => {
+  const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
+    modelChoices: [
+      {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        capabilities: ['text'],
+        disabled: false,
+      },
+    ],
+    capabilityRegistry: {
+      capabilities: [
+        {
+          id: 'mcp:remote',
+          kind: 'mcp_server',
+          name: 'Remote MCP',
+          status: 'missingDependency',
+          enabled: true,
+          readiness: {
+            ready: false,
+            status: 'blocked',
+            blockingReasons: [
+              {
+                code: 'MCP_AUTH_FAILED',
+                message: 'authorization=Bearer sk-secret-token-123456',
+              },
+            ],
+          },
+        },
+      ],
+    },
+  })
+
+  assert.equal(readiness.agentMcp.status, 'blocked')
+  assert.match(readiness.agentMcp.tags.join(' '), /authorization=\*\*\*/)
+  assert.doesNotMatch(JSON.stringify(readiness.agentMcp), /sk-secret-token/)
+})

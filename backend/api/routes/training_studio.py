@@ -39,12 +39,14 @@ from api.dependencies import (
     get_analysis_reader_service,
     get_analysis_service,
     get_chatroom_service,
+    get_conversation_service,
     get_current_user,
     get_growth_service,
     get_stakeholder_llm_client,
     require_system_roles,
     training_scope_for,
 )
+from api.conversation_scope import user_can_access_owned_metadata
 from application.ports.capabilities import build_text_runtime_capability_registry
 from application.ports.llm import (
     LLMEndpointMetadata,
@@ -74,6 +76,7 @@ from application.services.stakeholder.analysis_service import AnalysisReaderServ
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.dto import CreateChatRoomDTO, MessageDTO
 from application.services.stakeholder.sse import room_event_bus
+from application.services.conversation_service import ConversationApplicationService
 from application.services.training_studio.catalog_service import (
     TrainingCatalogService,
     TrainingTaskConfigDTO,
@@ -425,7 +428,11 @@ def _settings_llm_provider_metadata() -> LLMProviderMetadata:
     )
 
 
-def _llm_registry_response(llm: LLMPort | None) -> dict[str, object]:
+def _llm_registry_response(
+    llm: LLMPort | None,
+    *,
+    agent_configs: object | None = None,
+) -> dict[str, object]:
     source = "active_client" if llm is not None else "settings"
     provider_metadata = (
         llm.provider_metadata if llm is not None else _settings_llm_provider_metadata()
@@ -449,8 +456,31 @@ def _llm_registry_response(llm: LLMPort | None) -> dict[str, object]:
     payload["capability_registry"] = build_text_runtime_capability_registry(
         registry,
         model_specs=payload["model_specs"],
+        agent_configs=agent_configs,
     ).to_dict()
     return payload
+
+
+async def _agent_config_inventory_for_user(
+    service: ConversationApplicationService,
+    current_user: CurrentUser,
+) -> list[object]:
+    try:
+        items, _total = await service.list_agent_configs(skip=0, limit=settings.MAX_PAGE_SIZE)
+    except Exception as exc:
+        logger.warning("Failed to load agent config inventory for capability registry: %s", exc)
+        return []
+    if current_user.is_admin:
+        return list(items)
+    return [
+        item
+        for item in items
+        if user_can_access_owned_metadata(
+            item.metadata,
+            current_user,
+            allow_unscoped=False,
+        )
+    ]
 
 
 async def _reload_voice_clients() -> None:
@@ -1221,6 +1251,7 @@ def _openai_realtime_capability_response() -> dict[str, object]:
         effective_key=bool(effective_key),
         model=settings.REALTIME_OPENAI_MODEL,
         voice=settings.REALTIME_OPENAI_VOICE,
+        input_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
     )
 
 
@@ -2343,9 +2374,11 @@ async def get_scenario_templates(
 @router.get("/llm-registry", summary="Get text LLM provider and model registry")
 async def get_llm_registry(
     llm: LLMPort | None = Depends(get_stakeholder_llm_client),
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
-    return success_response(data=_llm_registry_response(llm))
+    agent_configs = await _agent_config_inventory_for_user(conversation_svc, current_user)
+    return success_response(data=_llm_registry_response(llm, agent_configs=agent_configs))
 
 
 @router.get("/voice-config", summary="Get voice preference configuration")

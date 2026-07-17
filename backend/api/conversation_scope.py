@@ -72,16 +72,21 @@ def conversation_create_payload_for_user(
     )
 
 
-def user_can_access_conversation(conversation: ConversationDTO, current_user: CurrentUser) -> bool:
+def user_can_access_owned_metadata(
+    metadata: dict[str, Any] | None,
+    current_user: CurrentUser,
+    *,
+    allow_unscoped: bool = True,
+) -> bool:
     if current_user.is_admin:
         return True
 
-    metadata = _as_mapping(conversation.metadata)
+    metadata = _as_mapping(metadata)
     owner_user_id = _conversation_owner_user_id(metadata)
     owner_team_id = _conversation_owner_team_id(metadata)
 
     if not owner_user_id and not owner_team_id:
-        return True
+        return allow_unscoped
     if owner_user_id and owner_user_id == current_user.user_id:
         return True
     if current_user.is_leader and owner_team_id and owner_team_id == current_user.team_id:
@@ -89,6 +94,32 @@ def user_can_access_conversation(conversation: ConversationDTO, current_user: Cu
     if not owner_user_id and owner_team_id and owner_team_id == current_user.team_id:
         return True
     return False
+
+
+def require_owned_metadata_access(
+    metadata: dict[str, Any] | None,
+    current_user: CurrentUser,
+    *,
+    resource_name: str,
+    allow_unscoped: bool = True,
+) -> None:
+    if not user_can_access_owned_metadata(
+        metadata,
+        current_user,
+        allow_unscoped=allow_unscoped,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{resource_name} is outside current user scope",
+        )
+
+
+def user_can_access_conversation(conversation: ConversationDTO, current_user: CurrentUser) -> bool:
+    return user_can_access_owned_metadata(
+        conversation.metadata,
+        current_user,
+        allow_unscoped=True,
+    )
 
 
 def require_conversation_access(

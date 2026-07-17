@@ -123,6 +123,57 @@ export interface RealtimeCapabilities {
 
 export type TrainingStudioReadinessStatus = 'ready' | 'warning' | 'blocked' | 'unknown'
 
+export type RuntimeCapabilityKind = 'provider' | 'model' | 'agent' | 'tool' | 'mcp_server' | 'runtime' | string
+export type RuntimeCapabilityStatus =
+  | 'available'
+  | 'ready'
+  | 'warning'
+  | 'blocked'
+  | 'missingDependency'
+  | 'unavailable'
+  | 'disabled'
+  | 'unknown'
+  | string
+
+export interface RuntimeCapabilityReadiness {
+  ready?: boolean
+  status?: RuntimeCapabilityStatus
+  blockingReasons?: RealtimeReadinessIssue[]
+  warnings?: RealtimeReadinessIssue[]
+  errors?: RealtimeReadinessIssue[]
+  [key: string]: unknown
+}
+
+export interface RuntimeCapabilityRegistryItem {
+  id?: string
+  kind?: RuntimeCapabilityKind
+  name?: string
+  provider?: string | null
+  source?: string | null
+  status?: RuntimeCapabilityStatus
+  enabled?: boolean
+  ready?: boolean
+  configured?: boolean | null
+  scopes?: string[]
+  required_roles?: string[]
+  requiredRoles?: string[]
+  tags?: string[]
+  readiness?: RuntimeCapabilityReadiness | null
+  blockingReasons?: RealtimeReadinessIssue[]
+  errors?: RealtimeReadinessIssue[]
+  metadata?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface RuntimeCapabilityRegistry {
+  provider?: string
+  version?: number
+  capabilities?: RuntimeCapabilityRegistryItem[]
+  by_kind?: Record<string, RuntimeCapabilityRegistryItem[]>
+  byKind?: Record<string, RuntimeCapabilityRegistryItem[]>
+  [key: string]: unknown
+}
+
 export interface TrainingStudioModelCapabilityInput {
   provider?: string | null
   providerLabel?: string | null
@@ -173,6 +224,7 @@ export interface TrainingStudioCapabilityReadiness {
 export interface BuildTrainingStudioCapabilityReadinessInput {
   realtimeCapabilities?: RealtimeCapabilities | null
   modelChoices?: TrainingStudioModelCapabilityInput[] | null
+  capabilityRegistry?: RuntimeCapabilityRegistry | null
 }
 
 interface LocalizedOption<T extends string> {
@@ -729,12 +781,19 @@ function optionLabel<T extends string>(options: LocalizedOption<T>[], value: T, 
 
 function cleanCapabilityText(value: unknown): string | null {
   if (value === undefined || value === null) return null
-  const text = String(value).trim()
+  const text = redactCapabilitySecretText(String(value).trim())
   return text || null
 }
 
 function uniqueCapabilityTexts(values: Array<string | null | undefined>): string[] {
   return Array.from(new Set(values.map(cleanCapabilityText).filter((value): value is string => Boolean(value))))
+}
+
+function redactCapabilitySecretText(value: string): string {
+  return value
+    .replace(/sk-[A-Za-z0-9_-]{6,}/g, 'sk-***')
+    .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
+    .replace(/\b(api[_-]?key|authorization|password|secret|token)(\s*[:=]\s*)([^,\s;]+)/gi, '$1$2***')
 }
 
 function normalizeCapabilityToken(value: string): string {
@@ -771,6 +830,61 @@ function countRealtimeBlockingIssues(capabilities: RealtimeCapabilities | null |
     ...(capabilities.pipecat.readiness?.blockingReasons ?? []),
     ...(capabilities.pipecat.errors ?? []),
   ].length
+}
+
+function normalizeRuntimeCapabilityKind(value: unknown): RuntimeCapabilityKind {
+  return String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+}
+
+function normalizeRuntimeCapabilityStatus(value: unknown): RuntimeCapabilityStatus {
+  return String(value ?? 'unknown').trim().toLowerCase().replace(/[\s-]+/g, '_')
+}
+
+function normalizeRuntimeCapabilityItems(
+  registry: RuntimeCapabilityRegistry | null | undefined,
+): RuntimeCapabilityRegistryItem[] {
+  if (!registry || typeof registry !== 'object') return []
+  if (Array.isArray(registry.capabilities)) return registry.capabilities
+  const byKind = registry.by_kind ?? registry.byKind
+  if (!byKind || typeof byKind !== 'object') return []
+  return Object.values(byKind).flatMap((items) => Array.isArray(items) ? items : [])
+}
+
+function runtimeCapabilityIsEnabled(item: RuntimeCapabilityRegistryItem): boolean {
+  return item.enabled !== false
+}
+
+function runtimeCapabilityIsReady(item: RuntimeCapabilityRegistryItem): boolean {
+  const status = normalizeRuntimeCapabilityStatus(item.readiness?.status ?? item.status)
+  if (item.ready === true) return true
+  if (item.readiness?.ready === true) return true
+  return runtimeCapabilityIsEnabled(item) && ['ready', 'available'].includes(status)
+}
+
+function runtimeCapabilityIsBlocked(item: RuntimeCapabilityRegistryItem): boolean {
+  const status = normalizeRuntimeCapabilityStatus(item.readiness?.status ?? item.status)
+  return ['blocked', 'missingdependency', 'missing_dependency', 'unavailable'].includes(status)
+}
+
+function runtimeCapabilityIsDisabled(item: RuntimeCapabilityRegistryItem): boolean {
+  const status = normalizeRuntimeCapabilityStatus(item.status)
+  return item.enabled === false || status === 'disabled'
+}
+
+function getRuntimeCapabilityIssues(item: RuntimeCapabilityRegistryItem): RealtimeReadinessIssue[] {
+  return [
+    ...(item.readiness?.blockingReasons ?? []),
+    ...(item.readiness?.warnings ?? []),
+    ...(item.readiness?.errors ?? []),
+    ...(item.blockingReasons ?? []),
+    ...(item.errors ?? []),
+  ]
+}
+
+function getRuntimeCapabilityIssueText(issue: RealtimeReadinessIssue): string | null {
+  return cleanCapabilityText(issue.message)
+    ?? cleanCapabilityText(issue.code)
+    ?? cleanCapabilityText(issue.feature)
 }
 
 function realtimeFeatureBooleans(capabilities: RealtimeCapabilities | null | undefined): boolean[] {
@@ -882,34 +996,65 @@ function buildAgentMcpReadiness(
   modelChoices: TrainingStudioModelCapabilityInput[],
   toolCapableModels: number,
   mcpCapableModels: number,
+  capabilityRegistry: RuntimeCapabilityRegistry | null | undefined,
 ): TrainingStudioCapabilityItem {
   const selectableModels = modelChoices.filter((choice) => !choice.disabled)
-  const status: TrainingStudioReadinessStatus = mcpCapableModels > 0
-    ? 'ready'
-    : toolCapableModels > 0
-      ? 'warning'
-      : modelChoices.length > 0
+  const runtimeItems = normalizeRuntimeCapabilityItems(capabilityRegistry)
+  const agentItems = runtimeItems.filter((item) => normalizeRuntimeCapabilityKind(item.kind) === 'agent')
+  const toolItems = runtimeItems.filter((item) => normalizeRuntimeCapabilityKind(item.kind) === 'tool')
+  const mcpItems = runtimeItems.filter((item) => normalizeRuntimeCapabilityKind(item.kind) === 'mcp_server')
+  const relevantItems = [...agentItems, ...toolItems, ...mcpItems]
+  const enabledItems = relevantItems.filter(runtimeCapabilityIsEnabled)
+  const readyItems = relevantItems.filter(runtimeCapabilityIsReady)
+  const blockedItems = relevantItems.filter(runtimeCapabilityIsBlocked)
+  const disabledItems = relevantItems.filter(runtimeCapabilityIsDisabled)
+  const explicitIssues = relevantItems.flatMap(getRuntimeCapabilityIssues)
+  const issueText = uniqueCapabilityTexts(explicitIssues.map(getRuntimeCapabilityIssueText))
+  const status: TrainingStudioReadinessStatus = relevantItems.length > 0
+    ? readyItems.length > 0
+      ? (blockedItems.length > 0 || disabledItems.length > 0 ? 'warning' : 'ready')
+      : blockedItems.length > 0 || disabledItems.length > 0
         ? 'blocked'
-        : 'unknown'
+        : 'warning'
+    : mcpCapableModels > 0
+      ? 'ready'
+      : toolCapableModels > 0
+        ? 'warning'
+        : modelChoices.length > 0
+          ? 'blocked'
+          : 'unknown'
 
   return {
     key: 'agent-mcp',
     label: 'Agent / MCP capability',
     status,
-    detail: mcpCapableModels > 0
-      ? 'MCP-capable model metadata is visible; agent/tool events can be surfaced without changing training semantics.'
-      : toolCapableModels > 0
-        ? 'Tool-capable model metadata is visible. MCP server inventory still needs an explicit backend readiness payload.'
-        : 'No tool-capable model metadata is visible for agent or MCP workflows.',
+    detail: relevantItems.length > 0
+      ? mcpItems.length > 0
+        ? 'Backend agent and MCP inventory is visible through a secret-free capability registry.'
+        : toolItems.length > 0
+          ? 'Tool capability is visible, but MCP server inventory is still incomplete.'
+          : 'Agent capability metadata is visible, but tool and MCP inventory is still incomplete.'
+      : mcpCapableModels > 0
+        ? 'MCP-capable model metadata is visible; agent/tool events can be surfaced without changing training semantics.'
+        : toolCapableModels > 0
+          ? 'Tool-capable model metadata is visible. MCP server inventory still needs an explicit backend readiness payload.'
+          : 'No tool-capable model metadata is visible for agent or MCP workflows.',
     tags: [
       'agent_tool_use events',
       'agent_message events',
-      toolCapableModels > 0 ? 'tool-capable models' : 'no tool models',
-      mcpCapableModels > 0 ? 'MCP tagged' : 'MCP inventory pending',
+      relevantItems.length > 0
+        ? `${enabledItems.length} enabled inventory items`
+        : toolCapableModels > 0 ? 'tool-capable models' : 'no tool models',
+      relevantItems.length > 0
+        ? `${readyItems.length} ready inventory items`
+        : mcpCapableModels > 0 ? 'MCP tagged' : 'MCP inventory pending',
+      ...issueText.slice(0, 2),
     ],
     metrics: [
       { label: 'tool models', value: String(toolCapableModels) },
       { label: 'MCP models', value: String(mcpCapableModels) },
+      { label: 'inventory', value: String(relevantItems.length) },
+      { label: 'blocked', value: String(blockedItems.length) },
       { label: 'selectable', value: String(selectableModels.length) },
     ],
   }
@@ -920,6 +1065,7 @@ export function buildTrainingStudioCapabilityReadiness(
 ): TrainingStudioCapabilityReadiness {
   const modelChoices = input.modelChoices ?? []
   const realtimeCapabilities = input.realtimeCapabilities ?? null
+  const capabilityRegistry = input.capabilityRegistry ?? null
   const providers = uniqueCapabilityTexts(modelChoices.map((choice) => choice.provider))
   const selectableModels = modelChoices.filter((choice) => !choice.disabled)
   const toolCapableModels = modelChoices.filter((choice) => (
@@ -940,7 +1086,12 @@ export function buildTrainingStudioCapabilityReadiness(
     featureBooleans.length || 7,
     realtimeBlockingIssues,
   )
-  const agentMcp = buildAgentMcpReadiness(modelChoices, toolCapableModels, mcpCapableModels)
+  const agentMcp = buildAgentMcpReadiness(
+    modelChoices,
+    toolCapableModels,
+    mcpCapableModels,
+    capabilityRegistry,
+  )
   const foundation: TrainingStudioCapabilityItem[] = [
     {
       key: 'text-runtime',

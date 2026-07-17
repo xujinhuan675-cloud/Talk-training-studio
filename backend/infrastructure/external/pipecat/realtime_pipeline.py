@@ -57,12 +57,61 @@ USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
 OPENAI_API_KEY_ENV_KEYS = OPENAI_REALTIME_API_KEY_ENV_KEYS
+OPENAI_REALTIME_MODEL_SETTING = "REALTIME_OPENAI_MODEL"
+OPENAI_REALTIME_VOICE_SETTING = "REALTIME_OPENAI_VOICE"
+OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING = "REALTIME_OPENAI_INPUT_AUDIO_FORMAT"
+_OPENAI_RUNTIME_VALUE_UNSET = object()
 PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "stt": "openai",
     "tts": "openai",
     "llm": "openai",
     "vad": "silero",
     "turnDetection": "pipecat",
+}
+PIPECAT_REALTIME_FEATURE_REQUIREMENTS = {
+    "stt": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": "stt:openai",
+        "message": "Pipecat OpenAI STT service is required before starting realtime calls",
+        "modules": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
+    },
+    "tts": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": "tts:openai",
+        "message": "Pipecat OpenAI TTS service is required before starting realtime calls",
+        "modules": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
+    },
+    "llm": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": "llm:openai",
+        "message": "Pipecat OpenAI LLM service is required before starting realtime calls",
+        "modules": (
+            OPENAI_LLM_PIPECAT_MODULE,
+            LLM_CONTEXT_PIPECAT_MODULE,
+            LLM_RESPONSE_PIPECAT_MODULE,
+        ),
+    },
+    "vad": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": "vad:silero",
+        "message": "Pipecat Silero VAD processor is required before starting realtime calls",
+        "modules": (
+            SILERO_VAD_PIPECAT_MODULE,
+            VAD_ANALYZER_PIPECAT_MODULE,
+            VAD_PROCESSOR_PIPECAT_MODULE,
+            "onnxruntime",
+        ),
+    },
+    "turnDetection": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": "turnDetection:pipecat",
+        "message": "Pipecat user turn detection is required before starting realtime calls",
+        "modules": (
+            USER_TURN_PROCESSOR_PIPECAT_MODULE,
+            USER_TURN_STRATEGIES_PIPECAT_MODULE,
+            USER_TURN_COMPLETION_PIPECAT_MODULE,
+        ),
+    },
 }
 PIPECAT_FEATURE_MODULE_HINTS = {
     "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
@@ -331,6 +380,10 @@ def pipecat_realtime_capability_response(
     require_websocket: bool = True,
     openai_api_key_available: bool | None = None,
     include_source_snapshot: bool = True,
+    openai_model: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    openai_voice: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    input_audio_format: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    output_audio_format: object = _OPENAI_RUNTIME_VALUE_UNSET,
 ) -> dict[str, Any]:
     """Return the public Pipecat capability/readiness payload for realtime calls."""
 
@@ -344,11 +397,25 @@ def pipecat_realtime_capability_response(
             error=f"Pipecat capability check failed: {redact_realtime_secret_text(str(exc))}",
         )
 
+    openai_requirements = _resolved_openai_runtime_requirements(
+        model=openai_model,
+        voice=openai_voice,
+        input_audio_format=input_audio_format,
+        output_audio_format=output_audio_format,
+    )
     data = _pipecat_capability_public_payload(capability)
+    data["model"] = openai_requirements["model"]
+    data["voice"] = openai_requirements["voice"]
+    data["inputAudioFormat"] = openai_requirements["inputAudioFormat"]
+    data["outputAudioFormat"] = openai_requirements["outputAudioFormat"]
     readiness = pipecat_realtime_readiness(
         capability,
         require_websocket=require_websocket,
         openai_api_key_available=openai_api_key_available,
+        openai_model=openai_requirements["model"],
+        openai_voice=openai_requirements["voice"],
+        input_audio_format=openai_requirements["inputAudioFormat"],
+        output_audio_format=openai_requirements["outputAudioFormat"],
     ).to_dict()
     data["readyForCall"] = readiness["ready"]
     data["readiness"] = readiness
@@ -366,10 +433,20 @@ def pipecat_realtime_readiness(
     *,
     require_websocket: bool = True,
     openai_api_key_available: bool | None = None,
+    openai_model: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    openai_voice: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    input_audio_format: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    output_audio_format: object = _OPENAI_RUNTIME_VALUE_UNSET,
 ) -> RealtimeProviderReadiness:
     """Build structured readiness from Pipecat capability and call prerequisites."""
 
     capability = capability or get_pipecat_capability(require_websocket=require_websocket)
+    openai_requirements = _resolved_openai_runtime_requirements(
+        model=openai_model,
+        voice=openai_voice,
+        input_audio_format=input_audio_format,
+        output_audio_format=output_audio_format,
+    )
     missing_modules = tuple(str(module) for module in capability.missing_modules)
     optional_missing_modules = tuple(
         str(module) for module in capability.optional_missing_modules
@@ -413,16 +490,14 @@ def pipecat_realtime_readiness(
         for feature, required_provider in PIPECAT_REALTIME_REQUIRED_FEATURES.items():
             if _pipecat_feature_available(capability, feature):
                 continue
+            requirement = PIPECAT_REALTIME_FEATURE_REQUIREMENTS[feature]
             blockers.append(
                 RealtimeReadinessIssue(
-                    code="PIPECAT_FEATURE_UNAVAILABLE",
-                    message=(
-                        f"Pipecat {feature} provider '{required_provider}' is required "
-                        "before starting realtime calls"
-                    ),
+                    code=str(requirement["code"]),
+                    message=str(requirement["message"]),
                     phase="capability_check",
                     provider="pipecat",
-                    feature=f"{feature}:{required_provider}",
+                    feature=str(requirement["feature"]),
                     modules=_pipecat_feature_missing_modules(
                         feature,
                         optional_missing_modules,
@@ -445,6 +520,42 @@ def pipecat_realtime_readiness(
                 missing_env=OPENAI_API_KEY_ENV_KEYS,
             )
         )
+    if not openai_requirements["model"]:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_REALTIME_MODEL",
+                message="Configure REALTIME_OPENAI_MODEL before starting Pipecat realtime calls",
+                phase="configuration",
+                provider="pipecat",
+                feature="model",
+                missing_env=(OPENAI_REALTIME_MODEL_SETTING,),
+            )
+        )
+    if not openai_requirements["voice"]:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_REALTIME_VOICE",
+                message="Configure REALTIME_OPENAI_VOICE before starting Pipecat realtime calls",
+                phase="configuration",
+                provider="pipecat",
+                feature="voice",
+                missing_env=(OPENAI_REALTIME_VOICE_SETTING,),
+            )
+        )
+    if not openai_requirements["inputAudioFormat"]:
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
+                message=(
+                    "Configure REALTIME_OPENAI_INPUT_AUDIO_FORMAT before starting "
+                    "Pipecat realtime calls"
+                ),
+                phase="configuration",
+                provider="pipecat",
+                feature="audioFormat",
+                missing_env=(OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING,),
+            )
+        )
 
     if error_message and not blockers:
         blockers.append(
@@ -462,6 +573,7 @@ def pipecat_realtime_readiness(
             "transport": "websocket" if require_websocket else "audio_chunks",
             "features": dict(PIPECAT_REALTIME_REQUIRED_FEATURES),
             "env": OPENAI_API_KEY_ENV_KEYS,
+            "openai": openai_requirements,
         },
         blocking_reasons=blockers,
         runtime=REALTIME_RUNTIME_PIPECAT,
@@ -503,11 +615,14 @@ def _pipecat_feature_missing_modules(
     optional_missing_modules: Sequence[str],
 ) -> tuple[str, ...]:
     hints = PIPECAT_FEATURE_MODULE_HINTS[feature]
-    return tuple(
+    missing = tuple(
         module
         for module in optional_missing_modules
         if any(module == hint or module.startswith(f"{hint}.") for hint in hints)
     )
+    if missing:
+        return missing
+    return tuple(str(module) for module in PIPECAT_REALTIME_FEATURE_REQUIREMENTS[feature]["modules"])
 
 
 def _module_spec_exists(module: str) -> bool:
@@ -839,6 +954,88 @@ def _optional_pipecat_symbol(module_name: str, symbol_name: str) -> type | None:
     except Exception:
         return None
     return getattr(module, symbol_name, None)
+
+
+def _clean_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _settings_text(name: str) -> str | None:
+    try:
+        from core.config import settings as app_settings
+    except Exception:
+        return None
+    return _clean_text(getattr(app_settings, name, None))
+
+
+def _resolve_openai_runtime_value(
+    value: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    *,
+    setting_name: str | None = None,
+) -> str | None:
+    if value is _OPENAI_RUNTIME_VALUE_UNSET:
+        return _settings_text(setting_name) if setting_name is not None else None
+    return _clean_text(value)
+
+
+def _resolved_openai_runtime_requirements(
+    *,
+    model: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    voice: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    input_audio_format: object = _OPENAI_RUNTIME_VALUE_UNSET,
+    output_audio_format: object = _OPENAI_RUNTIME_VALUE_UNSET,
+) -> dict[str, str | None]:
+    resolved_input_audio_format = _resolve_openai_runtime_value(
+        input_audio_format,
+        setting_name=OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING,
+    )
+    resolved_output_audio_format = _clean_text(
+        output_audio_format
+        if output_audio_format is not _OPENAI_RUNTIME_VALUE_UNSET
+        else resolved_input_audio_format
+    )
+    return {
+        "model": _resolve_openai_runtime_value(
+            model,
+            setting_name=OPENAI_REALTIME_MODEL_SETTING,
+        ),
+        "voice": _resolve_openai_runtime_value(
+            voice,
+            setting_name=OPENAI_REALTIME_VOICE_SETTING,
+        ),
+        "inputAudioFormat": resolved_input_audio_format,
+        "outputAudioFormat": resolved_output_audio_format,
+    }
+
+
+def _pipecat_dependency_probe(
+    capability: PipecatCapability,
+    *,
+    require_websocket: bool,
+) -> dict[str, object]:
+    return {
+        "checkedAt": datetime.now(UTC).isoformat(),
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "requireWebsocket": require_websocket,
+        "coreAvailable": bool(capability.core_available),
+        "websocketAvailable": bool(capability.websocket_available),
+        "available": bool(capability.available),
+        "featureAvailability": {
+            "stt": bool(capability.stt_available),
+            "tts": bool(capability.tts_available),
+            "llm": bool(capability.llm_available),
+            "vad": bool(capability.vad_available),
+            "turnDetection": bool(capability.turn_detection_available),
+        },
+        "missingModules": [str(module) for module in capability.missing_modules],
+        "optionalMissingModules": [
+            str(module) for module in capability.optional_missing_modules
+        ],
+        "error": redact_realtime_secret_text(capability.error) if capability.error else None,
+    }
 
 
 class PipecatRealtimePipelineAdapter:
@@ -1468,6 +1665,14 @@ def pipecat_pipeline_capability(
     capability = get_pipecat_capability(require_websocket=websocket is not None)
     metadata = dict(config.metadata)
     requested_features = _requested_feature_metadata(config)
+    openai_requirements = _resolved_openai_runtime_requirements(
+        model=config.model or _metadata_text(metadata, "model", "openaiModel", "openai_model"),
+        voice=config.voice or _metadata_text(metadata, "voice"),
+        input_audio_format=config.input_audio_format
+        or _metadata_text(metadata, "inputAudioFormat", "input_audio_format"),
+        output_audio_format=config.output_audio_format
+        or _metadata_text(metadata, "outputAudioFormat", "output_audio_format"),
+    )
     missing: list[str] = []
     if _feature_provider(metadata, "stt") == "openai" and not capability.stt_available:
         missing.append("stt:openai")
@@ -1488,6 +1693,7 @@ def pipecat_pipeline_capability(
         websocket=websocket,
         requested_features=requested_features,
         missing_features=missing,
+        openai_requirements=openai_requirements,
     )
     readiness_payload = readiness.to_dict()
 
@@ -1514,6 +1720,11 @@ def pipecat_pipeline_capability(
             "vadAvailable": capability.vad_available,
             "turnDetectionAvailable": capability.turn_detection_available,
             "requestedFeatures": requested_features,
+            "openaiRuntime": dict(openai_requirements),
+            "dependencyProbe": _pipecat_dependency_probe(
+                capability,
+                require_websocket=websocket is not None,
+            ),
             "optionalMissingModules": capability.optional_missing_modules,
             "runtimeLoaded": runtime is not None,
             "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
@@ -1532,6 +1743,7 @@ def _pipecat_pipeline_readiness(
     websocket: Any | None,
     requested_features: Mapping[str, str | None],
     missing_features: Sequence[str],
+    openai_requirements: Mapping[str, str | None],
 ) -> RealtimeProviderReadiness:
     blockers: list[RealtimeReadinessIssue] = []
     if not capability.core_available:
@@ -1561,16 +1773,23 @@ def _pipecat_pipeline_readiness(
     )
     for feature in missing_features:
         feature_name, _, provider = feature.partition(":")
+        requirement = PIPECAT_REALTIME_FEATURE_REQUIREMENTS.get(
+            "turnDetection" if feature_name == "turnDetection" else feature_name
+        )
         blockers.append(
             RealtimeReadinessIssue(
-                code="PIPECAT_FEATURE_UNAVAILABLE",
+                code=str(requirement["code"]) if requirement else "PIPECAT_FEATURE_UNAVAILABLE",
                 message=(
-                    f"Pipecat {feature_name} provider '{provider}' is required "
-                    "before starting realtime calls"
+                    str(requirement["message"])
+                    if requirement
+                    else (
+                        f"Pipecat {feature_name} provider '{provider}' is required "
+                        "before starting realtime calls"
+                    )
                 ),
                 phase="capability_check",
                 provider="pipecat",
-                feature=feature,
+                feature=str(requirement["feature"]) if requirement else feature,
                 modules=_pipecat_feature_missing_modules(
                     feature_name,
                     optional_missing_modules,
@@ -1595,12 +1814,49 @@ def _pipecat_pipeline_readiness(
                 missing_env=OPENAI_API_KEY_ENV_KEYS,
             )
         )
+    if not openai_requirements.get("model"):
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_REALTIME_MODEL",
+                message="Configure REALTIME_OPENAI_MODEL before starting Pipecat realtime calls",
+                phase="configuration",
+                provider="pipecat",
+                feature="model",
+                missing_env=(OPENAI_REALTIME_MODEL_SETTING,),
+            )
+        )
+    if not openai_requirements.get("voice"):
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_REALTIME_VOICE",
+                message="Configure REALTIME_OPENAI_VOICE before starting Pipecat realtime calls",
+                phase="configuration",
+                provider="pipecat",
+                feature="voice",
+                missing_env=(OPENAI_REALTIME_VOICE_SETTING,),
+            )
+        )
+    if not openai_requirements.get("inputAudioFormat"):
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
+                message=(
+                    "Configure REALTIME_OPENAI_INPUT_AUDIO_FORMAT before starting "
+                    "Pipecat realtime calls"
+                ),
+                phase="configuration",
+                provider="pipecat",
+                feature="audioFormat",
+                missing_env=(OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING,),
+            )
+        )
 
     return build_realtime_readiness(
         required={
             "transport": "websocket" if websocket is not None else "audio_chunks",
             "features": dict(requested_features),
             "env": OPENAI_API_KEY_ENV_KEYS,
+            "openai": dict(openai_requirements),
         },
         blocking_reasons=blockers,
         runtime=REALTIME_RUNTIME_PIPECAT,
