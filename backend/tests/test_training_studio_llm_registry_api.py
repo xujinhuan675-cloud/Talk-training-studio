@@ -181,6 +181,20 @@ def test_llm_registry_uses_active_client_provider_metadata(monkeypatch) -> None:
             "tags": [],
         }
     }
+    capability_registry = data["capability_registry"]
+    assert capability_registry["provider"] == "talkwise"
+    assert set(capability_registry["by_kind"]) == {
+        "provider",
+        "model",
+        "agent",
+        "tool",
+        "mcp_server",
+    }
+    assert capability_registry["by_kind"]["model"][0]["provider"] == "anthropic"
+    assert capability_registry["by_kind"]["model"][0]["configured"] is True
+    assert capability_registry["by_kind"]["agent"][0]["enabled"] is True
+    assert capability_registry["by_kind"]["tool"][0]["enabled"] is False
+    assert capability_registry["by_kind"]["mcp_server"][0]["enabled"] is False
 
 
 def test_llm_registry_response_strips_secrets_from_model_specs(monkeypatch) -> None:
@@ -213,6 +227,10 @@ def test_llm_registry_response_strips_secrets_from_model_specs(monkeypatch) -> N
         "timeout_ms": 5000,
         "headers": {"X-Safe": "kept"},
     }
+    assert data["capability_registry"]["by_kind"]["model"][0]["metadata"]["capabilities"] == [
+        "text",
+        "streaming",
+    ]
 
 
 def test_llm_registry_falls_back_to_settings_without_active_client(monkeypatch) -> None:

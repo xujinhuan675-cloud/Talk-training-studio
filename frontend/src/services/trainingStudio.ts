@@ -121,6 +121,60 @@ export interface RealtimeCapabilities {
   pipecat: PipecatRealtimeCapability
 }
 
+export type TrainingStudioReadinessStatus = 'ready' | 'warning' | 'blocked' | 'unknown'
+
+export interface TrainingStudioModelCapabilityInput {
+  provider?: string | null
+  providerLabel?: string | null
+  model?: string | null
+  modelLabel?: string | null
+  capabilities?: string[] | null
+  disabled?: boolean
+  isDefault?: boolean
+  wireApi?: string | null
+  endpoint?: string | null
+  disabledReason?: string | null
+}
+
+export interface TrainingStudioCapabilityMetric {
+  label: string
+  value: string
+}
+
+export interface TrainingStudioCapabilityItem {
+  key: string
+  label: string
+  status: TrainingStudioReadinessStatus
+  detail: string
+  tags: string[]
+  metrics: TrainingStudioCapabilityMetric[]
+}
+
+export interface TrainingStudioCapabilityReadiness {
+  overallStatus: TrainingStudioReadinessStatus
+  foundation: TrainingStudioCapabilityItem[]
+  providerModel: TrainingStudioCapabilityItem
+  realtime: TrainingStudioCapabilityItem
+  agentMcp: TrainingStudioCapabilityItem
+  modelCounts: {
+    providers: number
+    models: number
+    selectableModels: number
+    toolCapableModels: number
+    mcpCapableModels: number
+  }
+  realtimeCounts: {
+    pipecatFeatures: number
+    pipecatReadyFeatures: number
+    blockingIssues: number
+  }
+}
+
+export interface BuildTrainingStudioCapabilityReadinessInput {
+  realtimeCapabilities?: RealtimeCapabilities | null
+  modelChoices?: TrainingStudioModelCapabilityInput[] | null
+}
+
 interface LocalizedOption<T extends string> {
   value: T
   labelKey: TranslationKey
@@ -671,6 +725,268 @@ function translate(t: Translate | undefined, key: TranslationKey, fallback: stri
 function optionLabel<T extends string>(options: LocalizedOption<T>[], value: T, t?: Translate): string {
   const option = options.find((item) => item.value === value)
   return option ? translate(t, option.labelKey, option.fallbackLabel) : value
+}
+
+function cleanCapabilityText(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text || null
+}
+
+function uniqueCapabilityTexts(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map(cleanCapabilityText).filter((value): value is string => Boolean(value))))
+}
+
+function normalizeCapabilityToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+}
+
+function hasModelCapability(choice: TrainingStudioModelCapabilityInput, tokens: string[]): boolean {
+  const wanted = new Set(tokens)
+  return (choice.capabilities ?? []).some((capability) => {
+    const normalized = normalizeCapabilityToken(capability)
+    return wanted.has(normalized) || tokens.some((token) => normalized.includes(token))
+  })
+}
+
+function readinessPriority(status: TrainingStudioReadinessStatus): number {
+  if (status === 'blocked') return 3
+  if (status === 'warning') return 2
+  if (status === 'unknown') return 1
+  return 0
+}
+
+function combineReadinessStatus(items: TrainingStudioCapabilityItem[]): TrainingStudioReadinessStatus {
+  if (items.length === 0) return 'unknown'
+  return items.reduce<TrainingStudioReadinessStatus>((current, item) => (
+    readinessPriority(item.status) > readinessPriority(current) ? item.status : current
+  ), 'ready')
+}
+
+function countRealtimeBlockingIssues(capabilities: RealtimeCapabilities | null | undefined): number {
+  if (!capabilities) return 0
+  return [
+    ...(capabilities.openaiRealtime.readiness?.blockingReasons ?? []),
+    ...(capabilities.openaiRealtime.errors ?? []),
+    ...(capabilities.pipecat.readiness?.blockingReasons ?? []),
+    ...(capabilities.pipecat.errors ?? []),
+  ].length
+}
+
+function realtimeFeatureBooleans(capabilities: RealtimeCapabilities | null | undefined): boolean[] {
+  if (!capabilities) return []
+  return [
+    capabilities.pipecat.coreAvailable,
+    capabilities.pipecat.websocketAvailable,
+    capabilities.pipecat.vadAvailable,
+    capabilities.pipecat.sttAvailable,
+    capabilities.pipecat.ttsAvailable,
+    capabilities.pipecat.llmAvailable,
+    capabilities.pipecat.turnDetectionAvailable,
+  ]
+}
+
+function buildProviderModelReadiness(
+  modelChoices: TrainingStudioModelCapabilityInput[],
+): TrainingStudioCapabilityItem {
+  const providers = uniqueCapabilityTexts(modelChoices.map((choice) => choice.providerLabel || choice.provider))
+  const selectableModels = modelChoices.filter((choice) => !choice.disabled)
+  const defaultChoice = selectableModels.find((choice) => choice.isDefault) ?? selectableModels[0] ?? null
+  const status: TrainingStudioReadinessStatus = selectableModels.length > 0
+    ? 'ready'
+    : modelChoices.length > 0
+      ? 'warning'
+      : 'unknown'
+  const defaultLabel = defaultChoice
+    ? [defaultChoice.providerLabel || defaultChoice.provider, defaultChoice.modelLabel || defaultChoice.model]
+      .map(cleanCapabilityText)
+      .filter(Boolean)
+      .join(' / ')
+    : ''
+
+  return {
+    key: 'provider-model',
+    label: 'Provider / model registry',
+    status,
+    detail: defaultLabel
+      ? `Default route: ${defaultLabel}. Provider-neutral model metadata is available to the training runtime.`
+      : 'No selectable provider/model route is available yet.',
+    tags: [
+      `${providers.length} provider${providers.length === 1 ? '' : 's'}`,
+      `${selectableModels.length} selectable model${selectableModels.length === 1 ? '' : 's'}`,
+      ...uniqueCapabilityTexts(selectableModels.flatMap((choice) => choice.capabilities ?? [])).slice(0, 4),
+    ],
+    metrics: [
+      { label: 'providers', value: String(providers.length) },
+      { label: 'models', value: String(modelChoices.length) },
+      { label: 'selectable', value: String(selectableModels.length) },
+    ],
+  }
+}
+
+function buildRealtimeReadinessItem(
+  capabilities: RealtimeCapabilities | null | undefined,
+  readyFeatureCount: number,
+  totalFeatureCount: number,
+  blockingIssues: number,
+): TrainingStudioCapabilityItem {
+  if (!capabilities) {
+    return {
+      key: 'realtime-runtime',
+      label: 'Realtime runtime',
+      status: 'unknown',
+      detail: 'Realtime capabilities have not been loaded from the backend yet.',
+      tags: ['OpenAI Realtime', 'Pipecat'],
+      metrics: [
+        { label: 'pipecat', value: 'not loaded' },
+        { label: 'blockers', value: 'unknown' },
+      ],
+    }
+  }
+
+  const openaiReady = Boolean(capabilities.openaiRealtime.readyForCall)
+  const pipecatReady = Boolean(capabilities.pipecat.readyForCall)
+  const partialReady = openaiReady
+    || pipecatReady
+    || capabilities.openaiRealtime.configured
+    || capabilities.pipecat.available
+    || readyFeatureCount > 0
+  const status: TrainingStudioReadinessStatus = openaiReady && pipecatReady
+    ? 'ready'
+    : partialReady
+      ? 'warning'
+      : 'blocked'
+  const model = cleanCapabilityText(capabilities.openaiRealtime.model) ?? 'model not configured'
+  const voice = cleanCapabilityText(capabilities.openaiRealtime.voice) ?? 'voice not configured'
+
+  return {
+    key: 'realtime-runtime',
+    label: 'Realtime runtime',
+    status,
+    detail: `OpenAI Realtime ${openaiReady ? 'can start calls' : 'is not fully ready'}; Pipecat has ${readyFeatureCount}/${totalFeatureCount} pipeline features available.`,
+    tags: [
+      openaiReady ? 'OpenAI call-ready' : 'OpenAI needs setup',
+      pipecatReady ? 'Pipecat call-ready' : 'Pipecat checked',
+      model,
+      voice,
+    ],
+    metrics: [
+      { label: 'pipecat features', value: `${readyFeatureCount}/${totalFeatureCount}` },
+      { label: 'blockers', value: String(blockingIssues) },
+      { label: 'missing modules', value: String(capabilities.pipecat.missingModules.length) },
+    ],
+  }
+}
+
+function buildAgentMcpReadiness(
+  modelChoices: TrainingStudioModelCapabilityInput[],
+  toolCapableModels: number,
+  mcpCapableModels: number,
+): TrainingStudioCapabilityItem {
+  const selectableModels = modelChoices.filter((choice) => !choice.disabled)
+  const status: TrainingStudioReadinessStatus = mcpCapableModels > 0
+    ? 'ready'
+    : toolCapableModels > 0
+      ? 'warning'
+      : modelChoices.length > 0
+        ? 'blocked'
+        : 'unknown'
+
+  return {
+    key: 'agent-mcp',
+    label: 'Agent / MCP capability',
+    status,
+    detail: mcpCapableModels > 0
+      ? 'MCP-capable model metadata is visible; agent/tool events can be surfaced without changing training semantics.'
+      : toolCapableModels > 0
+        ? 'Tool-capable model metadata is visible. MCP server inventory still needs an explicit backend readiness payload.'
+        : 'No tool-capable model metadata is visible for agent or MCP workflows.',
+    tags: [
+      'agent_tool_use events',
+      'agent_message events',
+      toolCapableModels > 0 ? 'tool-capable models' : 'no tool models',
+      mcpCapableModels > 0 ? 'MCP tagged' : 'MCP inventory pending',
+    ],
+    metrics: [
+      { label: 'tool models', value: String(toolCapableModels) },
+      { label: 'MCP models', value: String(mcpCapableModels) },
+      { label: 'selectable', value: String(selectableModels.length) },
+    ],
+  }
+}
+
+export function buildTrainingStudioCapabilityReadiness(
+  input: BuildTrainingStudioCapabilityReadinessInput = {},
+): TrainingStudioCapabilityReadiness {
+  const modelChoices = input.modelChoices ?? []
+  const realtimeCapabilities = input.realtimeCapabilities ?? null
+  const providers = uniqueCapabilityTexts(modelChoices.map((choice) => choice.provider))
+  const selectableModels = modelChoices.filter((choice) => !choice.disabled)
+  const toolCapableModels = modelChoices.filter((choice) => (
+    !choice.disabled
+    && hasModelCapability(choice, ['tools', 'tool', 'tool_calling', 'function_calling', 'function', 'agent'])
+  )).length
+  const mcpCapableModels = modelChoices.filter((choice) => (
+    !choice.disabled
+    && hasModelCapability(choice, ['mcp', 'mcp_tools', 'mcp_server'])
+  )).length
+  const featureBooleans = realtimeFeatureBooleans(realtimeCapabilities)
+  const pipecatReadyFeatures = featureBooleans.filter(Boolean).length
+  const realtimeBlockingIssues = countRealtimeBlockingIssues(realtimeCapabilities)
+  const providerModel = buildProviderModelReadiness(modelChoices)
+  const realtime = buildRealtimeReadinessItem(
+    realtimeCapabilities,
+    pipecatReadyFeatures,
+    featureBooleans.length || 7,
+    realtimeBlockingIssues,
+  )
+  const agentMcp = buildAgentMcpReadiness(modelChoices, toolCapableModels, mcpCapableModels)
+  const foundation: TrainingStudioCapabilityItem[] = [
+    {
+      key: 'text-runtime',
+      label: 'LibreChat-style text runtime',
+      status: 'ready',
+      detail: 'Conversation tree, branch selection, edit, retry, fork, and selected-path replay are represented at the training boundary.',
+      tags: ['message tree', 'branch-aware replay', 'review metadata'],
+      metrics: [
+        { label: 'write actions', value: 'edit/retry/fork' },
+        { label: 'review source', value: 'session/report/progress' },
+      ],
+    },
+    {
+      key: 'training-semantics',
+      label: 'TalkWise training semantics',
+      status: 'ready',
+      detail: 'Training goal, persona, scenario, dispatcher, evaluation, report, and live guidance metadata stay separate from provider/model selection.',
+      tags: ['training session', 'rubric', 'growth report'],
+      metrics: [
+        { label: 'metadata lanes', value: 'separated' },
+        { label: 'review path', value: 'branch-aware' },
+      ],
+    },
+    realtime,
+    providerModel,
+  ]
+
+  return {
+    overallStatus: combineReadinessStatus([...foundation, agentMcp]),
+    foundation,
+    providerModel,
+    realtime,
+    agentMcp,
+    modelCounts: {
+      providers: providers.length,
+      models: modelChoices.length,
+      selectableModels: selectableModels.length,
+      toolCapableModels,
+      mcpCapableModels,
+    },
+    realtimeCounts: {
+      pipecatFeatures: featureBooleans.length || 7,
+      pipecatReadyFeatures,
+      blockingIssues: realtimeBlockingIssues,
+    },
+  }
 }
 
 export function getTrainingScenarioLabel(scenario: TrainingScenario, t?: Translate): string {

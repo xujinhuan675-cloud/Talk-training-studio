@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import re
+import base64
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
+REALTIME_EVENT_SCHEMA_VERSION = 1
+REALTIME_RUNTIME_PIPECAT = "pipecat"
+REALTIME_RUNTIME_OPENAI = "openai_realtime"
+REALTIME_RUNTIME_TALKWISE_LOCAL = "talkwise_local"
 OPENAI_REALTIME_API_KEY_ENV_KEYS = ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY")
 _SENSITIVE_REALTIME_METADATA_KEYS = {
     "api_key",
@@ -42,6 +47,36 @@ _SECRET_TEXT_PATTERNS = (
         r"\s*[:=]\s*)[^\s,;}\]]+"
     ),
 )
+
+
+def _normalized_realtime_name(value: object | None) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def realtime_runtime_for_provider(provider: object | None) -> str:
+    """Return the public realtime runtime family for a provider alias."""
+
+    normalized = _normalized_realtime_name(provider)
+    if normalized in {"pipecat", "pipecat_pipeline"}:
+        return REALTIME_RUNTIME_PIPECAT
+    if normalized in {"openai", "openai_realtime", "openai_webrtc"}:
+        return REALTIME_RUNTIME_OPENAI
+    if normalized in {"", "local", "talkwise", "talkwise_local"}:
+        return REALTIME_RUNTIME_TALKWISE_LOCAL
+    return normalized
+
+
+def normalize_realtime_runtime(
+    runtime: object | None,
+    *,
+    provider: object | None = None,
+) -> str:
+    """Normalize a runtime value, falling back to the provider family."""
+
+    normalized = _normalized_realtime_name(runtime)
+    if normalized in {"realtime_voice", "voice", "training_voice"}:
+        return realtime_runtime_for_provider(provider)
+    return normalized or realtime_runtime_for_provider(provider)
 
 
 def _metadata_key_forms(key: object) -> tuple[str, str]:
@@ -139,6 +174,7 @@ class RealtimeProviderReadiness:
 
     ready: bool
     status: str
+    runtime: str | None = None
     required: Mapping[str, object] = field(default_factory=dict)
     blocking_reasons: Sequence[RealtimeReadinessIssue | Mapping[str, object]] = field(
         default_factory=tuple
@@ -146,7 +182,7 @@ class RealtimeProviderReadiness:
     checked_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "ready": self.ready,
             "status": self.status,
             "checkedAt": self.checked_at.isoformat(),
@@ -155,17 +191,22 @@ class RealtimeProviderReadiness:
                 _readiness_issue_payload(issue) for issue in self.blocking_reasons
             ],
         }
+        if self.runtime is not None:
+            payload["runtime"] = self.runtime
+        return payload
 
 
 def build_realtime_readiness(
     *,
     required: Mapping[str, object],
     blocking_reasons: Sequence[RealtimeReadinessIssue | Mapping[str, object]] = (),
+    runtime: str | None = None,
 ) -> RealtimeProviderReadiness:
     blockers = tuple(blocking_reasons)
     return RealtimeProviderReadiness(
         ready=not blockers,
         status="ready" if not blockers else "blocked",
+        runtime=runtime,
         required=dict(required),
         blocking_reasons=blockers,
     )
@@ -217,8 +258,10 @@ def build_openai_realtime_capability_response(
     readiness = build_realtime_readiness(
         required={"env": OPENAI_REALTIME_API_KEY_ENV_KEYS},
         blocking_reasons=blockers,
+        runtime=REALTIME_RUNTIME_OPENAI,
     ).to_dict()
     return {
+        "runtime": REALTIME_RUNTIME_OPENAI,
         "configured": configured,
         "effectiveKey": effective_key,
         "model": model,
@@ -262,6 +305,7 @@ class RealtimePipelineConfig:
     """Provider-neutral configuration for a realtime voice pipeline."""
 
     provider: str
+    runtime: str | None = None
     model: str | None = None
     voice: str | None = None
     input_audio_format: str | None = None
@@ -277,6 +321,7 @@ class RealtimePipelineCapability:
     provider: str
     core_available: bool
     media_transport: str
+    runtime: str = REALTIME_RUNTIME_PIPECAT
     stt: str | None = None
     tts: str | None = None
     vad: str | None = None
@@ -307,6 +352,62 @@ class RealtimeAudioChunk:
 
 
 @dataclass(frozen=True)
+class RealtimeOutputAudio:
+    """Provider-neutral audio chunk emitted by a realtime runtime."""
+
+    data: bytes
+    provider: str
+    runtime: str | None = None
+    mime_type: str | None = None
+    sequence: int | None = None
+    sample_rate: int | None = None
+    channels: int | None = None
+    context_id: str | None = None
+    metadata: Mapping[str, object] = field(default_factory=dict)
+
+    def to_event(self) -> dict[str, object]:
+        resolved_runtime = normalize_realtime_runtime(self.runtime, provider=self.provider)
+        encoded = base64.b64encode(self.data).decode("ascii")
+        payload: dict[str, object] = {
+            "schemaVersion": REALTIME_EVENT_SCHEMA_VERSION,
+            "runtime": resolved_runtime,
+            "provider": self.provider,
+            "audio": encoded,
+            "encoding": "base64",
+            "bytes": len(self.data),
+        }
+        if self.mime_type is not None:
+            payload["mimeType"] = self.mime_type
+        if self.sample_rate is not None:
+            payload["sampleRate"] = self.sample_rate
+        if self.channels is not None:
+            payload["channels"] = self.channels
+        if self.sequence is not None:
+            payload["sequence"] = self.sequence
+        if self.context_id is not None:
+            payload["contextId"] = self.context_id
+        safe_metadata = sanitize_realtime_public_value(dict(self.metadata))
+        if isinstance(safe_metadata, dict) and safe_metadata:
+            payload["metadata"] = safe_metadata
+
+        event: dict[str, object] = {
+            "type": "audio.output",
+            "schemaVersion": REALTIME_EVENT_SCHEMA_VERSION,
+            "runtime": resolved_runtime,
+            "provider": self.provider,
+            "source": resolved_runtime,
+            "payload": payload,
+            "audio": encoded,
+            "encoding": "base64",
+            "bytes": len(self.data),
+        }
+        for key in ("mimeType", "sampleRate", "channels", "sequence", "contextId", "metadata"):
+            if key in payload:
+                event[key] = payload[key]
+        return event
+
+
+@dataclass(frozen=True)
 class RealtimeTranscript:
     """Final transcript event normalized across realtime providers."""
 
@@ -316,6 +417,7 @@ class RealtimeTranscript:
     provider: str
     realtime_session_id: str
     event_type: str
+    runtime: str | None = None
     event_id: str | None = None
     item_id: str | None = None
     response_id: str | None = None

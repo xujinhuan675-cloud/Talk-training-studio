@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from application.ports.realtime import (
+    REALTIME_RUNTIME_PIPECAT,
     RealtimeAudioChunk,
     RealtimePipelineConfig,
     RealtimeSessionBinding,
@@ -550,6 +551,7 @@ def test_pipecat_realtime_readiness_reports_structured_blockers_without_secrets(
 
     assert readiness["ready"] is False
     assert readiness["status"] == "blocked"
+    assert readiness["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert readiness["required"]["features"] == {
         "stt": "openai",
         "tts": "openai",
@@ -621,6 +623,8 @@ def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
         openai_api_key_available=True,
     )
 
+    assert response["runtime"] == REALTIME_RUNTIME_PIPECAT
+    assert response["provider"] == "pipecat"
     assert response["readyForCall"] is True
     assert response["readiness"]["status"] == "ready"
     assert response["errors"] == []
@@ -1247,6 +1251,7 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
     )
 
     assert capability.provider == "pipecat"
+    assert capability.runtime == REALTIME_RUNTIME_PIPECAT
     assert capability.media_transport == "pipecat.websocket"
     assert capability.stt == "openai"
     assert capability.tts == "openai"
@@ -1260,6 +1265,7 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
     assert capability.metadata["llmAvailable"] is True
     assert capability.metadata["vadAvailable"] is False
     assert capability.metadata["turnDetectionAvailable"] is True
+    assert capability.metadata["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert capability.metadata["requestedFeatures"] == {
         "stt": "openai",
         "tts": "openai",
@@ -1269,6 +1275,7 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
     }
     assert capability.ready_for_call is False
     assert capability.readiness_payload()["status"] == "blocked"
+    assert capability.readiness_payload()["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert [error["feature"] for error in capability.errors] == [
         "tts:openai",
         "vad:silero",
@@ -1305,6 +1312,7 @@ async def test_talkwise_event_processor_mirrors_pipecat_transcription_frames():
 
     event = await queue.get()
     assert event["type"] == "transcript.done"
+    assert event["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert event["text"] == "final user turn"
     assert event["source"] == "pipecat"
     assert event["sender_id"] == "user"
@@ -1335,6 +1343,7 @@ async def test_talkwise_event_processor_maps_interim_transcription_to_delta_even
 
     event = await queue.get()
     assert event["type"] == "transcript.delta"
+    assert event["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert event["text"] == "partial user turn"
     assert event["delta"] == "partial user turn"
     assert event["source"] == "pipecat"
@@ -1460,6 +1469,7 @@ async def test_talkwise_event_processor_preserves_assistant_frame_metadata():
 
     event = await queue.get()
     assert event["type"] == "response.audio_transcript.done"
+    assert event["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert event["text"] == "assistant final turn"
     assert event["metadata"]["responseId"] == "response-pipecat-1"
     assert event["metadata"]["pipecatFrame"]["frameName"] == "FakeLLMContextAssistantTurnFrame"
@@ -1496,6 +1506,7 @@ async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_eve
     payload = event["payload"]
     encoded = base64.b64encode(audio).decode("ascii")
     assert event["type"] == "audio.output"
+    assert event["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert event["source"] == "pipecat"
     assert event["audio"] == encoded
     assert event["mimeType"] == "audio/pcm"
@@ -1505,6 +1516,8 @@ async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_eve
     assert event["bytes"] == len(audio)
     assert event["contextId"] == "tts-context-1"
     assert payload["audio"] == encoded
+    assert payload["runtime"] == REALTIME_RUNTIME_PIPECAT
+    assert payload["provider"] == "pipecat"
     assert payload["encoding"] == "base64"
     assert payload["mimeType"] == "audio/pcm"
     assert payload["sampleRate"] == 24000
@@ -1607,6 +1620,7 @@ async def test_talkwise_event_processor_preserves_config_talkwise_metadata():
 def test_source_snapshot_documents_pipecat_first_boundaries():
     snapshot = pipecat_adapter.pipecat_source_snapshot()
 
+    assert snapshot["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert "pipecat.pipeline.pipeline.Pipeline" in snapshot["coreEntrypoints"]
     assert "pipecat.pipeline.worker.PipelineParams" in snapshot["coreEntrypoints"]
     assert "pipecat.workers.base_worker.WorkerParams" in snapshot["coreEntrypoints"]
@@ -1622,6 +1636,10 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     assert "interim transcript frame mirroring" in snapshot["talkwiseResponsibilities"]
     assert (
         "TrainingVoiceContext to LLMContext seed adaptation" in snapshot["talkwiseResponsibilities"]
+    )
+    assert (
+        "Pipecat runtime to provider-neutral readiness adaptation"
+        in snapshot["talkwiseResponsibilities"]
     )
     assert (
         "optional import and Pipecat symbol capability detection"

@@ -45,6 +45,7 @@ from api.dependencies import (
     require_system_roles,
     training_scope_for,
 )
+from application.ports.capabilities import build_text_runtime_capability_registry
 from application.ports.llm import (
     LLMEndpointMetadata,
     LLMModelMetadata,
@@ -55,6 +56,8 @@ from application.ports.llm import (
 )
 from application.ports.realtime import (
     OPENAI_REALTIME_API_KEY_ENV_KEYS,
+    REALTIME_RUNTIME_OPENAI,
+    REALTIME_RUNTIME_PIPECAT,
     PersistedRealtimeTranscript,
     RealtimeAudioChunk,
     RealtimePipelineAdapter,
@@ -63,6 +66,9 @@ from application.ports.realtime import (
     RealtimeTranscript,
     build_openai_realtime_capability_response,
     build_realtime_readiness,
+    normalize_realtime_runtime,
+    realtime_runtime_for_provider,
+    sanitize_realtime_public_value,
 )
 from application.services.stakeholder.analysis_service import AnalysisReaderService, AnalysisService
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
@@ -440,6 +446,10 @@ def _llm_registry_response(llm: LLMPort | None) -> dict[str, object]:
     )
     payload = registry.to_dict()
     payload.update(build_llm_registry_artifacts(registry))
+    payload["capability_registry"] = build_text_runtime_capability_registry(
+        registry,
+        model_specs=payload["model_specs"],
+    ).to_dict()
     return payload
 
 
@@ -536,6 +546,7 @@ def get_training_realtime_pipeline_factory() -> RealtimePipelineFactory:
                     "realtime_error": {
                         "provider": provider,
                         "runtime": "realtime_voice",
+                        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
                         "phase": "pipeline_factory",
                         "code": "PIPECAT_PIPELINE_FACTORY_FAILED",
                         "message": str(exc),
@@ -725,6 +736,10 @@ def _exception_realtime_error_payload(
         "provider": provider,
         "phase": phase,
         "runtime": "realtime_voice",
+        "realtimeRuntime": normalize_realtime_runtime(
+            structured.get("runtime"),
+            provider=provider,
+        ),
     }
     for key in (
         "feature",
@@ -1176,6 +1191,7 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
 
     return {
         "transport": "websocket",
+        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "transcriptionModel": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
         "inputSampleRate": 16000,
         "outputSampleRate": 24000,
@@ -1190,6 +1206,7 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
             "roomId": binding[1],
             "provider": "pipecat",
             "runtime": "realtime_voice",
+            "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
             "transport": "websocket",
         },
     }
@@ -1234,8 +1251,11 @@ def _pipecat_unavailable_capability_response(
                 modules=modules,
             ),
         ),
+        runtime=REALTIME_RUNTIME_PIPECAT,
     ).to_dict()
     return {
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "provider": "pipecat",
         "available": False,
         "coreAvailable": False,
         "websocketAvailable": False,
@@ -1413,6 +1433,7 @@ async def _build_realtime_voice_context(
         extra={
             "transport": "websocket",
             "provider": provider,
+            "realtimeRuntime": realtime_runtime_for_provider(provider),
             "roomId": binding[1],
         },
     )
@@ -1478,6 +1499,10 @@ def _normalize_realtime_transcript(
     """Normalize realtime transcript payloads from OpenAI, Pipecat, or clients."""
 
     event_type = str(payload.get("type") or "transcript.done")
+    runtime = normalize_realtime_runtime(
+        _coerce_optional_text(_wire_value(payload, "runtime", "realtimeRuntime")),
+        provider=provider,
+    )
     normalized_payload = dict(payload)
     if event_type not in _FINAL_TRANSCRIPT_EVENT_TYPES:
         normalized_payload["type"] = "transcript.done"
@@ -1492,6 +1517,7 @@ def _normalize_realtime_transcript(
         binding=binding,
         provider=provider,
         realtime_session_id=realtime_session_id,
+        runtime=runtime,
     )
     if transcript is None:
         text = _coerce_optional_text(_wire_value(payload, "text", "transcript", "content"))
@@ -1504,13 +1530,16 @@ def _normalize_realtime_transcript(
             provider=provider,
             realtime_session_id=realtime_session_id,
             event_type=event_type,
+            runtime=runtime,
         )
 
     resolved_role = role or transcript.role
     metadata = dict(transcript.metadata)
     realtime = dict(metadata.get("realtime") or {})
+    realtime["runtime"] = runtime
     realtime["eventType"] = event_type
     realtime["role"] = resolved_role
+    metadata.setdefault("runtime", runtime)
     metadata["realtime"] = realtime
     return replace(
         transcript,
@@ -1641,23 +1670,7 @@ def _coerce_optional_int(value: object | None) -> int | None:
 
 
 def _json_safe_realtime_value(value: object) -> object | None:
-    if isinstance(value, str | int | float | bool) or value is None:
-        return value
-    if isinstance(value, Mapping):
-        result: dict[str, object] = {}
-        for key, item in value.items():
-            safe_item = _json_safe_realtime_value(item)
-            if safe_item is not None:
-                result[str(key)] = safe_item
-        return result or None
-    if isinstance(value, list | tuple):
-        result = [
-            safe_item
-            for item in value
-            if (safe_item := _json_safe_realtime_value(item)) is not None
-        ]
-        return result or None
-    return None
+    return sanitize_realtime_public_value(value)
 
 
 def _pipeline_audio_output_payload(
@@ -1753,6 +1766,7 @@ async def _pump_openai_realtime_events(
             binding=RealtimeSessionBinding(training_session_id=binding[0], room_id=binding[1]),
             provider=provider,
             realtime_session_id=session.session_id,
+            runtime=REALTIME_RUNTIME_OPENAI,
         )
         if transcript is None:
             continue
@@ -2704,6 +2718,7 @@ async def realtime_training_session(
             task_goal=voice_context["task_goal"],
             rubric=voice_context["rubric"],
             recent_turns=voice_context["recent_turns"],
+            runtime=REALTIME_RUNTIME_PIPECAT,
             model=settings.REALTIME_OPENAI_MODEL,
             voice=settings.REALTIME_OPENAI_VOICE,
             input_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
@@ -2743,7 +2758,11 @@ async def realtime_training_session(
                     uow_factory=uow_factory,
                 )
             )
-        start_metadata: dict[str, object] = {"transport": "websocket", "provider": provider}
+        start_metadata: dict[str, object] = {
+            "transport": "websocket",
+            "provider": provider,
+            "realtimeRuntime": realtime_runtime_for_provider(provider),
+        }
         if binding is not None:
             start_metadata.update({"trainingSessionId": binding[0], "roomId": binding[1]})
         await _send_event(websocket, session.start(start_metadata))
@@ -2867,6 +2886,7 @@ async def realtime_training_session(
                     ),
                     provider=provider,
                     realtime_session_id=session.session_id,
+                    runtime=realtime_runtime_for_provider(provider),
                 )
                 if transcript is None:
                     await _send_wire_event(

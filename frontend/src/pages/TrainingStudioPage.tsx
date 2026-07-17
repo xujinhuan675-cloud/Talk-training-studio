@@ -26,6 +26,7 @@ import {
 } from '../services/trainingMode'
 import {
   buildTrainingStudioPrompt,
+  buildTrainingStudioCapabilityReadiness,
   getDefaultTrainingStudioConfig,
   getExpressionFrameworkLabel,
   getInterviewScenarioPreset,
@@ -37,8 +38,15 @@ import {
   fetchRealtimeCapabilities,
   type RealtimeCapabilities,
   type RealtimeReadinessIssue,
+  type TrainingStudioCapabilityItem,
   type TrainingStudioConfig,
+  type TrainingStudioReadinessStatus,
 } from '../services/trainingStudio'
+import {
+  fetchLlmRegistry,
+  getLlmRegistryModelChoices,
+  type LLMProviderMetadata,
+} from '../services/llmRegistry'
 import { useI18n, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import './TrainingStudioPage.css'
 
@@ -252,6 +260,26 @@ function realtimeStatusIcon(tone: RealtimeDiagnosticTone) {
   return <XCircle size={14} />
 }
 
+function capabilityStatusIcon(status: TrainingStudioReadinessStatus, loading = false) {
+  if (loading && status === 'unknown') return <Loader2 size={14} className="training-studio-spin" />
+  if (status === 'ready') return <CheckCircle2 size={14} />
+  if (status === 'blocked') return <XCircle size={14} />
+  return <AlertTriangle size={14} />
+}
+
+function capabilityStatusLabel(status: TrainingStudioReadinessStatus, tr: TranslateInline): string {
+  if (status === 'ready') return tr('Ready', 'Ready')
+  if (status === 'warning') return tr('Needs attention', 'Needs attention')
+  if (status === 'blocked') return tr('Blocked', 'Blocked')
+  return tr('Not loaded', 'Not loaded')
+}
+
+function compactCapabilityTag(value: string): string {
+  const text = value.replace(/\s+/g, ' ').trim()
+  if (text.length <= 42) return text
+  return `${text.slice(0, 39)}...`
+}
+
 function formatRealtimeFeatureLabel(feature: string, tr: TranslateInline): string {
   const normalized = feature.split(':')[0]?.trim().toLowerCase()
   if (normalized === 'stt') return tr('STT 语音识别', 'STT transcription')
@@ -438,6 +466,9 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [realtimeCapabilitiesLoading, setRealtimeCapabilitiesLoading] = useState(false)
   const [realtimeCapabilitiesError, setRealtimeCapabilitiesError] = useState<string | null>(null)
+  const [llmRegistry, setLlmRegistry] = useState<LLMProviderMetadata | null>(null)
+  const [llmRegistryLoading, setLlmRegistryLoading] = useState(false)
+  const [llmRegistryError, setLlmRegistryError] = useState<string | null>(null)
 
   const realtimeDiagnosticsVisible = mode === 'realtime' || mode === 'live_coach'
 
@@ -456,6 +487,22 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     }
   }, [tr])
 
+  const loadLlmRegistry = useCallback(async () => {
+    setLlmRegistryLoading(true)
+    setLlmRegistryError(null)
+    try {
+      setLlmRegistry(await fetchLlmRegistry())
+    } catch (requestError: unknown) {
+      setLlmRegistry(null)
+      setLlmRegistryError(getErrorMessage(
+        requestError,
+        tr('Could not load provider/model registry.', 'Could not load provider/model registry.'),
+      ))
+    } finally {
+      setLlmRegistryLoading(false)
+    }
+  }, [tr])
+
   useEffect(() => {
     if (initialProfile === 'live_coach') {
       setMode('live_coach')
@@ -463,9 +510,12 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   }, [initialProfile])
 
   useEffect(() => {
-    if (!realtimeDiagnosticsVisible) return
     void loadRealtimeCapabilities()
-  }, [loadRealtimeCapabilities, realtimeDiagnosticsVisible])
+  }, [loadRealtimeCapabilities])
+
+  useEffect(() => {
+    void loadLlmRegistry()
+  }, [loadLlmRegistry])
 
   useEffect(() => {
     const previousDefaults = previousDefaultsRef.current
@@ -485,6 +535,24 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     const base = goal.trim() || t('training.prompt.defaultGoal', { role, scenario })
     return buildTrainingStudioPrompt(config, `${base}\n\n${modeInstruction(mode, t)}`, t)
   }, [config, goal, mode, t])
+
+  const llmModelChoices = useMemo(
+    () => getLlmRegistryModelChoices(llmRegistry),
+    [llmRegistry],
+  )
+  const capabilityReadiness = useMemo(
+    () => buildTrainingStudioCapabilityReadiness({
+      realtimeCapabilities,
+      modelChoices: llmModelChoices,
+    }),
+    [llmModelChoices, realtimeCapabilities],
+  )
+  const capabilityLoading = (realtimeCapabilitiesLoading && !realtimeCapabilities)
+    || (llmRegistryLoading && !llmRegistry)
+  const capabilityErrors = [
+    realtimeCapabilitiesError,
+    llmRegistryError,
+  ].filter((message): message is string => Boolean(message))
 
   const openAIRealtimeStatus = realtimeCapabilities
     ? getOpenAIRealtimeStatus(realtimeCapabilities.openaiRealtime, tr)
@@ -684,6 +752,88 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             {error && <div className="training-studio-error">{error}</div>}
           </div>
         </header>
+
+        <section
+          className="training-studio-capability-panel"
+          aria-label={tr('Backend capability readiness', 'Backend capability readiness')}
+          aria-live="polite"
+        >
+          <div className="training-studio-capability-header">
+            <div>
+              <span className="training-studio-capability-kicker">
+                <ShieldCheck size={14} />
+                {tr('Mature foundation alignment', 'Mature foundation alignment')}
+              </span>
+              <h2>{tr('Runtime, model, realtime, and agent readiness', 'Runtime, model, realtime, and agent readiness')}</h2>
+              <p>
+                {tr(
+                  'Provider/model catalog, Realtime/Pipecat diagnostics, branch-aware review metadata, and agent/MCP capability signals are shown as product status without exposing secrets.',
+                  'Provider/model catalog, Realtime/Pipecat diagnostics, branch-aware review metadata, and agent/MCP capability signals are shown as product status without exposing secrets.',
+                )}
+              </p>
+            </div>
+            <div className="training-studio-capability-actions">
+              <span className={`training-studio-capability-status ${capabilityReadiness.overallStatus}`}>
+                {capabilityStatusIcon(capabilityReadiness.overallStatus, capabilityLoading)}
+                {capabilityStatusLabel(capabilityReadiness.overallStatus, tr)}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void loadRealtimeCapabilities()
+                  void loadLlmRegistry()
+                }}
+                disabled={realtimeCapabilitiesLoading || llmRegistryLoading}
+              >
+                {(realtimeCapabilitiesLoading || llmRegistryLoading)
+                  ? <Loader2 size={14} className="training-studio-spin" />
+                  : <RefreshCw size={14} />}
+                {tr('Refresh', 'Refresh')}
+              </button>
+            </div>
+          </div>
+
+          {capabilityErrors.length > 0 && (
+            <div className="training-studio-capability-alerts">
+              {capabilityErrors.map((message) => (
+                <div key={message}>
+                  <AlertTriangle size={14} />
+                  <span>{sanitizeRealtimeDiagnosticText(message)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="training-studio-capability-grid">
+            {[...capabilityReadiness.foundation, capabilityReadiness.agentMcp].map((item: TrainingStudioCapabilityItem) => (
+              <article className={`training-studio-capability-card ${item.status}`} key={item.key}>
+                <div className="training-studio-capability-card-head">
+                  <h3>{item.label}</h3>
+                  <span className={`training-studio-capability-status ${item.status}`}>
+                    {capabilityStatusIcon(item.status, capabilityLoading)}
+                    {capabilityStatusLabel(item.status, tr)}
+                  </span>
+                </div>
+                <p>{item.detail}</p>
+                <dl>
+                  {item.metrics.map((metric) => (
+                    <div key={`${item.key}:${metric.label}`}>
+                      <dt>{metric.label}</dt>
+                      <dd>{metric.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {item.tags.length > 0 && (
+                  <div className="training-studio-capability-tags">
+                    {item.tags.slice(0, 5).map((tag) => (
+                      <span key={`${item.key}:${tag}`} title={tag}>{compactCapabilityTag(tag)}</span>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
 
         <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
           {modeOptions.map((item) => {

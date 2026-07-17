@@ -13,6 +13,7 @@ from application.ports.realtime import (
     RealtimeTranscript,
     TrainingTranscriptSink,
     TrainingVoiceContext,
+    normalize_realtime_runtime,
 )
 from application.services.stakeholder.dto import MessageDTO
 from application.services.training_studio.session_service import TrainingSessionService
@@ -66,6 +67,7 @@ def build_realtime_transcript(
     binding: RealtimeSessionBinding,
     provider: str,
     realtime_session_id: str,
+    runtime: str | None = None,
 ) -> RealtimeTranscript | None:
     """Normalize a provider event into a final transcript DTO."""
 
@@ -74,6 +76,10 @@ def build_realtime_transcript(
         return None
 
     role = realtime_role_for_event(payload)
+    resolved_runtime = normalize_realtime_runtime(
+        runtime or _metadata_text(payload, "runtime", "realtimeRuntime", "realtime_runtime"),
+        provider=provider,
+    )
     return RealtimeTranscript(
         text=text,
         role=role,
@@ -81,18 +87,27 @@ def build_realtime_transcript(
         provider=provider,
         realtime_session_id=realtime_session_id,
         event_type=str(payload.get("type") or ""),
+        runtime=resolved_runtime,
         event_id=_metadata_text(payload, "event_id", "eventId"),
         item_id=_metadata_text(payload, "item_id", "itemId", "item"),
         response_id=_metadata_text(payload, "response_id", "responseId", "response"),
-        metadata=_metadata_from_event(payload, binding=binding, provider=provider, role=role),
+        metadata=_metadata_from_event(
+            payload,
+            binding=binding,
+            provider=provider,
+            runtime=resolved_runtime,
+            role=role,
+        ),
     )
 
 
 def transcript_to_message_metadata(transcript: RealtimeTranscript) -> dict[str, object]:
     """Return the persisted message metadata shape used by existing realtime routes."""
 
+    runtime = normalize_realtime_runtime(transcript.runtime, provider=transcript.provider)
     realtime: dict[str, object] = {
         "schemaVersion": 1,
+        "runtime": runtime,
         "provider": transcript.provider,
         "eventType": transcript.event_type,
         "role": transcript.role,
@@ -112,6 +127,7 @@ def transcript_to_message_metadata(transcript: RealtimeTranscript) -> dict[str, 
 
     metadata = dict(transcript.metadata)
     metadata.setdefault("source", "realtime_voice")
+    metadata.setdefault("runtime", runtime)
     metadata.setdefault("trainingMode", "voice")
     metadata.setdefault("interactionMode", "realtime")
     metadata["realtime"] = {**realtime, **dict(metadata.get("realtime") or {})}
@@ -269,9 +285,12 @@ def _metadata_from_event(
     *,
     binding: RealtimeSessionBinding,
     provider: str,
+    runtime: str | None = None,
     role: str,
 ) -> dict[str, object]:
+    resolved_runtime = normalize_realtime_runtime(runtime, provider=provider)
     realtime: dict[str, object] = {
+        "runtime": resolved_runtime,
         "provider": provider,
         "eventType": payload.get("type"),
         "role": role,
@@ -300,6 +319,7 @@ def _metadata_from_event(
 
     metadata: dict[str, object] = {
         "source": _metadata_scalar(_metadata_value(payload, "source")) or "realtime_voice",
+        "runtime": resolved_runtime,
         "trainingMode": "voice",
         "interactionMode": "realtime",
         "realtime": realtime,

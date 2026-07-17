@@ -38,6 +38,11 @@ class _FakeConversationService:
         self.action_call = None
         self.list_call = None
         self.search_call = None
+        self.agent_config_create_call = None
+        self.agent_config_list_call = None
+        self.agent_config_get_call = None
+        self.agent_config_update_call = None
+        self.agent_config_delete_call = None
         self.get_calls: list[int] = []
 
     async def create_conversation(self, payload):
@@ -66,6 +71,26 @@ class _FakeConversationService:
 
     async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
         self.action_call = (conversation_id, message_public_id, payload)
+        return None
+
+    async def create_agent_config(self, payload):
+        self.agent_config_create_call = payload
+        return None
+
+    async def list_agent_configs(self, **kwargs):
+        self.agent_config_list_call = kwargs
+        return [], 0
+
+    async def get_agent_config(self, config_id: int):
+        self.agent_config_get_call = config_id
+        return None
+
+    async def update_agent_config(self, config_id: int, payload):
+        self.agent_config_update_call = (config_id, payload)
+        return None
+
+    async def delete_agent_config(self, config_id: int):
+        self.agent_config_delete_call = config_id
         return None
 
 
@@ -255,3 +280,21 @@ def test_cross_user_chat_is_blocked_before_llm_service_call() -> None:
     assert conversation_service.get_calls == [7]
     assert chat_service.sync_call is None
     assert chat_service.stream_call is None
+
+
+def test_agent_config_routes_reject_unsupported_system_roles_before_service_call() -> None:
+    conversation_service = _FakeConversationService()
+    client = _client(conversation_service)
+
+    response = client.post(
+        "/api/v1/agent-configs",
+        headers={"X-System-Role": "auditor"},
+        json={"name": "shared-agent"},
+    )
+
+    assert response.status_code == 401
+    assert conversation_service.agent_config_create_call is None
+    assert conversation_service.agent_config_list_call is None
+    assert conversation_service.agent_config_get_call is None
+    assert conversation_service.agent_config_update_call is None
+    assert conversation_service.agent_config_delete_call is None

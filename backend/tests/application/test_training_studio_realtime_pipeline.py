@@ -1,6 +1,8 @@
 import pytest
 
 from application.ports.realtime import (
+    REALTIME_RUNTIME_OPENAI,
+    REALTIME_RUNTIME_PIPECAT,
     RealtimeSessionBinding,
     build_openai_realtime_capability_response,
 )
@@ -101,6 +103,7 @@ def test_build_realtime_transcript_maps_openai_user_event_to_provider_neutral_dt
     assert transcript.role == "user"
     assert transcript.binding == binding
     assert transcript.provider == "openai"
+    assert transcript.runtime == REALTIME_RUNTIME_OPENAI
     assert transcript.event_id == "evt_1"
     assert transcript.item_id == "item_1"
     assert transcript.metadata["trainingProfile"] == "live_coach"
@@ -122,6 +125,7 @@ def test_openai_realtime_capability_response_exposes_structured_readiness():
     )
 
     assert missing["configured"] is False
+    assert missing["runtime"] == REALTIME_RUNTIME_OPENAI
     assert missing["effectiveKey"] is False
     assert missing["readyForCall"] is False
     assert missing["readiness"]["ready"] is False
@@ -175,11 +179,13 @@ def test_build_realtime_transcript_maps_response_events_to_assistant_role():
 
     assert transcript is not None
     assert transcript.role == "assistant"
+    assert transcript.runtime == REALTIME_RUNTIME_PIPECAT
     assert transcript.response_id == "response_1"
     metadata = transcript_to_message_metadata(transcript)
     assert metadata["source"] == "realtime_voice"
     assert metadata["trainingMode"] == "voice"
     assert metadata["interactionMode"] == "realtime"
+    assert metadata["realtime"]["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert metadata["realtime"]["provider"] == "pipecat"
     assert metadata["realtime"]["role"] == "assistant"
     assert metadata["realtime"]["trainingSessionId"] == "training-2"
@@ -190,6 +196,7 @@ def test_build_realtime_transcript_maps_pipecat_user_id_to_sender_metadata():
     transcript = build_realtime_transcript(
         {
             "type": "transcript.done",
+            "runtime": "realtime_voice",
             "text": "I can start with the user problem.",
             "user_id": "participant-7",
             "source": "pipecat",
@@ -200,9 +207,11 @@ def test_build_realtime_transcript_maps_pipecat_user_id_to_sender_metadata():
     )
 
     assert transcript is not None
+    assert transcript.runtime == REALTIME_RUNTIME_PIPECAT
     assert transcript.metadata["sender_id"] == "participant-7"
     metadata = transcript_to_message_metadata(transcript)
     assert metadata["sender_id"] == "participant-7"
+    assert metadata["realtime"]["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert metadata["realtime"]["provider"] == "pipecat"
 
 
@@ -243,6 +252,7 @@ async def test_transcript_sink_persists_without_transport_dependency():
     assert persisted.payload["sender_type"] == "persona"
     assert persisted.payload["sender_id"] == "assistant"
     assert persisted.payload["metadata"]["realtime"]["provider"] == "pipecat"
+    assert persisted.payload["metadata"]["realtime"]["runtime"] == REALTIME_RUNTIME_PIPECAT
 
 
 @pytest.mark.asyncio
@@ -282,6 +292,7 @@ async def test_persistence_sink_writes_room_message_publishes_and_records_turn()
     assert messages.messages[0].sender_id == "customer-ai"
     assert messages.messages[0].metadata["source"] == "pipecat"
     assert messages.messages[0].metadata["trainingMode"] == "voice"
+    assert messages.messages[0].metadata["realtime"]["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert room.last_message_at == messages.messages[0].timestamp
     assert published[0][0] == 12
     assert published[0][1].content == "We can define the pilot metric first."

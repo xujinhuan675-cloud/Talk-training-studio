@@ -17,6 +17,7 @@ from application.ports.realtime import (
     RealtimeSessionBinding,
     TrainingTranscriptSink,
     TrainingVoiceContext,
+    normalize_realtime_runtime,
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
 )
@@ -163,6 +164,7 @@ class RealtimePipelineSessionRunner:
         rubric: Mapping[str, object] | None = None,
         recent_turns: Sequence[Mapping[str, object]] = (),
         context_metadata: Mapping[str, object] | None = None,
+        runtime: str | None = None,
         model: str | None = None,
         voice: str | None = None,
         input_audio_format: str | None = None,
@@ -184,6 +186,7 @@ class RealtimePipelineSessionRunner:
         )
         config = RealtimePipelineConfig(
             provider=provider,
+            runtime=normalize_realtime_runtime(runtime, provider=provider),
             model=model,
             voice=voice,
             input_audio_format=input_audio_format,
@@ -256,10 +259,10 @@ class RealtimePipelineSessionRunner:
                     raise RealtimePipelineProviderError(payload, provider=config.provider)
                 persisted = await self._persist_final_transcript(
                     payload,
-                    context,
-                    config,
-                    realtime_session_id,
-                )
+                context,
+                config,
+                realtime_session_id,
+            )
                 if persisted is not None:
                     await self._forward_event(
                         _live_guidance_trigger_event(
@@ -290,6 +293,7 @@ class RealtimePipelineSessionRunner:
             binding=context.binding,
             provider=config.provider,
             realtime_session_id=realtime_session_id,
+            runtime=config.runtime,
         )
         if transcript is None:
             return None
@@ -367,6 +371,7 @@ def _live_guidance_trigger_event(
         "text": transcript.text,
         "role": transcript.role,
         "eventType": transcript.event_type,
+        "runtime": normalize_realtime_runtime(transcript.runtime, provider=config.provider),
     }
     for output_key, value in {
         "eventId": transcript.event_id,
@@ -380,6 +385,7 @@ def _live_guidance_trigger_event(
         "type": "training.live_guidance.triggered",
         "schemaVersion": 1,
         "source": "realtime_voice",
+        "runtime": normalize_realtime_runtime(config.runtime, provider=config.provider),
         "reason": "final_transcript",
         "provider": config.provider,
         "trainingSessionId": context.binding.training_session_id,
@@ -461,6 +467,7 @@ def _pipeline_start_error(
         for key, value in structured.items()
         if key not in {"code", "message", "phase", "provider"}
     }
+    metadata.setdefault("runtime", normalize_realtime_runtime(None, provider=provider))
     metadata.setdefault("trainingSessionId", binding.training_session_id)
     metadata.setdefault("roomId", binding.room_id)
     if realtime_session_id is not None:
@@ -503,6 +510,7 @@ def _realtime_error_from_exception(exc: BaseException) -> dict[str, Any]:
         "missing_modules": "modules",
         "event_type": "eventType",
         "source_code": "sourceCode",
+        "runtime": "runtime",
         "metadata": "metadata",
     }.items():
         if hasattr(exc, attr_name):

@@ -22,6 +22,8 @@ from api.routes.training_studio import (
     router,
 )
 from application.ports.realtime import (
+    REALTIME_RUNTIME_OPENAI,
+    REALTIME_RUNTIME_PIPECAT,
     RealtimeAudioChunk,
     RealtimePipelineConfig,
     TrainingVoiceContext,
@@ -294,6 +296,8 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
         calls["require_websocket"] = require_websocket
         calls["openai_api_key_available"] = openai_api_key_available
         data = {
+            "runtime": "pipecat",
+            "provider": "pipecat",
             "available": bool(capability.available),
             "coreAvailable": bool(capability.core_available),
             "websocketAvailable": bool(capability.websocket_available),
@@ -374,6 +378,7 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
     data = response.json()["data"]
     assert data["openaiRealtime"]["configured"] is True
     assert data["openaiRealtime"]["effectiveKey"] is True
+    assert data["openaiRealtime"]["runtime"] == REALTIME_RUNTIME_OPENAI
     assert data["openaiRealtime"]["model"] == "gpt-realtime-test"
     assert data["openaiRealtime"]["voice"] == "marin-test"
     assert data["openaiRealtime"]["readyForCall"] is True
@@ -382,6 +387,8 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
     assert data["openaiRealtime"]["errors"] == []
     assert "sk-realtime-capability" not in response.text
     assert data["pipecat"]["available"] is True
+    assert data["pipecat"]["provider"] == "pipecat"
+    assert data["pipecat"]["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert data["pipecat"]["coreAvailable"] is True
     assert data["pipecat"]["websocketAvailable"] is True
     assert data["pipecat"]["vadAvailable"] is True
@@ -453,10 +460,13 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
     data = response.json()["data"]
     assert data["openaiRealtime"]["configured"] is True
     assert data["openaiRealtime"]["effectiveKey"] is True
+    assert data["openaiRealtime"]["runtime"] == REALTIME_RUNTIME_OPENAI
     assert data["openaiRealtime"]["readyForCall"] is True
     assert data["openaiRealtime"]["readiness"]["status"] == "ready"
     assert "sk-llm-fallback" not in response.text
     assert data["pipecat"]["available"] is False
+    assert data["pipecat"]["provider"] == "pipecat"
+    assert data["pipecat"]["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert data["pipecat"]["coreAvailable"] is False
     assert data["pipecat"]["websocketAvailable"] is False
     assert data["pipecat"]["llmAvailable"] is False
@@ -494,6 +504,8 @@ def test_realtime_capabilities_reports_pipecat_adapter_import_failure(monkeypatc
 
     assert response.status_code == 200
     data = response.json()["data"]["pipecat"]
+    assert data["provider"] == "pipecat"
+    assert data["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert data["available"] is False
     assert data["coreAvailable"] is False
     assert data["websocketAvailable"] is False
@@ -522,6 +534,8 @@ def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch)
 
     assert response.status_code == 200
     data = response.json()["data"]["pipecat"]
+    assert data["provider"] == "pipecat"
+    assert data["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert data["available"] is False
     assert data["coreAvailable"] is False
     assert data["websocketAvailable"] is False
@@ -967,6 +981,7 @@ def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline()
         started = ws.receive_json()
         listening = ws.receive_json()
         assert started["payload"]["provider"] == "pipecat"
+        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
         assert "trainingSessionId" not in started["payload"]
         assert listening["status"] == "listening"
         assert adapter.started_context is None
@@ -989,13 +1004,17 @@ def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline()
     assert adapter.started_context.binding.room_id == 42
     assert adapter.started_context.metadata["runtime"] == "realtime_voice"
     assert adapter.started_context.metadata["provider"] == "pipecat"
+    assert adapter.started_context.metadata["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
     assert adapter.started_config is not None
     assert adapter.started_config.provider == "pipecat"
+    assert adapter.started_config.runtime == REALTIME_RUNTIME_PIPECAT
+    assert adapter.started_config.metadata["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
     assert adapter.started_config.metadata["talkwise"] == {
         "trainingSessionId": "session-1",
         "roomId": 42,
         "provider": "pipecat",
         "runtime": "realtime_voice",
+        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "transport": "websocket",
     }
     assert adapter.closed is True
@@ -1132,6 +1151,7 @@ def test_openai_realtime_provider_relays_audio_and_persists_metadata() -> None:
         started = ws.receive_json()
         listening = ws.receive_json()
         assert started["payload"]["provider"] == "openai"
+        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_OPENAI
         assert listening["status"] == "listening"
 
         ws.send_bytes(b"\x01\x02\x03")
@@ -1154,6 +1174,7 @@ def test_openai_realtime_provider_relays_audio_and_persists_metadata() -> None:
     assert fake_openai.closed is True
     assert state.messages[0].metadata["trainingMode"] == "voice"
     assert state.messages[0].metadata["interactionMode"] == "realtime"
+    assert state.messages[0].metadata["realtime"]["runtime"] == REALTIME_RUNTIME_OPENAI
     assert state.messages[0].metadata["realtime"]["provider"] == "openai"
     assert state.messages[0].metadata["realtime"]["eventId"] == "evt_test"
     assert state.messages[0].metadata["realtime"]["itemId"] == "item_test"
@@ -1173,6 +1194,7 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
         started = ws.receive_json()
         ws.receive_json()
         assert started["payload"]["provider"] == "pipecat"
+        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
 
         ws.send_json(
             {
@@ -1193,6 +1215,7 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
     assert state.messages[0].metadata["source"] == "pipecat"
     assert state.messages[0].metadata["trainingMode"] == "voice"
     assert state.messages[0].metadata["interactionMode"] == "realtime"
+    assert state.messages[0].metadata["realtime"]["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert state.messages[0].metadata["realtime"]["provider"] == "pipecat"
     assert state.messages[0].metadata["realtime"]["role"] == "assistant"
     assert state.messages[0].metadata["realtime"]["responseId"] == "response_pipecat_1"
@@ -1206,6 +1229,8 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
         [
             {
                 "type": "audio.output",
+                "runtime": REALTIME_RUNTIME_PIPECAT,
+                "provider": "pipecat",
                 "audio": output_audio,
                 "mimeType": "audio/pcm",
                 "sequence": 99,
@@ -1213,6 +1238,7 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
             },
             {
                 "type": "response.audio_transcript.done",
+                "runtime": REALTIME_RUNTIME_PIPECAT,
                 "text": "Let's define the pilot metric before we begin.",
                 "response_id": "response_pipecat_2",
                 "source": "pipecat",
@@ -1230,6 +1256,7 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
         started = ws.receive_json()
         listening = ws.receive_json()
         assert started["payload"]["provider"] == "pipecat"
+        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
         assert listening["status"] == "listening"
 
         ws.send_json({"type": "audio.commit"})
@@ -1252,11 +1279,14 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
         assert audio_output["payload"]["mimeType"] == "audio/pcm"
         assert audio_output["payload"]["mime_type"] == "audio/pcm"
         assert audio_output["payload"]["sequence"] == 1
+        assert audio_output["payload"]["runtime"] == REALTIME_RUNTIME_PIPECAT
+        assert audio_output["payload"]["provider"] == "pipecat"
         assert audio_output["payload"]["metadata"] == {"providerFrame": "tts"}
         assert persisted["payload"]["message"]["content"] == (
             "Let's define the pilot metric before we begin."
         )
         assert guidance_trigger["payload"]["reason"] == "final_transcript"
+        assert guidance_trigger["payload"]["runtime"] == REALTIME_RUNTIME_PIPECAT
         assert guidance_trigger["payload"]["provider"] == "pipecat"
         assert guidance_trigger["payload"]["trainingSessionId"] == "session-1"
         assert guidance_trigger["payload"]["roomId"] == 42
@@ -1264,6 +1294,7 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
             "text": "Let's define the pilot metric before we begin.",
             "role": "assistant",
             "eventType": "response.audio_transcript.done",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
             "responseId": "response_pipecat_2",
         }
 
@@ -1281,6 +1312,7 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
     assert state.messages[0].metadata["source"] == "pipecat"
     assert state.messages[0].metadata["trainingMode"] == "voice"
     assert state.messages[0].metadata["interactionMode"] == "realtime"
+    assert state.messages[0].metadata["realtime"]["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert state.messages[0].metadata["realtime"]["provider"] == "pipecat"
     assert state.messages[0].metadata["realtime"]["responseId"] == "response_pipecat_2"
 
@@ -1330,12 +1362,15 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> Non
     assert adapter.started_context.metadata["runtime"] == "realtime_voice"
     assert adapter.started_context.metadata["trainingSessionId"] == "session-1"
     assert adapter.started_context.metadata["provider"] == "pipecat"
+    assert adapter.started_context.metadata["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
     assert adapter.started_context.metadata["transport"] == "websocket"
     assert adapter.started_context.metadata["roomId"] == 42
     assert adapter.started_config is not None
     assert adapter.started_config.provider == "pipecat"
+    assert adapter.started_config.runtime == REALTIME_RUNTIME_PIPECAT
     assert adapter.started_config.instructions
     assert adapter.started_config.metadata["transport"] == "websocket"
+    assert adapter.started_config.metadata["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
     stt_metadata = adapter.started_config.metadata["stt"]
     assert isinstance(stt_metadata, dict)
     assert stt_metadata["provider"] == "openai"
@@ -1363,6 +1398,7 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> Non
         "roomId": 42,
         "provider": "pipecat",
         "runtime": "realtime_voice",
+        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "transport": "websocket",
     }
     assert adapter.audio_chunks == [
@@ -1387,6 +1423,7 @@ def test_realtime_websocket_pipecat_provider_forwards_binary_audio_to_pipeline()
         started = ws.receive_json()
         listening = ws.receive_json()
         assert started["payload"]["provider"] == "pipecat"
+        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
         assert listening["status"] == "listening"
 
         ws.send_bytes(audio)

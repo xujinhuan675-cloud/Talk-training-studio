@@ -105,3 +105,140 @@ test('buildTrainingStudioPrompt omits product drill context outside product scen
   assert.doesNotMatch(prompt, /Product drill:/)
   assert.doesNotMatch(prompt, /Counterpart:/)
 })
+
+test('buildTrainingStudioCapabilityReadiness summarizes ready model and realtime foundations', () => {
+  const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
+    modelChoices: [
+      {
+        provider: 'openai',
+        providerLabel: 'OpenAI',
+        model: 'gpt-4o',
+        modelLabel: 'GPT-4o',
+        capabilities: ['text', 'tools', 'mcp'],
+        isDefault: true,
+        disabled: false,
+      },
+    ],
+    realtimeCapabilities: {
+      openaiRealtime: {
+        configured: true,
+        effectiveKey: true,
+        model: 'gpt-realtime',
+        voice: 'marin',
+        readyForCall: true,
+        readiness: {
+          ready: true,
+          status: 'ready',
+        },
+      },
+      pipecat: {
+        available: true,
+        coreAvailable: true,
+        websocketAvailable: true,
+        vadAvailable: true,
+        sttAvailable: true,
+        ttsAvailable: true,
+        llmAvailable: true,
+        turnDetectionAvailable: true,
+        missingModules: [],
+        optionalMissingModules: [],
+        error: null,
+        readyForCall: true,
+        readiness: {
+          ready: true,
+          status: 'ready',
+        },
+      },
+    },
+  })
+
+  assert.equal(readiness.overallStatus, 'ready')
+  assert.equal(readiness.providerModel.status, 'ready')
+  assert.equal(readiness.realtime.status, 'ready')
+  assert.equal(readiness.agentMcp.status, 'ready')
+  assert.equal(readiness.modelCounts.toolCapableModels, 1)
+  assert.equal(readiness.modelCounts.mcpCapableModels, 1)
+  assert.equal(readiness.realtimeCounts.pipecatReadyFeatures, 7)
+})
+
+test('buildTrainingStudioCapabilityReadiness marks tool-only agent readiness as warning', () => {
+  const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
+    modelChoices: [
+      {
+        provider: 'anthropic',
+        model: 'claude-sonnet',
+        capabilities: ['text', 'tool_calling'],
+        disabled: false,
+      },
+    ],
+  })
+
+  assert.equal(readiness.providerModel.status, 'ready')
+  assert.equal(readiness.realtime.status, 'unknown')
+  assert.equal(readiness.agentMcp.status, 'warning')
+  assert.match(readiness.agentMcp.detail, /MCP server inventory/)
+  assert.equal(readiness.modelCounts.toolCapableModels, 1)
+  assert.equal(readiness.modelCounts.mcpCapableModels, 0)
+})
+
+test('buildTrainingStudioCapabilityReadiness surfaces realtime blockers without leaking secrets', () => {
+  const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
+    modelChoices: [],
+    realtimeCapabilities: {
+      openaiRealtime: {
+        configured: false,
+        effectiveKey: false,
+        model: null,
+        voice: null,
+        readyForCall: false,
+        readiness: {
+          ready: false,
+          status: 'missing key',
+          blockingReasons: [
+            {
+              code: 'MISSING_OPENAI_API_KEY',
+              message: 'Missing OpenAI key',
+            },
+          ],
+        },
+      },
+      pipecat: {
+        available: false,
+        coreAvailable: false,
+        websocketAvailable: false,
+        vadAvailable: false,
+        sttAvailable: false,
+        ttsAvailable: false,
+        llmAvailable: false,
+        turnDetectionAvailable: false,
+        missingModules: ['pipecat.services.openai'],
+        optionalMissingModules: [],
+        error: 'PIPECAT_MODULE_UNAVAILABLE',
+        readyForCall: false,
+        readiness: {
+          ready: false,
+          status: 'blocked',
+          blockingReasons: [
+            {
+              code: 'PIPECAT_MODULE_UNAVAILABLE',
+              modules: ['pipecat.services.openai'],
+            },
+          ],
+        },
+      },
+    },
+  })
+
+  assert.equal(readiness.overallStatus, 'blocked')
+  assert.equal(readiness.providerModel.status, 'unknown')
+  assert.equal(readiness.realtime.status, 'blocked')
+  assert.equal(readiness.realtimeCounts.blockingIssues, 2)
+  assert.deepEqual(
+    readiness.realtime.metrics.map((metric) => [metric.label, metric.value]),
+    [
+      ['pipecat features', '0/7'],
+      ['blockers', '2'],
+      ['missing modules', '1'],
+    ],
+  )
+})

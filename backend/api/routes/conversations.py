@@ -44,6 +44,7 @@ from core.response import paginated_response, success_response
 
 router = APIRouter(tags=["Conversations"])
 _conversation_user = require_system_roles("admin", "leader", "staff")
+_agent_config_user = require_system_roles("admin", "leader", "staff")
 
 
 async def _get_accessible_conversation(
@@ -392,6 +393,7 @@ async def list_runs(
 async def create_agent_config(
     payload: CreateAgentConfigDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    _current_user: CurrentUser = Depends(_agent_config_user),
 ):
     config = await service.create_agent_config(payload)
     return success_response(config, message=t("ok"))
@@ -406,6 +408,7 @@ async def list_agent_configs(
     page: int = Query(1, ge=1),
     size: int = Query(default=settings.DEFAULT_PAGE_SIZE, ge=1, le=settings.MAX_PAGE_SIZE),
     service: ConversationApplicationService = Depends(get_conversation_service),
+    _current_user: CurrentUser = Depends(_agent_config_user),
 ):
     skip = (page - 1) * size
     items, total = await service.list_agent_configs(skip=skip, limit=size)
@@ -420,6 +423,7 @@ async def list_agent_configs(
 async def get_agent_config(
     config_id: int,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    _current_user: CurrentUser = Depends(_agent_config_user),
 ):
     config = await service.get_agent_config(config_id)
     return success_response(config, message=t("ok"))
@@ -434,6 +438,7 @@ async def update_agent_config(
     config_id: int,
     payload: UpdateAgentConfigDTO,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    _current_user: CurrentUser = Depends(_agent_config_user),
 ):
     config = await service.update_agent_config(config_id, payload)
     return success_response(config, message=t("ok"))
@@ -447,6 +452,7 @@ async def update_agent_config(
 async def delete_agent_config(
     config_id: int,
     service: ConversationApplicationService = Depends(get_conversation_service),
+    _current_user: CurrentUser = Depends(_agent_config_user),
 ):
     await service.delete_agent_config(config_id)
     return success_response({"deleted": True}, message=t("ok"))

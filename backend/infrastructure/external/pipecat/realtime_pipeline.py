@@ -8,7 +8,6 @@ dependency-safe factories, and DTO-to-frame adaptation only.
 from __future__ import annotations
 
 import asyncio
-import base64
 import importlib
 import importlib.util
 import json
@@ -16,13 +15,15 @@ import logging
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
 from application.ports.realtime import (
     OPENAI_REALTIME_API_KEY_ENV_KEYS,
+    REALTIME_RUNTIME_PIPECAT,
     RealtimeAudioChunk,
+    RealtimeOutputAudio,
     RealtimePipelineAdapter,
     RealtimePipelineCapability,
     RealtimePipelineConfig,
@@ -30,6 +31,7 @@ from application.ports.realtime import (
     RealtimeReadinessIssue,
     TrainingVoiceContext,
     build_realtime_readiness,
+    normalize_realtime_runtime,
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
 )
@@ -253,6 +255,7 @@ class PipecatRealtimePipelineError(RuntimeError):
             "message": str(self),
             "phase": self.phase,
             "provider": self.provider,
+            "runtime": REALTIME_RUNTIME_PIPECAT,
         }
         if self.feature is not None:
             payload["feature"] = self.feature
@@ -461,11 +464,14 @@ def pipecat_realtime_readiness(
             "env": OPENAI_API_KEY_ENV_KEYS,
         },
         blocking_reasons=blockers,
+        runtime=REALTIME_RUNTIME_PIPECAT,
     )
 
 
 def _pipecat_capability_public_payload(capability: PipecatCapability) -> dict[str, Any]:
     return {
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "provider": "pipecat",
         "available": bool(capability.available),
         "coreAvailable": bool(capability.core_available),
         "websocketAvailable": bool(capability.websocket_available),
@@ -820,6 +826,13 @@ def _service_settings(
     return settings_factory(**settings_kwargs)
 
 
+def _pipecat_config(config: RealtimePipelineConfig) -> RealtimePipelineConfig:
+    runtime = normalize_realtime_runtime(config.runtime, provider=config.provider)
+    if runtime == REALTIME_RUNTIME_PIPECAT and config.runtime == REALTIME_RUNTIME_PIPECAT:
+        return config
+    return replace(config, runtime=REALTIME_RUNTIME_PIPECAT)
+
+
 def _optional_pipecat_symbol(module_name: str, symbol_name: str) -> type | None:
     try:
         module = importlib.import_module(module_name)
@@ -860,7 +873,8 @@ class PipecatRealtimePipelineAdapter:
         runtime = self._runtime
         return pipecat_pipeline_capability(
             runtime=runtime,
-            config=self._config or RealtimePipelineConfig(provider="pipecat"),
+            config=self._config
+            or RealtimePipelineConfig(provider="pipecat", runtime=REALTIME_RUNTIME_PIPECAT),
             websocket=self._websocket,
         )
 
@@ -872,6 +886,7 @@ class PipecatRealtimePipelineAdapter:
             runtime = self._runtime or import_pipecat_runtime(
                 require_websocket=self._websocket is not None
             )
+            config = _pipecat_config(config)
             self._runtime = runtime
             self._context = context
             self._config = config
@@ -978,6 +993,7 @@ def _pipecat_start_error(
 ) -> PipecatRealtimePipelineError:
     message = str(exc)
     metadata: dict[str, Any] = {
+        "runtime": REALTIME_RUNTIME_PIPECAT,
         "trainingSessionId": context.binding.training_session_id,
         "roomId": context.binding.room_id,
         "requestedFeatures": _requested_feature_metadata(config),
@@ -1479,6 +1495,7 @@ def pipecat_pipeline_capability(
         provider=config.provider,
         core_available=capability.core_available,
         media_transport="pipecat.websocket" if websocket is not None else "talkwise.audio_chunks",
+        runtime=REALTIME_RUNTIME_PIPECAT,
         stt=_feature_provider(metadata, "stt"),
         tts=_feature_provider(metadata, "tts"),
         vad=_feature_provider(metadata, "vad"),
@@ -1488,6 +1505,7 @@ def pipecat_pipeline_capability(
         readiness=readiness,
         errors=tuple(dict(error) for error in readiness_payload["blockingReasons"]),
         metadata={
+            "runtime": REALTIME_RUNTIME_PIPECAT,
             "coreAvailable": capability.core_available,
             "websocketAvailable": capability.websocket_available,
             "sttAvailable": capability.stt_available,
@@ -1585,6 +1603,7 @@ def _pipecat_pipeline_readiness(
             "env": OPENAI_API_KEY_ENV_KEYS,
         },
         blocking_reasons=blockers,
+        runtime=REALTIME_RUNTIME_PIPECAT,
     )
 
 
@@ -1640,6 +1659,7 @@ def _event_from_pipecat_frame(
         text = getattr(frame, "text", "")
         event: dict[str, Any] = {
             "type": "transcript.delta",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
             "text": text,
             "delta": text,
             "provider": config.provider,
@@ -1654,6 +1674,7 @@ def _event_from_pipecat_frame(
         user_id = getattr(frame, "user_id", None)
         event: dict[str, Any] = {
             "type": "transcript.done",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
             "text": frame.text,
             "provider": config.provider,
             "source": "pipecat",
@@ -1666,6 +1687,7 @@ def _event_from_pipecat_frame(
     if isinstance(frame, runtime.LLMContextAssistantTurnFrame):
         event = {
             "type": "response.audio_transcript.done",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
             "text": frame.text,
             "provider": config.provider,
             "source": "pipecat",
@@ -1686,38 +1708,18 @@ def _tts_audio_event_from_pipecat_frame(
         return None
 
     sequence = _frame_audio_sequence(frame, fallback=audio_sequence)
-    payload: dict[str, Any] = {
-        "audio": base64.b64encode(audio).decode("ascii"),
-        "encoding": "base64",
-        "mimeType": _output_audio_mime_type(config, frame),
-        "sampleRate": _frame_sample_rate(frame, config),
-        "channels": _frame_channels(frame, config),
-        "sequence": sequence,
-        "bytes": len(audio),
-    }
     context_id = _json_safe_metadata(getattr(frame, "context_id", None))
-    if context_id is not None:
-        payload["contextId"] = context_id
-
-    event: dict[str, Any] = {
-        "type": "audio.output",
-        "provider": config.provider,
-        "source": "pipecat",
-        "payload": payload,
-        "audio": payload["audio"],
-        "encoding": payload["encoding"],
-        "mimeType": payload["mimeType"],
-        "sampleRate": payload["sampleRate"],
-        "channels": payload["channels"],
-        "sequence": payload["sequence"],
-        "bytes": payload["bytes"],
-    }
-    if context_id is not None:
-        event["contextId"] = context_id
-    event = _with_frame_metadata(event, frame, config=config)
-    if "metadata" in event:
-        payload["metadata"] = event["metadata"]
-    return event
+    return RealtimeOutputAudio(
+        data=audio,
+        provider=config.provider,
+        runtime=REALTIME_RUNTIME_PIPECAT,
+        mime_type=_output_audio_mime_type(config, frame),
+        sequence=sequence,
+        sample_rate=_frame_sample_rate(frame, config),
+        channels=_frame_channels(frame, config),
+        context_id=str(context_id) if context_id is not None else None,
+        metadata=_frame_config_metadata(frame, config=config),
+    ).to_event()
 
 
 def _bytes_from_audio_frame(frame: Any) -> bytes | None:
@@ -1820,15 +1822,24 @@ def _with_frame_metadata(
     *,
     config: RealtimePipelineConfig,
 ) -> dict[str, Any]:
+    metadata = _frame_config_metadata(frame, config=config)
+    if metadata:
+        event["metadata"] = metadata
+    return event
+
+
+def _frame_config_metadata(
+    frame: Any,
+    *,
+    config: RealtimePipelineConfig,
+) -> dict[str, Any]:
     metadata = _frame_event_metadata(frame)
     talkwise_metadata = _json_safe_metadata(
         config.metadata.get("talkwise") or config.metadata.get("talkwiseMetadata")
     )
     if isinstance(talkwise_metadata, Mapping):
         metadata.setdefault("talkwise", dict(talkwise_metadata))
-    if metadata:
-        event["metadata"] = metadata
-    return event
+    return metadata
 
 
 def _frame_event_metadata(frame: Any) -> dict[str, Any]:
@@ -2443,6 +2454,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
 
     return {
         "checkedAt": datetime.now(UTC).isoformat(),
+        "runtime": REALTIME_RUNTIME_PIPECAT,
         "coreEntrypoints": (
             "pipecat.pipeline.pipeline.Pipeline",
             "pipecat.pipeline.worker.PipelineParams",
@@ -2500,6 +2512,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "pipeline factory configuration",
             "RealtimeAudioChunk to InputAudioRawFrame adaptation",
             "TrainingVoiceContext to LLMContext seed adaptation",
+            "Pipecat runtime to provider-neutral readiness adaptation",
             "interim transcript frame mirroring",
             "final transcript frame mirroring",
             "TTSAudioRawFrame to provider-neutral audio.output event mirroring",

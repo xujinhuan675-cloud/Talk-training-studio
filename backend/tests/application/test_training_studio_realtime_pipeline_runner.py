@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from application.ports.realtime import (
+    REALTIME_RUNTIME_PIPECAT,
     PersistedRealtimeTranscript,
     RealtimeAudioChunk,
     RealtimePipelineConfig,
@@ -142,6 +143,7 @@ async def test_runner_start_builds_context_and_config_for_adapter():
     )
     assert adapter.started_config == RealtimePipelineConfig(
         provider="pipecat",
+        runtime=REALTIME_RUNTIME_PIPECAT,
         model="test-model",
         voice="alloy",
         input_audio_format="pcm16",
@@ -176,6 +178,7 @@ async def test_runner_closes_adapter_when_start_fails():
     assert error["code"] == "PIPECAT_FEATURE_UNAVAILABLE"
     assert error["phase"] == "pipeline_start"
     assert error["provider"] == "pipecat"
+    assert error["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert error["feature"] == "stt:openai"
     assert error["trainingSessionId"] == "training-1"
     assert error["roomId"] == 42
@@ -231,6 +234,7 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
     assert transcript.text == "We can start with a pilot."
     assert transcript.binding == _binding()
     assert transcript.provider == "pipecat"
+    assert transcript.runtime == REALTIME_RUNTIME_PIPECAT
     assert transcript.realtime_session_id == "rt-1"
     assert transcript.event_id == "evt-1"
     assert event_sink.events == [
@@ -238,6 +242,7 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
             "type": "training.live_guidance.triggered",
             "schemaVersion": 1,
             "source": "realtime_voice",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
             "reason": "final_transcript",
             "provider": "pipecat",
             "trainingSessionId": "training-1",
@@ -247,6 +252,7 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
                 "text": "We can start with a pilot.",
                 "role": "user",
                 "eventType": "transcript.done",
+                "runtime": REALTIME_RUNTIME_PIPECAT,
                 "eventId": "evt-1",
             },
             "messageId": 1,
