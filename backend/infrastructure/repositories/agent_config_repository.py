@@ -53,10 +53,19 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def update(self, config: AgentConfig) -> AgentConfig:
-        result = await self.session.execute(
-            select(AgentConfigModel).where(AgentConfigModel.id == config.id)
+    async def update(
+        self,
+        config: AgentConfig,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> AgentConfig:
+        query = select(AgentConfigModel).where(AgentConfigModel.id == config.id)
+        query = apply_owned_metadata_scope(
+            query,
+            AgentConfigModel.extra_metadata,
+            metadata_scope,
         )
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         if model is None:
             raise AgentConfigNotFoundException(config.id)
@@ -73,27 +82,54 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def delete(self, config_id: int) -> None:
-        result = await self.session.execute(
-            select(AgentConfigModel).where(AgentConfigModel.id == config_id)
+    async def delete(
+        self,
+        config_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
+        query = select(AgentConfigModel).where(AgentConfigModel.id == config_id)
+        query = apply_owned_metadata_scope(
+            query,
+            AgentConfigModel.extra_metadata,
+            metadata_scope,
         )
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         if model is None:
             raise AgentConfigNotFoundException(config_id)
         await self.session.delete(model)
         await self.session.flush()
 
-    async def get_by_id(self, config_id: int) -> Optional[AgentConfig]:
-        result = await self.session.execute(
-            select(AgentConfigModel).where(AgentConfigModel.id == config_id)
+    async def get_by_id(
+        self,
+        config_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[AgentConfig]:
+        query = select(AgentConfigModel).where(AgentConfigModel.id == config_id)
+        query = apply_owned_metadata_scope(
+            query,
+            AgentConfigModel.extra_metadata,
+            metadata_scope,
         )
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
-    async def get_by_name(self, name: str) -> Optional[AgentConfig]:
-        result = await self.session.execute(
-            select(AgentConfigModel).where(AgentConfigModel.name == name)
+    async def get_by_name(
+        self,
+        name: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[AgentConfig]:
+        query = select(AgentConfigModel).where(AgentConfigModel.name == name)
+        query = apply_owned_metadata_scope(
+            query,
+            AgentConfigModel.extra_metadata,
+            metadata_scope,
         )
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 

@@ -14,9 +14,6 @@ from api.conversation_scope import (
     conversation_create_payload_for_user,
     conversation_metadata_for_current_user,
     owned_metadata_scope_for_current_user,
-    require_conversation_access,
-    require_owned_metadata_access,
-    user_can_access_owned_metadata,
 )
 from api.dependencies import CurrentUser, get_conversation_service, require_system_roles
 from application.dto import (
@@ -54,8 +51,13 @@ async def _get_accessible_conversation(
     conversation_id: int,
     current_user: CurrentUser,
 ) -> ConversationDTO:
-    conv = await service.get_conversation(conversation_id)
-    return require_conversation_access(conv, current_user)
+    return await service.get_conversation(
+        conversation_id,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=True,
+        ),
+    )
 
 
 async def _get_accessible_agent_config(
@@ -63,14 +65,13 @@ async def _get_accessible_agent_config(
     config_id: int,
     current_user: CurrentUser,
 ) -> AgentConfigDTO:
-    config = await service.get_agent_config(config_id)
-    require_owned_metadata_access(
-        config.metadata,
-        current_user,
-        resource_name="Agent config",
-        allow_unscoped=False,
+    return await service.get_agent_config(
+        config_id,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=False,
+        ),
     )
-    return config
 
 
 # Conversations
@@ -126,8 +127,7 @@ async def get_conversation(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    conv = await service.get_conversation(conversation_id)
-    require_conversation_access(conv, current_user)
+    conv = await _get_accessible_conversation(service, conversation_id, current_user)
     return success_response(conv, message=t("ok"))
 
 
@@ -142,8 +142,14 @@ async def update_conversation(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
-    conv = await service.update_conversation(conversation_id, payload)
+    conv = await service.update_conversation(
+        conversation_id,
+        payload,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=True,
+        ),
+    )
     return success_response(conv, message=t("ok"))
 
 
@@ -157,8 +163,13 @@ async def delete_conversation(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
-    conv = await service.delete_conversation(conversation_id)
+    conv = await service.delete_conversation(
+        conversation_id,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=True,
+        ),
+    )
     return success_response(conv, message=t("ok"))
 
 
@@ -485,7 +496,14 @@ async def update_agent_config(
                 ),
             },
         )
-    config = await service.update_agent_config(config_id, payload)
+    config = await service.update_agent_config(
+        config_id,
+        payload,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=False,
+        ),
+    )
     return success_response(config, message=t("ok"))
 
 
@@ -499,6 +517,11 @@ async def delete_agent_config(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_agent_config_user),
 ):
-    await _get_accessible_agent_config(service, config_id, current_user)
-    await service.delete_agent_config(config_id)
+    await service.delete_agent_config(
+        config_id,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=False,
+        ),
+    )
     return success_response({"deleted": True}, message=t("ok"))

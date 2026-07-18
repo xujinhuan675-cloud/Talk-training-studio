@@ -30,10 +30,20 @@ class ConversationRepository(ABC):
     async def create(self, conversation: Conversation) -> Conversation: ...
 
     @abstractmethod
-    async def update(self, conversation: Conversation) -> Conversation: ...
+    async def update(
+        self,
+        conversation: Conversation,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Conversation: ...
 
     @abstractmethod
-    async def get_by_id(self, conversation_id: int) -> Optional[Conversation]: ...
+    async def get_by_id(
+        self,
+        conversation_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[Conversation]: ...
 
     @abstractmethod
     async def list(
@@ -181,16 +191,36 @@ class AgentConfigRepository(ABC):
     async def create(self, config: AgentConfig) -> AgentConfig: ...
 
     @abstractmethod
-    async def update(self, config: AgentConfig) -> AgentConfig: ...
+    async def update(
+        self,
+        config: AgentConfig,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> AgentConfig: ...
 
     @abstractmethod
-    async def delete(self, config_id: int) -> None: ...
+    async def delete(
+        self,
+        config_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None: ...
 
     @abstractmethod
-    async def get_by_id(self, config_id: int) -> Optional[AgentConfig]: ...
+    async def get_by_id(
+        self,
+        config_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[AgentConfig]: ...
 
     @abstractmethod
-    async def get_by_name(self, name: str) -> Optional[AgentConfig]: ...
+    async def get_by_name(
+        self,
+        name: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[AgentConfig]: ...
 
     @abstractmethod
     async def list(

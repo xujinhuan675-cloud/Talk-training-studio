@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from starlette.responses import StreamingResponse
 
-from api.conversation_scope import require_conversation_access
+from api.conversation_scope import owned_metadata_scope_for_current_user
 from api.dependencies import (
     CurrentUser,
     get_chat_service,
@@ -42,8 +42,13 @@ async def chat(
     conversation_service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_chat_user),
 ):
-    conversation = await conversation_service.get_conversation(conversation_id)
-    require_conversation_access(conversation, current_user)
+    await conversation_service.get_conversation(
+        conversation_id,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=True,
+        ),
+    )
 
     if payload.stream:
         return StreamingResponse(

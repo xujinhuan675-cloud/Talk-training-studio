@@ -68,7 +68,7 @@ class _FakeChatService:
             )
         ]
 
-    async def get_conversation(self, conversation_id: int):
+    async def get_conversation(self, conversation_id: int, **kwargs):
         return _conversation(conversation_id=conversation_id)
 
     async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):

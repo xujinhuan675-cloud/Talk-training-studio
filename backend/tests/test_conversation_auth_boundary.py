@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -63,6 +64,11 @@ def _matches_metadata_scope(metadata: dict, scope) -> bool:
     return False
 
 
+def _require_scope_match(metadata: dict, scope) -> None:
+    if scope is not None and not _matches_metadata_scope(metadata, scope):
+        raise HTTPException(status_code=403, detail="Resource is outside current user scope")
+
+
 def _conversation(
     conversation_id: int,
     *,
@@ -120,7 +126,13 @@ class _FakeConversationService:
         self.agent_config_update_call = None
         self.agent_config_delete_call = None
         self.get_calls: list[int] = []
+        self.get_scope_calls = []
+        self.update_scope_calls = []
+        self.delete_scope_calls = []
         self.agent_config_get_calls: list[int] = []
+        self.agent_config_get_scope_calls = []
+        self.agent_config_update_scope_calls = []
+        self.agent_config_delete_scope_calls = []
 
     async def create_conversation(self, payload):
         self.created_payload = payload
@@ -137,17 +149,29 @@ class _FakeConversationService:
         limit = kwargs.get("limit", 20)
         return items[skip:skip + limit], total
 
-    async def get_conversation(self, conversation_id: int):
+    async def get_conversation(self, conversation_id: int, **kwargs):
+        metadata_scope = kwargs.get("metadata_scope")
         self.get_calls.append(conversation_id)
-        return self.conversations.get(conversation_id) or _conversation(conversation_id)
+        self.get_scope_calls.append(metadata_scope)
+        item = self.conversations.get(conversation_id) or _conversation(conversation_id)
+        _require_scope_match(item.metadata, metadata_scope)
+        return item
 
-    async def update_conversation(self, conversation_id: int, payload):
+    async def update_conversation(self, conversation_id: int, payload, **kwargs):
+        metadata_scope = kwargs.get("metadata_scope")
+        self.update_scope_calls.append(metadata_scope)
+        item = self.conversations.get(conversation_id) or _conversation(conversation_id)
+        _require_scope_match(item.metadata, metadata_scope)
         self.update_call = (conversation_id, payload)
-        return self.conversations.get(conversation_id) or _conversation(conversation_id)
+        return item
 
-    async def delete_conversation(self, conversation_id: int):
+    async def delete_conversation(self, conversation_id: int, **kwargs):
+        metadata_scope = kwargs.get("metadata_scope")
+        self.delete_scope_calls.append(metadata_scope)
+        item = self.conversations.get(conversation_id) or _conversation(conversation_id)
+        _require_scope_match(item.metadata, metadata_scope)
         self.delete_call = conversation_id
-        return self.conversations.get(conversation_id) or _conversation(conversation_id)
+        return item
 
     async def search_messages(self, conversation_id: int, query: str, **kwargs):
         self.search_call = (conversation_id, query, kwargs)
@@ -172,18 +196,29 @@ class _FakeConversationService:
         limit = kwargs.get("limit", 20)
         return items[skip:skip + limit], total
 
-    async def get_agent_config(self, config_id: int):
+    async def get_agent_config(self, config_id: int, **kwargs):
+        metadata_scope = kwargs.get("metadata_scope")
         self.agent_config_get_call = config_id
         self.agent_config_get_calls.append(config_id)
-        return self.agent_configs.get(config_id) or _agent_config(config_id)
+        self.agent_config_get_scope_calls.append(metadata_scope)
+        item = self.agent_configs.get(config_id) or _agent_config(config_id)
+        _require_scope_match(item.metadata, metadata_scope)
+        return item
 
-    async def update_agent_config(self, config_id: int, payload):
-        self.agent_config_update_call = (config_id, payload)
+    async def update_agent_config(self, config_id: int, payload, **kwargs):
+        metadata_scope = kwargs.get("metadata_scope")
+        self.agent_config_update_scope_calls.append(metadata_scope)
         source = self.agent_configs.get(config_id) or _agent_config(config_id)
+        _require_scope_match(source.metadata, metadata_scope)
+        self.agent_config_update_call = (config_id, payload)
         metadata = payload.metadata if payload.metadata is not None else source.metadata
         return source.model_copy(update={"metadata": metadata})
 
-    async def delete_agent_config(self, config_id: int):
+    async def delete_agent_config(self, config_id: int, **kwargs):
+        metadata_scope = kwargs.get("metadata_scope")
+        self.agent_config_delete_scope_calls.append(metadata_scope)
+        source = self.agent_configs.get(config_id) or _agent_config(config_id)
+        _require_scope_match(source.metadata, metadata_scope)
         self.agent_config_delete_call = config_id
         return None
 
@@ -242,7 +277,7 @@ def test_create_conversation_stamps_current_mock_user_scope() -> None:
     assert conversation_service.created_payload.metadata["ownerUserId"] == "user-sales-001"
 
 
-def test_cross_user_conversation_search_is_blocked_before_service_call() -> None:
+def test_cross_user_conversation_search_is_scoped_before_search_call() -> None:
     conversation_service = _FakeConversationService(
         {
             7: _conversation(
@@ -264,6 +299,7 @@ def test_cross_user_conversation_search_is_blocked_before_service_call() -> None
 
     assert response.status_code == 403
     assert conversation_service.get_calls == [7]
+    assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.search_call is None
 
 
@@ -294,6 +330,30 @@ def test_cross_user_conversation_list_filters_other_user_items() -> None:
     data = response.json()["data"]
     assert [item["id"] for item in data["items"]] == [8]
     assert data["total"] == 1
+
+
+def test_cross_user_conversation_get_uses_scoped_service_call() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            )
+        }
+    )
+    client = _client(conversation_service)
+
+    response = client.get("/api/v1/conversations/7", headers={"X-Mock-User": "sales"})
+
+    assert response.status_code == 403
+    assert conversation_service.get_calls == [7]
+    scope = conversation_service.get_scope_calls[0]
+    assert scope.user_id == "user-sales-001"
+    assert scope.team_id == "team-revenue"
+    assert scope.include_team_scope is False
 
 
 def test_non_admin_conversation_list_filters_before_pagination() -> None:
@@ -343,7 +403,7 @@ def test_non_admin_conversation_list_filters_before_pagination() -> None:
     assert second_page.json()["data"]["total"] == 2
 
 
-def test_cross_user_conversation_mutations_are_blocked_before_service_call() -> None:
+def test_cross_user_conversation_mutations_are_blocked_by_scoped_service_call() -> None:
     conversation_service = _FakeConversationService(
         {
             7: _conversation(
@@ -366,9 +426,71 @@ def test_cross_user_conversation_mutations_are_blocked_before_service_call() -> 
 
     assert update_resp.status_code == 403
     assert delete_resp.status_code == 403
-    assert conversation_service.get_calls == [7, 7]
+    assert conversation_service.get_calls == []
+    assert conversation_service.update_scope_calls[0].user_id == "user-sales-001"
+    assert conversation_service.delete_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.update_call is None
     assert conversation_service.delete_call is None
+
+
+def test_leader_single_resource_routes_use_team_metadata_scope() -> None:
+    team_metadata = {
+        "ownerUserId": "user-peer-001",
+        "teamId": "team-revenue",
+    }
+    conversation_service = _FakeConversationService(
+        conversations={7: _conversation(7, metadata=team_metadata)},
+        agent_configs={8: _agent_config(8, metadata=team_metadata)},
+    )
+    client = _client(conversation_service)
+    headers = {"X-Mock-User": "leader"}
+
+    responses = [
+        client.get("/api/v1/conversations/7", headers=headers),
+        client.patch("/api/v1/conversations/7", headers=headers, json={"title": "team"}),
+        client.delete("/api/v1/conversations/7", headers=headers),
+        client.get("/api/v1/agent-configs/8", headers=headers),
+        client.patch("/api/v1/agent-configs/8", headers=headers, json={"name": "team-agent"}),
+        client.delete("/api/v1/agent-configs/8", headers=headers),
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200, 200, 200]
+    assert conversation_service.get_scope_calls[0].include_team_scope is True
+    assert conversation_service.update_scope_calls[0].include_team_scope is True
+    assert conversation_service.delete_scope_calls[0].include_team_scope is True
+    assert conversation_service.agent_config_get_scope_calls[0].include_team_scope is True
+    assert conversation_service.agent_config_update_scope_calls[0].include_team_scope is True
+    assert conversation_service.agent_config_delete_scope_calls[0].include_team_scope is True
+
+
+def test_admin_single_resource_routes_pass_unscoped_metadata_scope() -> None:
+    other_metadata = {
+        "ownerUserId": "user-cs-001",
+        "teamId": "team-service",
+    }
+    conversation_service = _FakeConversationService(
+        conversations={7: _conversation(7, metadata=other_metadata)},
+        agent_configs={8: _agent_config(8, metadata={})},
+    )
+    client = _client(conversation_service)
+    headers = {"X-Mock-User": "admin"}
+
+    responses = [
+        client.get("/api/v1/conversations/7", headers=headers),
+        client.patch("/api/v1/conversations/7", headers=headers, json={"title": "admin"}),
+        client.delete("/api/v1/conversations/7", headers=headers),
+        client.get("/api/v1/agent-configs/8", headers=headers),
+        client.patch("/api/v1/agent-configs/8", headers=headers, json={"name": "admin-agent"}),
+        client.delete("/api/v1/agent-configs/8", headers=headers),
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200, 200, 200]
+    assert conversation_service.get_scope_calls == [None]
+    assert conversation_service.update_scope_calls == [None]
+    assert conversation_service.delete_scope_calls == [None]
+    assert conversation_service.agent_config_get_scope_calls == [None, None]
+    assert conversation_service.agent_config_update_scope_calls == [None]
+    assert conversation_service.agent_config_delete_scope_calls == [None]
 
 
 def test_cross_user_message_action_is_blocked_before_service_call() -> None:
@@ -393,6 +515,7 @@ def test_cross_user_message_action_is_blocked_before_service_call() -> None:
 
     assert response.status_code == 403
     assert conversation_service.get_calls == [7]
+    assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.action_call is None
 
 
@@ -419,6 +542,7 @@ def test_cross_user_chat_is_blocked_before_llm_service_call() -> None:
 
     assert response.status_code == 403
     assert conversation_service.get_calls == [7]
+    assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert chat_service.sync_call is None
     assert chat_service.stream_call is None
 
@@ -508,7 +632,12 @@ def test_agent_config_routes_enforce_owner_metadata_scope() -> None:
     assert get_resp.status_code == 403
     assert update_resp.status_code == 403
     assert delete_resp.status_code == 403
-    assert conversation_service.agent_config_get_calls == [7, 7, 7]
+    assert conversation_service.agent_config_get_calls == [7, 7]
+    assert [scope.user_id for scope in conversation_service.agent_config_get_scope_calls] == [
+        "user-sales-001",
+        "user-sales-001",
+    ]
+    assert conversation_service.agent_config_delete_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.agent_config_update_call is None
     assert conversation_service.agent_config_delete_call is None
 
@@ -588,6 +717,8 @@ def test_agent_config_update_preserves_existing_owner_scope() -> None:
     )
 
     assert response.status_code == 200
+    assert conversation_service.agent_config_get_scope_calls[0].user_id == "user-sales-001"
+    assert conversation_service.agent_config_update_scope_calls[0].user_id == "user-sales-001"
     _, payload = conversation_service.agent_config_update_call
     assert payload.metadata["ownerUserId"] == "user-sales-001"
     assert payload.metadata["teamId"] == "team-revenue"

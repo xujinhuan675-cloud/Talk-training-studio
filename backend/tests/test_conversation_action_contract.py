@@ -62,7 +62,7 @@ class _FakeActionService:
     async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):
         raise MessageNotFoundException()
 
-    async def get_conversation(self, conversation_id: int):
+    async def get_conversation(self, conversation_id: int, **kwargs):
         return _conversation(conversation_id=conversation_id)
 
     async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):

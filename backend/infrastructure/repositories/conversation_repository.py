@@ -67,10 +67,19 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def update(self, conversation: Conversation) -> Conversation:
-        result = await self.session.execute(
-            select(ConversationModel).where(ConversationModel.id == conversation.id)
+    async def update(
+        self,
+        conversation: Conversation,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Conversation:
+        query = select(ConversationModel).where(ConversationModel.id == conversation.id)
+        query = apply_owned_metadata_scope(
+            query,
+            ConversationModel.extra_metadata,
+            metadata_scope,
         )
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         if model is None:
             raise ConversationNotFoundException(conversation.id)
@@ -87,10 +96,19 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def get_by_id(self, conversation_id: int) -> Optional[Conversation]:
-        result = await self.session.execute(
-            select(ConversationModel).where(ConversationModel.id == conversation_id)
+    async def get_by_id(
+        self,
+        conversation_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[Conversation]:
+        query = select(ConversationModel).where(ConversationModel.id == conversation_id)
+        query = apply_owned_metadata_scope(
+            query,
+            ConversationModel.extra_metadata,
+            metadata_scope,
         )
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
