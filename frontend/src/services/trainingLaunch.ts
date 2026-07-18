@@ -1,110 +1,105 @@
 import type { InteractionMode, TrainingMode } from './trainingMode'
-import type { StartTrainingSessionRequest, TrainingSessionDTO } from './trainingSession'
+import type { StartTrainingSessionRequest } from './trainingSession'
 
-export interface TrainingLaunchStartSessionContext<TRoom extends { id: number | string }> {
-  trainingSession: TrainingSessionDTO
-  startedSession: TrainingSessionDTO
-  room: TRoom | null
-  roomId: number | string
-  trainingMode: TrainingMode
-  interactionMode: InteractionMode
+export interface TrainingLaunchRoom {
+  id: number | string
 }
 
-export interface TrainingLaunchFlowOptions<
-  TCreateRequest,
-  TBattlePayload,
-  TRoom extends { id: number | string },
-  TNavigationState,
-> {
+export interface TrainingLaunchSession {
+  session_id: string
+}
+
+export interface TrainingLaunchStartedSession {
+  session_id: string
+  room_id?: number | string | null
+}
+
+export interface LaunchTrainingSessionFlowParams<TCreateRequest, TBattlePayload, TNavigationState> {
   createTrainingSessionRequest: TCreateRequest
-  createTrainingSession: (request: TCreateRequest) => Promise<TrainingSessionDTO>
-  battlePayload?: TBattlePayload | null
-  startBattle?: (payload: TBattlePayload) => Promise<TRoom>
-  startTrainingSession: (sessionId: string, request: StartTrainingSessionRequest) => Promise<TrainingSessionDTO>
+  createTrainingSession: (request: TCreateRequest) => Promise<TrainingLaunchSession>
+  battlePayload: TBattlePayload | null
+  startBattle: (payload: TBattlePayload) => Promise<TrainingLaunchRoom>
   buildTrainingSessionStartRequest: (
-    request: StartTrainingSessionRequest,
+    data: StartTrainingSessionRequest,
     trainingMode: TrainingMode,
     interactionMode: InteractionMode,
   ) => StartTrainingSessionRequest
+  startTrainingSession: (
+    sessionId: string,
+    data: StartTrainingSessionRequest,
+  ) => Promise<TrainingLaunchStartedSession>
+  trainingMode: TrainingMode
+  interactionMode: InteractionMode
   buildChatPath: (
     roomId: number | string,
     trainingMode: TrainingMode,
     trainingSessionId: string,
     interactionMode: InteractionMode,
   ) => string
-  buildNavigationState: (context: TrainingLaunchStartSessionContext<TRoom>) => TNavigationState
-  navigate: (path: string, options: { state: TNavigationState }) => void
-  trainingMode: TrainingMode
-  interactionMode: InteractionMode
-  afterStartSession?: (context: TrainingLaunchStartSessionContext<TRoom>) => void | Promise<void>
+  buildNavigationState: (context: {
+    room: TrainingLaunchRoom | null
+    roomId: number | string
+    startedSession: TrainingLaunchStartedSession
+    trainingSession: TrainingLaunchSession
+  }) => TNavigationState
+  navigate: (to: string, options: { state: TNavigationState }) => void
+  afterStartSession?: (context: {
+    room: TrainingLaunchRoom | null
+    roomId: number | string
+    startedSession: TrainingLaunchStartedSession
+    trainingSession: TrainingLaunchSession
+  }) => void | Promise<void>
 }
 
-export interface TrainingLaunchFlowResult<TNavigationState, TRoom extends { id: number | string }> {
-  trainingSession: TrainingSessionDTO
-  room: TRoom | null
-  startedSession: TrainingSessionDTO
+export interface LaunchTrainingSessionFlowResult<TNavigationState> {
+  trainingSession: TrainingLaunchSession
+  room: TrainingLaunchRoom | null
+  startedSession: TrainingLaunchStartedSession
   roomId: number | string
   chatPath: string
-  navigationState: TNavigationState
+  state: TNavigationState
 }
 
-export async function launchTrainingSessionFlow<
-  TCreateRequest,
-  TBattlePayload,
-  TRoom extends { id: number | string },
-  TNavigationState,
->(
-  options: TrainingLaunchFlowOptions<TCreateRequest, TBattlePayload, TRoom, TNavigationState>,
-): Promise<TrainingLaunchFlowResult<TNavigationState, TRoom>> {
-  const trainingSession = await options.createTrainingSession(options.createTrainingSessionRequest)
-  const room = options.battlePayload == null
-    ? null
-    : options.startBattle
-      ? await options.startBattle(options.battlePayload)
-      : null
-  if (options.battlePayload != null && !options.startBattle) {
-    throw new Error('Training launch requires startBattle when a battle payload is provided')
-  }
-
-  const startedSession = await options.startTrainingSession(
-    trainingSession.session_id,
-    options.buildTrainingSessionStartRequest(
-      room ? { room_id: room.id } : {},
-      options.trainingMode,
-      options.interactionMode,
-    ),
+export async function launchTrainingSessionFlow<TCreateRequest, TNavigationState>(
+  params: LaunchTrainingSessionFlowParams<TCreateRequest, unknown, TNavigationState>,
+): Promise<LaunchTrainingSessionFlowResult<TNavigationState>> {
+  const trainingSession = await params.createTrainingSession(params.createTrainingSessionRequest)
+  const room = params.battlePayload == null ? null : await params.startBattle(params.battlePayload)
+  const startRequest = params.buildTrainingSessionStartRequest(
+    room ? { room_id: room.id } : {},
+    params.trainingMode,
+    params.interactionMode,
   )
-
-  const context: TrainingLaunchStartSessionContext<TRoom> = {
-    trainingSession,
-    startedSession,
-    room,
-    roomId: startedSession.room_id ?? room?.id ?? null,
-    trainingMode: options.trainingMode,
-    interactionMode: options.interactionMode,
-  }
-
-  if (context.roomId == null) {
+  const startedSession = await params.startTrainingSession(trainingSession.session_id, startRequest)
+  const roomId = startedSession.room_id ?? room?.id
+  if (roomId == null) {
     throw new Error('Failed to resolve training room')
   }
-
-  await options.afterStartSession?.(context)
-
-  const chatPath = options.buildChatPath(
-    context.roomId,
-    options.trainingMode,
+  const state = params.buildNavigationState({
+    room,
+    roomId,
+    startedSession,
+    trainingSession,
+  })
+  await params.afterStartSession?.({
+    room,
+    roomId,
+    startedSession,
+    trainingSession,
+  })
+  const chatPath = params.buildChatPath(
+    roomId,
+    params.trainingMode,
     startedSession.session_id,
-    options.interactionMode,
+    params.interactionMode,
   )
-  const navigationState = options.buildNavigationState(context)
-  options.navigate(chatPath, { state: navigationState })
-
+  params.navigate(chatPath, { state })
   return {
     trainingSession,
     room,
     startedSession,
-    roomId: context.roomId,
+    roomId,
     chatPath,
-    navigationState,
+    state,
   }
 }
