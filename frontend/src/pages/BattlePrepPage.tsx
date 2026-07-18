@@ -10,6 +10,7 @@ import {
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
 import { useI18n, type Translate } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import './BattlePrepPage.css'
 
 function initialState(t: Translate) {
@@ -85,7 +86,7 @@ export default function BattlePrepPage() {
         selected_training_points: selectedPoints,
         difficulty: toBattleDifficulty(studioConfig.difficulty),
       })
-      navigate(`/chat/${room.id}`)
+      navigate(APP_ROUTES.conversation(room.id))
     } catch (e: unknown) {
       setState((s) => ({ ...s, submitting: false, error: getErrorMessage(e, tr('启动失败，请重试', 'Start failed. Please try again.')) }))
     }

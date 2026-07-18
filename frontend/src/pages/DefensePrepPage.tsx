@@ -4,6 +4,7 @@ import { Loader2, Upload, FileText, ArrowLeft, Play } from 'lucide-react'
 import { createDefenseSession, startDefenseSession, type DefenseSession, type PersonaSummary } from '../services/api'
 import { useAppContext } from '../contexts/AppContext'
 import { useI18n } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import './DefensePrepPage.css'
 
 const SCENARIO_OPTIONS: { value: string; labelZh: string; labelEn: string; descZh: string; descEn: string }[] = [
@@ -96,7 +97,7 @@ export default function DefensePrepPage() {
     try {
       const updated = await startDefenseSession(session.id)
       if (updated.room_id) {
-        navigate(`/chat/${updated.room_id}`)
+        navigate(APP_ROUTES.conversation(updated.room_id))
       } else {
         setState((s) => ({ ...s, submitting: false, error: tr('未能创建聊天房间，请重试', 'Could not create a chat room. Please try again.') }))
       }

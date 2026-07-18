@@ -25,6 +25,7 @@ import { buildTrainingModeChatPath } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import { PageShell } from '../components/ui/page'
 import {
   getScenarioTrainingCardById,
@@ -606,7 +607,7 @@ export default function TrainingResultPage() {
           <AlertCircle size={24} />
           <strong>{tr('训练结果不可用', 'Training result unavailable')}</strong>
           <span>{error}</span>
-          <Link to="/training-history" className="training-result-primary-link">
+          <Link to={APP_ROUTES.reviewSessions} className="training-result-primary-link">
             {tr('返回训练记录', 'Back to history')}
           </Link>
         </section>
@@ -629,11 +630,11 @@ export default function TrainingResultPage() {
           </div>
         </div>
         <div className="training-result-actions">
-          <Link to="/scenario-training" className="training-result-secondary-link">
+          <Link to={APP_ROUTES.practiceScenarios} className="training-result-secondary-link">
             <RotateCcw size={15} />
             {tr('再次练习', 'Practice again')}
           </Link>
-          <Link to="/training-history" className="training-result-secondary-link">
+          <Link to={APP_ROUTES.reviewSessions} className="training-result-secondary-link">
             {tr('训练记录', 'History')}
           </Link>
           {chatPath && (
