@@ -16,7 +16,8 @@ async function loadTsModule(sourcePath, prefix) {
   })
   let outputText = output.outputText
   const cleanupPaths = []
-  if (outputText.includes("from './appRoutes'")) {
+  const appRoutesImportPattern = /from\s+['"]\.\/appRoutes['"]/
+  if (appRoutesImportPattern.test(outputText)) {
     const appRoutesSource = fs.readFileSync(path.resolve('src/appRoutes.ts'), 'utf8')
     const appRoutesOutput = ts.transpileModule(appRoutesSource, {
       compilerOptions: {
@@ -27,7 +28,7 @@ async function loadTsModule(sourcePath, prefix) {
     const appRoutesPath = path.join(os.tmpdir(), `app-routes-${process.pid}-${Date.now()}.mjs`)
     fs.writeFileSync(appRoutesPath, appRoutesOutput)
     cleanupPaths.push(appRoutesPath)
-    outputText = outputText.replace("from './appRoutes'", `from '${pathToFileURL(appRoutesPath).href}'`)
+    outputText = outputText.replace(appRoutesImportPattern, `from '${pathToFileURL(appRoutesPath).href}'`)
   }
   const outputPath = path.join(os.tmpdir(), `${prefix}-${process.pid}-${Date.now()}.mjs`)
   fs.writeFileSync(outputPath, outputText)
