@@ -25,6 +25,7 @@ import {
   type TrainingProfile,
 } from '../services/trainingMode'
 import { launchTrainingSessionFlow } from '../services/trainingLaunch'
+import { buildTrainingSessionStartRequest } from '../services/trainingSession'
 import {
   buildTrainingStudioPrompt,
   buildTrainingStudioCapabilityReadiness,
