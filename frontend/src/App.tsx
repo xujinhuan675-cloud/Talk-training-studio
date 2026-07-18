@@ -95,6 +95,7 @@ function App() {
                 <Route path="defense-prep" element={<DefensePrepPage />} />
                 <Route path="battle-prep" element={managementOnly(<BattlePrepPage />)} />
               </Route>
+              <Route path="chat/:roomId" element={<ConversationRoomRedirect />} />
               <Route path="conversations" element={<ChatPage />} />
               <Route path="conversations/:roomId" element={<ChatPage />} />
               <Route path="review" element={<Outlet />}>
@@ -102,12 +103,14 @@ function App() {
                 <Route path="sessions" element={<TrainingHistoryPage />} />
                 <Route path="sessions/:sessionId" element={<TrainingResultPage />} />
               </Route>
+              <Route path="review/session/:sessionId" element={<TrainingResultSessionRedirect />} />
               <Route path="growth" element={<GrowthPage />} />
               <Route path="growth/leaderboard" element={<ScenarioLeaderboardPage />} />
               <Route path="config" element={managementOnly(<SettingsPage />)} />
               <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
               <Route path="config/personas/new" element={managementOnly(<PersonaBuilderPage />)} />
               <Route path="config/personas/:id/edit" element={managementOnly(<PersonaEditorPage />)} />
+              <Route path="config/persona/:id/edit" element={<PersonaEditRedirect />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
