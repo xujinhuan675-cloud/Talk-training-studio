@@ -20,6 +20,12 @@ import { AuthProvider, useAuthContext } from './contexts/AuthContext'
 import { I18nProvider } from './i18n'
 import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from './services/auth'
 import { APP_ROUTES } from './appRoutes'
+import {
+  createRedirectTarget,
+  resolveConversationRoomRedirectTarget,
+  resolvePersonaEditRedirectTarget,
+  resolveTrainingResultSessionRedirectTarget,
+} from './routeRedirects'
 
 function RequireSystemRole({
   roles,
@@ -48,28 +54,29 @@ function managementOnly(element: ReactNode) {
 
 function RedirectTo({ to }: { to: string }) {
   const location = useLocation()
-  return <Navigate to={`${to}${location.search}`} replace state={location.state} />
+  const redirectTarget = createRedirectTarget(to, location)
+  return <Navigate to={redirectTarget.to} replace state={redirectTarget.state} />
 }
 
-function LegacyConversationRedirect() {
-  const { roomId } = useParams()
+function ConversationRoomRedirect() {
   const location = useLocation()
-  const target = roomId ? APP_ROUTES.conversation(roomId) : APP_ROUTES.conversations
-  return <Navigate to={`${target}${location.search}`} replace state={location.state} />
+  const { roomId } = useParams<{ roomId: string }>()
+  const redirectTarget = createRedirectTarget(resolveConversationRoomRedirectTarget(roomId), location)
+  return <Navigate to={redirectTarget.to} replace state={redirectTarget.state} />
 }
 
-function LegacyTrainingResultRedirect() {
-  const { sessionId } = useParams()
+function TrainingResultSessionRedirect() {
   const location = useLocation()
-  const target = sessionId ? APP_ROUTES.reviewSession(sessionId) : APP_ROUTES.reviewSessions
-  return <Navigate to={`${target}${location.search}`} replace state={location.state} />
+  const { sessionId } = useParams<{ sessionId: string }>()
+  const redirectTarget = createRedirectTarget(resolveTrainingResultSessionRedirectTarget(sessionId), location)
+  return <Navigate to={redirectTarget.to} replace state={redirectTarget.state} />
 }
 
-function LegacyPersonaEditRedirect() {
-  const { id } = useParams()
+function PersonaEditRedirect() {
   const location = useLocation()
-  const target = id ? APP_ROUTES.configPersonaEdit(id) : APP_ROUTES.config
-  return <Navigate to={`${target}${location.search}`} replace state={location.state} />
+  const { id } = useParams<{ id: string }>()
+  const redirectTarget = createRedirectTarget(resolvePersonaEditRedirectTarget(id), location)
+  return <Navigate to={redirectTarget.to} replace state={redirectTarget.state} />
 }
 
 function App() {
@@ -101,24 +108,6 @@ function App() {
               <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
               <Route path="config/personas/new" element={managementOnly(<PersonaBuilderPage />)} />
               <Route path="config/personas/:id/edit" element={managementOnly(<PersonaEditorPage />)} />
-              <Route path="scenario-training" element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
-              <Route path="training-studio" element={<RedirectTo to={APP_ROUTES.practiceCustom} />} />
-              <Route path="live-coach" element={<RedirectTo to={APP_ROUTES.practiceLiveCoach} />} />
-              <Route path="battle-prep" element={<RedirectTo to={APP_ROUTES.practiceBattle} />} />
-              <Route path="defense-prep" element={<RedirectTo to={APP_ROUTES.practiceDefense} />} />
-              <Route path="chat" element={<LegacyConversationRedirect />} />
-              <Route path="chat/:roomId" element={<LegacyConversationRedirect />} />
-              <Route path="training-history" element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
-              <Route path="training-result" element={<LegacyTrainingResultRedirect />} />
-              <Route path="training-result/:sessionId" element={<LegacyTrainingResultRedirect />} />
-              <Route path="training/history" element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
-              <Route path="training/result" element={<LegacyTrainingResultRedirect />} />
-              <Route path="training/result/:sessionId" element={<LegacyTrainingResultRedirect />} />
-              <Route path="scenario-leaderboard" element={<RedirectTo to={APP_ROUTES.growthLeaderboard} />} />
-              <Route path="scenario-config" element={<RedirectTo to={APP_ROUTES.configScenarios} />} />
-              <Route path="settings" element={<RedirectTo to={APP_ROUTES.config} />} />
-              <Route path="persona/new" element={<RedirectTo to={APP_ROUTES.configPersonaNew} />} />
-              <Route path="persona/:id/edit" element={<LegacyPersonaEditRedirect />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
