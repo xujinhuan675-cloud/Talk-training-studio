@@ -20,6 +20,21 @@ from domain.stakeholder.entity import Message as StakeholderMessage
 from domain.training_studio.session import TrainingSession
 
 
+_CONVERSATION_AUTH_METADATA_KEYS = frozenset(
+    {
+        "authScope",
+        "ownerUserId",
+        "owner_user_id",
+        "createdByUserId",
+        "created_by_user_id",
+        "teamId",
+        "team_id",
+        "ownerTeamId",
+        "owner_team_id",
+    }
+)
+
+
 class ConversationTrainingConversationAdapter:
     """Bridge TrainingCoreOrchestrator to the conversation/message tree runtime."""
 
@@ -328,12 +343,20 @@ def _conversation_title_for_session(session: TrainingSession) -> str:
 
 def _conversation_metadata_for_session(session: TrainingSession) -> dict[str, object]:
     return {
-        **dict(session.task_config.metadata or {}),
+        **_task_metadata_without_auth_scope(session),
         **_training_conversation_metadata_for_session(
             session,
             branch_id="main",
             branch_tail_message_id=None,
         ),
+    }
+
+
+def _task_metadata_without_auth_scope(session: TrainingSession) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in dict(session.task_config.metadata or {}).items()
+        if key not in _CONVERSATION_AUTH_METADATA_KEYS
     }
 
 
@@ -344,15 +367,35 @@ def _training_conversation_metadata_for_session(
     branch_tail_message_id: object | None,
     selected_message_ids: Sequence[object] | None = None,
 ) -> dict[str, object]:
-    return training_core_metadata_for_session(
-        session,
-        runtime="conversation_message_tree",
-        extra=training_branch_metadata(
+    extra_metadata = {
+        **training_branch_metadata(
             branch_id=branch_id,
             branch_tail_message_id=branch_tail_message_id,
             selected_message_ids=selected_message_ids,
         ),
+        **_conversation_auth_metadata_for_session(session),
+    }
+    return training_core_metadata_for_session(
+        session,
+        runtime="conversation_message_tree",
+        extra=extra_metadata,
     )
+
+
+def _conversation_auth_metadata_for_session(session: TrainingSession) -> dict[str, object]:
+    user_id = _optional_text(session.user_id)
+    team_id = _optional_text(session.team_id)
+    auth_scope: dict[str, object] = {}
+    metadata: dict[str, object] = {}
+    if user_id is not None:
+        auth_scope["userId"] = user_id
+        metadata["ownerUserId"] = user_id
+    if team_id is not None:
+        auth_scope["teamId"] = team_id
+        metadata["teamId"] = team_id
+    if auth_scope:
+        metadata["authScope"] = auth_scope
+    return metadata
 
 
 def _conversation_metadata_with_branch_state(
@@ -382,6 +425,13 @@ def _metadata_text(session: TrainingSession, *keys: str) -> str | None:
         if text:
             return text
     return None
+
+
+def _optional_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _branch_id_for_turn(

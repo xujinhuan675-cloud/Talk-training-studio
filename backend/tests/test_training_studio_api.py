@@ -23,6 +23,7 @@ from api.dependencies import (
 import api.routes.training_studio as training_studio_routes
 from api.routes.training_studio import (
     get_live_guidance_service,
+    get_training_runtime_uow_factory,
     get_training_scenario_config_service,
     get_storybank_service,
     get_training_session_service,
@@ -89,6 +90,35 @@ class FakeChatroomService:
         return self.details[room_id]
 
 
+class FakeTrainingRuntimeConversationRepository:
+    def __init__(self, state) -> None:
+        self._state = state
+
+    async def create(self, conversation):
+        saved = SimpleNamespace(
+            id=len(self._state.created_conversations) + 1,
+            title=conversation.title,
+            system_prompt=conversation.system_prompt,
+            model=conversation.model,
+            metadata=dict(conversation.metadata),
+        )
+        self._state.created_conversations.append(saved)
+        return saved
+
+
+class FakeTrainingRuntimeUnitOfWork:
+    def __init__(self, state, **kwargs) -> None:
+        self._state = state
+        self._kwargs = kwargs
+        self.conversation_repository = FakeTrainingRuntimeConversationRepository(state)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
 @pytest.fixture
 def app(tmp_path):
     reset_ai_rate_limit_state()
@@ -101,11 +131,15 @@ def app(tmp_path):
     )
     session_ids = count(1)
     session_service = TrainingSessionService(id_factory=lambda: f"session-{next(session_ids)}")
+    runtime_state = SimpleNamespace(created_conversations=[])
     analysis_service = FakeAnalysisService()
     reader_service = FakeAnalysisReaderService()
     growth_service = FakeGrowthService()
     chatroom_service = FakeChatroomService()
     guidance_service = TrainingLiveGuidanceService(monologue_word_threshold=20)
+    test_app.dependency_overrides[get_training_runtime_uow_factory] = (
+        lambda: (lambda **kwargs: FakeTrainingRuntimeUnitOfWork(runtime_state, **kwargs))
+    )
     test_app.dependency_overrides[get_storybank_service] = lambda: storybank
     test_app.dependency_overrides[get_training_scenario_config_service] = lambda: scenario_config_service
     test_app.dependency_overrides[get_training_session_service] = lambda: session_service
@@ -121,6 +155,7 @@ def app(tmp_path):
     test_app.state.analysis_reader_service = reader_service
     test_app.state.growth_service = growth_service
     test_app.state.chatroom_service = chatroom_service
+    test_app.state.training_runtime_state = runtime_state
     return test_app
 
 
@@ -892,6 +927,63 @@ async def test_training_session_start_can_create_room(client: AsyncClient) -> No
     started = start_resp.json()["data"]
     assert started["status"] == "active"
     assert started["room_id"] == "701"
+
+
+@pytest.mark.asyncio
+async def test_training_session_start_can_bind_message_tree_runtime(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            metadata={
+                "persona_ids": ["customer-1"],
+                "scenario_id": 9,
+                "ownerUserId": "forged-user",
+                "teamId": "forged-team",
+                "authScope": {"userId": "forged-user", "teamId": "forged-team"},
+            },
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+        headers={"X-Mock-User": "sales"},
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"runtime": "conversation_message_tree"},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert start_resp.status_code == 200
+    started = start_resp.json()["data"]
+    assert started["status"] == "active"
+    assert started["room_id"] == "talkwise-conversation:1"
+    assert started["conversation"]["provider"] == "talkwise-conversation"
+    assert started["conversation"]["metadata"]["runtime"] == "conversation_message_tree"
+    assert started["conversation"]["metadata"]["ownerUserId"] == "user-sales-001"
+    assert started["conversation"]["metadata"]["teamId"] == "team-revenue"
+    assert started["conversation"]["metadata"]["authScope"] == {
+        "userId": "user-sales-001",
+        "teamId": "team-revenue",
+    }
+    assert started["task_config"]["metadata"]["runtime"] == "conversation_message_tree"
+    assert started["task_config"]["metadata"]["ownerUserId"] == "user-sales-001"
+    assert started["task_config"]["metadata"]["teamId"] == "team-revenue"
+    assert started["task_config"]["metadata"]["authScope"] == {
+        "userId": "user-sales-001",
+        "teamId": "team-revenue",
+    }
+    assert app.state.chatroom_service.created_rooms == []
+    assert app.state.training_runtime_state.created_conversations[0].metadata["ownerUserId"] == (
+        "user-sales-001"
+    )
+    assert app.state.training_runtime_state.created_conversations[0].metadata["teamId"] == (
+        "team-revenue"
+    )
 
 
 @pytest.mark.asyncio

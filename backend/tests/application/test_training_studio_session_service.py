@@ -102,6 +102,50 @@ async def test_session_service_records_turn_count():
     assert (await service.get_session("session-1")).message_count == 3
 
 
+async def test_session_service_start_merges_runtime_metadata_when_started():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "metadata": {"source": "scenario_training"},
+        }
+    )
+    runtime_metadata = {
+        "runtime": "conversation_message_tree",
+        "selectedPath": {
+            "branchId": "branch-review",
+            "tailMessageId": "msg-tail",
+            "messageIds": ["msg-root", "msg-tail"],
+            "purpose": "training_replay_context",
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "currentBranchTail": {
+            "branchId": "branch-review",
+            "messageId": "msg-tail",
+        },
+    }
+
+    started = await service.start_session(
+        session.session_id,
+        room_id="talkwise-conversation:7",
+        metadata=runtime_metadata,
+    )
+    runtime_metadata["selectedPath"]["tailMessageId"] = "mutated"
+
+    assert started.room_id == "talkwise-conversation:7"
+    assert started.task_config.metadata["source"] == "scenario_training"
+    assert started.task_config.metadata["runtime"] == "conversation_message_tree"
+    assert started.task_config.metadata["selectedPath"]["tailMessageId"] == "msg-tail"
+    assert (await service.get_session("session-1")).task_config.metadata[
+        "currentBranchTail"
+    ] == {
+        "branchId": "branch-review",
+        "messageId": "msg-tail",
+    }
+
+
 async def test_session_service_applies_access_scope_to_get_list_and_mutations():
     session_ids = iter(["session-sales", "session-peer", "session-service"])
     service = TrainingSessionService(id_factory=lambda: next(session_ids))

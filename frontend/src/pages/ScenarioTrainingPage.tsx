@@ -11,7 +11,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trophy,
-  UserRound,
 } from 'lucide-react'
 import { startBattle } from '../services/api'
 import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
@@ -22,8 +21,7 @@ import {
   type TrainingMode,
 } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
-import { getUserDisplayRoleName } from '../services/auth'
-import { useI18n } from '../i18n'
+import { useI18n, type Locale, type TranslateInline } from '../i18n'
 import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
 import {
   buildScenarioTrainingBattlePayload,
@@ -47,53 +45,74 @@ type DifficultyFilter = 'all' | ScenarioTrainingDifficulty
 type CategoryFilter = 'all' | ScenarioTrainingCategory
 type ScenarioLaunchMode = TrainingMode | 'realtime'
 
-const difficultyOptions: Array<{ value: DifficultyFilter; label: string }> = [
-  { value: 'all', label: '全部难度' },
-  { value: 'easy', label: '轻量' },
-  { value: 'medium', label: '标准' },
-  { value: 'hard', label: '高压' },
-  { value: 'expert', label: '专家' },
-]
+const difficultyOptions: DifficultyFilter[] = ['all', 'easy', 'medium', 'hard', 'expert']
+const categoryOptions: CategoryFilter[] = ['all', 'sales', 'customer_service', 'negotiation', 'interview', 'workplace']
+const modeOptions: ScenarioLaunchMode[] = ['text', 'voice', 'realtime']
 
-const categoryOptions: Array<{ value: CategoryFilter; label: string }> = [
-  { value: 'all', label: '全部类型' },
-  { value: 'sales', label: '销售' },
-  { value: 'customer_service', label: '客服' },
-  { value: 'negotiation', label: '谈判' },
-  { value: 'interview', label: '面试' },
-  { value: 'workplace', label: '职场沟通' },
-]
-
-const modeOptions: Array<{ value: ScenarioLaunchMode; label: string }> = [
-  { value: 'text', label: '文本' },
-  { value: 'voice', label: '语音' },
-  { value: 'realtime', label: '实时' },
-]
-
-const difficultyLabels: Record<ScenarioTrainingDifficulty, string> = {
-  easy: '轻量',
-  medium: '标准',
-  hard: '高压',
-  expert: '专家',
+function getDifficultyLabel(value: ScenarioTrainingDifficulty, tr: TranslateInline): string {
+  switch (value) {
+    case 'easy':
+      return tr('轻量', 'Light')
+    case 'medium':
+      return tr('标准', 'Standard')
+    case 'hard':
+      return tr('高压', 'High pressure')
+    case 'expert':
+      return tr('专家', 'Expert')
+  }
 }
 
-const categoryLabels: Record<ScenarioTrainingCategory, string> = {
-  sales: '销售',
-  customer_service: '客服',
-  negotiation: '谈判',
-  interview: '面试',
-  workplace: '职场沟通',
+function getDifficultyFilterLabel(value: DifficultyFilter, tr: TranslateInline): string {
+  return value === 'all' ? tr('全部难度', 'All difficulties') : getDifficultyLabel(value, tr)
 }
 
-const statusLabels: Record<ScenarioTrainingStatus, string> = {
-  not_started: '未开始',
-  in_progress: '练习中',
-  completed: '已完成',
-  failed: '失败',
+function getCategoryLabel(value: ScenarioTrainingCategory, tr: TranslateInline): string {
+  switch (value) {
+    case 'sales':
+      return tr('销售', 'Sales')
+    case 'customer_service':
+      return tr('客服', 'Service')
+    case 'negotiation':
+      return tr('谈判', 'Negotiation')
+    case 'interview':
+      return tr('面试', 'Interview')
+    case 'workplace':
+      return tr('职场沟通', 'Workplace')
+  }
 }
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '启动训练失败'
+function getCategoryFilterLabel(value: CategoryFilter, tr: TranslateInline): string {
+  return value === 'all' ? tr('全部类型', 'All categories') : getCategoryLabel(value, tr)
+}
+
+function getModeLabel(value: ScenarioLaunchMode, tr: TranslateInline): string {
+  switch (value) {
+    case 'text':
+      return tr('文本', 'Text')
+    case 'voice':
+      return tr('语音', 'Voice')
+    case 'video':
+      return tr('视频', 'Video')
+    case 'realtime':
+      return tr('实时', 'Realtime')
+  }
+}
+
+function getStatusLabel(status: ScenarioTrainingStatus, tr: TranslateInline): string {
+  switch (status) {
+    case 'not_started':
+      return tr('未开始', 'Not started')
+    case 'in_progress':
+      return tr('练习中', 'In progress')
+    case 'completed':
+      return tr('已完成', 'Completed')
+    case 'failed':
+      return tr('失败', 'Failed')
+  }
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
 }
 
 function getScenarioTrainingMode(mode: ScenarioLaunchMode): TrainingMode {
@@ -104,11 +123,11 @@ function getScenarioInteractionMode(mode: ScenarioLaunchMode): InteractionMode {
   return mode === 'realtime' ? 'realtime' : 'turn_based'
 }
 
-function formatDate(value?: string): string {
-  if (!value) return '未练习'
+function formatDate(value: string | undefined, locale: Locale, tr: TranslateInline): string {
+  if (!value) return tr('未练习', 'Not practiced')
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('zh-CN', {
+  return date.toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', {
     month: '2-digit',
     day: '2-digit',
   })
@@ -137,7 +156,7 @@ function matchesScenario(
 
 export default function ScenarioTrainingPage() {
   const navigate = useNavigate()
-  const { tr } = useI18n()
+  const { locale, tr } = useI18n()
   const { currentUser } = useAuthContext()
   const [mode, setMode] = useState<ScenarioLaunchMode>('text')
   const [query, setQuery] = useState('')
@@ -258,7 +277,7 @@ export default function ScenarioTrainingPage() {
         },
       })
     } catch (e: unknown) {
-      setError(getErrorMessage(e))
+      setError(getErrorMessage(e, tr('启动训练失败', 'Failed to start training')))
       setStartingScenarioId(null)
     }
   }
@@ -266,13 +285,7 @@ export default function ScenarioTrainingPage() {
   return (
     <PageShell width="wide" className="scenario-training-page">
       <PageHeader
-        eyebrow={tr('按场景训练', 'Scenario training')}
-        icon={<ClipboardList size={16} />}
-        title={tr('真实销售与客服场景练习', 'Real-world sales and service drills')}
-        description={tr(
-          '在同一条训练链路里筛选场景、选择模式并直接开练。',
-          'Filter scenarios, pick a mode, and start practice in one path.',
-        )}
+        title={tr('场景训练', 'Scenario training')}
         stats={(
           <PageStatGrid
             stats={[
@@ -285,19 +298,19 @@ export default function ScenarioTrainingPage() {
                 value: scoreText,
               },
               {
-                label: tr('当前用户', 'Current user'),
-                value: currentUser ? getUserDisplayRoleName(currentUser) : tr('未登录', 'Signed out'),
-                detail: currentUser?.teamName ?? currentUser?.name ?? tr('模拟用户', 'Mock user'),
+                label: tr('匹配场景', 'Matched scenarios'),
+                value: filteredScenarios.length,
               },
             ]}
           />
         )}
       />
 
-      <section className="scenario-training-toolbar" aria-label={tr('场景筛选', 'Scenario filters')}>
+      <section className="scenario-training-toolbar" aria-label={tr('筛选与模式', 'Filters and mode')}>
         <label className="scenario-training-search">
           <Search size={16} />
           <input
+            aria-label={tr('搜索场景', 'Search scenarios')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={tr('搜索客户、异议、场景...', 'Search customers, objections, scenarios...')}
@@ -307,12 +320,13 @@ export default function ScenarioTrainingPage() {
         <label className="scenario-training-select">
           <SlidersHorizontal size={15} />
           <select
+            aria-label={tr('难度筛选', 'Difficulty filter')}
             value={difficulty}
             onChange={(event) => setDifficulty(event.target.value as DifficultyFilter)}
           >
             {difficultyOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+              <option key={option} value={option}>
+                {getDifficultyFilterLabel(option, tr)}
               </option>
             ))}
           </select>
@@ -321,26 +335,29 @@ export default function ScenarioTrainingPage() {
         <label className="scenario-training-select">
           <ClipboardList size={15} />
           <select
+            aria-label={tr('类型筛选', 'Category filter')}
             value={category}
             onChange={(event) => setCategory(event.target.value as CategoryFilter)}
           >
             {categoryOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+              <option key={option} value={option}>
+                {getCategoryFilterLabel(option, tr)}
               </option>
             ))}
           </select>
         </label>
 
         <div className="scenario-training-mode" role="group" aria-label={tr('训练模式', 'Training mode')}>
+          <span className="scenario-training-mode-label">{tr('模式', 'Mode')}</span>
           {modeOptions.map((option) => (
             <button
-              key={option.value}
+              key={option}
               type="button"
-              className={mode === option.value ? 'selected' : ''}
-              onClick={() => setMode(option.value)}
+              aria-pressed={mode === option}
+              className={mode === option ? 'selected' : ''}
+              onClick={() => setMode(option)}
             >
-              {option.label}
+              {getModeLabel(option, tr)}
             </button>
           ))}
         </div>
@@ -362,9 +379,9 @@ export default function ScenarioTrainingPage() {
                 <div>
                   <div className="scenario-training-card-tags">
                     <span className={`difficulty ${scenario.difficulty}`}>
-                      {difficultyLabels[scenario.difficulty]}
+                      {getDifficultyLabel(scenario.difficulty, tr)}
                     </span>
-                    <span>{categoryLabels[scenario.category]}</span>
+                    <span>{getCategoryLabel(scenario.category, tr)}</span>
                     {scenario.required && <span className="required">{tr('必练', 'Required')}</span>}
                   </div>
                   <h2>{scenario.title}</h2>
@@ -373,38 +390,24 @@ export default function ScenarioTrainingPage() {
                   {scenario.status === 'completed' && <CheckCircle2 size={14} />}
                   {scenario.status === 'in_progress' && <Clock3 size={14} />}
                   {scenario.status === 'not_started' && <ShieldCheck size={14} />}
-                  {statusLabels[scenario.status]}
+                  {scenario.status === 'failed' && <AlertCircle size={14} />}
+                  {getStatusLabel(scenario.status, tr)}
                 </span>
               </div>
 
-              <p className="scenario-training-desc">{scenario.description}</p>
-
-              <div className="scenario-training-customer">
-                <UserRound size={16} />
-                <span>{scenario.customerProfile}</span>
-              </div>
-
-              <blockquote>{scenario.openingLine}</blockquote>
-
-              <div className="scenario-training-meta">
-                <span>
+              <div className="scenario-training-card-status">
+                <span aria-label={tr('分数', 'Score')}>
                   <Trophy size={14} />
                   {typeof scenario.score === 'number'
-                    ? `${scenario.score} 分`
+                    ? tr('{score} 分', '{score} pts', { score: scenario.score })
                     : scenario.scoreStatus === 'pending' && scenario.status === 'completed'
                       ? tr('评分中', 'Scoring')
                       : tr('暂无分数', 'No score')}
                 </span>
-                <span>
+                <span aria-label={tr('最近练习', 'Last practiced')}>
                   <Clock3 size={14} />
-                  {formatDate(scenario.lastPracticedAt)}
+                  {formatDate(scenario.lastPracticedAt, locale, tr)}
                 </span>
-              </div>
-
-              <div className="scenario-training-points">
-                {scenario.trainingPoints.map((point) => (
-                  <span key={point}>{point}</span>
-                ))}
               </div>
 
               <div className="scenario-training-actions">

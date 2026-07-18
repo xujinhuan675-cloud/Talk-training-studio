@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from domain.training_studio.session import TrainingSession
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
 from application.services.training_studio.live_guidance_service import (
@@ -231,12 +232,34 @@ class TrainingCoreOrchestrator:
         payload: CreateTrainingSessionDTO | TrainingTaskConfigDTO | dict,
     ) -> StartedTrainingSession:
         session = await self._session_service.create_session(payload)
+        return await self._start_existing_session(session)
+
+    async def start_existing_session(
+        self,
+        session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> StartedTrainingSession:
+        session = await self._session_service.get_session(
+            _normalize_required_text(session_id, "session_id"),
+            access_scope=access_scope,
+        )
+        return await self._start_existing_session(session, access_scope=access_scope)
+
+    async def _start_existing_session(
+        self,
+        session: TrainingSession,
+        *,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> StartedTrainingSession:
         conversation = _require_conversation_ref(
             await self._conversation_adapter.create_conversation(session)
         )
         started = await self._session_service.start_session(
             session.session_id,
             room_id=conversation.session_room_id,
+            metadata=conversation.metadata,
+            access_scope=access_scope,
         )
         return StartedTrainingSession(session=started, conversation=conversation)
 

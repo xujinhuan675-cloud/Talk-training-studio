@@ -9,7 +9,6 @@ import {
   Loader2,
   Lock,
   MessageSquare,
-  Radio,
   Swords,
   Target,
   TrendingUp,
@@ -45,6 +44,10 @@ function getAvatarColor(id: string | number): string {
 
 function getInitial(name: string): string {
   return name.charAt(0)
+}
+
+function formatXp(value: number, tr: TranslateInline): string {
+  return tr('+{count} 经验', '+{count} XP', { count: value })
 }
 
 function timeAgo(dateStr: string | null, tr: TranslateInline): string {
@@ -111,8 +114,15 @@ const HomePage: React.FC = () => {
   }, [])
 
   const recentRooms = rooms.slice(0, 4)
+  const latestRoom = recentRooms[0]
   const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
   const dailyProgressPercent = Math.round(dailyChallenge.progress * 100)
+  const dailyXpLabel = formatXp(dailyChallenge.xp, tr)
+  const operatorLabel = currentUser?.teamName ?? currentUser?.name ?? tr('模拟用户', 'Mock user')
+  const dailyStatusLabel = dailyStarting ? tr('启动中', 'Starting') : tr('可开始', 'Ready')
+  const latestRoomTime = latestRoom
+    ? (timeAgo(latestRoom.last_message_at, tr) || tr('暂无时间', 'No time'))
+    : tr('没有可继续的对话', 'No active conversation')
 
   const startDailyChallenge = async () => {
     const scenario = getScenarioTrainingCardById(dailyChallenge.scenarioId)
@@ -173,47 +183,26 @@ const HomePage: React.FC = () => {
     <PageShell className="home-page" width="wide">
       <PageHeader
         icon={<Target size={16} />}
-        eyebrow={tr('沟通训练工作台', 'Communication training workspace')}
-        title={tr('从目标进入训练，再把复盘变成下一次练习', 'Start with a goal, practice, then turn review into the next drill')}
-        description={tr(
-          '主线围绕场景训练、AI 对话、实时提示、训练复盘和成长路径组织。自由聊天和专项准备保留为辅助入口。',
-          'The main loop is organized around scenario practice, AI conversation, live guidance, review, and growth. Free chat and special prep remain secondary entry points.',
-        )}
-        actions={(
-          <>
-            <Button asChild variant="primary">
-              <Link to="/scenario-training">
-                <ClipboardList size={15} />
-                {tr('选择训练场景', 'Choose scenario')}
-              </Link>
-            </Button>
-            <Button asChild variant="ghost">
-              <Link to="/training-history">
-                <History size={15} />
-                {tr('查看复盘', 'Review history')}
-              </Link>
-            </Button>
-          </>
-        )}
+        eyebrow={t('nav.home')}
+        title={tr('训练工作台', 'Training workbench')}
+        description={tr('查看推荐、未完成对话和能力进度后直接进入下一步。', 'Check recommendations, unfinished conversations, and skill progress before taking the next action.')}
         stats={(
           <PageStatGrid
             stats={[
               {
-                label: tr('主线入口', 'Primary path'),
-                value: t('nav.scenarioTraining'),
-                detail: tr('目标 -> 对话 -> 复盘', 'Goal -> chat -> review'),
+                label: tr('推荐状态', 'Recommendation'),
+                value: dailyStatusLabel,
                 tone: 'success',
               },
               {
-                label: tr('今日推荐', 'Today'),
-                value: `+${dailyChallenge.xp} XP`,
-                detail: tr(dailyChallenge.titleZh, dailyChallenge.titleEn),
+                label: tr('可继续房间', 'Continuable rooms'),
+                value: rooms.length,
+                detail: latestRoomTime,
                 tone: 'warning',
               },
               {
-                label: tr('最近房间', 'Recent rooms'),
-                value: rooms.length,
-                detail: currentUser?.teamName ?? currentUser?.name ?? tr('模拟用户', 'Mock user'),
+                label: tr('当前身份', 'Current identity'),
+                value: operatorLabel,
                 tone: 'accent',
               },
             ]}
@@ -225,33 +214,40 @@ const HomePage: React.FC = () => {
         <Surface className="home-primary-session" variant="accent" padding="lg">
           <div className="home-primary-session-head">
             <div>
-              <Badge tone="success">{tr('推荐训练', 'Recommended drill')}</Badge>
+              <Badge tone="success">{tr('下一步', 'Next action')}</Badge>
               <h2>{tr(dailyChallenge.titleZh, dailyChallenge.titleEn)}</h2>
             </div>
-            <Badge tone="warning">+{dailyChallenge.xp} XP</Badge>
+            <Badge tone="warning">{dailyXpLabel}</Badge>
           </div>
 
-          <div className="home-mode-strip" aria-label={tr('支持的训练方式', 'Supported practice modes')}>
-            <span>
-              <MessageSquare size={14} />
-              {tr('文本', 'Text')}
-            </span>
-            <span>
-              <Radio size={14} />
-              {tr('语音/实时', 'Voice/realtime')}
-            </span>
-            <span>
-              <TrendingUp size={14} />
-              {tr('复盘成长', 'Review growth')}
-            </span>
+          <div className="home-status-grid">
+            <div className="home-status-card">
+              <span>{tr('完成进度', 'Completion')}</span>
+              <strong>{dailyProgressPercent}%</strong>
+            </div>
+            <div className="home-status-card">
+              <span>{tr('训练方式', 'Practice mode')}</span>
+              <strong>{tr('文本对话', 'Text chat')}</strong>
+            </div>
+            <div className="home-status-card">
+              <span>{tr('记录范围', 'Record scope')}</span>
+              <strong>{operatorLabel}</strong>
+            </div>
           </div>
 
           <div className="home-progress-block">
             <div className="home-progress-copy">
-              <span>{tr('建议进度', 'Suggested progress')}</span>
+              <span>{tr('推荐训练进度', 'Recommended drill progress')}</span>
               <strong>{dailyProgressPercent}%</strong>
             </div>
-            <div className="home-progress-track">
+            <div
+              className="home-progress-track"
+              role="progressbar"
+              aria-label={tr('推荐训练进度', 'Recommended drill progress')}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={dailyProgressPercent}
+            >
               <span style={{ width: `${dailyProgressPercent}%` }} />
             </div>
           </div>
@@ -268,7 +264,7 @@ const HomePage: React.FC = () => {
             </Button>
             <Button asChild variant="secondary">
               <Link to="/scenario-training">
-                {tr('浏览全部场景', 'Browse scenarios')}
+                {tr('更换场景', 'Change scenario')}
                 <ChevronRight size={15} />
               </Link>
             </Button>
@@ -279,45 +275,71 @@ const HomePage: React.FC = () => {
           )}
         </Surface>
 
-        <Surface className="home-loop-panel" variant="raised" padding="lg">
-          <div className="home-loop-head">
-            <Badge tone="neutral">{tr('训练闭环', 'Training loop')}</Badge>
-            <h2>{tr('本次练习应如何完成', 'How this practice should complete')}</h2>
+        <Surface className="home-task-panel" variant="raised" padding="lg">
+          <div className="home-task-head">
+            <Badge tone="neutral">{tr('待处理', 'Queue')}</Badge>
+            <h2>{tr('从状态进入下一步', 'Move from status to action')}</h2>
           </div>
-          <ol className="home-loop-list">
-            <li className="active">
-              <span>1</span>
-              <div>
-                <strong>{tr('选择目标和场景', 'Choose goal and scenario')}</strong>
+          <div className="home-task-list">
+            {latestRoom ? (
+              <Link to={`/chat/${latestRoom.id}`} className="home-task-item">
+                <span className="home-task-icon success">
+                  <MessageSquare size={17} />
+                </span>
+                <div>
+                  <strong>{tr('继续对话', 'Continue conversation')}</strong>
+                  <em>{latestRoom.name}</em>
+                </div>
+                <ChevronRight size={15} />
+              </Link>
+            ) : (
+              <div className="home-task-item is-disabled" aria-disabled="true">
+                <span className="home-task-icon muted">
+                  <MessageSquare size={17} />
+                </span>
+                <div>
+                  <strong>{tr('继续对话', 'Continue conversation')}</strong>
+                  <em>{tr('新训练会生成记录', 'New practice will create a record')}</em>
+                </div>
               </div>
-            </li>
-            <li>
-              <span>2</span>
+            )}
+
+            <Link to="/training-history" className="home-task-item">
+              <span className="home-task-icon warning">
+                <History size={17} />
+              </span>
               <div>
-                <strong>{tr('进入多模态对话', 'Enter multimodal conversation')}</strong>
+                <strong>{t('nav.trainingHistory')}</strong>
+                <em>{tr('查看训练复盘', 'Open training reviews')}</em>
               </div>
-            </li>
-            <li>
-              <span>3</span>
+              <ChevronRight size={15} />
+            </Link>
+
+            <Link to="/growth" className="home-task-item">
+              <span className="home-task-icon accent">
+                <TrendingUp size={17} />
+              </span>
               <div>
-                <strong>{tr('复盘并继续训练', 'Review and continue')}</strong>
+                <strong>{t('nav.growth')}</strong>
+                <em>{tr('检查能力进度', 'Check skill progress')}</em>
               </div>
-            </li>
-          </ol>
+              <ChevronRight size={15} />
+            </Link>
+          </div>
         </Surface>
       </div>
 
       <PageSection
-        title={tr('训练入口', 'Training entry points')}
+        title={tr('功能区', 'Function area')}
       >
-        <div className="home-entry-grid" aria-label={tr('训练入口', 'Training entry points')}>
+        <div className="home-entry-grid">
           <Link to="/scenario-training" className="home-entry-card primary">
             <span className="home-entry-icon success">
               <ClipboardList size={19} />
             </span>
             <div>
-              <Badge tone="success">{t('nav.scenarioTraining')}</Badge>
-              <strong>{tr('按业务场景开练', 'Practice by business scenario')}</strong>
+              <Badge tone="success">{tr('主线功能', 'Primary function')}</Badge>
+              <strong>{t('nav.scenarioTraining')}</strong>
             </div>
             <ChevronRight size={16} />
           </Link>
@@ -327,8 +349,8 @@ const HomePage: React.FC = () => {
               <MessageSquare size={19} />
             </span>
             <div>
-              <Badge>{tr('辅助入口', 'Secondary')}</Badge>
-              <strong>{tr('开放式沟通模拟', 'Open communication simulation')}</strong>
+              <Badge>{tr('自由模拟', 'Open simulation')}</Badge>
+              <strong>{t('nav.chat')}</strong>
             </div>
             <ChevronRight size={16} />
           </Link>
@@ -338,23 +360,23 @@ const HomePage: React.FC = () => {
               <FileText size={19} />
             </span>
             <div>
-              <Badge tone="violet">{tr('专项准备', 'Special prep')}</Badge>
-              <strong>{tr('模拟答辩演练', 'Mock defense practice')}</strong>
+              <Badge tone="violet">{tr('专项功能', 'Specialized')}</Badge>
+              <strong>{tr('答辩准备', 'Defense prep')}</strong>
             </div>
             <ChevronRight size={16} />
           </Link>
 
           {canUseManagementActions && (
             <Link to="/battle-prep" className="home-entry-card">
-            <span className="home-entry-icon warning">
-              <Swords size={19} />
-            </span>
-            <div>
-              <Badge tone="warning">{t('nav.battlePrep')}</Badge>
-              <strong>{tr('30 分钟快速演练', '30-minute fast drill')}</strong>
-            </div>
-            <ChevronRight size={16} />
-          </Link>
+              <span className="home-entry-icon warning">
+                <Swords size={19} />
+              </span>
+              <div>
+                <Badge tone="warning">{tr('管理权限', 'Management role')}</Badge>
+                <strong>{t('nav.battlePrep')}</strong>
+              </div>
+              <ChevronRight size={16} />
+            </Link>
           )}
         </div>
       </PageSection>
@@ -362,11 +384,11 @@ const HomePage: React.FC = () => {
       <div className="home-review-grid">
         <PageSection
           className="home-recent-section"
-          title={tr('最近对话', 'Recent conversations')}
+          title={tr('对话记录', 'Conversation log')}
           actions={(
             <Button asChild variant="ghost" size="sm">
               <Link to="/chat">
-                {tr('查看全部', 'View all')}
+                {tr('全部房间', 'All rooms')}
                 <ChevronRight size={14} />
               </Link>
             </Button>
@@ -375,7 +397,7 @@ const HomePage: React.FC = () => {
           <Surface className="home-recent-surface" padding="sm">
             {recentRooms.length === 0 ? (
               <div className="home-empty-block">
-                <p>{tr('还没有对话记录', 'No conversations yet')}</p>
+                <p>{tr('暂无对话记录', 'No conversation records')}</p>
                 <Button asChild variant="secondary" size="sm">
                   <Link to="/scenario-training">{tr('开始第一次训练', 'Start first practice')}</Link>
                 </Button>
@@ -409,11 +431,11 @@ const HomePage: React.FC = () => {
 
         <PageSection
           className="home-skill-section"
-          title={tr('能力路径', 'Skill path')}
+          title={tr('能力进度', 'Skill progress')}
           actions={(
             <Button asChild variant="ghost" size="sm">
               <Link to="/growth">
-                {tr('展开', 'Expand')}
+                {t('nav.growth')}
                 <ChevronRight size={14} />
               </Link>
             </Button>

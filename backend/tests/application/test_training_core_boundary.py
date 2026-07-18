@@ -382,6 +382,50 @@ async def test_training_core_starts_session_with_runtime_conversation_binding():
     assert result.conversation.conversation_id == "conversation-session-1"
 
 
+@pytest.mark.asyncio
+async def test_training_core_starts_existing_session_with_branch_review_metadata():
+    runtime_metadata = {
+        "runtime": "conversation_message_tree",
+        **training_branch_metadata(
+            branch_id="branch-review",
+            branch_tail_message_id="msg-tail",
+            selected_message_ids=["msg-root"],
+        ),
+    }
+    adapter = FakeConversationAdapter(
+        provider="talkwise-conversation",
+        legacy_room_id=None,
+        metadata=runtime_metadata,
+    )
+    session_service = TrainingSessionService(id_factory=lambda: "session-existing")
+    existing = await session_service.create_session(
+        {
+            **_task_config().model_dump(),
+            "metadata": {"source": "scenario_training"},
+        }
+    )
+    orchestrator = TrainingCoreOrchestrator(
+        session_service=session_service,
+        conversation_adapter=adapter,
+    )
+
+    started = await orchestrator.start_existing_session(" session-existing ")
+    runtime_metadata["selectedPath"]["tailMessageId"] = "mutated"
+
+    assert started.session.session_id == existing.session_id
+    assert started.session.room_id == "talkwise-conversation:conversation-session-existing"
+    assert started.conversation.provider == "talkwise-conversation"
+    assert started.conversation.conversation_id == "conversation-session-existing"
+    assert started.session.task_config.metadata["source"] == "scenario_training"
+    assert started.session.task_config.metadata["runtime"] == "conversation_message_tree"
+    assert started.session.task_config.metadata["selectedPath"]["tailMessageId"] == "msg-tail"
+    assert started.session.task_config.metadata["selectedPath"]["affectsScoring"] is False
+    assert started.session.task_config.metadata["currentBranchTail"] == {
+        "branchId": "branch-review",
+        "messageId": "msg-tail",
+    }
+
+
 @pytest.mark.parametrize(
     ("provider", "legacy_room_id", "expected_room_id", "metadata"),
     [

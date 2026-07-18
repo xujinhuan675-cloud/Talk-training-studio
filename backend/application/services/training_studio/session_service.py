@@ -181,6 +181,7 @@ class TrainingSessionService:
         session_id: str,
         room_id: str | None = None,
         *,
+        metadata: Mapping[str, object] | None = None,
         access_scope: TrainingSessionAccessScope | None = None,
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
@@ -189,6 +190,7 @@ class TrainingSessionService:
             if self._room_creator is None:
                 raise ValueError("room_creator is required when room_id is not provided")
             resolved_room_id = self._room_creator(session)
+        _merge_task_config_metadata(session, metadata)
         session.start(resolved_room_id)
         return await self._save(session)
 

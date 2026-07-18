@@ -117,7 +117,12 @@ from application.services.training_studio.session_service import (
     TrainingSessionDTO,
     TrainingSessionService,
 )
-from application.services.training_studio.training_core import training_core_metadata_for_session
+from application.services.training_studio.training_core import (
+    ConversationRef,
+    StartedTrainingSession,
+    TrainingCoreOrchestrator,
+    training_core_metadata_for_session,
+)
 from core.config import LLMSettings, VoiceSettings, settings
 from core.response import success_response
 from domain.common.exceptions import DomainValidationException
@@ -127,6 +132,7 @@ from domain.training_studio.catalog import ScenarioCategory
 from domain.training_studio.session import TrainingSessionStatus
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 from domain.training_studio.storybank import JsonFileStoryBankStore, StoryBankService
+from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
 router = APIRouter(prefix="/training-studio", tags=["Training Studio"])
@@ -164,6 +170,14 @@ _TRAINING_GUIDANCE_SENDER_ID = "training_coach"
 _ENV_ASSIGNMENT_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 _VOICE_TTS_PROVIDERS = {"minimax", "elevenlabs", "openrouter"}
 _VOICE_STT_PROVIDERS = {"minimax", "whisper"}
+_TEXT_MESSAGE_TREE_RUNTIME = "conversation_message_tree"
+_TEXT_MESSAGE_TREE_PROVIDER = ConversationTrainingConversationAdapter.provider
+_TEXT_MESSAGE_TREE_OPT_IN_VALUES = {
+    _TEXT_MESSAGE_TREE_RUNTIME,
+    _TEXT_MESSAGE_TREE_PROVIDER,
+    "message_tree",
+    "conversation_tree",
+}
 
 
 class VoicePreferenceConfigDTO(BaseModel):
@@ -533,8 +547,12 @@ def get_live_guidance_service() -> TrainingLiveGuidanceService:
     return _live_guidance_llm_service
 
 
-def get_training_realtime_uow_factory() -> Callable[..., AbstractUnitOfWork]:
+def get_training_runtime_uow_factory() -> Callable[..., AbstractUnitOfWork]:
     return SQLAlchemyUnitOfWork
+
+
+def get_training_realtime_uow_factory() -> Callable[..., AbstractUnitOfWork]:
+    return get_training_runtime_uow_factory()
 
 
 def get_training_realtime_openai_factory() -> Callable[[], OpenAIRealtimeTranscriptionClient]:
@@ -616,6 +634,8 @@ class StartTrainingSessionDTO(BaseModel):
     room_name: str | None = Field(default=None, min_length=1, max_length=255)
     room_type: str = Field(default="battle_prep", pattern=r"^(private|group|battle_prep|defense)$")
     scenario_id: int | None = None
+    runtime: str | None = Field(default=None, min_length=1, max_length=80)
+    provider: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class CompleteTrainingSessionDTO(BaseModel):
@@ -669,6 +689,34 @@ def _storybank_entry_to_dict(entry) -> dict:
 
 def _session_to_dict(session) -> dict:
     return TrainingSessionDTO.from_domain(session).model_dump(mode="json")
+
+
+def _started_training_session_to_dict(started: StartedTrainingSession) -> dict:
+    payload = _session_to_dict(started.session)
+    payload["conversation"] = _conversation_ref_to_dict(started.conversation)
+    return payload
+
+
+def _conversation_ref_to_dict(conversation: ConversationRef) -> dict[str, object]:
+    return {
+        "provider": conversation.provider,
+        "conversationId": conversation.conversation_id,
+        "branchTailMessageId": conversation.branch_tail_message_id,
+        "legacyRoomId": conversation.legacy_room_id,
+        "metadata": dict(conversation.metadata),
+    }
+
+
+def _requests_message_tree_runtime(body: StartTrainingSessionDTO) -> bool:
+    requested = [
+        _coerce_optional_text(body.runtime),
+        _coerce_optional_text(body.provider),
+    ]
+    return any(
+        str(value).strip().lower() in _TEXT_MESSAGE_TREE_OPT_IN_VALUES
+        for value in requested
+        if value
+    )
 
 
 def _not_found_if_missing(exc: ValueError) -> HTTPException:
@@ -2029,13 +2077,42 @@ async def start_training_session(
     body: StartTrainingSessionDTO,
     svc: TrainingSessionService = Depends(get_training_session_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_runtime_uow_factory),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = _training_session_access_scope_for_current_user(current_user)
     session = await _require_accessible_training_session(
         session_id,
         svc=svc,
         current_user=current_user,
     )
+
+    if _requests_message_tree_runtime(body):
+        mode = str(getattr(session.mode, "value", session.mode)).strip().lower()
+        if mode != "text":
+            raise HTTPException(
+                status_code=422,
+                detail="conversation_message_tree runtime is only available for text sessions",
+            )
+        if body.room_id is not None and str(body.room_id).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="room_id cannot be provided when starting a conversation_message_tree session",
+            )
+        orchestrator = TrainingCoreOrchestrator(
+            session_service=svc,
+            conversation_adapter=ConversationTrainingConversationAdapter(uow_factory),
+        )
+        try:
+            started = await orchestrator.start_existing_session(
+                session_id,
+                access_scope=access_scope,
+            )
+        except PermissionError as exc:
+            raise _session_access_denied(exc) from exc
+        except ValueError as exc:
+            raise _not_found_if_missing(exc) from exc
+        return success_response(data=_started_training_session_to_dict(started))
 
     room_id = str(body.room_id).strip() if body.room_id is not None else ""
     if not room_id:
@@ -2061,7 +2138,7 @@ async def start_training_session(
         started = await svc.start_session(
             session_id,
             room_id=room_id,
-            access_scope=_training_session_access_scope_for_current_user(current_user),
+            access_scope=access_scope,
         )
     except PermissionError as exc:
         raise _session_access_denied(exc) from exc

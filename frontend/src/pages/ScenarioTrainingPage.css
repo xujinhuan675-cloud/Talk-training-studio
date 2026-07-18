@@ -4,80 +4,6 @@
   color: var(--text-primary);
 }
 
-.scenario-training-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 24px;
-  align-items: end;
-  margin: 0 auto 18px;
-  max-width: var(--page-max-width);
-}
-
-.scenario-training-title-block {
-  min-width: 0;
-}
-
-.scenario-training-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 8px;
-  color: var(--green);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.scenario-training-title-block h1 {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.18;
-  font-weight: 800;
-  letter-spacing: 0;
-}
-
-.scenario-training-title-block p {
-  max-width: 760px;
-  margin: 9px 0 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.scenario-training-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(92px, 1fr));
-  gap: 8px;
-  min-width: 330px;
-}
-
-.scenario-training-summary div {
-  min-height: 68px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--bg-card);
-}
-
-.scenario-training-summary span {
-  color: var(--text-primary);
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.1;
-}
-
-.scenario-training-summary small {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .scenario-training-toolbar,
 .scenario-training-error,
 .scenario-training-grid,
@@ -138,6 +64,14 @@
   align-items: center;
   gap: 4px;
   padding: 4px;
+}
+
+.scenario-training-mode-label {
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .scenario-training-mode button {
@@ -214,8 +148,7 @@
 
 .scenario-training-card-tags span,
 .scenario-training-status,
-.scenario-training-meta span,
-.scenario-training-points span {
+.scenario-training-card-status span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -284,65 +217,25 @@
   color: var(--amber);
 }
 
-.scenario-training-desc {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.55;
+.scenario-training-status.failed {
+  border-color: rgba(199, 91, 91, 0.28);
+  background: var(--rose-soft);
+  color: var(--rose);
 }
 
-.scenario-training-customer {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  border-left: 3px solid var(--green);
-  padding-left: 10px;
-  color: var(--text-primary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.scenario-training-customer svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--green);
-}
-
-.scenario-training-card blockquote {
-  margin: 0;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: 11px 12px;
-  background: var(--bg-base);
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.scenario-training-meta {
+.scenario-training-card-status {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
 }
 
-.scenario-training-meta span {
+.scenario-training-card-status span {
   background: var(--bg-base);
   color: var(--text-secondary);
 }
 
-.scenario-training-meta span:first-child {
+.scenario-training-card-status span:first-child {
   color: var(--amber);
-}
-
-.scenario-training-points {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.scenario-training-points span {
-  background: rgba(45, 156, 111, 0.08);
-  color: var(--green);
 }
 
 .scenario-training-actions {
@@ -409,23 +302,12 @@
 }
 
 @media (max-width: 980px) {
-  .scenario-training-hero,
   .scenario-training-toolbar {
     grid-template-columns: 1fr;
-  }
-
-  .scenario-training-summary {
-    width: 100%;
-    min-width: 0;
   }
 }
 
 @media (max-width: 720px) {
-  .scenario-training-title-block h1 {
-    font-size: 23px;
-  }
-
-  .scenario-training-summary,
   .scenario-training-grid {
     grid-template-columns: 1fr;
   }

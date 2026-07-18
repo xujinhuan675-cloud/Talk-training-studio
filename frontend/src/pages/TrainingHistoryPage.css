@@ -6,6 +6,7 @@
 
 .training-history-hero,
 .training-history-toolbar,
+.training-history-filter-summary,
 .training-history-alerts,
 .training-history-list {
   max-width: var(--page-max-width);
@@ -93,7 +94,7 @@
   grid-template-columns: minmax(260px, 1fr) minmax(190px, auto) minmax(160px, auto);
   gap: 10px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .training-history-search,
@@ -130,6 +131,66 @@
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
+}
+
+.training-history-filter-summary {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.training-history-filter-summary div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.training-history-filter-summary span,
+.training-history-filter-summary strong {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+  padding: 0 8px;
+}
+
+.training-history-filter-summary span {
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 850;
+}
+
+.training-history-filter-summary strong {
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-weight: 800;
+}
+
+.training-history-filter-summary button {
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.training-history-filter-summary button:hover {
+  border-color: var(--green);
+  color: var(--green);
 }
 
 .training-history-alerts {
@@ -467,6 +528,11 @@
     grid-template-columns: 1fr;
   }
 
+  .training-history-filter-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .training-history-summary {
     width: 100%;
     min-width: 0;
@@ -484,7 +550,8 @@
 
   .training-history-actions,
   .training-history-actions a,
-  .training-history-actions span {
+  .training-history-actions span,
+  .training-history-filter-summary button {
     width: 100%;
   }
 }

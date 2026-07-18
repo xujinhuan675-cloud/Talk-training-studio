@@ -336,3 +336,21 @@ git diff --cached --check
 
 - `text runtime start path` 仍然是下一块更值钱的生产性切片
 - `Pipecat readiness helper` 和纯 `API isolation` 先作为补强项保留
+## 2026-07-18 text runtime start path
+
+本轮已完成：
+- `POST /training-studio/sessions/{id}/start` 在 `runtime=conversation_message_tree` / provider alias 下进入 `TrainingCoreOrchestrator.start_existing_session`
+- `TrainingSessionService.start_session` 支持 `metadata`，可把 conversation branch / replay metadata 写回 `task_config.metadata`
+- `ConversationTrainingConversationAdapter` 过滤 task_config 里的 owner/team 伪造字段，并用 session 的 `user_id/team_id` 重写 `ownerUserId` / `teamId` / `authScope`
+- 相关覆盖已落在 session service、training core、conversation adapter 和 API start path
+
+当前判断：
+- 文本 conversation / message tree: 60-70%
+- auth / ACL: 50-60%
+- Pipecat realtime: 45-55%
+- MCP / Agent: 15-20%
+
+下一步：
+1. 单独收敛 Pipecat readiness / error helper
+2. 再补 conversation child-route auth matrix
+3. 如有需要，再把前端启动入口显式切到 `runtime=conversation_message_tree`

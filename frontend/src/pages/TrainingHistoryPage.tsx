@@ -117,7 +117,7 @@ function translatedRecordLabel(
   return label ? translateLabel(label, tr) : value
 }
 
-function getErrorMessage(error: unknown, fallback = 'Request failed'): string {
+function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
@@ -242,6 +242,17 @@ function historyBranchSummaryText(info: TrainingConversationBranchInfo, tr: Tran
     })
   }
   return ''
+}
+
+function historyEntryMetaText(entry: HistoryEntry, tr: TranslateInline): string {
+  const source = translateLabel(sourceLabels[entry.source], tr)
+  if (typeof entry.messageCount === 'number') {
+    return tr('{source} · {count} 条消息', '{source} · {count} messages', {
+      source,
+      count: entry.messageCount,
+    })
+  }
+  return source
 }
 
 function gradeKey(score?: number): string {
@@ -479,28 +490,45 @@ export default function TrainingHistoryPage() {
     () => entries.filter((entry) => matchesEntry(entry, query, scenarioFilter, statusFilter)),
     [entries, query, scenarioFilter, statusFilter],
   )
-  const completedCount = entries.filter((entry) => entry.status === 'completed').length
+  const completedCount = filteredEntries.filter((entry) => entry.status === 'completed').length
+  const reviewableCount = filteredEntries.filter((entry) => entry.sessionId).length
   const scoredEntries = entries.filter((entry) => entry.score !== undefined)
   const averageScore = scoredEntries.length
     ? Math.round(scoredEntries.reduce((sum, entry) => sum + (entry.score ?? 0), 0) / scoredEntries.length)
     : undefined
+  const hasActiveFilters = Boolean(query.trim()) || scenarioFilter !== 'all' || statusFilter !== 'all'
+  const selectedScenarioLabel = scenarioFilter === 'all'
+    ? tr('全部场景', 'All scenarios')
+    : scenarioOptions.find((option) => option.value === scenarioFilter)?.label ?? scenarioFilter
+  const selectedStatusLabel = statusFilter === 'all'
+    ? tr('全部状态', 'All statuses')
+    : translateLabel(statusLabels[statusFilter], tr)
+  const resetFilters = () => {
+    setQuery('')
+    setScenarioFilter('all')
+    setStatusFilter('all')
+  }
 
   return (
     <PageShell width="wide" className="training-history-page">
       <PageHeader
         eyebrow={tr('训练记录', 'Training history')}
         icon={<History size={16} />}
-        title={tr('复盘场景练习结果', 'Review scenario practice results')}
+        title={tr('筛选可复盘记录', 'Filter reviewable records')}
         description={tr(
-          '按场景、状态或关键词筛选训练记录，分支信息只保留一次。',
-          'Filter records by scenario, status, or keyword, with branch details shown once.',
+          '按场景、状态和关键词定位记录，再进入复盘或对话回放。',
+          'Find records by scenario, status, and keyword, then open the review or replay.',
         )}
         stats={(
           <PageStatGrid
             stats={[
               {
-                label: tr('总记录', 'Total records'),
-                value: entries.length,
+                label: tr('匹配记录', 'Matching records'),
+                value: filteredEntries.length,
+              },
+              {
+                label: tr('可复盘', 'Reviewable'),
+                value: reviewableCount,
               },
               {
                 label: tr('已完成', 'Completed'),
@@ -555,6 +583,20 @@ export default function TrainingHistoryPage() {
         </label>
       </section>
 
+      <section className="training-history-filter-summary" aria-label={tr('当前筛选', 'Current filters')}>
+        <div>
+          <span>{tr('{count} 条匹配记录', '{count} matching records', { count: filteredEntries.length })}</span>
+          <strong>{selectedScenarioLabel}</strong>
+          <strong>{selectedStatusLabel}</strong>
+          {query.trim() && <strong>{tr('关键词：{query}', 'Keyword: {query}', { query: query.trim() })}</strong>}
+        </div>
+        {hasActiveFilters && (
+          <button type="button" onClick={resetFilters}>
+            {tr('清空筛选', 'Clear filters')}
+          </button>
+        )}
+      </section>
+
       {(sessionError || progressError) && (
         <section className="training-history-alerts">
           {sessionError && (
@@ -578,7 +620,7 @@ export default function TrainingHistoryPage() {
           <span>{tr('场景', 'Scenario')}</span>
           <span>{tr('状态', 'Status')}</span>
           <span>{tr('分数', 'Score')}</span>
-          <span>{tr('回放', 'Replay')}</span>
+          <span>{tr('操作', 'Actions')}</span>
         </div>
 
         {loading && (
@@ -613,7 +655,7 @@ export default function TrainingHistoryPage() {
               <div className="training-history-scenario">
                 <div>
                   <strong>{entry.title}</strong>
-                  <span>{entry.description || entry.sessionId || tr('本地进度记录', 'Local progress record')}</span>
+                  <span>{historyEntryMetaText(entry, tr)}</span>
                 </div>
                 <div className="training-history-tags">
                   {entry.difficulty && (
@@ -676,10 +718,10 @@ export default function TrainingHistoryPage() {
               <div className="training-history-actions">
                 {entry.sessionId ? (
                   <Link to={`/training-result/${encodeURIComponent(entry.sessionId)}`}>
-                    {tr('结果', 'Result')}
+                    {tr('复盘', 'Review')}
                   </Link>
                 ) : (
-                  <span>{tr('无会话', 'No session')}</span>
+                  <span>{tr('仅进度', 'Progress only')}</span>
                 )}
                 {chatPath && (
                   <Link to={chatPath} title={tr('打开聊天回放', 'Open chat replay')} aria-label={tr('打开聊天回放', 'Open chat replay')}>

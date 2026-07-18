@@ -427,6 +427,69 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
 
 
 @pytest.mark.asyncio
+async def test_conversation_adapter_stamps_session_auth_metadata_over_task_metadata() -> None:
+    state = _ConversationState()
+    adapter = ConversationTrainingConversationAdapter(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs),
+        default_model="gpt-training",
+    )
+    orchestrator = TrainingCoreOrchestrator(
+        session_service=TrainingSessionService(id_factory=lambda: "training-text-auth"),
+        conversation_adapter=adapter,
+    )
+    base_task_config = _task_config()
+    task_config = base_task_config.model_copy(
+        update={
+            "metadata": {
+                **base_task_config.metadata,
+                "authScope": {"userId": "user-cs-001", "teamId": "team-service"},
+                "ownerUserId": "user-cs-001",
+                "owner_user_id": "user-cs-002",
+                "createdByUserId": "user-cs-003",
+                "created_by_user_id": "user-cs-004",
+                "teamId": "team-service",
+                "team_id": "team-cs-002",
+                "ownerTeamId": "team-cs-003",
+                "owner_team_id": "team-cs-004",
+            },
+        }
+    )
+
+    started = await orchestrator.start_session(
+        CreateTrainingSessionDTO(
+            task_config=task_config,
+            mode="text",
+            user_id=" user-sales-001 ",
+            team_id=" team-revenue ",
+        )
+    )
+
+    metadata = state.conversations[1].metadata
+    assert metadata["ownerUserId"] == "user-sales-001"
+    assert metadata["teamId"] == "team-revenue"
+    assert metadata["authScope"] == {
+        "userId": "user-sales-001",
+        "teamId": "team-revenue",
+    }
+    assert started.conversation.metadata["ownerUserId"] == "user-sales-001"
+    assert started.conversation.metadata["teamId"] == "team-revenue"
+    assert started.conversation.metadata["authScope"] == metadata["authScope"]
+    assert metadata["runtime"] == "conversation_message_tree"
+    assert metadata["branchId"] == "main"
+    assert metadata["branchPolicy"]["owner"] == "training_core"
+    assert metadata["room_name"] == "Renewal practice"
+    for key in (
+        "owner_user_id",
+        "createdByUserId",
+        "created_by_user_id",
+        "team_id",
+        "ownerTeamId",
+        "owner_team_id",
+    ):
+        assert key not in metadata
+
+
+@pytest.mark.asyncio
 async def test_conversation_adapter_model_selection_metadata_cannot_shadow_training_semantics(
 ) -> None:
     state = _ConversationState()
