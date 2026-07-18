@@ -17,6 +17,7 @@ from application.ports.realtime import (
     RealtimeSessionBinding,
     TrainingTranscriptSink,
     TrainingVoiceContext,
+    classify_realtime_pipeline_start_error_message,
     normalize_realtime_runtime,
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
@@ -474,7 +475,7 @@ def _pipeline_start_error(
         metadata.setdefault("realtimeSessionId", realtime_session_id)
 
     if code == "REALTIME_PIPELINE_START_FAILED":
-        fallback = _classify_start_error_message(message)
+        fallback = classify_realtime_pipeline_start_error_message(message)
         if fallback:
             code = str(fallback.pop("code"))
             phase = str(fallback.pop("phase", phase))
@@ -519,60 +520,6 @@ def _realtime_error_from_exception(exc: BaseException) -> dict[str, Any]:
                 data[output_key] = value
     safe_data = sanitize_realtime_public_value(data)
     return dict(safe_data) if isinstance(safe_data, Mapping) else {"message": data["message"]}
-
-
-def _classify_start_error_message(message: str) -> dict[str, Any]:
-    text = message.lower()
-    if "api key is required" in text or "openai api key" in text:
-        return {
-            "code": "MISSING_OPENAI_API_KEY",
-            "phase": "configuration",
-            "missingEnv": ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY"),
-            "feature": _feature_from_error_text(text),
-        }
-    if "stt" in text and "unavailable" in text:
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "pipeline_start",
-            "feature": "stt:openai",
-        }
-    if "tts" in text and "unavailable" in text:
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "pipeline_start",
-            "feature": "tts:openai",
-        }
-    if ("llm" in text or "aggregator" in text) and "unavailable" in text:
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "pipeline_start",
-            "feature": "llm:openai",
-        }
-    if "vad" in text and "unavailable" in text:
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "pipeline_start",
-            "feature": "vad:silero",
-        }
-    if "user turn" in text and "unavailable" in text:
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "pipeline_start",
-            "feature": "turnDetection:pipecat",
-        }
-    if "not importable" in text or ("module" in text and "missing" in text):
-        return {"code": "PIPECAT_MODULE_UNAVAILABLE", "phase": "runtime_import"}
-    return {}
-
-
-def _feature_from_error_text(text: str) -> str | None:
-    if "stt" in text:
-        return "stt:openai"
-    if "tts" in text:
-        return "tts:openai"
-    if "llm" in text:
-        return "llm:openai"
-    return None
 
 
 __all__ = [

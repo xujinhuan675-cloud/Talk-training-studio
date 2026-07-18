@@ -82,11 +82,74 @@ def normalize_realtime_runtime(
     return normalized or realtime_runtime_for_provider(provider)
 
 
+def classify_realtime_pipeline_start_error_message(
+    message: object | None,
+    *,
+    feature_phase: str = "pipeline_start",
+    module_phase: str = "runtime_import",
+) -> dict[str, Any]:
+    """Classify public-safe realtime pipeline start error text."""
+
+    text = str(message or "").lower()
+    if "api key is required" in text or "openai api key" in text:
+        return {
+            "code": "MISSING_OPENAI_API_KEY",
+            "phase": "configuration",
+            "missingEnv": OPENAI_REALTIME_API_KEY_ENV_KEYS,
+            "feature": _realtime_feature_from_error_text(text),
+        }
+    if "stt" in text and ("unavailable" in text or "settings class" in text):
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": feature_phase,
+            "feature": "stt:openai",
+        }
+    if "tts" in text and ("unavailable" in text or "settings class" in text):
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": feature_phase,
+            "feature": "tts:openai",
+        }
+    if ("llm" in text or "aggregator" in text) and (
+        "unavailable" in text or "settings class" in text
+    ):
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": feature_phase,
+            "feature": "llm:openai",
+        }
+    if "vad" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": feature_phase,
+            "feature": "vad:silero",
+        }
+    if "user turn" in text and "unavailable" in text:
+        return {
+            "code": "PIPECAT_FEATURE_UNAVAILABLE",
+            "phase": feature_phase,
+            "feature": "turnDetection:pipecat",
+        }
+    if "not importable" in text or ("module" in text and "missing" in text):
+        return {"code": "PIPECAT_MODULE_UNAVAILABLE", "phase": module_phase}
+    return {}
+
+
 def _metadata_key_forms(key: object) -> tuple[str, str]:
     lowered = str(key).lower()
     snake = "".join(ch if ch.isalnum() else "_" for ch in lowered).strip("_")
     compact = "".join(ch for ch in lowered if ch.isalnum())
     return snake, compact
+
+
+def _realtime_feature_from_error_text(text: str) -> str | None:
+    if "stt" in text:
+        return "stt:openai"
+    if "tts" in text:
+        return "tts:openai"
+    if "llm" in text:
+        return "llm:openai"
+    return None
 
 
 def is_sensitive_realtime_metadata_key(key: object) -> bool:

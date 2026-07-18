@@ -31,6 +31,7 @@ from application.ports.realtime import (
     RealtimeReadinessIssue,
     TrainingVoiceContext,
     build_realtime_readiness,
+    classify_realtime_pipeline_start_error_message,
     normalize_realtime_runtime,
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
@@ -1211,7 +1212,7 @@ def _pipecat_start_error(
             metadata=metadata,
         )
 
-    classified = _classify_pipecat_start_error(message)
+    classified = _classify_pipecat_start_error(message, websocket=websocket)
     return PipecatRealtimePipelineError(
         message,
         code=str(classified.get("code") or "PIPECAT_PIPELINE_START_FAILED"),
@@ -1241,63 +1242,30 @@ def _requested_feature_metadata(config: RealtimePipelineConfig) -> dict[str, str
     }
 
 
-def _classify_pipecat_start_error(message: str) -> dict[str, object]:
-    text = message.lower()
-    if "api key is required" in text or "openai api key" in text:
-        return {
-            "code": "MISSING_OPENAI_API_KEY",
-            "phase": "configuration",
-            "missingEnv": OPENAI_API_KEY_ENV_KEYS,
-            "feature": _feature_from_error_text(text),
-        }
-    if "stt" in text and ("unavailable" in text or "settings class" in text):
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "voice_processor_config",
-            "feature": "stt:openai",
-            "modules": (OPENAI_STT_PIPECAT_MODULE,),
-        }
-    if "tts" in text and ("unavailable" in text or "settings class" in text):
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "voice_processor_config",
-            "feature": "tts:openai",
-            "modules": (OPENAI_TTS_PIPECAT_MODULE,),
-        }
-    if ("llm" in text or "aggregator" in text) and (
-        "unavailable" in text or "settings class" in text
-    ):
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "voice_processor_config",
-            "feature": "llm:openai",
-            "modules": (OPENAI_LLM_PIPECAT_MODULE,),
-        }
-    if "vad" in text and "unavailable" in text:
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "voice_processor_config",
-            "feature": "vad:silero",
-            "modules": (SILERO_VAD_PIPECAT_MODULE, VAD_PROCESSOR_PIPECAT_MODULE),
-        }
-    if "user turn" in text and "unavailable" in text:
-        return {
-            "code": "PIPECAT_FEATURE_UNAVAILABLE",
-            "phase": "voice_processor_config",
-            "feature": "turnDetection:pipecat",
-            "modules": (USER_TURN_PROCESSOR_PIPECAT_MODULE,),
-        }
-    return {}
+def _classify_pipecat_start_error(message: str, *, websocket: bool) -> dict[str, object]:
+    classified = classify_realtime_pipeline_start_error_message(
+        message,
+        feature_phase="voice_processor_config",
+    )
+    if not classified:
+        return {}
+
+    feature = str(classified.get("feature") or "")
+    code = str(classified.get("code") or "")
+    if code == "PIPECAT_MODULE_UNAVAILABLE":
+        modules = _missing_modules_for_start_error(websocket)
+    else:
+        modules = _pipecat_start_error_modules(feature)
+    if modules:
+        classified["modules"] = modules
+    return classified
 
 
-def _feature_from_error_text(text: str) -> str | None:
-    if "stt" in text:
-        return "stt:openai"
-    if "tts" in text:
-        return "tts:openai"
-    if "llm" in text:
-        return "llm:openai"
-    return None
+def _pipecat_start_error_modules(feature: str) -> tuple[str, ...]:
+    feature_name = feature.split(":", 1)[0] if feature else ""
+    if feature_name in PIPECAT_FEATURE_MODULE_HINTS:
+        return tuple(PIPECAT_FEATURE_MODULE_HINTS[feature_name])
+    return ()
 
 
 def _pipecat_feature_unavailable_error(
