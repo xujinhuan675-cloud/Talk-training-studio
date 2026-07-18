@@ -650,63 +650,70 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
         },
       })
 
-      const room = await startBattle({
-        persona_name: isLiveCoachMode
-          ? t('training.liveCoach.personaName')
-          : scenarioStakeholder
-          ? t(scenarioStakeholder.personaNameKey)
-          : t('training.prompt.personaName', { role }),
-        persona_role: isLiveCoachMode
-          ? t('training.liveCoach.personaRole')
-          : scenarioStakeholder
-          ? t(scenarioStakeholder.personaRoleKey)
-          : t('training.prompt.personaRole', { level, scenario }),
-        persona_style: isLiveCoachMode
-          ? t('training.liveCoach.personaStyle')
-          : scenarioStakeholder
-          ? t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })
-          : t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
-        scenario_context: isLiveCoachMode
-          ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
-              sourceLanguage: sourceLanguageLabel,
-              targetLanguage: targetLanguageLabel,
-            })}`
-          : prompt,
-        selected_training_points: isLiveCoachMode
-          ? [
-              t('training.liveCoach.nextReplyPoint'),
-              t('training.liveCoach.riskPoint'),
-              t('training.liveCoach.translationPoint'),
-              t('training.liveCoach.reviewPoint'),
-            ]
-          : [
-              t('training.prompt.structurePoint', { framework }),
-              ...(interviewStakeholder
-                ? [
-                    t('training.prompt.interviewEvidencePoint'),
-                    t('training.prompt.interviewFollowupPoint'),
-                  ]
-                : []),
-              ...(productStakeholder
-                ? [
-                    t('training.prompt.productAlignmentPoint'),
-                    t('training.prompt.productTradeoffPoint'),
-                  ]
-                : []),
-              t('training.prompt.deliveryPoint', { mode: modeLabel }),
-              t('training.prompt.evidencePoint'),
-            ],
-        difficulty: toBattleDifficulty(config.difficulty),
-      })
+      const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
+      const room = useConversationMessageTreeRuntime
+        ? null
+        : await startBattle({
+            persona_name: isLiveCoachMode
+              ? t('training.liveCoach.personaName')
+              : scenarioStakeholder
+              ? t(scenarioStakeholder.personaNameKey)
+              : t('training.prompt.personaName', { role }),
+            persona_role: isLiveCoachMode
+              ? t('training.liveCoach.personaRole')
+              : scenarioStakeholder
+              ? t(scenarioStakeholder.personaRoleKey)
+              : t('training.prompt.personaRole', { level, scenario }),
+            persona_style: isLiveCoachMode
+              ? t('training.liveCoach.personaStyle')
+              : scenarioStakeholder
+              ? t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })
+              : t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
+            scenario_context: isLiveCoachMode
+              ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
+                  sourceLanguage: sourceLanguageLabel,
+                  targetLanguage: targetLanguageLabel,
+                })}`
+              : prompt,
+            selected_training_points: isLiveCoachMode
+              ? [
+                  t('training.liveCoach.nextReplyPoint'),
+                  t('training.liveCoach.riskPoint'),
+                  t('training.liveCoach.translationPoint'),
+                  t('training.liveCoach.reviewPoint'),
+                ]
+              : [
+                  t('training.prompt.structurePoint', { framework }),
+                  ...(interviewStakeholder
+                    ? [
+                        t('training.prompt.interviewEvidencePoint'),
+                        t('training.prompt.interviewFollowupPoint'),
+                      ]
+                    : []),
+                  ...(productStakeholder
+                    ? [
+                        t('training.prompt.productAlignmentPoint'),
+                        t('training.prompt.productTradeoffPoint'),
+                      ]
+                    : []),
+                  t('training.prompt.deliveryPoint', { mode: modeLabel }),
+                  t('training.prompt.evidencePoint'),
+                ],
+            difficulty: toBattleDifficulty(config.difficulty),
+          })
       const startedSession = await startTrainingSession(
         trainingSession.session_id,
         buildTrainingSessionStartRequest(
-          { room_id: room.id },
+          room ? { room_id: room.id } : {},
           trainingMode,
           interactionMode,
         ),
       )
-      navigate(buildTrainingModeChatPath(room.id, trainingMode, startedSession.session_id, interactionMode, {
+      const roomId = startedSession.room_id ?? room?.id
+      if (roomId == null) {
+        throw new Error('Failed to resolve training room')
+      }
+      navigate(buildTrainingModeChatPath(roomId, trainingMode, startedSession.session_id, interactionMode, {
         trainingProfile,
         sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,
         targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : null,

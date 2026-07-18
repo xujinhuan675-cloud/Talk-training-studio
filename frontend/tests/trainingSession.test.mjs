@@ -119,7 +119,7 @@ test('startTrainingSession posts to the start endpoint with JSON body', async ()
 test('buildTrainingSessionStartRequest opts text turn-based sessions into message tree runtime', () => {
   assert.deepEqual(
     trainingSession.buildTrainingSessionStartRequest({ room_id: 42 }, 'text', 'turn_based'),
-    { room_id: 42, runtime: 'conversation_message_tree' },
+    { runtime: 'conversation_message_tree' },
   )
   assert.deepEqual(
     trainingSession.buildTrainingSessionStartRequest({ room_id: 42 }, 'text', 'realtime'),

@@ -154,11 +154,14 @@ const HomePage: React.FC = () => {
         team_id: progressScope.teamId,
         task_config: buildScenarioTrainingTaskConfig(scenario),
       })
-      const room = await startBattle(buildScenarioTrainingBattlePayload(scenario, trainingMode))
+      const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
+      const room = useConversationMessageTreeRuntime
+        ? null
+        : await startBattle(buildScenarioTrainingBattlePayload(scenario, trainingMode))
       const startedSession = await startTrainingSession(
         trainingSession.session_id,
         buildTrainingSessionStartRequest(
-          { room_id: room.id },
+          room ? { room_id: room.id } : {},
           trainingMode,
           interactionMode,
         ),
@@ -171,7 +174,10 @@ const HomePage: React.FC = () => {
       )
       saveScenarioTrainingProgress(nextProgress, progressScope)
 
-      const roomId = startedSession.room_id || room.id
+      const roomId = startedSession.room_id ?? room?.id
+      if (roomId == null) {
+        throw new Error('Failed to resolve training room')
+      }
       const chatPath = buildTrainingModeChatPath(roomId, trainingMode, startedSession.session_id, interactionMode)
       const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
       navigate(`${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`, {

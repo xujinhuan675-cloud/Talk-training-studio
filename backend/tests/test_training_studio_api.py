@@ -987,6 +987,24 @@ async def test_training_session_start_can_bind_message_tree_runtime(
 
 
 @pytest.mark.asyncio
+async def test_training_session_start_rejects_room_id_for_message_tree_runtime(
+    client: AsyncClient,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    session_id = create_resp.json()["data"]["session_id"]
+
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"runtime": "conversation_message_tree", "room_id": 42},
+    )
+
+    assert start_resp.status_code == 422
+    assert "room_id cannot be provided when starting a conversation_message_tree session" in (
+        start_resp.json()["message"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_training_session_fail_endpoint(client: AsyncClient) -> None:
     create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
     session_id = create_resp.json()["data"]["session_id"]

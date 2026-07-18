@@ -248,6 +248,7 @@ export function buildTrainingSessionStartRequest(
   const request: StartTrainingSessionRequest = { ...data }
   if (trainingMode === 'text' && interactionMode === 'turn_based') {
     request.runtime = TRAINING_SESSION_MESSAGE_TREE_RUNTIME
+    delete request.room_id
   } else {
     delete request.runtime
   }
