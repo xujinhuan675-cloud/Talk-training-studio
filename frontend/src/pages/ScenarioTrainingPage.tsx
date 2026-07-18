@@ -20,7 +20,7 @@ import {
   type InteractionMode,
   type TrainingMode,
 } from '../services/trainingMode'
-import { buildTrainingSessionStartRequest } from '../services/trainingSession'
+import { launchTrainingSessionFlow } from '../services/trainingLaunch'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
 import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
@@ -246,46 +246,50 @@ export default function ScenarioTrainingPage() {
     try {
       const trainingMode = getScenarioTrainingMode(mode)
       const interactionMode = getScenarioInteractionMode(mode)
-      const trainingSession = await createTrainingSession({
-        mode: trainingMode,
-        scenario_template_id: scenario.id,
-        user_id: progressScope.userId,
-        team_id: progressScope.teamId,
-        task_config: buildScenarioTrainingTaskConfig(scenario),
-      })
       const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
-      const room = useConversationMessageTreeRuntime
-        ? null
-        : await startBattle(buildScenarioTrainingBattlePayload(scenario, trainingMode))
-      const startedSession = await startTrainingSession(
-        trainingSession.session_id,
-        buildTrainingSessionStartRequest(
-          room ? { room_id: room.id } : {},
-          trainingMode,
-          interactionMode,
-        ),
-      )
-      const nextProgress = markScenarioTrainingStarted(
-        progress,
-        scenario.id,
-        startedSession.session_id,
-        progressScope,
-      )
-      setProgress(nextProgress)
-      saveScenarioTrainingProgress(nextProgress, progressScope)
-
-      const roomId = startedSession.room_id ?? room?.id
-      if (roomId == null) {
-        throw new Error('Failed to resolve training room')
-      }
-      const chatPath = buildTrainingModeChatPath(roomId, trainingMode, startedSession.session_id, interactionMode)
       const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
-      navigate(`${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`, {
-        state: {
+      await launchTrainingSessionFlow({
+        createTrainingSessionRequest: {
+          mode: trainingMode,
+          scenario_template_id: scenario.id,
+          user_id: progressScope.userId,
+          team_id: progressScope.teamId,
+          task_config: buildScenarioTrainingTaskConfig(scenario),
+        },
+        createTrainingSession,
+        battlePayload: useConversationMessageTreeRuntime
+          ? null
+          : buildScenarioTrainingBattlePayload(scenario, trainingMode),
+        startBattle,
+        startTrainingSession,
+        buildTrainingSessionStartRequest,
+        trainingMode,
+        interactionMode,
+        buildChatPath: (roomId, nextTrainingMode, trainingSessionId, nextInteractionMode) => {
+          const chatPath = buildTrainingModeChatPath(
+            roomId,
+            nextTrainingMode,
+            trainingSessionId,
+            nextInteractionMode,
+          )
+          return `${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`
+        },
+        buildNavigationState: ({ startedSession }) => ({
           ...buildScenarioTrainingRouteState(scenario),
           trainingMode,
           interactionMode,
           trainingSessionId: startedSession.session_id,
+        }),
+        navigate,
+        afterStartSession: ({ startedSession }) => {
+          const nextProgress = markScenarioTrainingStarted(
+            progress,
+            scenario.id,
+            startedSession.session_id,
+            progressScope,
+          )
+          setProgress(nextProgress)
+          saveScenarioTrainingProgress(nextProgress, progressScope)
         },
       })
     } catch (e: unknown) {

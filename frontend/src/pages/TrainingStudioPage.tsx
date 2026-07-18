@@ -24,6 +24,7 @@ import {
   type TrainingMode,
   type TrainingProfile,
 } from '../services/trainingMode'
+import { launchTrainingSessionFlow } from '../services/trainingLaunch'
 import {
   buildTrainingStudioPrompt,
   buildTrainingStudioCapabilityReadiness,
@@ -50,7 +51,6 @@ import {
 } from '../services/llmRegistry'
 import { useI18n, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
-import { buildTrainingSessionStartRequest } from '../services/trainingSession'
 import './TrainingStudioPage.css'
 
 type LaunchMode = TrainingMode | 'realtime' | 'live_coach'
@@ -616,109 +616,109 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       const interviewStakeholder = config.scenario === 'interview' ? interviewScenarioPreset : undefined
       const productStakeholder = config.scenario === 'product_management' ? productScenarioPreset : undefined
       const scenarioStakeholder = interviewStakeholder ?? productStakeholder
-      const trainingSession = await createTrainingSession({
-        mode: trainingMode,
-        task_config: {
-          role,
-          level,
-          tech_stack: splitTechStack(config.techStack, scenario),
-          question_type_ratios: { ...config.questionMix },
-          question_count: config.questionCount,
-          framework: config.framework,
-          difficulty: config.difficulty,
-          category: config.scenario,
-          metadata: isLiveCoachMode
-            ? {
-                source: 'live_coach_mvp',
-                trainingProfile,
-                liveCoach: {
-                  sourceLanguage: liveCoachSourceLanguage,
-                  targetLanguage: liveCoachTargetLanguage,
-                  captureStrategy: 'browser_microphone_mvp',
-                  transcriptStrategy: 'chat_room_messages',
-                  translationStrategy: 'text_first_mvp',
-                  extensionPoints: [
-                    'system_audio_tap',
-                    'virtual_microphone',
-                    'speech_to_speech_translation',
-                    'prosody_preservation',
-                    '70_plus_languages',
-                  ],
-                },
-              }
-            : undefined,
-        },
-      })
-
       const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
-      const room = useConversationMessageTreeRuntime
-        ? null
-        : await startBattle({
-            persona_name: isLiveCoachMode
-              ? t('training.liveCoach.personaName')
-              : scenarioStakeholder
-              ? t(scenarioStakeholder.personaNameKey)
-              : t('training.prompt.personaName', { role }),
-            persona_role: isLiveCoachMode
-              ? t('training.liveCoach.personaRole')
-              : scenarioStakeholder
-              ? t(scenarioStakeholder.personaRoleKey)
-              : t('training.prompt.personaRole', { level, scenario }),
-            persona_style: isLiveCoachMode
-              ? t('training.liveCoach.personaStyle')
-              : scenarioStakeholder
-              ? t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })
-              : t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
-            scenario_context: isLiveCoachMode
-              ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
-                  sourceLanguage: sourceLanguageLabel,
-                  targetLanguage: targetLanguageLabel,
-                })}`
-              : prompt,
-            selected_training_points: isLiveCoachMode
-              ? [
-                  t('training.liveCoach.nextReplyPoint'),
-                  t('training.liveCoach.riskPoint'),
-                  t('training.liveCoach.translationPoint'),
-                  t('training.liveCoach.reviewPoint'),
-                ]
-              : [
-                  t('training.prompt.structurePoint', { framework }),
-                  ...(interviewStakeholder
-                    ? [
-                        t('training.prompt.interviewEvidencePoint'),
-                        t('training.prompt.interviewFollowupPoint'),
-                      ]
-                    : []),
-                  ...(productStakeholder
-                    ? [
-                        t('training.prompt.productAlignmentPoint'),
-                        t('training.prompt.productTradeoffPoint'),
-                      ]
-                    : []),
-                  t('training.prompt.deliveryPoint', { mode: modeLabel }),
-                  t('training.prompt.evidencePoint'),
-                ],
-            difficulty: toBattleDifficulty(config.difficulty),
-          })
-      const startedSession = await startTrainingSession(
-        trainingSession.session_id,
-        buildTrainingSessionStartRequest(
-          room ? { room_id: room.id } : {},
-          trainingMode,
-          interactionMode,
+      await launchTrainingSessionFlow({
+        createTrainingSessionRequest: {
+          mode: trainingMode,
+          task_config: {
+            role,
+            level,
+            tech_stack: splitTechStack(config.techStack, scenario),
+            question_type_ratios: { ...config.questionMix },
+            question_count: config.questionCount,
+            framework: config.framework,
+            difficulty: config.difficulty,
+            category: config.scenario,
+            metadata: isLiveCoachMode
+              ? {
+                  source: 'live_coach_mvp',
+                  trainingProfile,
+                  liveCoach: {
+                    sourceLanguage: liveCoachSourceLanguage,
+                    targetLanguage: liveCoachTargetLanguage,
+                    captureStrategy: 'browser_microphone_mvp',
+                    transcriptStrategy: 'chat_room_messages',
+                    translationStrategy: 'text_first_mvp',
+                    extensionPoints: [
+                      'system_audio_tap',
+                      'virtual_microphone',
+                      'speech_to_speech_translation',
+                      'prosody_preservation',
+                      '70_plus_languages',
+                    ],
+                  },
+                }
+              : undefined,
+          },
+        },
+        createTrainingSession,
+        battlePayload: useConversationMessageTreeRuntime
+          ? null
+          : {
+              persona_name: isLiveCoachMode
+                ? t('training.liveCoach.personaName')
+                : scenarioStakeholder
+                ? t(scenarioStakeholder.personaNameKey)
+                : t('training.prompt.personaName', { role }),
+              persona_role: isLiveCoachMode
+                ? t('training.liveCoach.personaRole')
+                : scenarioStakeholder
+                ? t(scenarioStakeholder.personaRoleKey)
+                : t('training.prompt.personaRole', { level, scenario }),
+              persona_style: isLiveCoachMode
+                ? t('training.liveCoach.personaStyle')
+                : scenarioStakeholder
+                ? t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })
+                : t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
+              scenario_context: isLiveCoachMode
+                ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
+                    sourceLanguage: sourceLanguageLabel,
+                    targetLanguage: targetLanguageLabel,
+                  })}`
+                : prompt,
+              selected_training_points: isLiveCoachMode
+                ? [
+                    t('training.liveCoach.nextReplyPoint'),
+                    t('training.liveCoach.riskPoint'),
+                    t('training.liveCoach.translationPoint'),
+                    t('training.liveCoach.reviewPoint'),
+                  ]
+                : [
+                    t('training.prompt.structurePoint', { framework }),
+                    ...(interviewStakeholder
+                      ? [
+                          t('training.prompt.interviewEvidencePoint'),
+                          t('training.prompt.interviewFollowupPoint'),
+                        ]
+                      : []),
+                    ...(productStakeholder
+                      ? [
+                          t('training.prompt.productAlignmentPoint'),
+                          t('training.prompt.productTradeoffPoint'),
+                        ]
+                      : []),
+                    t('training.prompt.deliveryPoint', { mode: modeLabel }),
+                    t('training.prompt.evidencePoint'),
+                  ],
+              difficulty: toBattleDifficulty(config.difficulty),
+            },
+        startBattle,
+        startTrainingSession,
+        buildTrainingSessionStartRequest,
+        trainingMode,
+        interactionMode,
+        buildChatPath: (roomId, nextTrainingMode, trainingSessionId, nextInteractionMode) => buildTrainingModeChatPath(
+          roomId,
+          nextTrainingMode,
+          trainingSessionId,
+          nextInteractionMode,
+          {
+            trainingProfile,
+            sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,
+            targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : null,
+          },
         ),
-      )
-      const roomId = startedSession.room_id ?? room?.id
-      if (roomId == null) {
-        throw new Error('Failed to resolve training room')
-      }
-      navigate(buildTrainingModeChatPath(roomId, trainingMode, startedSession.session_id, interactionMode, {
-        trainingProfile,
-        sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,
-        targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : null,
-      }), {
-        state: {
+        buildNavigationState: ({ startedSession }) => ({
           source: isLiveCoachMode ? 'live-coach' : 'training-studio',
           trainingMode,
           interactionMode,
@@ -726,7 +726,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           trainingProfile,
           sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : undefined,
           targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : undefined,
-        },
+        }),
+        navigate,
       })
     } catch (e: unknown) {
       setError(getErrorMessage(e, t('training.error.startFailed')))
