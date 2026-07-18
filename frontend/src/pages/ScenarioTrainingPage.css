@@ -1,6 +1,5 @@
 .scenario-training-page {
   min-height: 100%;
-  padding: 28px 28px 42px;
   background: var(--bg-base);
   color: var(--text-primary);
 }
@@ -410,10 +409,6 @@
 }
 
 @media (max-width: 980px) {
-  .scenario-training-page {
-    padding: 22px 18px 36px;
-  }
-
   .scenario-training-hero,
   .scenario-training-toolbar {
     grid-template-columns: 1fr;
@@ -426,10 +421,6 @@
 }
 
 @media (max-width: 720px) {
-  .scenario-training-page {
-    padding: 18px 12px 88px;
-  }
-
   .scenario-training-title-block h1 {
     font-size: 23px;
   }

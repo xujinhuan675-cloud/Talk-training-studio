@@ -24,6 +24,7 @@ import {
 import { useAuthContext } from '../contexts/AuthContext'
 import { getUserDisplayRoleName } from '../services/auth'
 import { useI18n } from '../i18n'
+import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
 import {
   buildScenarioTrainingBattlePayload,
   buildScenarioTrainingRouteState,
@@ -263,37 +264,35 @@ export default function ScenarioTrainingPage() {
   }
 
   return (
-    <div className="scenario-training-page">
-      <section className="scenario-training-hero">
-        <div className="scenario-training-title-block">
-          <div className="scenario-training-kicker">
-            <ClipboardList size={16} />
-            <span>{tr('按场景训练', 'Scenario training')}</span>
-          </div>
-          <h1>{tr('真实销售与客服场景练习', 'Real-world sales and service drills')}</h1>
-          <p>
-            {tr(
-              '从业务场景卡片直接进入 AI 客户陪练，训练记录会复用现有 Training Session、ChatPage、报告和实时指导链路。',
-              'Start from business scenario cards and reuse the existing Training Session, ChatPage, report, and guidance flow.',
-            )}
-          </p>
-        </div>
-
-        <div className="scenario-training-summary" aria-label={tr('训练概览', 'Training overview')}>
-          <div>
-            <span>{completedRequired}/{requiredTotal}</span>
-            <small>{tr('必练完成', 'Required done')}</small>
-          </div>
-          <div>
-            <span>{scoreText}</span>
-            <small>{tr('平均分', 'Average score')}</small>
-          </div>
-          <div>
-            <span>{currentUser ? getUserDisplayRoleName(currentUser) : tr('未登录', 'Signed out')}</span>
-            <small>{currentUser?.teamName ?? currentUser?.name ?? tr('模拟用户', 'Mock user')}</small>
-          </div>
-        </div>
-      </section>
+    <PageShell width="wide" className="scenario-training-page">
+      <PageHeader
+        eyebrow={tr('按场景训练', 'Scenario training')}
+        icon={<ClipboardList size={16} />}
+        title={tr('真实销售与客服场景练习', 'Real-world sales and service drills')}
+        description={tr(
+          '在同一条训练链路里筛选场景、选择模式并直接开练。',
+          'Filter scenarios, pick a mode, and start practice in one path.',
+        )}
+        stats={(
+          <PageStatGrid
+            stats={[
+              {
+                label: tr('必练完成', 'Required done'),
+                value: `${completedRequired}/${requiredTotal}`,
+              },
+              {
+                label: tr('平均分', 'Average score'),
+                value: scoreText,
+              },
+              {
+                label: tr('当前用户', 'Current user'),
+                value: currentUser ? getUserDisplayRoleName(currentUser) : tr('未登录', 'Signed out'),
+                detail: currentUser?.teamName ?? currentUser?.name ?? tr('模拟用户', 'Mock user'),
+              },
+            ]}
+          />
+        )}
+      />
 
       <section className="scenario-training-toolbar" aria-label={tr('场景筛选', 'Scenario filters')}>
         <label className="scenario-training-search">
@@ -430,6 +429,6 @@ export default function ScenarioTrainingPage() {
           <p>{tr('没有匹配的训练场景', 'No matching scenarios')}</p>
         </section>
       )}
-    </div>
+    </PageShell>
   )
 }

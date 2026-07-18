@@ -1,11 +1,7 @@
-.user-menu {
-  position: relative;
-  flex-shrink: 0;
-}
-
 .user-menu-trigger {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 8px;
   min-width: 158px;
   max-width: 220px;
@@ -84,10 +80,6 @@
 }
 
 .user-menu-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 160;
   width: 232px;
   padding: 8px;
   border: 1px solid var(--border);
@@ -181,7 +173,6 @@
   }
 
   .user-menu-popover {
-    right: -2px;
     width: min(232px, calc(100vw - 20px));
   }
 }

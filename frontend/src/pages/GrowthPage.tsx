@@ -30,6 +30,7 @@ import { useGrowth, type SkillPathNode, type DimensionKey } from '../hooks/useGr
 import { generateProfileCard, type ProfileCard as ProfileCardData } from '../services/api'
 import ProfileCard from '../components/ProfileCard'
 import { useI18n, type TranslateInline } from '../i18n'
+import { PageShell } from '../components/ui/page'
 import './GrowthPage.css'
 
 // ---------------------------------------------------------------------------
@@ -291,30 +292,30 @@ const GrowthPage: React.FC = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="growth-page">
+      <PageShell width="wide" className="growth-page">
         <div className="gp-loading">
           <Loader2 size={24} className="gp-spin" />
           <span>{tr('加载成长数据...', 'Loading growth data...')}</span>
         </div>
-      </div>
+      </PageShell>
     )
   }
 
   // Error state
   if (error) {
     return (
-      <div className="growth-page">
+      <PageShell width="wide" className="growth-page">
         <div className="gp-empty">
           <p>{tr('加载失败: {error}', 'Failed to load: {error}', { error })}</p>
         </div>
-      </div>
+      </PageShell>
     )
   }
 
   // Empty state
   if (!dashboard || dashboard.overview.total_evaluations === 0) {
     return (
-      <div className="growth-page">
+      <PageShell width="wide" className="growth-page">
         <div className="gp-empty">
           <div className="gp-empty-icon">
             <Sparkles size={48} strokeWidth={1.5} />
@@ -329,7 +330,7 @@ const GrowthPage: React.FC = () => {
             {tr('开始一场练习', 'Start a practice session')}
           </button>
         </div>
-      </div>
+      </PageShell>
     )
   }
 
@@ -338,7 +339,7 @@ const GrowthPage: React.FC = () => {
   const dimChanges = computeDimensionChanges(evaluations)
 
   return (
-    <div className="growth-page">
+    <PageShell width="wide" className="growth-page">
       {/* Gamification stats row */}
       <div className="gp-gamification-row">
         <div className="gp-gam-card">
@@ -589,7 +590,7 @@ const GrowthPage: React.FC = () => {
           </div>
         )}
       </section>
-    </div>
+    </PageShell>
   )
 }
 

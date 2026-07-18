@@ -1,5 +1,12 @@
 import { AlertTriangle } from 'lucide-react'
 import { useI18n } from '../../i18n'
+import { Button } from '../ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '../ui/dialog'
 import './ConfirmDialog.css'
 
 interface ConfirmDialogProps {
@@ -25,29 +32,33 @@ export default function ConfirmDialog({
 }: ConfirmDialogProps) {
   const { tr } = useI18n()
 
-  if (!open) return null
-
   return (
-    <div className="confirm-overlay" onClick={onCancel}>
-      <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onCancel()
+      }}
+    >
+      <DialogContent className="confirm-dialog">
         <div className={`confirm-icon ${danger ? 'danger' : ''}`}>
-          <AlertTriangle size={22} />
+          <AlertTriangle size={22} aria-hidden="true" />
         </div>
-        <h3 className="confirm-title">{title}</h3>
-        <p className="confirm-message">{message}</p>
+        <DialogTitle className="confirm-title">{title}</DialogTitle>
+        <DialogDescription className="confirm-message">{message}</DialogDescription>
         <div className="confirm-actions">
-          <button className="confirm-btn cancel" onClick={onCancel}>
+          <Button className="confirm-btn" variant="secondary" onClick={onCancel}>
             {cancelLabel || tr('取消', 'Cancel')}
-          </button>
-          <button
-            className={`confirm-btn ${danger ? 'danger' : 'primary'}`}
+          </Button>
+          <Button
+            className="confirm-btn"
+            variant={danger ? 'danger' : 'primary'}
             onClick={onConfirm}
             autoFocus
           >
             {confirmLabel || tr('确定', 'OK')}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

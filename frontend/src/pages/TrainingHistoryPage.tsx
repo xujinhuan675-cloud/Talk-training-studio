@@ -23,6 +23,7 @@ import {
 import { buildTrainingModeChatPath } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
 import {
   getScenarioTrainingCardById,
   getScenarioTrainingProgress,
@@ -485,37 +486,34 @@ export default function TrainingHistoryPage() {
     : undefined
 
   return (
-    <div className="training-history-page">
-      <header className="training-history-hero">
-        <div className="training-history-title-block">
-          <div className="training-history-kicker">
-            <History size={16} />
-            <span>{tr('训练记录', 'Training history')}</span>
-          </div>
-          <h1>{tr('复盘场景练习结果', 'Review scenario practice results')}</h1>
-          <p>
-            {tr(
-              '按场景、状态或关键词筛选已完成和进行中的练习。结果复用训练会话、复盘报告和本地场景进度。',
-              'Filter completed and in-progress drills by scenario, status, or keyword. Results reuse Training Session records, reports, and local scenario progress.',
-            )}
-          </p>
-        </div>
-
-        <div className="training-history-summary" aria-label={tr('训练记录概览', 'Training history summary')}>
-          <div>
-            <span>{entries.length}</span>
-            <small>{tr('总记录', 'Total records')}</small>
-          </div>
-          <div>
-            <span>{completedCount}</span>
-            <small>{tr('已完成', 'Completed')}</small>
-          </div>
-          <div>
-            <span>{averageScore ?? '--'}</span>
-            <small>{tr('平均分', 'Average score')}</small>
-          </div>
-        </div>
-      </header>
+    <PageShell width="wide" className="training-history-page">
+      <PageHeader
+        eyebrow={tr('训练记录', 'Training history')}
+        icon={<History size={16} />}
+        title={tr('复盘场景练习结果', 'Review scenario practice results')}
+        description={tr(
+          '按场景、状态或关键词筛选训练记录，分支信息只保留一次。',
+          'Filter records by scenario, status, or keyword, with branch details shown once.',
+        )}
+        stats={(
+          <PageStatGrid
+            stats={[
+              {
+                label: tr('总记录', 'Total records'),
+                value: entries.length,
+              },
+              {
+                label: tr('已完成', 'Completed'),
+                value: completedCount,
+              },
+              {
+                label: tr('平均分', 'Average score'),
+                value: averageScore ?? '--',
+              },
+            ]}
+          />
+        )}
+      />
 
       <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>
         <label className="training-history-search">
@@ -643,29 +641,6 @@ export default function TrainingHistoryPage() {
                     </span>
                   )}
                 </div>
-                {entry.branchInfo && (
-                  <div
-                    className="training-history-branch-context"
-                    title={historyBranchTitle(entry.branchInfo, tr)}
-                  >
-                    <span>{historyBranchPathText(entry.branchInfo, tr)}</span>
-                    <span>{historyBranchPathTextStateText(entry.branchInfo.pathTextState, tr)}</span>
-                    {entry.branchInfo.forkPointMessageId && (
-                      <span>
-                        {tr('分叉点：{value}', 'Fork point: {value}', {
-                          value: compactHistoryBranchText(entry.branchInfo.forkPointMessageId, 34),
-                        })}
-                      </span>
-                    )}
-                    {entry.branchInfo.selectedTailMessageId && (
-                      <span>
-                        {tr('尾节点：{value}', 'Tail: {value}', {
-                          value: compactHistoryBranchText(entry.branchInfo.selectedTailMessageId, 34),
-                        })}
-                      </span>
-                    )}
-                  </div>
-                )}
                 {branchSummary && entry.branchInfo && (
                   <p
                     className={`training-history-branch-summary${entry.branchInfo.lastReplyPreview ? '' : ' empty'}`}
@@ -716,6 +691,6 @@ export default function TrainingHistoryPage() {
           )
         })}
       </section>
-    </div>
+    </PageShell>
   )
 }

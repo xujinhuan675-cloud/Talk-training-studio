@@ -3,13 +3,12 @@
    ================================================ */
 
 .growth-page {
-  width: min(var(--page-max-width), calc(100% - (var(--page-gutter) * 2)));
-  max-width: none;
-  margin: 0 auto;
-  padding: 24px 0;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 24px;
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
 /* ---------- Loading / Empty ---------- */
@@ -606,11 +605,6 @@
 /* ---------- Responsive ---------- */
 
 @media (max-width: 640px) {
-  .growth-page {
-    width: auto;
-    padding: var(--page-gutter-mobile);
-  }
-
   .gp-score-summary {
     flex-direction: column;
     gap: 16px;

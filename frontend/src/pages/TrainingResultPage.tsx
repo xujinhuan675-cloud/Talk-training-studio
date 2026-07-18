@@ -25,6 +25,7 @@ import { buildTrainingModeChatPath } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import { PageShell } from '../components/ui/page'
 import {
   getScenarioTrainingCardById,
   getScenarioTrainingProgress,
@@ -588,19 +589,19 @@ export default function TrainingResultPage() {
 
   if (loadState === 'loading' || loadState === 'idle') {
     return (
-      <div className="training-result-page">
+      <PageShell width="wide" className="training-result-page">
         <section className="training-result-state">
           <Loader2 className="training-result-spin" size={24} />
           <strong>{tr('正在加载训练结果...', 'Loading training result...')}</strong>
           <span>{tr('正在读取会话、复盘报告和回放转写。', 'Reading the session, report, and replay transcript.')}</span>
         </section>
-      </div>
+      </PageShell>
     )
   }
 
   if (loadState === 'error') {
     return (
-      <div className="training-result-page">
+      <PageShell width="wide" className="training-result-page">
         <section className="training-result-state error">
           <AlertCircle size={24} />
           <strong>{tr('训练结果不可用', 'Training result unavailable')}</strong>
@@ -609,12 +610,12 @@ export default function TrainingResultPage() {
             {tr('返回训练记录', 'Back to history')}
           </Link>
         </section>
-      </div>
+      </PageShell>
     )
   }
 
   return (
-    <div className="training-result-page">
+    <PageShell width="wide" className="training-result-page">
       <header className="training-result-topbar">
         <div className="training-result-title">
           <button type="button" onClick={() => navigate(-1)} aria-label={tr('返回', 'Go back')}>
@@ -943,6 +944,6 @@ export default function TrainingResultPage() {
           </span>
         </footer>
       )}
-    </div>
+    </PageShell>
   )
 }
