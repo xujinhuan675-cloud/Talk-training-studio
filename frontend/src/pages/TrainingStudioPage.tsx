@@ -49,6 +49,7 @@ import {
   type LLMProviderMetadata,
 } from '../services/llmRegistry'
 import { useI18n, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import './TrainingStudioPage.css'
 
 type LaunchMode = TrainingMode | 'realtime' | 'live_coach'
@@ -721,7 +722,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   }
 
   const startGuidedBattle = async () => {
-    navigate('/battle-prep')
+    navigate(APP_ROUTES.practiceBattle)
   }
 
   return (
