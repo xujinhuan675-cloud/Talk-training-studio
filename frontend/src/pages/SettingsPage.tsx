@@ -85,12 +85,12 @@ type TabKey = 'personas' | 'scenarios' | 'organizations' | 'config' | 'preferenc
 type SettingsTabKey = TabKey | 'training'
 
 const TABS: { key: SettingsTabKey; labelZh: string; labelEn: string; icon: React.ReactNode }[] = [
-  { key: 'personas', labelZh: '角色', labelEn: 'Personas', icon: <Users size={14} /> },
-  { key: 'scenarios', labelZh: '场景', labelEn: 'Scenarios', icon: <Layers size={14} /> },
-  { key: 'organizations', labelZh: '组织', labelEn: 'Organizations', icon: <Building2 size={14} /> },
-  { key: 'training', labelZh: '训练管理', labelEn: 'Training', icon: <ClipboardList size={14} /> },
-  { key: 'config', labelZh: '配置', labelEn: 'Config', icon: <KeyRound size={14} /> },
-  { key: 'preferences', labelZh: '偏好', labelEn: 'Preferences', icon: <Volume2 size={14} /> },
+  { key: 'personas', labelZh: '角色对象', labelEn: 'Persona Objects', icon: <Users size={14} /> },
+  { key: 'scenarios', labelZh: '场景对象', labelEn: 'Scenario Objects', icon: <Layers size={14} /> },
+  { key: 'organizations', labelZh: '组织对象', labelEn: 'Organization Objects', icon: <Building2 size={14} /> },
+  { key: 'training', labelZh: '训练模板', labelEn: 'Training Templates', icon: <ClipboardList size={14} /> },
+  { key: 'config', labelZh: '服务配置', labelEn: 'Service Config', icon: <KeyRound size={14} /> },
+  { key: 'preferences', labelZh: '用户偏好', labelEn: 'User Preferences', icon: <Volume2 size={14} /> },
 ]
 
 const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'config', 'preferences']
@@ -171,19 +171,19 @@ function PersonasTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('角色', 'Personas')}</h3>
+        <h3 className="settings-section-title">{tr('角色对象', 'Persona Objects')}</h3>
         <div className="settings-header-actions">
           <button
             className="persona-build-btn"
             onClick={() => navigate(APP_ROUTES.configPersonaNew)}
-            title={tr('粘贴素材让 AI 生成对手画像', 'Paste materials for AI to generate opponent profiles')}
+            title={tr('从素材生成角色对象', 'Generate persona objects from source material')}
           >
             <Sparkles size={14} />
-            {tr('从素材生成对手', 'Generate from Materials')}
+            {tr('导入素材', 'Import Material')}
           </button>
           <button className="settings-create-btn" onClick={startCreate}>
             <Plus size={14} />
-            {tr('创建新角色', 'Create Persona')}
+            {tr('新建角色', 'New Persona')}
           </button>
         </div>
       </div>
@@ -385,7 +385,7 @@ function ScenariosTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('场景', 'Scenarios')}</h3>
+        <h3 className="settings-section-title">{tr('场景对象', 'Scenario Objects')}</h3>
         <button className="settings-create-btn" onClick={startCreate}>
           <Plus size={14} />
           {tr('新建场景', 'New Scenario')}
@@ -453,7 +453,7 @@ function ScenariosTab() {
 
       {showForm && (
         <div className="settings-form-panel">
-          <h4>{isNew ? tr('新建场景', 'New Scenario') : tr('编辑场景', 'Edit Scenario')}</h4>
+          <h4>{isNew ? tr('场景 Schema', 'Scenario Schema') : tr('编辑 Schema', 'Edit Schema')}</h4>
 
           <label className="field-label">
             {tr('名称', 'Name')}
@@ -461,7 +461,7 @@ function ScenariosTab() {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={tr('场景名称', 'Scenario name')}
+              placeholder={tr('对象名称', 'Object name')}
               autoFocus
             />
           </label>
@@ -472,20 +472,20 @@ function ScenariosTab() {
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={tr('简短描述', 'Short description')}
+              placeholder={tr('短描述', 'Short description')}
             />
           </label>
 
           <label className="field-label">
-            {tr('上下文提示词', 'Context Prompt')}
+            {tr('上下文', 'Context')}
             <textarea
               value={contextPrompt}
               onChange={(e) => setContextPrompt(e.target.value)}
-              placeholder={tr('设定场景的上下文提示词...', 'Set the context prompt for this scenario...')}
+              placeholder={tr('场景背景和约束', 'Scenario context and constraints')}
             />
           </label>
 
-          <div className="field-label" style={{ marginBottom: 4 }}>{tr('推荐角色（可选）', 'Recommended Personas (optional)')}</div>
+          <div className="field-label" style={{ marginBottom: 4 }}>{tr('关联角色', 'Linked Personas')}</div>
           <div className="settings-checkbox-list">
             {allPersonas.map((p) => (
               <label key={p.id} className="settings-checkbox-item">
@@ -740,7 +740,7 @@ function OrganizationsTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('组织', 'Organizations')}</h3>
+        <h3 className="settings-section-title">{tr('组织对象', 'Organization Objects')}</h3>
         <button className="settings-create-btn" onClick={handleNewOrg}>
           <Plus size={14} />
           {tr('新建组织', 'New Organization')}
@@ -764,21 +764,21 @@ function OrganizationsTab() {
         {/* Org sub-tabs */}
         <div className="settings-org-tabs">
           <button className={`settings-org-tab${orgTab === 'info' ? ' active' : ''}`} onClick={() => setOrgTab('info')}>
-            {tr('基本信息', 'Basic Info')}
+            {tr('字段', 'Fields')}
           </button>
           <button
             className={`settings-org-tab${orgTab === 'teams' ? ' active' : ''}`}
             onClick={() => setOrgTab('teams')}
             disabled={!selectedOrg}
           >
-            {tr('团队', 'Teams')}
+            {tr('团队对象', 'Team Objects')}
           </button>
           <button
             className={`settings-org-tab${orgTab === 'relationships' ? ' active' : ''}`}
             onClick={() => setOrgTab('relationships')}
             disabled={!selectedOrg}
           >
-            {tr('角色关系', 'Persona Relationships')}
+            {tr('关系', 'Relationships')}
           </button>
         </div>
 
@@ -786,20 +786,20 @@ function OrganizationsTab() {
           {orgTab === 'info' && (
             <>
               <label className="field-label">
-                {tr('组织名称', 'Organization Name')}
-                <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder={tr('如：Acme Corp', 'Example: Acme Corp')} />
+                {tr('名称', 'Name')}
+                <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder={tr('Acme Corp', 'Acme Corp')} />
               </label>
               <label className="field-label">
                 {tr('行业', 'Industry')}
-                <input type="text" value={orgIndustry} onChange={(e) => setOrgIndustry(e.target.value)} placeholder={tr('如：SaaS / 金融 / 制造', 'Example: SaaS / Finance / Manufacturing')} />
+                <input type="text" value={orgIndustry} onChange={(e) => setOrgIndustry(e.target.value)} placeholder={tr('SaaS / 金融 / 制造', 'SaaS / Finance / Manufacturing')} />
               </label>
               <label className="field-label">
-                {tr('组织描述', 'Organization Description')}
-                <textarea value={orgDescription} onChange={(e) => setOrgDescription(e.target.value)} placeholder={tr('组织的业务、产品、文化...', 'Business, products, culture...')} style={{ minHeight: 60 }} />
+                {tr('描述', 'Description')}
+                <textarea value={orgDescription} onChange={(e) => setOrgDescription(e.target.value)} placeholder={tr('业务、产品、文化', 'Business, products, culture')} style={{ minHeight: 60 }} />
               </label>
               <label className="field-label">
-                {tr('上下文提示词', 'Context Prompt')}
-                <textarea value={orgContextPrompt} onChange={(e) => setOrgContextPrompt(e.target.value)} placeholder={tr('注入所有角色 system prompt 的组织背景...', 'Organization context injected into all persona system prompts...')} style={{ minHeight: 80 }} />
+                {tr('上下文', 'Context')}
+                <textarea value={orgContextPrompt} onChange={(e) => setOrgContextPrompt(e.target.value)} placeholder={tr('角色共享的组织背景', 'Shared organization context')} style={{ minHeight: 80 }} />
               </label>
 
               <div className="settings-form-actions">
@@ -1087,7 +1087,7 @@ function ConfigTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('AI 配置', 'AI Config')}</h3>
+        <h3 className="settings-section-title">{tr('服务 Schema', 'Service Schema')}</h3>
         <button className="settings-create-btn" onClick={loadConfig} disabled={loading || saving}>
           <RefreshCw size={14} />
           {loading ? tr('加载中...', 'Loading...') : tr('刷新', 'Refresh')}
@@ -1127,7 +1127,7 @@ function ConfigTab() {
         <section className="settings-form-panel settings-voice-panel">
           <div className="settings-voice-panel-title">
             <KeyRound size={18} />
-            <h4>{tr('LLM 文本模型', 'LLM Text Model')}</h4>
+            <h4>{tr('LLM', 'LLM')}</h4>
           </div>
           <label className="field-label">
             {tr('Base URL', 'Base URL')}
@@ -1138,7 +1138,7 @@ function ConfigTab() {
             <input value={form.llmDefaultModel} onChange={(e) => updateForm({ llmDefaultModel: e.target.value })} />
           </label>
           <label className="field-label">
-            {tr('调用模式', 'Wire API')}
+            {tr('接口', 'API')}
             <select value={form.llmWireApi} onChange={(e) => updateForm({ llmWireApi: e.target.value })}>
               <option value="responses">Responses</option>
               <option value="chat_completions">Chat Completions</option>
@@ -1159,7 +1159,7 @@ function ConfigTab() {
         <section className="settings-form-panel settings-voice-panel">
           <div className="settings-voice-panel-title">
             <Volume2 size={18} />
-            <h4>{tr('AI 语音回复 TTS', 'AI Speech Reply TTS')}</h4>
+            <h4>{tr('TTS', 'TTS')}</h4>
           </div>
           <label className="field-label">
             {tr('服务商', 'Provider')}
@@ -1192,7 +1192,7 @@ function ConfigTab() {
         <section className="settings-form-panel settings-voice-panel">
           <div className="settings-voice-panel-title">
             <Mic size={18} />
-            <h4>{tr('语音转写 STT', 'Speech Transcription STT')}</h4>
+            <h4>{tr('STT', 'STT')}</h4>
           </div>
           <label className="field-label">
             {tr('服务商', 'Provider')}
@@ -1234,7 +1234,7 @@ function ConfigTab() {
         <section className="settings-form-panel settings-voice-panel">
           <div className="settings-voice-panel-title">
             <Radio size={18} />
-            <h4>{tr('实时 WebRTC 语音', 'Realtime WebRTC Voice')}</h4>
+            <h4>{tr('Realtime', 'Realtime')}</h4>
           </div>
           <label className="field-label">
             {tr('Realtime API Key', 'Realtime API Key')}
@@ -1263,7 +1263,7 @@ function ConfigTab() {
             <input value={form.realtimeCallUrl} onChange={(e) => updateForm({ realtimeCallUrl: e.target.value })} />
           </label>
           <p className="settings-voice-note">
-            {tr('Realtime WebRTC 目前使用 OpenAI Realtime 接口；OpenRouter 配置仅应用于逐轮 STT/TTS。', 'Realtime WebRTC currently uses the OpenAI Realtime API; OpenRouter settings apply to turn-based STT/TTS only.')}
+            {tr('实时语音使用 Realtime；逐轮语音使用 STT/TTS。', 'Realtime voice uses Realtime; turn-based voice uses STT/TTS.')}
           </p>
         </section>
       </div>
@@ -1290,8 +1290,8 @@ function PreferencesTab() {
       <div className="settings-placeholder-icon">
         <SlidersHorizontal size={28} />
       </div>
-      <h3>{tr('偏好稍后开放', 'Preferences coming later')}</h3>
-      <p>{tr('模型、密钥和服务地址先在配置中管理。', 'Manage models, keys, and service URLs in Config for now.')}</p>
+      <h3>{tr('暂无偏好 Schema', 'No Preference Schema')}</h3>
+      <p>{tr('可配置对象在服务配置中。', 'Configurable objects are in Service Config.')}</p>
     </div>
   )
 }

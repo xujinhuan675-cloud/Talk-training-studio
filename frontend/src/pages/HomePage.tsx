@@ -200,24 +200,24 @@ const HomePage: React.FC = () => {
       <PageHeader
         icon={<Target size={16} />}
         eyebrow={t('nav.home')}
-        title={tr('工作台', 'Workbench')}
-        description={tr('从推荐训练、未完成会话和复盘入口继续。', 'Continue from recommended practice, unfinished conversations, and reviews.')}
+        title={tr('训练入口', 'Training Index')}
+        description={tr('选择训练、会话或复盘。', 'Open practice, conversations, or review.')}
         stats={(
           <PageStatGrid
             stats={[
               {
-                label: tr('推荐状态', 'Recommendation'),
+                label: tr('推荐训练', 'Recommended'),
                 value: dailyStatusLabel,
                 tone: 'success',
               },
               {
-                label: tr('可继续房间', 'Continuable rooms'),
+                label: tr('会话记录', 'Sessions'),
                 value: rooms.length,
                 detail: latestRoomTime,
                 tone: 'warning',
               },
               {
-                label: tr('当前身份', 'Current identity'),
+                label: tr('使用身份', 'Identity'),
                 value: operatorLabel,
                 tone: 'accent',
               },
@@ -230,7 +230,7 @@ const HomePage: React.FC = () => {
         <Surface className="home-primary-session" variant="accent" padding="lg">
           <div className="home-primary-session-head">
             <div>
-              <Badge tone="success">{tr('下一步', 'Next action')}</Badge>
+              <Badge tone="success">{tr('推荐', 'Recommended')}</Badge>
               <h2>{tr(dailyChallenge.titleZh, dailyChallenge.titleEn)}</h2>
             </div>
             <Badge tone="warning">{dailyXpLabel}</Badge>
@@ -238,15 +238,15 @@ const HomePage: React.FC = () => {
 
           <div className="home-status-grid">
             <div className="home-status-card">
-              <span>{tr('完成进度', 'Completion')}</span>
+              <span>{tr('进度', 'Progress')}</span>
               <strong>{dailyProgressPercent}%</strong>
             </div>
             <div className="home-status-card">
-              <span>{tr('训练方式', 'Practice mode')}</span>
+              <span>{tr('模式', 'Mode')}</span>
               <strong>{tr('文本对话', 'Text chat')}</strong>
             </div>
             <div className="home-status-card">
-              <span>{tr('记录范围', 'Record scope')}</span>
+              <span>{tr('范围', 'Scope')}</span>
               <strong>{operatorLabel}</strong>
             </div>
           </div>
@@ -276,11 +276,11 @@ const HomePage: React.FC = () => {
               disabled={dailyStarting}
             >
               {dailyStarting ? <Loader2 size={15} className="home-spin" /> : <Target size={15} />}
-              {dailyStarting ? tr('启动中', 'Starting') : tr('开始推荐训练', 'Start recommended drill')}
+              {dailyStarting ? tr('启动中', 'Starting') : tr('开始训练', 'Start practice')}
             </Button>
             <Button asChild variant="secondary">
               <Link to={APP_ROUTES.practiceScenarios}>
-                {tr('更换场景', 'Change scenario')}
+                {tr('场景库', 'Scenario catalog')}
                 <ChevronRight size={15} />
               </Link>
             </Button>
@@ -293,8 +293,8 @@ const HomePage: React.FC = () => {
 
         <Surface className="home-task-panel" variant="raised" padding="lg">
           <div className="home-task-head">
-            <Badge tone="neutral">{tr('待处理', 'Queue')}</Badge>
-            <h2>{tr('下一步', 'Next')}</h2>
+            <Badge tone="neutral">{tr('继续', 'Continue')}</Badge>
+            <h2>{tr('任务', 'Tasks')}</h2>
           </div>
           <div className="home-task-list">
             {latestRoom ? (
@@ -303,7 +303,7 @@ const HomePage: React.FC = () => {
                   <MessageSquare size={17} />
                 </span>
                 <div>
-                  <strong>{tr('继续对话', 'Continue conversation')}</strong>
+                  <strong>{tr('最近会话', 'Recent session')}</strong>
                   <em>{latestRoom.name}</em>
                 </div>
                 <ChevronRight size={15} />
@@ -314,8 +314,8 @@ const HomePage: React.FC = () => {
                   <MessageSquare size={17} />
                 </span>
                 <div>
-                  <strong>{tr('继续对话', 'Continue conversation')}</strong>
-                  <em>{tr('新训练会生成记录', 'New practice will create a record')}</em>
+                  <strong>{tr('最近会话', 'Recent session')}</strong>
+                  <em>{tr('暂无可继续会话', 'No session yet')}</em>
                 </div>
               </div>
             )}
@@ -326,7 +326,7 @@ const HomePage: React.FC = () => {
               </span>
               <div>
                 <strong>{t('nav.review')}</strong>
-                <em>{tr('查看训练复盘', 'Open training reviews')}</em>
+                <em>{tr('训练复盘', 'Training reviews')}</em>
               </div>
               <ChevronRight size={15} />
             </Link>
@@ -337,7 +337,7 @@ const HomePage: React.FC = () => {
               </span>
               <div>
                 <strong>{t('nav.growth')}</strong>
-                <em>{tr('检查能力进度', 'Check skill progress')}</em>
+                <em>{tr('能力进度', 'Skill progress')}</em>
               </div>
               <ChevronRight size={15} />
             </Link>
@@ -346,7 +346,7 @@ const HomePage: React.FC = () => {
       </div>
 
       <PageSection
-        title={tr('开始', 'Start')}
+        title={tr('目录', 'Catalog')}
       >
         <div className="home-entry-grid">
           <Link to={APP_ROUTES.practiceScenarios} className="home-entry-card primary">
@@ -404,7 +404,7 @@ const HomePage: React.FC = () => {
           actions={(
             <Button asChild variant="ghost" size="sm">
               <Link to={APP_ROUTES.conversations}>
-                {tr('全部房间', 'All rooms')}
+                {tr('全部会话', 'All sessions')}
                 <ChevronRight size={14} />
               </Link>
             </Button>
