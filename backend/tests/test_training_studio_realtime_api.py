@@ -1204,8 +1204,21 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
                 "source": "pipecat",
             }
         )
+        transcript_done = ws.receive_json()
         persisted = ws.receive_json()
 
+    assert transcript_done["type"] == "transcript.done"
+    assert transcript_done["payload"] == {
+        "text": "That works if we define the pilot metric first.",
+        "role": "assistant",
+        "eventType": "response.audio_transcript.done",
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "provider": "pipecat",
+        "trainingSessionId": "session-1",
+        "roomId": 42,
+        "realtimeSessionId": "session-1",
+        "responseId": "response_pipecat_1",
+    }
     assert persisted["type"] == "transcript.persisted"
     assert persisted["payload"]["message"]["content"] == (
         "That works if we define the pilot metric first."
@@ -1261,13 +1274,20 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
 
         ws.send_json({"type": "audio.commit"})
         committed = ws.receive_json()
-        events = [ws.receive_json() for _ in range(4)]
+        events = [ws.receive_json() for _ in range(5)]
 
         assert committed["status"] == "processing"
         audio_output = next(event for event in events if event["type"] == "audio.output")
+        transcript_done = next(event for event in events if event["type"] == "transcript.done")
         persisted = next(event for event in events if event["type"] == "transcript.persisted")
         guidance_trigger = next(
             event for event in events if event["type"] == "training.live_guidance.triggered"
+        )
+        event_types = [event["type"] for event in events]
+        assert event_types.index("audio.output") < event_types.index("transcript.done")
+        assert event_types.index("transcript.done") < event_types.index("transcript.persisted")
+        assert event_types.index("transcript.persisted") < event_types.index(
+            "training.live_guidance.triggered"
         )
         assert any(
             event["type"] == "status.changed" and event["status"] == "listening"
@@ -1282,6 +1302,17 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
         assert audio_output["payload"]["runtime"] == REALTIME_RUNTIME_PIPECAT
         assert audio_output["payload"]["provider"] == "pipecat"
         assert audio_output["payload"]["metadata"] == {"providerFrame": "tts"}
+        assert transcript_done["payload"] == {
+            "text": "Let's define the pilot metric before we begin.",
+            "role": "assistant",
+            "eventType": "response.audio_transcript.done",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "provider": "pipecat",
+            "trainingSessionId": "session-1",
+            "roomId": 42,
+            "realtimeSessionId": "session-1",
+            "responseId": "response_pipecat_2",
+        }
         assert persisted["payload"]["message"]["content"] == (
             "Let's define the pilot metric before we begin."
         )

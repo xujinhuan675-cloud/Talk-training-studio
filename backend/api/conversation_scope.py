@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from api.dependencies import CurrentUser
 from application.dto import ConversationDTO, CreateConversationDTO
+from domain.conversation.repository import OwnedMetadataScope
 
 
 _OWNER_USER_KEYS = ("ownerUserId", "owner_user_id", "createdByUserId", "created_by_user_id")
@@ -94,6 +95,21 @@ def user_can_access_owned_metadata(
     if not owner_user_id and owner_team_id and owner_team_id == current_user.team_id:
         return True
     return False
+
+
+def owned_metadata_scope_for_current_user(
+    current_user: CurrentUser,
+    *,
+    allow_unscoped: bool,
+) -> OwnedMetadataScope | None:
+    if current_user.is_admin:
+        return None
+    return OwnedMetadataScope(
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
+        include_team_scope=current_user.is_leader,
+        allow_unscoped=allow_unscoped,
+    )
 
 
 def require_owned_metadata_access(

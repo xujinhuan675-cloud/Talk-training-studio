@@ -7,9 +7,20 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from .entity import AgentConfig, Conversation, Message, Run
+
+
+@dataclass(frozen=True)
+class OwnedMetadataScope:
+    """Repository-level scope for resources carrying owner/team metadata."""
+
+    user_id: str
+    team_id: str | None = None
+    include_team_scope: bool = False
+    allow_unscoped: bool = True
 
 
 class ConversationRepository(ABC):
@@ -31,10 +42,16 @@ class ConversationRepository(ABC):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[Conversation]: ...
 
     @abstractmethod
-    async def count(self, *, status: Optional[str] = None) -> int: ...
+    async def count(
+        self,
+        *,
+        status: Optional[str] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> int: ...
 
 
 class MessageRepository(ABC):
@@ -181,7 +198,8 @@ class AgentConfigRepository(ABC):
         *,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[AgentConfig]: ...
 
     @abstractmethod
-    async def count(self) -> int: ...
+    async def count(self, *, metadata_scope: OwnedMetadataScope | None = None) -> int: ...

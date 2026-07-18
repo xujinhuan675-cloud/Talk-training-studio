@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.conversation.entity import Conversation
 from domain.conversation.exceptions import ConversationNotFoundException
-from domain.conversation.repository import ConversationRepository
+from domain.conversation.repository import ConversationRepository, OwnedMetadataScope
 from infrastructure.models.conversation import ConversationModel
+from infrastructure.repositories.metadata_scope import apply_owned_metadata_scope
 
 
 class SQLAlchemyConversationRepository(ConversationRepository):
@@ -36,11 +37,18 @@ class SQLAlchemyConversationRepository(ConversationRepository):
             deleted_at=model.deleted_at,
         )
 
-    def _apply_filters(self, query, *, status: Optional[str]):
+    def _apply_filters(
+        self,
+        query,
+        *,
+        status: Optional[str],
+        metadata_scope: OwnedMetadataScope | None = None,
+    ):
         # Exclude soft-deleted by default
         query = query.where(ConversationModel.deleted_at.is_(None))
         if status:
             query = query.where(ConversationModel.status == status)
+        query = apply_owned_metadata_scope(query, ConversationModel.extra_metadata, metadata_scope)
         return query
 
     async def create(self, conversation: Conversation) -> Conversation:
@@ -92,9 +100,10 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[Conversation]:
         query = select(ConversationModel)
-        query = self._apply_filters(query, status=status)
+        query = self._apply_filters(query, status=status, metadata_scope=metadata_scope)
         query = query.order_by(
             ConversationModel.updated_at.desc(),
             ConversationModel.id.desc(),
@@ -103,8 +112,13 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
 
-    async def count(self, *, status: Optional[str] = None) -> int:
+    async def count(
+        self,
+        *,
+        status: Optional[str] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> int:
         query = select(func.count()).select_from(ConversationModel)
-        query = self._apply_filters(query, status=status)
+        query = self._apply_filters(query, status=status, metadata_scope=metadata_scope)
         result = await self.session.execute(query)
         return int(result.scalar() or 0)

@@ -587,8 +587,8 @@ def _tool_capabilities(
 ) -> list[RuntimeCapability]:
     descriptors = _descriptor_items(tool_configs, _TOOL_CONFIG_COLLECTION_KEYS)
     tool_model_ids = _string_list(model_summary.get("tool_capable_model_ids"))
-    ready_mcp_ids = {capability.id for capability in mcp_capabilities if capability.ready}
-    has_ready_mcp = bool(ready_mcp_ids)
+    ready_mcp_capabilities = [capability for capability in mcp_capabilities if capability.ready]
+    has_ready_mcp = bool(ready_mcp_capabilities)
     capabilities: list[RuntimeCapability] = [
         _model_tool_capability(
             tool_model_ids=tool_model_ids,
@@ -606,6 +606,13 @@ def _tool_capabilities(
             default=bool(_descriptor_text(descriptor, ("mcp_server", "mcpServer", "server"))),
         )
         mcp_server = _descriptor_text(descriptor, ("mcp_server", "mcpServer", "server"))
+        matching_ready_mcp = ready_mcp_capabilities
+        if mcp_server:
+            matching_ready_mcp = [
+                capability
+                for capability in ready_mcp_capabilities
+                if _mcp_server_matches(capability, mcp_server)
+            ]
         status = "ready"
         reasons: list[dict[str, object]] = []
         if not enabled:
@@ -621,15 +628,15 @@ def _tool_capabilities(
                     metadata={"tool": name},
                 )
             )
-        elif requires_mcp and not has_ready_mcp:
+        elif requires_mcp and not matching_ready_mcp:
             status = "missingDependency"
             reasons.append(
                 _reason(
                     "MISSING_READY_MCP_SERVER",
-                    "This tool requires an MCP server, but no ready MCP server is registered.",
+                    "This tool requires a ready MCP server, but the requested server is not registered or not ready.",
                     phase="configuration",
                     feature="mcp_server",
-                    dependency="mcp_server",
+                    dependency=mcp_server or "mcp_server",
                     severity="warning",
                     metadata={"tool": name, "mcp_server": mcp_server},
                 )
@@ -658,6 +665,59 @@ def _tool_capabilities(
             )
         )
     return capabilities
+
+
+def _mcp_server_matches(capability: RuntimeCapability, requested_server: str) -> bool:
+    requested_aliases = _mcp_server_aliases(requested_server)
+    if not requested_aliases:
+        return False
+
+    capability_aliases = _mcp_server_aliases(
+        capability.id,
+        capability.id.removeprefix("mcp_server:"),
+        capability.name,
+        capability.source,
+    )
+    metadata = capability.metadata if isinstance(capability.metadata, Mapping) else {}
+    capability_aliases.update(
+        _mcp_server_aliases(
+            metadata.get("mcp_server"),
+            metadata.get("server"),
+            metadata.get("id"),
+            metadata.get("name"),
+            metadata.get("label"),
+        )
+    )
+    config = metadata.get("config")
+    if isinstance(config, Mapping):
+        capability_aliases.update(
+            _mcp_server_aliases(
+                config.get("id"),
+                config.get("name"),
+                config.get("label"),
+                config.get("mcp_server"),
+                config.get("server"),
+            )
+        )
+
+    return bool(requested_aliases & capability_aliases)
+
+
+def _mcp_server_aliases(*values: object) -> set[str]:
+    aliases: set[str] = set()
+    for value in values:
+        text = _optional_text(value)
+        if not text:
+            continue
+        lowered = text.lower()
+        aliases.add(lowered)
+        aliases.add(_slug(text))
+        if lowered.startswith("mcp_server:"):
+            suffix = text.split(":", 1)[1].strip()
+            if suffix:
+                aliases.add(suffix.lower())
+                aliases.add(_slug(suffix))
+    return aliases
 
 
 def _model_tool_capability(

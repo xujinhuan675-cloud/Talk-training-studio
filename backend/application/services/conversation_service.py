@@ -35,6 +35,7 @@ from domain.conversation.exceptions import (
     ConversationNotFoundException,
     MessageNotFoundException,
 )
+from domain.conversation.repository import OwnedMetadataScope
 
 
 def _utcnow() -> datetime:
@@ -244,10 +245,19 @@ class ConversationApplicationService:
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> Tuple[list[ConversationDTO], int]:
         async with self._uow_factory(readonly=True) as uow:
-            items = await uow.conversation_repository.list(status=status, skip=skip, limit=limit)
-            total = await uow.conversation_repository.count(status=status)
+            items = await uow.conversation_repository.list(
+                status=status,
+                skip=skip,
+                limit=limit,
+                metadata_scope=metadata_scope,
+            )
+            total = await uow.conversation_repository.count(
+                status=status,
+                metadata_scope=metadata_scope,
+            )
             return [ConversationDTO.model_validate(c) for c in items], total
 
     async def update_conversation(
@@ -815,10 +825,15 @@ class ConversationApplicationService:
         *,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> Tuple[list[AgentConfigDTO], int]:
         async with self._uow_factory(readonly=True) as uow:
-            items = await uow.agent_config_repository.list(skip=skip, limit=limit)
-            total = await uow.agent_config_repository.count()
+            items = await uow.agent_config_repository.list(
+                skip=skip,
+                limit=limit,
+                metadata_scope=metadata_scope,
+            )
+            total = await uow.agent_config_repository.count(metadata_scope=metadata_scope)
             return [AgentConfigDTO.model_validate(c) for c in items], total
 
     async def update_agent_config(

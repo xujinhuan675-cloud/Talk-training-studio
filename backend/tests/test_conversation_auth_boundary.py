@@ -11,6 +11,58 @@ from api.routes.conversations import router as conversation_router
 from application.dto import AgentConfigDTO, ConversationDTO
 
 
+def _as_mapping(value: object | None) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _metadata_text(metadata: dict, *keys: str) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return None
+
+
+def _owned_user_id(metadata: dict) -> str | None:
+    scope = _as_mapping(metadata.get("authScope"))
+    return _metadata_text(scope, "userId", "user_id") or _metadata_text(
+        metadata,
+        "ownerUserId",
+        "owner_user_id",
+        "createdByUserId",
+        "created_by_user_id",
+    )
+
+
+def _owned_team_id(metadata: dict) -> str | None:
+    scope = _as_mapping(metadata.get("authScope"))
+    return _metadata_text(scope, "teamId", "team_id") or _metadata_text(
+        metadata,
+        "teamId",
+        "team_id",
+        "ownerTeamId",
+        "owner_team_id",
+    )
+
+
+def _matches_metadata_scope(metadata: dict, scope) -> bool:
+    metadata = _as_mapping(metadata)
+    owner_user_id = _owned_user_id(metadata)
+    owner_team_id = _owned_team_id(metadata)
+    team_id = getattr(scope, "team_id", None)
+    if not owner_user_id and not owner_team_id:
+        return bool(getattr(scope, "allow_unscoped", False))
+    if owner_user_id and owner_user_id == getattr(scope, "user_id", None):
+        return True
+    if getattr(scope, "include_team_scope", False) and owner_team_id and owner_team_id == team_id:
+        return True
+    if not owner_user_id and owner_team_id and owner_team_id == team_id:
+        return True
+    return False
+
+
 def _conversation(
     conversation_id: int,
     *,
@@ -76,7 +128,14 @@ class _FakeConversationService:
 
     async def list_conversations(self, **kwargs):
         self.list_call = kwargs
-        return list(self.conversations.values()), len(self.conversations)
+        items = list(self.conversations.values())
+        metadata_scope = kwargs.get("metadata_scope")
+        if metadata_scope is not None:
+            items = [item for item in items if _matches_metadata_scope(item.metadata, metadata_scope)]
+        total = len(items)
+        skip = kwargs.get("skip", 0)
+        limit = kwargs.get("limit", 20)
+        return items[skip:skip + limit], total
 
     async def get_conversation(self, conversation_id: int):
         self.get_calls.append(conversation_id)
@@ -104,7 +163,14 @@ class _FakeConversationService:
 
     async def list_agent_configs(self, **kwargs):
         self.agent_config_list_call = kwargs
-        return list(self.agent_configs.values()), len(self.agent_configs)
+        items = list(self.agent_configs.values())
+        metadata_scope = kwargs.get("metadata_scope")
+        if metadata_scope is not None:
+            items = [item for item in items if _matches_metadata_scope(item.metadata, metadata_scope)]
+        total = len(items)
+        skip = kwargs.get("skip", 0)
+        limit = kwargs.get("limit", 20)
+        return items[skip:skip + limit], total
 
     async def get_agent_config(self, config_id: int):
         self.agent_config_get_call = config_id
@@ -228,6 +294,53 @@ def test_cross_user_conversation_list_filters_other_user_items() -> None:
     data = response.json()["data"]
     assert [item["id"] for item in data["items"]] == [8]
     assert data["total"] == 1
+
+
+def test_non_admin_conversation_list_filters_before_pagination() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            ),
+            8: _conversation(
+                8,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+            9: _conversation(
+                9,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+        }
+    )
+    client = _client(conversation_service)
+
+    first_page = client.get(
+        "/api/v1/conversations",
+        params={"page": 1, "size": 1},
+        headers={"X-Mock-User": "sales"},
+    )
+    second_page = client.get(
+        "/api/v1/conversations",
+        params={"page": 2, "size": 1},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert [item["id"] for item in first_page.json()["data"]["items"]] == [8]
+    assert first_page.json()["data"]["total"] == 2
+    assert [item["id"] for item in second_page.json()["data"]["items"]] == [9]
+    assert second_page.json()["data"]["total"] == 2
 
 
 def test_cross_user_conversation_mutations_are_blocked_before_service_call() -> None:
@@ -398,6 +511,53 @@ def test_agent_config_routes_enforce_owner_metadata_scope() -> None:
     assert conversation_service.agent_config_get_calls == [7, 7, 7]
     assert conversation_service.agent_config_update_call is None
     assert conversation_service.agent_config_delete_call is None
+
+
+def test_non_admin_agent_config_list_filters_before_pagination() -> None:
+    conversation_service = _FakeConversationService(
+        agent_configs={
+            7: _agent_config(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            ),
+            8: _agent_config(
+                8,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+            9: _agent_config(
+                9,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+        }
+    )
+    client = _client(conversation_service)
+
+    first_page = client.get(
+        "/api/v1/agent-configs",
+        params={"page": 1, "size": 1},
+        headers={"X-Mock-User": "sales"},
+    )
+    second_page = client.get(
+        "/api/v1/agent-configs",
+        params={"page": 2, "size": 1},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert [item["id"] for item in first_page.json()["data"]["items"]] == [8]
+    assert first_page.json()["data"]["total"] == 2
+    assert [item["id"] for item in second_page.json()["data"]["items"]] == [9]
+    assert second_page.json()["data"]["total"] == 2
 
 
 def test_agent_config_update_preserves_existing_owner_scope() -> None:

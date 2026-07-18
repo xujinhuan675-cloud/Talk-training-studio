@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.conversation.entity import AgentConfig
 from domain.conversation.exceptions import AgentConfigNotFoundException
-from domain.conversation.repository import AgentConfigRepository
+from domain.conversation.repository import AgentConfigRepository, OwnedMetadataScope
 from infrastructure.models.conversation import AgentConfigModel
+from infrastructure.repositories.metadata_scope import apply_owned_metadata_scope
 
 
 class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
@@ -101,17 +102,19 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         *,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[AgentConfig]:
         query = (
             select(AgentConfigModel)
             .order_by(AgentConfigModel.created_at.desc(), AgentConfigModel.id.desc())
-            .offset(skip)
-            .limit(limit)
         )
+        query = apply_owned_metadata_scope(query, AgentConfigModel.extra_metadata, metadata_scope)
+        query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
 
-    async def count(self) -> int:
+    async def count(self, *, metadata_scope: OwnedMetadataScope | None = None) -> int:
         query = select(func.count()).select_from(AgentConfigModel)
+        query = apply_owned_metadata_scope(query, AgentConfigModel.extra_metadata, metadata_scope)
         result = await self.session.execute(query)
         return int(result.scalar() or 0)

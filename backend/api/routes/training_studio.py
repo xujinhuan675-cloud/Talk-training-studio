@@ -46,7 +46,7 @@ from api.dependencies import (
     require_system_roles,
     training_scope_for,
 )
-from api.conversation_scope import user_can_access_owned_metadata
+from api.conversation_scope import owned_metadata_scope_for_current_user
 from application.ports.capabilities import build_text_runtime_capability_registry
 from application.ports.llm import (
     LLMEndpointMetadata,
@@ -466,21 +466,18 @@ async def _agent_config_inventory_for_user(
     current_user: CurrentUser,
 ) -> list[object]:
     try:
-        items, _total = await service.list_agent_configs(skip=0, limit=settings.MAX_PAGE_SIZE)
+        items, _total = await service.list_agent_configs(
+            skip=0,
+            limit=settings.MAX_PAGE_SIZE,
+            metadata_scope=owned_metadata_scope_for_current_user(
+                current_user,
+                allow_unscoped=False,
+            ),
+        )
     except Exception as exc:
         logger.warning("Failed to load agent config inventory for capability registry: %s", exc)
         return []
-    if current_user.is_admin:
-        return list(items)
-    return [
-        item
-        for item in items
-        if user_can_access_owned_metadata(
-            item.metadata,
-            current_user,
-            allow_unscoped=False,
-        )
-    ]
+    return list(items)
 
 
 async def _reload_voice_clients() -> None:
@@ -1636,6 +1633,13 @@ class _WebSocketTrainingTranscriptSink:
         )
 
     async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
+        if _uses_pipecat_realtime(transcript.provider):
+            await _send_wire_event(
+                self._websocket,
+                "transcript.done",
+                self._session,
+                _realtime_transcript_done_payload(transcript),
+            )
         persisted = await self._sink.persist(transcript)
         payload = dict(persisted.payload)
         payload.setdefault("trainingSessionId", self._training_session_id)
@@ -1647,6 +1651,27 @@ class _WebSocketTrainingTranscriptSink:
             payload,
         )
         return persisted
+
+
+def _realtime_transcript_done_payload(transcript: RealtimeTranscript) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "text": transcript.text,
+        "role": transcript.role,
+        "eventType": transcript.event_type,
+        "runtime": transcript.runtime,
+        "provider": transcript.provider,
+        "trainingSessionId": transcript.binding.training_session_id,
+        "roomId": transcript.binding.room_id,
+        "realtimeSessionId": transcript.realtime_session_id,
+    }
+    for key, value in {
+        "eventId": transcript.event_id,
+        "itemId": transcript.item_id,
+        "responseId": transcript.response_id,
+    }.items():
+        if value is not None:
+            payload[key] = value
+    return payload
 
 
 def _pipeline_event_type(payload: Mapping[str, object]) -> str:

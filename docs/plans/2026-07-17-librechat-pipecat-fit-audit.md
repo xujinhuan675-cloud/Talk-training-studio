@@ -53,6 +53,71 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | MCP/Agent/Tool | 10% | 当前项目没有系统性 Agent/MCP 基底，应从 LibreChat 迁移或适配。 |
 | 成熟部署/运维 | 25% | 本地开发和测试可用，管理面板、权限覆盖、token/usage、审计不足。 |
 
+## 成熟底座迁移进度仪表盘
+
+更新日期：2026-07-18。
+
+本节用于给后续 AI 快速判断：当前 TalkWise 哪些核心部分已经迁到 LibreChat / Pipecat 的成熟底座思路上，哪些还只是概念或 inventory，哪些成熟项目能力未来可继续迁入。后续每轮迁移后应优先更新本节，再更新更细的功能域说明。
+
+总体判断：当前不是“已迁完”，而是已经从概念对齐进入按成熟底座切块迁移的早期到中期。第一批边界已经落地，但 LibreChat / Pipecat 还没有成为唯一 source of truth。
+
+### 当前项目核心部分对齐程度
+
+| 核心域 | 对齐底座 | 当前程度 | 状态判断 |
+|:---|:---|:---:|:---|
+| TrainingCore / 训练语义 | TalkWise 自有 | 65-70% | 已有 session、scenario、persona/stakeholder、report、progress、live guidance。这里不迁给 LibreChat/Pipecat，只作为上层产品语义保留。 |
+| 文本 conversation / message tree | LibreChat | 45-55% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search 基础。还没把 LibreChat-style text runtime 作为完整底座。 |
+| branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 55-65% | 已有当前路径、tail、fork metadata、结果/历史展示雏形。还缺稳定数据契约和接近 LibreChat message-tree 的完整 E2E 行为验收。 |
+| model/provider registry | LibreChat | 45-55% | 已有 LLM registry、model specs、capability readiness。还不是完整 provider/preset/runtime registry。 |
+| auth / ACL / resource scope | LibreChat | 40-50% | 已把 conversation / agent config list 的 user/team scope 下沉到 repository 查询层。get/update/delete 仍是 route 级检查，还未形成完整 ACL 系统。 |
+| MCP / Agent / Tool | LibreChat | 15-20% | 已有 capability inventory 和具体 MCP server readiness 校验。还没有 tool dispatcher、MCP lifecycle、OAuth MCP、tool call runtime。 |
+| realtime websocket / transcript | Pipecat | 45-55% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、live guidance trigger。Pipecat final transcript 已对齐 `transcript.done -> transcript.persisted` 顺序。 |
+| Pipecat runtime source of truth | Pipecat | 25-35% | 现在是 Pipecat path 可用、OpenAI realtime path 并存。还没收敛成 Pipecat 为主、OpenAI realtime 作为 Pipecat service/fallback。 |
+| files / RAG / training materials | LibreChat | 15-25% | 项目里有文件/素材相关雏形，但还没迁入 LibreChat 式 file ownership、RAG、agent file scope。 |
+| usage / moderation / admin ops | LibreChat | 10-20% | 当前不是重点，只适合 auth/ACL 稳定后再迁。 |
+
+第一部分结论：
+
+- TalkWise 自己的训练产品层已经有 65% 左右的形状。
+- LibreChat 文本底座约 40-50%，已经开始落到 conversation、capability、resource scope，但还不是统一 runtime。
+- Pipecat realtime 底座约 40-50%，已经有 adapter/event/persistence 链路，但还没成为唯一实时语音 runtime。
+- MCP/Agent 和生产级 auth/ACL 还明显处在早期。
+
+当前已经落地的方向是“先修边界，再迁 runtime”：
+
+- 文本侧开始对齐 LibreChat 的 ownership / capability / message-tree 思路。
+- 语音侧开始对齐 Pipecat 的 provider-neutral event lifecycle。
+- TrainingCore 保持为上层产品语义，不被通用 chat/realtime runtime 接管。
+
+### 成熟项目未来可迁移能力
+
+| 成熟项目能力 | 未来用途 | 当前可迁移状态 | 下一步 |
+|:---|:---|:---:|:---|
+| LibreChat conversation/message schema | 文本训练底座 | 可迁移，但还没选 source of truth | 决定保留当前 schema + adapter，还是逐步迁 LibreChat-style schema。 |
+| LibreChat message tree 行为 | edit/retry/fork/branch review | 高价值，可作为验收标准 | 把 LibreChat message-tree E2E 行为转成 TalkWise 测试矩阵。 |
+| LibreChat auth / ACL | 用户、团队、资源权限 | 概念已开始落地 | 把 `OwnedMetadataScope` 扩展到 get/update/delete、training session/report/guidance。 |
+| LibreChat MCP / Agent / tools | 教练工具、素材检索、企业系统接入 | 还在 inventory 阶段 | 先迁 registry/discovery/readiness，再接一个窄 tool consumer，不先造通用 dispatcher。 |
+| LibreChat files/RAG/uploads | 训练材料、会议纪要、案例导入 | 可用但未迁 | 先统一 file resource ownership，再接 RAG/tool。 |
+| LibreChat import/export/share | 训练复盘导入导出、团队分享 | 后置 | auth/ACL 和 report contract 稳定后做。 |
+| Pipecat frame pipeline | 实时语音主 runtime | 高价值，部分接入 | 让 `RealtimePipelineAdapter` 变成 Pipecat adapter 主路径。 |
+| Pipecat STT/TTS/LLM services | 多 provider 语音训练 | 可迁，但需收敛 | 先稳定 OpenAI/Pipecat 一条链，再扩 provider。 |
+| Pipecat VAD/turn/interruption | 打断、沉默、轮次检测 | 尚未实质接入 | 下一阶段产出 TalkWise 可读事件：turn started/stopped、interrupted、silence timeout。 |
+| Pipecat transport / WebRTC | 视频/会议式训练 | 后置 | WebSocket 稳定后再考虑 WebRTC/LiveKit/Daily。 |
+| Pipecat observability | latency、turn、provider error | 中高价值 | realtime 路径稳定后补 metrics/tracing。 |
+
+第二部分结论：
+
+- LibreChat 未来主要提供平台化能力扩展面：auth、ACL、MCP、Agent、files、RAG、provider registry、message-tree 验收。
+- Pipecat 未来主要提供实时能力扩展面：pipeline、STT/TTS/LLM services、VAD、turn/interruption、transport、observability。
+- 当前可迁移能力已经分层识别清楚，但实际代码迁移仍处于前两层：capability inventory、resource scope、Pipecat transcript event。
+
+后续更新规则：
+
+1. 每轮迁移后，先更新“当前项目核心部分对齐程度”的百分比和状态判断。
+2. 如果某个能力从 inventory 进入 runtime，应同步更新“成熟项目未来可迁移能力”的当前状态。
+3. 不把 TalkWise 训练语义迁给 LibreChat/Pipecat；只把通用底座、运行时、权限、工具、观测和验收标准迁入。
+4. 若新增能力无法明确归入 LibreChat 或 Pipecat，应优先判断它是不是 TalkWise 产品语义；如果不是，再决定是否需要引入新的成熟底座。
+
 ## LibreChat 功能域适配
 
 | 功能域 | LibreChat 成熟资产 | 适配等级 | TalkWise 落地方式 |

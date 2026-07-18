@@ -13,9 +13,9 @@ from fastapi import APIRouter, Depends, Query
 from api.conversation_scope import (
     conversation_create_payload_for_user,
     conversation_metadata_for_current_user,
+    owned_metadata_scope_for_current_user,
     require_conversation_access,
     require_owned_metadata_access,
-    user_can_access_conversation,
     user_can_access_owned_metadata,
 )
 from api.dependencies import CurrentUser, get_conversation_service, require_system_roles
@@ -104,10 +104,15 @@ async def list_conversations(
     current_user: CurrentUser = Depends(_conversation_user),
 ):
     skip = (page - 1) * size
-    items, total = await service.list_conversations(status=status, skip=skip, limit=size)
-    if not current_user.is_admin:
-        items = [item for item in items if user_can_access_conversation(item, current_user)]
-        total = len(items)
+    items, total = await service.list_conversations(
+        status=status,
+        skip=skip,
+        limit=size,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=True,
+        ),
+    )
     return paginated_response(items=items, total=total, page=page, size=size)
 
 
@@ -433,18 +438,14 @@ async def list_agent_configs(
     current_user: CurrentUser = Depends(_agent_config_user),
 ):
     skip = (page - 1) * size
-    items, total = await service.list_agent_configs(skip=skip, limit=size)
-    if not current_user.is_admin:
-        items = [
-            item
-            for item in items
-            if user_can_access_owned_metadata(
-                item.metadata,
-                current_user,
-                allow_unscoped=False,
-            )
-        ]
-        total = len(items)
+    items, total = await service.list_agent_configs(
+        skip=skip,
+        limit=size,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=False,
+        ),
+    )
     return paginated_response(items=items, total=total, page=page, size=size)
 
 

@@ -257,6 +257,75 @@ def test_text_runtime_capability_registry_reports_missing_mcp_server_as_tool_onl
     )
 
 
+def test_text_runtime_capability_registry_requires_specific_mcp_server_match_for_tools() -> None:
+    model = LLMModelMetadata(
+        name="gpt-tooling",
+        provider="openai",
+        endpoint="https://openai.example/v1",
+        extra={"capabilities": ["text", "tool_calling"]},
+    )
+    llm_registry = build_llm_provider_registry(
+        [
+            LLMProviderMetadata(
+                provider="openai",
+                default_model="gpt-tooling",
+                endpoint="https://openai.example/v1",
+                wire_api="responses",
+                models=[model],
+                endpoints=[
+                    LLMEndpointMetadata(
+                        provider="openai",
+                        endpoint="https://openai.example/v1",
+                        wire_api="responses",
+                        default_model="gpt-tooling",
+                        models=[model],
+                    )
+                ],
+            )
+        ],
+        provider="talkwise",
+        extra={"configured": True},
+    )
+    artifacts = build_llm_registry_artifacts(llm_registry)
+
+    payload = build_text_runtime_capability_registry(
+        llm_registry,
+        model_specs=artifacts["model_specs"],
+        tool_configs=[
+            {
+                "id": "crm.lookup",
+                "name": "CRM Lookup",
+                "requires_mcp": True,
+                "mcp_server": "crm",
+            }
+        ],
+        mcp_servers=[
+            {"id": "calendar", "name": "Calendar MCP", "transport": "stdio"},
+            {
+                "id": "crm",
+                "name": "CRM MCP",
+                "transport": "stdio",
+                "enabled": False,
+            },
+        ],
+    ).to_dict()
+
+    assert payload["readiness"]["status"] == "warning"
+    tool_capabilities = payload["by_kind"]["tool"]
+    assert [capability["status"] for capability in tool_capabilities] == [
+        "ready",
+        "missingDependency",
+    ]
+    assert tool_capabilities[1]["metadata"]["mcp_server"] == "crm"
+    assert tool_capabilities[1]["readiness"]["blockingReasons"][0]["code"] == (
+        "MISSING_READY_MCP_SERVER"
+    )
+    assert [capability["status"] for capability in payload["by_kind"]["mcp_server"]] == [
+        "ready",
+        "disabled",
+    ]
+
+
 def test_text_runtime_capability_registry_marks_disabled_and_missing_dependency_states() -> None:
     model = LLMModelMetadata(
         name="gpt-tooling",
