@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { startBattle } from '../services/api'
 import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
-import { createTrainingSession, startTrainingSession } from '../services/trainingSession'
+import { buildTrainingSessionStartRequest, createTrainingSession, startTrainingSession } from '../services/trainingSession'
 import {
   buildTrainingModeChatPath,
   type InteractionMode,
