@@ -26,159 +26,145 @@ async function loadTrainingLaunchModule() {
 
 const trainingLaunch = await loadTrainingLaunchModule()
 
-test('launchTrainingSessionFlow skips startBattle when no battle payload is provided', async () => {
-  const createTrainingSessionRequest = { mode: 'text', scenario_template_id: 'scenario-1' }
-  const createTrainingSessionCalls = []
-  const startBattleCalls = []
-  const startTrainingSessionCalls = []
-  const buildRequestCalls = []
-  const navigateCalls = []
-
+test('launchTrainingSessionFlow skips battle when payload is null', async () => {
+  const events = []
   const result = await trainingLaunch.launchTrainingSessionFlow({
-    createTrainingSessionRequest,
+    createTrainingSessionRequest: { mode: 'text', scenario_template_id: 'scenario-1' },
     createTrainingSession: async (request) => {
-      createTrainingSessionCalls.push(request)
-      return { session_id: 'session-1' }
+      events.push(['create', request])
+      return { session_id: 'created-1' }
     },
     battlePayload: null,
-    startBattle: async (payload) => {
-      startBattleCalls.push(payload)
-      throw new Error('startBattle should not be called')
+    startBattle: async () => {
+      events.push(['battle'])
+      return { id: 'room-from-battle' }
+    },
+    buildTrainingSessionStartRequest: (data, mode, interactionMode) => {
+      events.push(['buildRequest', data, mode, interactionMode])
+      return { ...data, runtime: `${mode}:${interactionMode}` }
     },
     startTrainingSession: async (sessionId, request) => {
-      startTrainingSessionCalls.push({ sessionId, request })
-      return { session_id: sessionId, room_id: 41 }
-    },
-    buildTrainingSessionStartRequest: (request, trainingMode, interactionMode) => {
-      buildRequestCalls.push({ request, trainingMode, interactionMode })
-      return {
-        ...request,
-        runtime: trainingMode === 'text' && interactionMode === 'turn_based' ? 'conversation_message_tree' : undefined,
-      }
-    },
-    buildChatPath: (roomId, trainingMode, trainingSessionId, interactionMode) => (
-      `/chat/${roomId}?mode=${trainingMode}&session=${trainingSessionId}&interaction=${interactionMode}`
-    ),
-    buildNavigationState: (context) => ({
-      sessionId: context.startedSession.session_id,
-      roomId: context.roomId,
-      mode: context.trainingMode,
-      interactionMode: context.interactionMode,
-    }),
-    navigate: (pathValue, options) => {
-      navigateCalls.push({ pathValue, options })
+      events.push(['startSession', sessionId, request])
+      return { session_id: 'started-1', room_id: 'room-from-session' }
     },
     trainingMode: 'text',
     interactionMode: 'turn_based',
+    buildChatPath: (roomId, mode, sessionId, interactionMode) => {
+      events.push(['buildPath', roomId, mode, sessionId, interactionMode])
+      return `/conversations/${roomId}?trainingMode=${mode}&interactionMode=${interactionMode}`
+    },
+    buildNavigationState: ({ room, roomId, startedSession, trainingSession }) => ({
+      room,
+      roomId,
+      startedSession,
+      trainingSession,
+    }),
+    navigate: (to, options) => {
+      events.push(['navigate', to, options.state])
+    },
+    afterStartSession: ({ startedSession }) => {
+      events.push(['after', startedSession.session_id])
+    },
   })
 
-  assert.deepEqual(createTrainingSessionCalls, [createTrainingSessionRequest])
-  assert.deepEqual(startBattleCalls, [])
-  assert.deepEqual(startTrainingSessionCalls, [
-    {
-      sessionId: 'session-1',
-      request: { runtime: 'conversation_message_tree' },
-    },
+  assert.deepEqual(events[0], ['create', { mode: 'text', scenario_template_id: 'scenario-1' }])
+  assert.equal(events.some(([name]) => name === 'battle'), false)
+  assert.deepEqual(events.find(([name]) => name === 'buildRequest'), [
+    'buildRequest',
+    {},
+    'text',
+    'turn_based',
   ])
-  assert.deepEqual(buildRequestCalls, [
-    {
-      request: {},
-      trainingMode: 'text',
-      interactionMode: 'turn_based',
-    },
+  assert.deepEqual(events.find(([name]) => name === 'startSession'), [
+    'startSession',
+    'created-1',
+    { runtime: 'text:turn_based' },
   ])
-  assert.deepEqual(navigateCalls, [
+  assert.deepEqual(events.find(([name]) => name === 'after'), ['after', 'started-1'])
+  assert.deepEqual(events.find(([name]) => name === 'buildPath'), [
+    'buildPath',
+    'room-from-session',
+    'text',
+    'started-1',
+    'turn_based',
+  ])
+  assert.deepEqual(events.find(([name]) => name === 'navigate'), [
+    'navigate',
+    '/conversations/room-from-session?trainingMode=text&interactionMode=turn_based',
     {
-      pathValue: '/chat/41?mode=text&session=session-1&interaction=turn_based',
-      options: {
-        state: {
-          sessionId: 'session-1',
-          roomId: 41,
-          mode: 'text',
-          interactionMode: 'turn_based',
-        },
-      },
+      room: null,
+      roomId: 'room-from-session',
+      startedSession: { session_id: 'started-1', room_id: 'room-from-session' },
+      trainingSession: { session_id: 'created-1' },
     },
   ])
   assert.equal(result.room, null)
-  assert.equal(result.roomId, 41)
-  assert.equal(result.chatPath, '/chat/41?mode=text&session=session-1&interaction=turn_based')
+  assert.equal(result.roomId, 'room-from-session')
+  assert.equal(result.chatPath, '/conversations/room-from-session?trainingMode=text&interactionMode=turn_based')
 })
 
-test('launchTrainingSessionFlow calls startBattle and forwards the room id into the start request', async () => {
-  const createTrainingSessionRequest = { mode: 'voice', scenario_template_id: 'scenario-2' }
-  const createTrainingSessionCalls = []
-  const startBattleCalls = []
-  const startTrainingSessionCalls = []
-  const buildRequestCalls = []
-  const navigateCalls = []
-
+test('launchTrainingSessionFlow calls battle when payload exists and falls back to the battle room', async () => {
+  const events = []
   const result = await trainingLaunch.launchTrainingSessionFlow({
-    createTrainingSessionRequest,
+    createTrainingSessionRequest: { mode: 'voice', scenario_template_id: 'scenario-2' },
     createTrainingSession: async (request) => {
-      createTrainingSessionCalls.push(request)
-      return { session_id: 'session-2' }
+      events.push(['create', request])
+      return { session_id: 'created-2' }
     },
-    battlePayload: { persona: 'counterpart' },
+    battlePayload: { persona_name: 'Stakeholder' },
     startBattle: async (payload) => {
-      startBattleCalls.push(payload)
-      return { id: 77 }
+      events.push(['battle', payload])
+      return { id: 42 }
+    },
+    buildTrainingSessionStartRequest: (data, mode, interactionMode) => {
+      events.push(['buildRequest', data, mode, interactionMode])
+      return { ...data, runtime: `${mode}:${interactionMode}` }
     },
     startTrainingSession: async (sessionId, request) => {
-      startTrainingSessionCalls.push({ sessionId, request })
-      return { session_id: sessionId }
-    },
-    buildTrainingSessionStartRequest: (request, trainingMode, interactionMode) => {
-      buildRequestCalls.push({ request, trainingMode, interactionMode })
-      return request
-    },
-    buildChatPath: (roomId, trainingMode, trainingSessionId, interactionMode) => (
-      `/chat/${roomId}?mode=${trainingMode}&session=${trainingSessionId}&interaction=${interactionMode}`
-    ),
-    buildNavigationState: (context) => ({
-      sessionId: context.startedSession.session_id,
-      roomId: context.roomId,
-      roomSeen: context.room?.id ?? null,
-      mode: context.trainingMode,
-      interactionMode: context.interactionMode,
-    }),
-    navigate: (pathValue, options) => {
-      navigateCalls.push({ pathValue, options })
+      events.push(['startSession', sessionId, request])
+      return { session_id: 'started-2' }
     },
     trainingMode: 'voice',
     interactionMode: 'realtime',
+    buildChatPath: (roomId, mode, sessionId, interactionMode) => {
+      events.push(['buildPath', roomId, mode, sessionId, interactionMode])
+      return `/conversations/${roomId}?trainingMode=${mode}&interactionMode=${interactionMode}`
+    },
+    buildNavigationState: ({ room, roomId, startedSession, trainingSession }) => ({
+      room,
+      roomId,
+      startedSession,
+      trainingSession,
+    }),
+    navigate: (to, options) => {
+      events.push(['navigate', to, options.state])
+    },
   })
 
-  assert.deepEqual(createTrainingSessionCalls, [createTrainingSessionRequest])
-  assert.deepEqual(startBattleCalls, [{ persona: 'counterpart' }])
-  assert.deepEqual(startTrainingSessionCalls, [
+  assert.deepEqual(events.find(([name]) => name === 'battle'), ['battle', { persona_name: 'Stakeholder' }])
+  assert.deepEqual(events.find(([name]) => name === 'buildRequest'), [
+    'buildRequest',
+    { room_id: 42 },
+    'voice',
+    'realtime',
+  ])
+  assert.deepEqual(events.find(([name]) => name === 'buildPath'), [
+    'buildPath',
+    42,
+    'voice',
+    'started-2',
+    'realtime',
+  ])
+  assert.deepEqual(events.find(([name]) => name === 'navigate'), [
+    'navigate',
+    '/conversations/42?trainingMode=voice&interactionMode=realtime',
     {
-      sessionId: 'session-2',
-      request: { room_id: 77 },
+      room: { id: 42 },
+      roomId: 42,
+      startedSession: { session_id: 'started-2' },
+      trainingSession: { session_id: 'created-2' },
     },
   ])
-  assert.deepEqual(buildRequestCalls, [
-    {
-      request: { room_id: 77 },
-      trainingMode: 'voice',
-      interactionMode: 'realtime',
-    },
-  ])
-  assert.deepEqual(navigateCalls, [
-    {
-      pathValue: '/chat/77?mode=voice&session=session-2&interaction=realtime',
-      options: {
-        state: {
-          sessionId: 'session-2',
-          roomId: 77,
-          roomSeen: 77,
-          mode: 'voice',
-          interactionMode: 'realtime',
-        },
-      },
-    },
-  ])
-  assert.equal(result.room.id, 77)
-  assert.equal(result.roomId, 77)
-  assert.equal(result.chatPath, '/chat/77?mode=voice&session=session-2&interaction=realtime')
+  assert.equal(result.roomId, 42)
+  assert.equal(result.chatPath, '/conversations/42?trainingMode=voice&interactionMode=realtime')
 })
