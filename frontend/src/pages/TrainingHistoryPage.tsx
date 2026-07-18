@@ -24,6 +24,7 @@ import { buildTrainingModeChatPath } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
 import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
+import { APP_ROUTES } from '../appRoutes'
 import {
   getScenarioTrainingCardById,
   getScenarioTrainingProgress,
@@ -717,7 +718,7 @@ export default function TrainingHistoryPage() {
 
               <div className="training-history-actions">
                 {entry.sessionId ? (
-                  <Link to={`/training-result/${encodeURIComponent(entry.sessionId)}`}>
+                  <Link to={APP_ROUTES.reviewSession(entry.sessionId)}>
                     {tr('复盘', 'Review')}
                   </Link>
                 ) : (

@@ -30,6 +30,7 @@ import { useGrowth, type SkillPathNode, type DimensionKey } from '../hooks/useGr
 import { generateProfileCard, type ProfileCard as ProfileCardData } from '../services/api'
 import ProfileCard from '../components/ProfileCard'
 import { useI18n, type TranslateInline } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import { PageShell } from '../components/ui/page'
 import './GrowthPage.css'
 
@@ -326,7 +327,7 @@ const GrowthPage: React.FC = () => {
             <br />
             {tr('完成 2 次以上评估后，就能看到成长趋势。', 'After 2 or more evaluations, growth trends will appear here.')}
           </p>
-          <button className="gp-empty-btn" onClick={() => navigate('/chat')}>
+          <button className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.conversations)}>
             {tr('开始一场练习', 'Start a practice session')}
           </button>
         </div>
@@ -518,7 +519,7 @@ const GrowthPage: React.FC = () => {
             return (
               <Link
                 key={ev.id}
-                to={`/chat/${ev.room_id}`}
+                to={APP_ROUTES.conversation(ev.room_id)}
                 className="gp-eval-card"
               >
                 <div className={`gp-eval-grade gp-eval-grade--${cls}`}>
