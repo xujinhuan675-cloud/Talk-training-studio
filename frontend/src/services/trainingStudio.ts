@@ -56,6 +56,12 @@ export interface VideoAnswerUploadResult {
   size: number
 }
 
+export interface VideoAnswerUploadRequest {
+  trainingSessionId: string
+  roomId: number
+  filename?: string
+}
+
 interface ApiResponse<T> {
   code: number
   message: string
@@ -1307,13 +1313,26 @@ export async function fetchRealtimeCapabilities(): Promise<RealtimeCapabilities>
   return unwrapApiResponse<RealtimeCapabilities>(await resp.json())
 }
 
+export function buildVideoAnswerUploadUrl({
+  trainingSessionId,
+  roomId,
+}: VideoAnswerUploadRequest): string {
+  const params = new URLSearchParams({
+    training_session_id: trainingSessionId,
+    room_id: String(roomId),
+  })
+  return `${TRAINING_STUDIO_API_BASE}/video-answers?${params.toString()}`
+}
+
 export async function uploadVideoAnswer(
   blob: Blob,
-  filename = `video-answer-${Date.now()}${extensionForVideoMimeType(blob.type)}`,
+  request: VideoAnswerUploadRequest,
 ): Promise<VideoAnswerUploadResult> {
-  const resp = await fetch(`${TRAINING_STUDIO_API_BASE}/video-answers`, {
+  const filename = request.filename || `video-answer-${Date.now()}${extensionForVideoMimeType(blob.type)}`
+  const resp = await fetch(buildVideoAnswerUploadUrl(request), {
     method: 'POST',
     headers: {
+      ...getAuthRequestHeaders(),
       'Content-Type': blob.type || 'video/webm',
       'X-Filename': filename,
     },

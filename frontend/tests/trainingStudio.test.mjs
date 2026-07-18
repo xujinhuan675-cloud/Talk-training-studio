@@ -40,6 +40,21 @@ async function loadTrainingStudioModule() {
   }
 }
 
+function createStorage(initialEntries = {}) {
+  const entries = new Map(Object.entries(initialEntries))
+  return {
+    getItem(key) {
+      return entries.has(key) ? entries.get(key) : null
+    },
+    setItem(key, value) {
+      entries.set(key, String(value))
+    },
+    removeItem(key) {
+      entries.delete(key)
+    },
+  }
+}
+
 const trainingStudio = await loadTrainingStudioModule()
 
 test('default training studio config is product-manager interview oriented', () => {
@@ -335,4 +350,59 @@ test('buildTrainingStudioCapabilityReadiness redacts backend capability blockers
   assert.equal(readiness.agentMcp.status, 'blocked')
   assert.match(readiness.agentMcp.tags.join(' '), /authorization=\*\*\*/)
   assert.doesNotMatch(JSON.stringify(readiness.agentMcp), /sk-secret-token/)
+})
+
+test('uploadVideoAnswer binds training session and auth context into the request', async () => {
+  const originalWindow = globalThis.window
+  const originalFetch = globalThis.fetch
+  const localStorage = createStorage({
+    'talkwise.auth.state': JSON.stringify({ status: 'authenticated', userId: 'leader' }),
+  })
+  const sessionStorage = createStorage()
+  globalThis.window = { localStorage, sessionStorage }
+
+  const blob = new Blob(['video-bytes'], { type: 'video/webm' })
+  const expectedUploadUrl = '/api/v1/training-studio/video-answers?training_session_id=session-7&room_id=42'
+  const expectedPlaybackUrl = '/api/v1/training-studio/video-answers/answer-1.webm?training_session_id=session-7&room_id=42&auth_user_id=user-leader-001&auth_role=leader&auth_team_id=team-revenue'
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init })
+    assert.equal(String(url), expectedUploadUrl)
+    assert.equal(init.method, 'POST')
+    assert.equal(init.body, blob)
+    assert.equal(init.headers['Content-Type'], 'video/webm')
+    assert.equal(init.headers['X-Filename'], 'answer.webm')
+    assert.equal(init.headers['X-Mock-User'], 'leader')
+    assert.equal(init.headers['X-User-Id'], 'user-leader-001')
+    assert.equal(init.headers['X-System-Role'], 'leader')
+    assert.equal(init.headers['X-Team-Id'], 'team-revenue')
+    return new Response(JSON.stringify({
+      data: {
+        filename: 'answer-1.webm',
+        url: expectedPlaybackUrl,
+        mimeType: 'video/webm',
+        size: blob.size,
+      },
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  try {
+    const result = await trainingStudio.uploadVideoAnswer(blob, {
+      trainingSessionId: 'session-7',
+      roomId: 42,
+      filename: 'answer.webm',
+    })
+
+    assert.equal(result.filename, 'answer-1.webm')
+    assert.equal(result.url, expectedPlaybackUrl)
+    assert.equal(result.mimeType, 'video/webm')
+    assert.equal(result.size, blob.size)
+    assert.equal(calls.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    globalThis.window = originalWindow
+  }
 })

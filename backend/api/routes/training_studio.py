@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import (
@@ -1881,6 +1882,55 @@ def _resolve_video_answer_file(filename: str) -> Path:
     return path
 
 
+_VIDEO_ANSWER_METADATA_SUFFIX = ".meta.json"
+
+
+def _resolve_video_answer_metadata_file(filename: str) -> Path:
+    return _resolve_video_answer_file(f"{filename}{_VIDEO_ANSWER_METADATA_SUFFIX}")
+
+
+def _load_video_answer_metadata(filename: str) -> dict[str, object]:
+    path = _resolve_video_answer_metadata_file(filename)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Video answer not found")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=404, detail="Video answer not found") from exc
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=404, detail="Video answer not found")
+    return raw
+
+
+def _write_video_answer_record(
+    path: Path,
+    *,
+    data: bytes,
+    metadata: dict[str, object],
+) -> None:
+    path.write_bytes(data)
+    metadata_path = _resolve_video_answer_metadata_file(path.name)
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+
+def _build_video_answer_url(
+    filename: str,
+    *,
+    current_user: CurrentUser,
+    training_session_id: str,
+    room_id: int,
+) -> str:
+    params: dict[str, str] = {
+        "training_session_id": training_session_id,
+        "room_id": str(room_id),
+        "auth_user_id": current_user.user_id,
+        "auth_role": current_user.system_role,
+    }
+    if current_user.team_id:
+        params["auth_team_id"] = current_user.team_id
+    return f"/api/v1/training-studio/video-answers/{filename}?{urlencode(params)}"
+
+
 @router.post("/sessions", status_code=201, summary="Create a Training Studio session")
 async def create_training_session(
     body: CreateTrainingSessionDTO,
@@ -2707,7 +2757,35 @@ async def list_storybank_entries(
 
 
 @router.post("/video-answers", status_code=201, summary="Upload a recorded video answer")
-async def upload_video_answer(request: Request):
+async def upload_video_answer(
+    request: Request,
+    training_session_id: str = Query(..., min_length=1),
+    room_id: int = Query(..., ge=1),
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    session = await _require_accessible_training_session(
+        training_session_id,
+        svc=svc,
+        current_user=current_user,
+    )
+    if session.status != TrainingSessionStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400,
+            detail="Training session must be active before uploading video answers",
+        )
+    bound_room_id = _coerce_optional_room_id(session.room_id)
+    if bound_room_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Training session must be started before uploading video answers",
+        )
+    if room_id != bound_room_id:
+        raise HTTPException(
+            status_code=400,
+            detail="room_id does not match the active training session",
+        )
+
     content_type = _normalize_video_content_type(request.headers.get("content-type"))
     if not content_type.startswith("video/"):
         raise HTTPException(status_code=422, detail="Only video uploads are supported")
@@ -2730,11 +2808,28 @@ async def upload_video_answer(request: Request):
     original_filename = request.headers.get("x-filename")
     filename = f"{uuid4().hex}{_video_extension(original_filename, content_type)}"
     path = _VIDEO_ANSWER_DIR / filename
-    await asyncio.to_thread(path.write_bytes, data)
+    metadata = {
+        "filename": filename,
+        "trainingSessionId": training_session_id,
+        "roomId": room_id,
+        "userId": current_user.user_id,
+        "systemRole": current_user.system_role,
+        "teamId": current_user.team_id,
+        "mimeType": content_type,
+        "size": len(data),
+        "originalFilename": original_filename,
+        "createdAt": datetime.now(UTC).isoformat(),
+    }
+    await asyncio.to_thread(_write_video_answer_record, path, data=data, metadata=metadata)
     return success_response(
         data={
             "filename": filename,
-            "url": f"/api/v1/training-studio/video-answers/{filename}",
+            "url": _build_video_answer_url(
+                filename,
+                current_user=current_user,
+                training_session_id=training_session_id,
+                room_id=room_id,
+            ),
             "mimeType": content_type,
             "size": len(data),
         }
@@ -2742,7 +2837,27 @@ async def upload_video_answer(request: Request):
 
 
 @router.get("/video-answers/{filename}", summary="Read a recorded video answer")
-async def read_video_answer(filename: str):
+async def read_video_answer(
+    filename: str,
+    training_session_id: str = Query(..., min_length=1),
+    room_id: int = Query(..., ge=1),
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    metadata = _load_video_answer_metadata(filename)
+    if _coerce_optional_text(metadata.get("trainingSessionId")) != training_session_id:
+        raise HTTPException(status_code=404, detail="Video answer not found")
+    stored_room_id = _coerce_optional_room_id(metadata.get("roomId"))
+    if stored_room_id != room_id:
+        raise HTTPException(status_code=404, detail="Video answer not found")
+    session = await _require_accessible_training_session(
+        training_session_id,
+        svc=svc,
+        current_user=current_user,
+    )
+    session_room_id = _coerce_optional_room_id(session.room_id)
+    if session_room_id != room_id:
+        raise HTTPException(status_code=404, detail="Video answer not found")
     path = _resolve_video_answer_file(filename)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Video answer not found")

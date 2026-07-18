@@ -1338,10 +1338,22 @@ function ChatArea() {
     const fallbackCaption = isVideoBattlePrep
       ? tr('我提交了一段视频回答，请继续追问或总结。', 'I submitted a recorded video answer. Please continue with a follow-up or summary.')
       : undefined
+    if (!trainingSessionId || selectedRoomId == null) {
+      if (isVideoBattlePrep) {
+        setVideoAnswerStatus('error')
+        setVideoAnswerError(
+          tr('瑙嗛鍥炵瓟闇€瑕佸凡缁戝畾鐨勮缁冧細璇濆拰鎴?间俊鎭?', 'Video answers require a bound training session and room.'),
+        )
+      }
+      return
+    }
     let videoUrl = result.url
     let videoSize = result.size
     try {
-      const uploaded = await uploadVideoAnswer(result.blob)
+      const uploaded = await uploadVideoAnswer(result.blob, {
+        trainingSessionId,
+        roomId: selectedRoomId,
+      })
       videoUrl = uploaded.url
       videoSize = uploaded.size
     } catch (error) {
