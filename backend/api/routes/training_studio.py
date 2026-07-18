@@ -124,6 +124,7 @@ from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
 from domain.training_studio.catalog import ScenarioCategory
 from domain.training_studio.session import TrainingSessionStatus
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 from domain.training_studio.storybank import JsonFileStoryBankStore, StoryBankService
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
@@ -674,22 +675,20 @@ def _not_found_if_missing(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-def _assert_training_session_access(session, current_user: CurrentUser) -> None:
+def _training_session_access_scope_for_current_user(
+    current_user: CurrentUser,
+) -> TrainingSessionAccessScope | None:
     if current_user.is_admin:
-        return
-    if current_user.is_leader:
-        if session.team_id and current_user.team_id and session.team_id == current_user.team_id:
-            return
-        if session.user_id and session.user_id == current_user.user_id:
-            return
-        raise HTTPException(
-            status_code=403, detail="Training session is outside the current team scope"
-        )
-    if session.user_id and session.user_id == current_user.user_id:
-        return
-    raise HTTPException(
-        status_code=403, detail="Training session is outside the current user scope"
+        return None
+    return TrainingSessionAccessScope(
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
+        include_team_scope=current_user.is_leader,
     )
+
+
+def _session_access_denied(exc: PermissionError) -> HTTPException:
+    return HTTPException(status_code=403, detail=str(exc) or "Training session is outside scope")
 
 
 async def _require_accessible_training_session(
@@ -699,11 +698,30 @@ async def _require_accessible_training_session(
     current_user: CurrentUser,
 ):
     try:
-        session = await svc.get_session(session_id)
+        return await svc.get_session(
+            session_id,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
+        )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
-    _assert_training_session_access(session, current_user)
-    return session
+
+
+async def _require_report_id_for_training_session(
+    report_id: str,
+    *,
+    session,
+    reader_svc: AnalysisReaderService,
+) -> str:
+    try:
+        report_lookup_id = int(report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Training session report not found") from exc
+    report = await reader_svc.get_report(report_lookup_id)
+    if report is None or str(report.room_id) != str(session.room_id):
+        raise HTTPException(status_code=404, detail="Training session report not found")
+    return str(report_lookup_id)
 
 
 def _event_to_wire(event: RealtimeEvent) -> dict:
@@ -1410,11 +1428,18 @@ async def _resolve_realtime_binding(
         raise HTTPException(status_code=400, detail="session_id is required when binding realtime")
 
     try:
-        training_session = await svc.get_session(session_id)
+        training_session = await svc.get_session(
+            session_id,
+            access_scope=(
+                _training_session_access_scope_for_current_user(current_user)
+                if current_user is not None
+                else None
+            ),
+        )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
-    if current_user is not None:
-        _assert_training_session_access(training_session, current_user)
     if training_session.status != TrainingSessionStatus.ACTIVE:
         raise HTTPException(
             status_code=400, detail="Training session must be active before binding realtime"
@@ -1901,6 +1926,7 @@ async def list_training_sessions(
         user_id=scope.user_id,
         team_id=scope.team_id,
         scenario_template_id=scenario_template_id,
+        access_scope=_training_session_access_scope_for_current_user(current_user),
     )
     return success_response(data=[_session_to_dict(session) for session in sessions])
 
@@ -1927,6 +1953,7 @@ async def list_scenario_training_progress(
         limit=limit,
         user_id=scope.user_id,
         team_id=scope.team_id,
+        access_scope=_training_session_access_scope_for_current_user(current_user),
     )
     return success_response(data=[item.model_dump(mode="json") for item in progress])
 
@@ -1973,9 +2000,20 @@ async def start_training_session(
             )
         )
         room_id = str(room.id)
+    elif not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can bind an existing room to a training session",
+        )
 
     try:
-        started = await svc.start_session(session_id, room_id=room_id)
+        started = await svc.start_session(
+            session_id,
+            room_id=room_id,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
+        )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
     return success_response(data=_session_to_dict(started))
@@ -1988,6 +2026,7 @@ async def complete_training_session(
     background_tasks: BackgroundTasks,
     svc: TrainingSessionService = Depends(get_training_session_service),
     analysis_svc: AnalysisService = Depends(get_analysis_service),
+    reader_svc: AnalysisReaderService = Depends(get_analysis_reader_service),
     growth_svc=Depends(get_growth_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -2015,6 +2054,12 @@ async def complete_training_session(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         report_id = str(report.id)
         background_tasks.add_task(growth_svc.evaluate_competency, report.id)
+    elif report_id:
+        report_id = await _require_report_id_for_training_session(
+            report_id,
+            session=session,
+            reader_svc=reader_svc,
+        )
 
     score_id = str(body.score_id).strip() if body.score_id is not None else None
     try:
@@ -2022,7 +2067,10 @@ async def complete_training_session(
             session_id,
             report_id=report_id or None,
             score_id=score_id,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
         )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
     return success_response(data=_session_to_dict(completed))
@@ -2041,7 +2089,13 @@ async def fail_training_session(
         current_user=current_user,
     )
     try:
-        failed = await svc.fail_session(session_id, body.reason)
+        failed = await svc.fail_session(
+            session_id,
+            body.reason,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
+        )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
     return success_response(data=_session_to_dict(failed))
@@ -2093,13 +2147,18 @@ async def create_realtime_sdp_call(
     offer_sdp = (await request.body()).decode("utf-8", errors="ignore").strip()
     if not offer_sdp:
         raise HTTPException(status_code=422, detail="SDP offer is required")
-    await _resolve_realtime_binding(
+    binding = await _resolve_realtime_binding(
         session_id,
         room_id,
         svc=svc,
         uow_factory=uow_factory,
         current_user=current_user,
     )
+    if binding is None:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI realtime SDP requires an active training session binding",
+        )
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:

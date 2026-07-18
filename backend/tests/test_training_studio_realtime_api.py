@@ -661,7 +661,7 @@ def test_realtime_sdp_proxy_returns_sdp_answer_when_openai_call_succeeds(monkeyp
     monkeypatch.setattr(httpx, "AsyncClient", _FakeSDPAsyncClient)
 
     response = client.post(
-        "/api/v1/training-studio/realtime/sdp",
+        "/api/v1/training-studio/realtime/sdp?session_id=session-1&room_id=42",
         content=offer_sdp,
         headers={"content-type": "application/sdp"},
     )
@@ -675,6 +675,43 @@ def test_realtime_sdp_proxy_returns_sdp_answer_when_openai_call_succeeds(monkeyp
     assert captured.data and "session" in captured.data
     assert '"type": "realtime"' in captured.data["session"]
     assert "Bearer test-openai-key" in captured.headers.values()
+
+
+def test_realtime_sdp_proxy_requires_bound_training_session(monkeypatch) -> None:
+    app, _ = _make_bound_app()
+    client = TestClient(app)
+    monkeypatch.setattr(settings.llm, "api_key", "test-openai-key")
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeSDPAsyncClient)
+
+    response = client.post(
+        "/api/v1/training-studio/realtime/sdp",
+        content="v=0\r\ns=Local browser offer\r\n",
+        headers={"content-type": "application/sdp"},
+    )
+
+    assert response.status_code == 400
+    assert "requires an active training session binding" in _response_error_message(response)
+
+
+def test_realtime_sdp_proxy_rejects_other_mock_user_binding(monkeypatch) -> None:
+    app, _ = _make_bound_app(
+        session_payload=_session_payload(
+            user_id="user-cs-001",
+            team_id="team-service",
+        )
+    )
+    client = TestClient(app)
+    monkeypatch.setattr(settings.llm, "api_key", "test-openai-key")
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeSDPAsyncClient)
+
+    response = client.post(
+        "/api/v1/training-studio/realtime/sdp?session_id=session-1&room_id=42",
+        headers={"X-Mock-User": "sales", "content-type": "application/sdp"},
+        content="v=0\r\ns=Local browser offer\r\n",
+    )
+
+    assert response.status_code == 403
+    assert "current user scope" in _response_error_message(response)
 
 
 def test_realtime_sdp_proxy_missing_api_key_returns_clear_error(monkeypatch) -> None:

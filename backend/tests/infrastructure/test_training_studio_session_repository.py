@@ -13,6 +13,7 @@ from domain.training_studio.session import (
     TrainingSessionMode,
     TrainingSessionStatus,
 )
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 from infrastructure.models import Base
 from infrastructure.repositories.training_session_repository import (
     SQLAlchemyTrainingSessionRepository,
@@ -136,6 +137,71 @@ async def test_training_session_repository_save_is_upsert(session_factory) -> No
     assert loaded is not None
     assert loaded.status == TrainingSessionStatus.ACTIVE
     assert loaded.room_id == "room-1"
+
+
+@pytest.mark.asyncio
+async def test_training_session_repository_applies_access_scope_to_get_and_list(
+    session_factory,
+) -> None:
+    sales = TrainingSession(
+        session_id="session-sales",
+        task_config=_task_config(),
+        mode="text",
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+    peer = TrainingSession(
+        session_id="session-peer",
+        task_config=_task_config(),
+        mode="voice",
+        user_id="user-peer-001",
+        team_id="team-revenue",
+    )
+    service = TrainingSession(
+        session_id="session-service",
+        task_config=_task_config(),
+        mode="video",
+        user_id="user-cs-001",
+        team_id="team-service",
+    )
+
+    async with session_factory() as db_session:
+        repo = SQLAlchemyTrainingSessionRepository(db_session)
+        await repo.save(sales)
+        await repo.save(peer)
+        await repo.save(service)
+        await db_session.commit()
+
+    staff_scope = TrainingSessionAccessScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+    leader_scope = TrainingSessionAccessScope(
+        user_id="user-sales-lead-001",
+        team_id="team-revenue",
+        include_team_scope=True,
+    )
+
+    async with session_factory() as db_session:
+        repo = SQLAlchemyTrainingSessionRepository(db_session)
+        assert await repo.get("session-service", access_scope=staff_scope) is None
+        sales_session = await repo.get("session-sales", access_scope=staff_scope)
+        assert sales_session is not None
+        assert sales_session.session_id == "session-sales"
+        staff_sessions = await repo.list(access_scope=staff_scope)
+        leader_sessions = await repo.list(access_scope=leader_scope)
+        admin_sessions = await repo.list()
+
+    assert [session.session_id for session in staff_sessions] == ["session-sales"]
+    assert [session.session_id for session in leader_sessions] == [
+        "session-sales",
+        "session-peer",
+    ]
+    assert [session.session_id for session in admin_sessions] == [
+        "session-sales",
+        "session-peer",
+        "session-service",
+    ]
 
 
 @pytest.mark.asyncio

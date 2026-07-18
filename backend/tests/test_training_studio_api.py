@@ -515,7 +515,10 @@ async def test_training_session_create_list_and_get(client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_scenario_training_progress_aggregates_sessions(client: AsyncClient) -> None:
+async def test_scenario_training_progress_aggregates_sessions(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload(
@@ -540,6 +543,7 @@ async def test_scenario_training_progress_aggregates_sessions(client: AsyncClien
         f"/api/v1/training-studio/sessions/{session_id}/start",
         json={"room_id": 42},
     )
+    app.state.analysis_reader_service.reports[9001] = FakeReport(id=9001, room_id=42)
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/complete",
         json={"report_id": "9001", "score_id": "score-9001", "generate_report": False},
@@ -816,6 +820,27 @@ async def test_staff_cannot_mutate_other_user_training_session_boundaries(
 
 
 @pytest.mark.asyncio
+async def test_staff_cannot_start_own_session_with_arbitrary_existing_room_id(
+    client: AsyncClient,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("realtime"),
+        headers={"X-Mock-User": "sales"},
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert start_resp.status_code == 403
+    assert "Only admins can bind an existing room" in start_resp.json()["message"]
+
+
+@pytest.mark.asyncio
 async def test_leader_cannot_read_other_team_training_session(client: AsyncClient) -> None:
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
@@ -922,6 +947,7 @@ async def test_training_session_complete_with_explicit_report_id_skips_generatio
         f"/api/v1/training-studio/sessions/{session_id}/start",
         json={"room_id": 42},
     )
+    app.state.analysis_reader_service.reports[777] = FakeReport(id=777, room_id=42)
 
     complete_resp = await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/complete",
@@ -935,14 +961,13 @@ async def test_training_session_complete_with_explicit_report_id_skips_generatio
     assert app.state.analysis_service.generated_for == []
     assert app.state.growth_service.evaluated == []
 
-    app.state.analysis_reader_service.reports[777] = FakeReport(id=777, room_id=42)
     report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
     assert report_resp.status_code == 200
     assert report_resp.json()["data"]["id"] == 777
 
 
 @pytest.mark.asyncio
-async def test_training_session_report_returns_404_for_non_numeric_report_id(
+async def test_training_session_complete_rejects_unowned_explicit_report_id(
     client: AsyncClient,
     app: FastAPI,
 ) -> None:
@@ -952,16 +977,39 @@ async def test_training_session_report_returns_404_for_non_numeric_report_id(
         f"/api/v1/training-studio/sessions/{session_id}/start",
         json={"room_id": 42},
     )
+    app.state.analysis_reader_service.reports[777] = FakeReport(id=777, room_id=43)
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={"report_id": "777", "generate_report": False},
+    )
+
+    assert complete_resp.status_code == 404
+    assert "report not found" in complete_resp.json()["message"]
+    stored = await app.state.training_session_service.get_session(session_id)
+    assert stored.report_id is None
+
+
+@pytest.mark.asyncio
+async def test_training_session_complete_rejects_non_numeric_explicit_report_id(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+
     complete_resp = await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/complete",
         json={"report_id": "report-777", "generate_report": False},
     )
-    assert complete_resp.status_code == 200
 
-    report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
-
-    assert report_resp.status_code == 404
+    assert complete_resp.status_code == 404
     assert app.state.analysis_reader_service.requested_ids == []
+    stored = await app.state.training_session_service.get_session(session_id)
+    assert stored.report_id is None
 
 
 @pytest.mark.asyncio
@@ -1075,7 +1123,7 @@ async def test_training_guidance_rate_limit_returns_429(
     session_id = create_resp.json()["data"]["session_id"]
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
-        json={"room_id": 42},
+        json={"persona_ids": ["customer-1"], "room_name": "Support practice"},
         headers=headers,
     )
     payload = {
@@ -1166,16 +1214,17 @@ async def test_training_guidance_accepts_eventsource_mock_user_scope(
         json=session_payload("text", user_id="user-sales-001", team_id="team-revenue"),
     )
     session_id = create_resp.json()["data"]["session_id"]
+    room_id = 42
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
-        json={"room_id": 42},
+        json={"room_id": room_id},
     )
-    app.state.chatroom_service.details[42] = chat_detail(
-        42,
+    app.state.chatroom_service.details[room_id] = chat_detail(
+        room_id,
         [
             MessageDTO(
                 id=1,
-                room_id=42,
+                room_id=room_id,
                 sender_type="user",
                 sender_id="me",
                 content="Can we start with a low-risk pilot?",
@@ -1334,13 +1383,15 @@ async def test_training_guidance_stream_refresh_preserves_current_user_scope(
         headers=headers,
     )
     session_id = create_resp.json()["data"]["session_id"]
-    await client.post(
+    start_resp = await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
-        json={"room_id": 42},
+        json={"persona_ids": ["customer-1"], "room_name": "Scoped room"},
         headers=headers,
     )
-    app.state.chatroom_service.details[42] = chat_detail(
-        42,
+    assert start_resp.status_code == 200
+    room_id = int(start_resp.json()["data"]["room_id"])
+    app.state.chatroom_service.details[room_id] = chat_detail(
+        room_id,
         [
             MessageDTO(
                 id=1,
@@ -1357,19 +1408,19 @@ async def test_training_guidance_stream_refresh_preserves_current_user_scope(
         session = await app.state.training_session_service.get_session(session_id)
         session.user_id = "user-cs-001"
         session.team_id = "team-service"
-        app.state.chatroom_service.details[42] = chat_detail(
-            42,
+        app.state.chatroom_service.details[room_id] = chat_detail(
+            room_id,
             [
                 MessageDTO(
                     id=1,
-                    room_id=42,
+                    room_id=room_id,
                     sender_type="user",
                     sender_id="me",
                     content="Can we start with a low-risk pilot?",
                 ),
                 MessageDTO(
                     id=2,
-                    room_id=42,
+                    room_id=room_id,
                     sender_type="persona",
                     sender_id="customer-1",
                     content="I am worried the budget still does not work.",
@@ -1377,9 +1428,9 @@ async def test_training_guidance_stream_refresh_preserves_current_user_scope(
             ],
         )
         await room_event_bus.publish(
-            42,
+            room_id,
             "message",
-            {"id": 2, "room_id": 42, "sender_type": "persona", "sender_id": "customer-1"},
+            {"id": 2, "room_id": room_id, "sender_type": "persona", "sender_id": "customer-1"},
         )
 
     publish_task = asyncio.create_task(move_session_out_of_scope_and_publish())

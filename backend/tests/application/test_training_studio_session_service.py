@@ -6,6 +6,7 @@ from application.services.training_studio.session_service import (
     TrainingSessionService,
 )
 from domain.training_studio.session import TrainingSessionStatus
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 pytestmark = pytest.mark.asyncio
 
@@ -99,6 +100,57 @@ async def test_session_service_records_turn_count():
 
     assert updated.message_count == 3
     assert (await service.get_session("session-1")).message_count == 3
+
+
+async def test_session_service_applies_access_scope_to_get_list_and_mutations():
+    session_ids = iter(["session-sales", "session-peer", "session-service"])
+    service = TrainingSessionService(id_factory=lambda: next(session_ids))
+    sales = await service.create_session(
+        {
+            **make_payload(),
+            "user_id": "user-sales-001",
+            "team_id": "team-revenue",
+        }
+    )
+    peer = await service.create_session(
+        {
+            **make_payload(),
+            "user_id": "user-peer-001",
+            "team_id": "team-revenue",
+        }
+    )
+    service_session = await service.create_session(
+        {
+            **make_payload(),
+            "user_id": "user-cs-001",
+            "team_id": "team-service",
+        }
+    )
+
+    staff_scope = TrainingSessionAccessScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+    leader_scope = TrainingSessionAccessScope(
+        user_id="user-sales-lead-001",
+        team_id="team-revenue",
+        include_team_scope=True,
+    )
+
+    assert await service.get_session(sales.session_id, access_scope=staff_scope) is sales
+    with pytest.raises(PermissionError, match="outside current user scope"):
+        await service.get_session(service_session.session_id, access_scope=staff_scope)
+    with pytest.raises(PermissionError, match="outside current user scope"):
+        await service.start_session(service_session.session_id, room_id="42", access_scope=staff_scope)
+
+    staff_sessions = await service.list_sessions(access_scope=staff_scope)
+    leader_sessions = await service.list_sessions(access_scope=leader_scope)
+
+    assert [session.session_id for session in staff_sessions] == [sales.session_id]
+    assert [session.session_id for session in leader_sessions] == [
+        sales.session_id,
+        peer.session_id,
+    ]
 
 
 async def test_session_service_progress_preserves_failed_status_and_reason():

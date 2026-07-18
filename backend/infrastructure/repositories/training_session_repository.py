@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.training_studio.catalog import TrainingTaskConfig
 from domain.training_studio.session import TrainingSession
-from domain.training_studio.session_repository import TrainingSessionRepository
+from domain.training_studio.session_repository import (
+    TrainingSessionAccessScope,
+    TrainingSessionRepository,
+)
 from infrastructure.models.training_session import TrainingSessionModel
 
 
@@ -72,6 +75,20 @@ class SQLAlchemyTrainingSessionRepository(TrainingSessionRepository):
         model.message_count = session.message_count
         model.failure_reason = session.failure_reason
 
+    def _apply_access_scope(self, query, access_scope: TrainingSessionAccessScope | None):
+        if access_scope is None:
+            return query
+        conditions = []
+        user_id = (access_scope.user_id or "").strip()
+        team_id = (access_scope.team_id or "").strip()
+        if user_id:
+            conditions.append(TrainingSessionModel.user_id == user_id)
+        if access_scope.include_team_scope and team_id:
+            conditions.append(TrainingSessionModel.team_id == team_id)
+        if not conditions:
+            return query.where(false())
+        return query.where(or_(*conditions))
+
     async def save(self, session: TrainingSession) -> TrainingSession:
         result = await self.session.execute(
             select(TrainingSessionModel).where(
@@ -87,10 +104,15 @@ class SQLAlchemyTrainingSessionRepository(TrainingSessionRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def get(self, session_id: str) -> TrainingSession | None:
-        result = await self.session.execute(
-            select(TrainingSessionModel).where(TrainingSessionModel.session_id == session_id)
-        )
+    async def get(
+        self,
+        session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> TrainingSession | None:
+        query = select(TrainingSessionModel).where(TrainingSessionModel.session_id == session_id)
+        query = self._apply_access_scope(query, access_scope)
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
@@ -102,8 +124,10 @@ class SQLAlchemyTrainingSessionRepository(TrainingSessionRepository):
         user_id: str | None = None,
         team_id: str | None = None,
         scenario_template_id: str | None = None,
+        access_scope: TrainingSessionAccessScope | None = None,
     ) -> list[TrainingSession]:
         query = select(TrainingSessionModel)
+        query = self._apply_access_scope(query, access_scope)
         if user_id:
             query = query.where(TrainingSessionModel.user_id == user_id)
         if team_id:
