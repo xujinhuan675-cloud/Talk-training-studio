@@ -24,7 +24,6 @@ const Layout: React.FC = () => {
   const palette = useCommandPalette(rooms, personaMap)
   const isTrainingChatRoute = (
     /^\/conversations\/[^/]+/.test(location.pathname)
-    || /^\/chat\/[^/]+/.test(location.pathname)
   ) && Boolean(getTrainingSessionIdFromLocation(location.search, location.state))
 
   return (

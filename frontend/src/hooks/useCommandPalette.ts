@@ -193,23 +193,25 @@ export function useCommandPalette(
     items.push(...matchingActions)
 
     // Filter personas
-    const personas = Object.values(personaMap)
-    const matchingPersonas = q
-      ? personas.filter((p) => p.name.toLowerCase().includes(q) || p.role.toLowerCase().includes(q))
-      : personas
+    if (canUseManagementActions) {
+      const personas = Object.values(personaMap)
+      const matchingPersonas = q
+        ? personas.filter((p) => p.name.toLowerCase().includes(q) || p.role.toLowerCase().includes(q))
+        : personas
 
-    for (const p of matchingPersonas.slice(0, 5)) {
-      items.push({
-        id: `persona-${p.id}`,
-        type: 'persona',
-        label: p.name,
-        description: p.role,
-        icon: 'User',
-        onSelect: () => {
-          close()
-          navigate(APP_ROUTES.config)
-        },
-      })
+      for (const p of matchingPersonas.slice(0, 5)) {
+        items.push({
+          id: `persona-${p.id}`,
+          type: 'persona',
+          label: p.name,
+          description: p.role,
+          icon: 'User',
+          onSelect: () => {
+            close()
+            navigate(APP_ROUTES.config)
+          },
+        })
+      }
     }
 
     return items
