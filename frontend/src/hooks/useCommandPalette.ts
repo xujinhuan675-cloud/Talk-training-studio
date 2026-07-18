@@ -65,7 +65,7 @@ export function useCommandPalette(
       {
         id: 'action-scenario-training',
         type: 'action' as const,
-        label: t('nav.scenarioTraining'),
+        label: t('command.action.startPractice'),
         icon: 'ClipboardList',
         onSelect: () => {
           close()
@@ -75,7 +75,7 @@ export function useCommandPalette(
       {
         id: 'action-training-studio',
         type: 'action' as const,
-        label: t('nav.trainingStudio'),
+        label: t('command.action.customPractice'),
         icon: 'Dumbbell',
         roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {
@@ -120,7 +120,7 @@ export function useCommandPalette(
       {
         id: 'action-training-history',
         type: 'action' as const,
-        label: t('nav.trainingHistory'),
+        label: t('command.action.trainingHistory'),
         icon: 'History',
         onSelect: () => {
           close()
@@ -130,7 +130,7 @@ export function useCommandPalette(
       {
         id: 'action-scenario-leaderboard',
         type: 'action' as const,
-        label: t('nav.scenarioLeaderboard'),
+        label: t('command.action.scenarioLeaderboard'),
         icon: 'Trophy',
         onSelect: () => {
           close()
@@ -140,7 +140,7 @@ export function useCommandPalette(
       {
         id: 'action-scenario-config',
         type: 'action' as const,
-        label: t('nav.scenarioConfig'),
+        label: t('command.action.scenarioConfig'),
         icon: 'SlidersHorizontal',
         roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {

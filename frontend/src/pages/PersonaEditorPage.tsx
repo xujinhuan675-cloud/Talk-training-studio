@@ -1,4 +1,4 @@
-// input: route /persona/:id/edit
+// input: route /config/personas/:id/edit
 // output: 完整编辑器 (Hero + 5 LayerCards + EvidencePopover + FloatingCTA + 未保存离开确认)
 // owner: wanhua.gu
 // pos: 表示层 - 5-layer persona 编辑器主页 (Story 2.7)；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
@@ -438,7 +438,7 @@ export default function PersonaEditorPage() {
       <div className="editor-status error">
         <p>{tr('加载失败：{error}', 'Failed to load: {error}', { error: error || tr('persona 不存在', 'persona does not exist') })}</p>
         <button type="button" onClick={() => navigate(APP_ROUTES.config)}>
-          {tr('返回设置', 'Back to Settings')}
+          {tr('返回配置', 'Back to Config')}
         </button>
       </div>
     )

@@ -250,7 +250,7 @@ test('resolveRuntimeEndpoint picks realtime websocket endpoint with session bind
 test('resolveRuntimeEndpoint routes message-tree provider to conversation chat endpoint', () => {
   const endpoint = trainingConversation.resolveRuntimeEndpoint({
     mode: 'text',
-    provider: 'talkwise-conversation',
+    provider: 'conversation_message_tree',
     conversation: {
       conversationId: 42,
     },
@@ -281,13 +281,13 @@ test('buildTrainingConversationPayload maps branch tail to chat parent message',
 
 test('buildConversationTreeMessageActionContext exposes controlled conversation action endpoints', () => {
   const context = trainingConversation.buildConversationTreeMessageActionContext({
-    provider: 'talkwise-conversation',
+    provider: 'conversation_tree',
     conversationId: 42,
     messagePublicId: 'msg_leaf',
     branchId: 'branch-selected',
   })
 
-  assert.equal(context.provider, 'talkwise-conversation')
+  assert.equal(context.provider, 'conversation_tree')
   assert.equal(context.conversationId, '42')
   assert.equal(context.messagePublicId, 'msg_leaf')
   assert.equal(context.branchId, 'branch-selected')

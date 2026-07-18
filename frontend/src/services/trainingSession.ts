@@ -1,4 +1,4 @@
-import type { TrainingMode } from './trainingMode'
+import type { InteractionMode, TrainingMode } from './trainingMode'
 import type { ConversationTreeMessage } from './trainingConversation'
 import { getAuthRequestHeaders } from './auth'
 import { getErrorMessage } from '../utils/errors'
@@ -6,6 +6,8 @@ import { getErrorMessage } from '../utils/errors'
 export type { TrainingMode } from './trainingMode'
 
 export type TrainingSessionStatus = 'created' | 'active' | 'completed' | 'failed'
+export const TRAINING_SESSION_MESSAGE_TREE_RUNTIME = 'conversation_message_tree' as const
+export type TrainingSessionStartRuntime = typeof TRAINING_SESSION_MESSAGE_TREE_RUNTIME
 
 export interface TrainingTaskConfigDTO {
   role: string
@@ -53,6 +55,7 @@ export interface StartTrainingSessionRequest {
   room_name?: string
   room_type?: 'private' | 'group' | 'battle_prep' | 'defense'
   scenario_id?: number | null
+  runtime?: TrainingSessionStartRuntime
 }
 
 export interface CompleteTrainingSessionRequest {
@@ -235,6 +238,20 @@ function jsonRequest(method: 'POST' | 'PUT' | 'PATCH', body?: unknown): RequestI
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   }
+}
+
+export function buildTrainingSessionStartRequest(
+  data: StartTrainingSessionRequest,
+  trainingMode: TrainingMode,
+  interactionMode: InteractionMode,
+): StartTrainingSessionRequest {
+  const request: StartTrainingSessionRequest = { ...data }
+  if (trainingMode === 'text' && interactionMode === 'turn_based') {
+    request.runtime = TRAINING_SESSION_MESSAGE_TREE_RUNTIME
+  } else {
+    delete request.runtime
+  }
+  return request
 }
 
 function cleanText(value: unknown): string | undefined {

@@ -50,6 +50,7 @@ import {
 } from '../services/llmRegistry'
 import { useI18n, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { buildTrainingSessionStartRequest } from '../services/trainingSession'
 import './TrainingStudioPage.css'
 
 type LaunchMode = TrainingMode | 'realtime' | 'live_coach'
@@ -697,9 +698,14 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             ],
         difficulty: toBattleDifficulty(config.difficulty),
       })
-      const startedSession = await startTrainingSession(trainingSession.session_id, {
-        room_id: room.id,
-      })
+      const startedSession = await startTrainingSession(
+        trainingSession.session_id,
+        buildTrainingSessionStartRequest(
+          { room_id: room.id },
+          trainingMode,
+          interactionMode,
+        ),
+      )
       navigate(buildTrainingModeChatPath(room.id, trainingMode, startedSession.session_id, interactionMode, {
         trainingProfile,
         sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,

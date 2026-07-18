@@ -809,6 +809,8 @@ function isConversationTreeProvider(provider: string): boolean {
   return normalized === 'talkwise_conversation'
     || normalized === 'conversation'
     || normalized === 'message_tree'
+    || normalized === 'conversation_tree'
+    || normalized === 'conversation_message_tree'
 }
 
 function normalizeTrainingTurnsForConversation(

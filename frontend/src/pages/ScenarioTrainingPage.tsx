@@ -20,6 +20,7 @@ import {
   type InteractionMode,
   type TrainingMode,
 } from '../services/trainingMode'
+import { buildTrainingSessionStartRequest } from '../services/trainingSession'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
 import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
@@ -253,9 +254,14 @@ export default function ScenarioTrainingPage() {
         task_config: buildScenarioTrainingTaskConfig(scenario),
       })
       const room = await startBattle(buildScenarioTrainingBattlePayload(scenario, trainingMode))
-      const startedSession = await startTrainingSession(trainingSession.session_id, {
-        room_id: room.id,
-      })
+      const startedSession = await startTrainingSession(
+        trainingSession.session_id,
+        buildTrainingSessionStartRequest(
+          { room_id: room.id },
+          trainingMode,
+          interactionMode,
+        ),
+      )
       const nextProgress = markScenarioTrainingStarted(
         progress,
         scenario.id,

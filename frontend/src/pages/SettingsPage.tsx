@@ -171,7 +171,7 @@ function PersonasTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('角色管理', 'Persona Management')}</h3>
+        <h3 className="settings-section-title">{tr('角色', 'Personas')}</h3>
         <div className="settings-header-actions">
           <button
             className="persona-build-btn"
@@ -194,7 +194,7 @@ function PersonasTab() {
             <div className="settings-empty-icon">
               <Users size={36} />
             </div>
-            <p>{tr('暂无角色，点击上方按钮创建', 'No personas yet. Use the button above to create one.')}</p>
+            <p>{tr('暂无角色', 'No personas yet')}</p>
           </div>
         )}
         {personas.map((p) => (
@@ -385,7 +385,7 @@ function ScenariosTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('场景管理', 'Scenario Management')}</h3>
+        <h3 className="settings-section-title">{tr('场景', 'Scenarios')}</h3>
         <button className="settings-create-btn" onClick={startCreate}>
           <Plus size={14} />
           {tr('新建场景', 'New Scenario')}
@@ -398,7 +398,7 @@ function ScenariosTab() {
             <div className="settings-empty-icon">
               <Layers size={36} />
             </div>
-            <p>{tr('暂无场景，点击上方按钮创建', 'No scenarios yet. Use the button above to create one.')}</p>
+            <p>{tr('暂无场景', 'No scenarios yet')}</p>
           </div>
         )}
         {scenarios.map((s) => (
@@ -740,7 +740,7 @@ function OrganizationsTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('组织管理', 'Organization Management')}</h3>
+        <h3 className="settings-section-title">{tr('组织', 'Organizations')}</h3>
         <button className="settings-create-btn" onClick={handleNewOrg}>
           <Plus size={14} />
           {tr('新建组织', 'New Organization')}
@@ -1290,8 +1290,8 @@ function PreferencesTab() {
       <div className="settings-placeholder-icon">
         <SlidersHorizontal size={28} />
       </div>
-      <h3>{tr('偏好配置预留', 'Preferences Placeholder')}</h3>
-      <p>{tr('这里后续用于音色选择、角色专属声音、角色默认语气和对话偏好。API Key、Base URL 和模型请在“配置”中管理。', 'This area is reserved for voice selection, persona-specific voices, default persona tone, and conversation preferences. Manage API keys, base URLs, and models in Config.')}</p>
+      <h3>{tr('偏好稍后开放', 'Preferences coming later')}</h3>
+      <p>{tr('模型、密钥和服务地址先在配置中管理。', 'Manage models, keys, and service URLs in Config for now.')}</p>
     </div>
   )
 }

@@ -17,7 +17,11 @@ import { useAppContext } from '../contexts/AppContext'
 import { useAuthContext } from '../contexts/AuthContext'
 import { fetchRooms, startBattle, type ChatRoom } from '../services/api'
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
-import { createTrainingSession, startTrainingSession } from '../services/trainingSession'
+import {
+  buildTrainingSessionStartRequest,
+  createTrainingSession,
+  startTrainingSession,
+} from '../services/trainingSession'
 import { buildTrainingModeChatPath } from '../services/trainingMode'
 import {
   buildScenarioTrainingBattlePayload,
@@ -151,9 +155,14 @@ const HomePage: React.FC = () => {
         task_config: buildScenarioTrainingTaskConfig(scenario),
       })
       const room = await startBattle(buildScenarioTrainingBattlePayload(scenario, trainingMode))
-      const startedSession = await startTrainingSession(trainingSession.session_id, {
-        room_id: room.id,
-      })
+      const startedSession = await startTrainingSession(
+        trainingSession.session_id,
+        buildTrainingSessionStartRequest(
+          { room_id: room.id },
+          trainingMode,
+          interactionMode,
+        ),
+      )
       const nextProgress = markScenarioTrainingStarted(
         progress,
         scenario.id,
@@ -185,8 +194,8 @@ const HomePage: React.FC = () => {
       <PageHeader
         icon={<Target size={16} />}
         eyebrow={t('nav.home')}
-        title={tr('训练工作台', 'Training workbench')}
-        description={tr('查看推荐、未完成对话和能力进度后直接进入下一步。', 'Check recommendations, unfinished conversations, and skill progress before taking the next action.')}
+        title={tr('工作台', 'Workbench')}
+        description={tr('从推荐训练、未完成会话和复盘入口继续。', 'Continue from recommended practice, unfinished conversations, and reviews.')}
         stats={(
           <PageStatGrid
             stats={[
@@ -238,13 +247,13 @@ const HomePage: React.FC = () => {
 
           <div className="home-progress-block">
             <div className="home-progress-copy">
-              <span>{tr('推荐训练进度', 'Recommended drill progress')}</span>
+              <span>{tr('进度', 'Progress')}</span>
               <strong>{dailyProgressPercent}%</strong>
             </div>
             <div
               className="home-progress-track"
               role="progressbar"
-              aria-label={tr('推荐训练进度', 'Recommended drill progress')}
+              aria-label={tr('进度', 'Progress')}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={dailyProgressPercent}
@@ -279,7 +288,7 @@ const HomePage: React.FC = () => {
         <Surface className="home-task-panel" variant="raised" padding="lg">
           <div className="home-task-head">
             <Badge tone="neutral">{tr('待处理', 'Queue')}</Badge>
-            <h2>{tr('从状态进入下一步', 'Move from status to action')}</h2>
+            <h2>{tr('下一步', 'Next')}</h2>
           </div>
           <div className="home-task-list">
             {latestRoom ? (
@@ -310,7 +319,7 @@ const HomePage: React.FC = () => {
                 <History size={17} />
               </span>
               <div>
-                <strong>{t('nav.trainingHistory')}</strong>
+                <strong>{t('nav.review')}</strong>
                 <em>{tr('查看训练复盘', 'Open training reviews')}</em>
               </div>
               <ChevronRight size={15} />
@@ -331,7 +340,7 @@ const HomePage: React.FC = () => {
       </div>
 
       <PageSection
-        title={tr('功能区', 'Function area')}
+        title={tr('开始', 'Start')}
       >
         <div className="home-entry-grid">
           <Link to={APP_ROUTES.practiceScenarios} className="home-entry-card primary">
@@ -339,7 +348,7 @@ const HomePage: React.FC = () => {
               <ClipboardList size={19} />
             </span>
             <div>
-              <Badge tone="success">{tr('主线功能', 'Primary function')}</Badge>
+              <Badge tone="success">{t('nav.practice')}</Badge>
               <strong>{t('nav.scenarioTraining')}</strong>
             </div>
             <ChevronRight size={16} />
@@ -350,8 +359,8 @@ const HomePage: React.FC = () => {
               <MessageSquare size={19} />
             </span>
             <div>
-              <Badge>{tr('自由模拟', 'Open simulation')}</Badge>
-              <strong>{t('nav.chat')}</strong>
+              <Badge>{tr('模拟', 'Simulation')}</Badge>
+              <strong>{t('nav.conversations')}</strong>
             </div>
             <ChevronRight size={16} />
           </Link>
@@ -361,7 +370,7 @@ const HomePage: React.FC = () => {
               <FileText size={19} />
             </span>
             <div>
-              <Badge tone="violet">{tr('专项功能', 'Specialized')}</Badge>
+              <Badge tone="violet">{t('nav.practice')}</Badge>
               <strong>{tr('答辩准备', 'Defense prep')}</strong>
             </div>
             <ChevronRight size={16} />
@@ -373,7 +382,7 @@ const HomePage: React.FC = () => {
                 <Swords size={19} />
               </span>
               <div>
-                <Badge tone="warning">{tr('管理权限', 'Management role')}</Badge>
+                <Badge tone="warning">{tr('备战', 'Prep')}</Badge>
                 <strong>{t('nav.battlePrep')}</strong>
               </div>
               <ChevronRight size={16} />

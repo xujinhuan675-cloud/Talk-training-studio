@@ -1,4 +1,4 @@
-// input: route /persona/new
+// input: route /config/personas/new
 // output: 输入素材（1-5 段，类型 tag）+ SSE 流式进度面板 + 失败重试 + 完成 2s 自动跳转
 // owner: wanhua.gu
 // pos: 表示层 - persona builder 入口页 (Story 2.6 AC1-10)；一旦我被更新，务必更新我的开头注释以及所属文件夹的md

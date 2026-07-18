@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet, useLocation, useParams } from 'react-router-dom'
 import Layout from './components/layout/Layout'
 import HomePage from './pages/HomePage'
 import ChatPage from './pages/ChatPage'
@@ -80,7 +80,7 @@ function App() {
           <Routes>
             <Route element={<Layout />}>
               <Route index element={<HomePage />} />
-              <Route path="practice">
+              <Route path="practice" element={<Outlet />}>
                 <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
                 <Route path="scenarios" element={<ScenarioTrainingPage />} />
                 <Route path="custom" element={managementOnly(<TrainingStudioPage />)} />
@@ -90,7 +90,7 @@ function App() {
               </Route>
               <Route path="conversations" element={<ChatPage />} />
               <Route path="conversations/:roomId" element={<ChatPage />} />
-              <Route path="review">
+              <Route path="review" element={<Outlet />}>
                 <Route index element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
                 <Route path="sessions" element={<TrainingHistoryPage />} />
                 <Route path="sessions/:sessionId" element={<TrainingResultPage />} />

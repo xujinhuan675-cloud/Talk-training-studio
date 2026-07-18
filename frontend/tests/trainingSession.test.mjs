@@ -116,6 +116,21 @@ test('startTrainingSession posts to the start endpoint with JSON body', async ()
   assert.deepEqual(JSON.parse(calls[0].init.body), body)
 })
 
+test('buildTrainingSessionStartRequest opts text turn-based sessions into message tree runtime', () => {
+  assert.deepEqual(
+    trainingSession.buildTrainingSessionStartRequest({ room_id: 42 }, 'text', 'turn_based'),
+    { room_id: 42, runtime: 'conversation_message_tree' },
+  )
+  assert.deepEqual(
+    trainingSession.buildTrainingSessionStartRequest({ room_id: 42 }, 'text', 'realtime'),
+    { room_id: 42 },
+  )
+  assert.deepEqual(
+    trainingSession.buildTrainingSessionStartRequest({ room_id: 42 }, 'voice', 'turn_based'),
+    { room_id: 42 },
+  )
+})
+
 test('completeTrainingSession posts to the complete endpoint with JSON body', async () => {
   const calls = installFetchStub()
   const body = { report_id: 501, generate_report: false }
