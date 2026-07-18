@@ -320,3 +320,19 @@ git diff --cached --check
 1. 先把 realtime readiness / error 映射收敛成单一 helper
 2. 再补 conversation child-route auth matrix
 3. 之后再做 opt-in text runtime start path
+
+## 2026-07-18 继续进度
+
+本轮补上了 conversation child-route auth boundary 的统一覆盖：
+
+- `backend/tests/test_conversation_auth_boundary.py` 新增参数化用例，覆盖 `/messages`、`/messages/{id}/path`、`/messages/{id}/locate`、`/messages/{id}/children`、`/messages/{id}/fork`、`/messages/{id}/edit`、`/messages/{id}/retry`、`/runs`
+- 验证结果：
+  - `frontend: node --test tests\\*.mjs`
+  - `frontend: npm run build`
+  - `backend: .\\.venv-backend\\Scripts\\python.exe -m pytest backend\\tests`
+  - `git diff --check`
+
+当前判断不变：
+
+- `text runtime start path` 仍然是下一块更值钱的生产性切片
+- `Pipecat readiness helper` 和纯 `API isolation` 先作为补强项保留

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from api.dependencies import get_chat_service, get_conversation_service
 from api.routes.chat import router as chat_router
@@ -118,6 +119,14 @@ class _FakeConversationService:
         self.update_call = None
         self.delete_call = None
         self.action_call = None
+        self.list_messages_call = None
+        self.get_message_path_call = None
+        self.locate_message_call = None
+        self.list_message_children_call = None
+        self.fork_conversation_call = None
+        self.edit_message_call = None
+        self.retry_message_call = None
+        self.list_runs_call = None
         self.list_call = None
         self.search_call = None
         self.agent_config_create_call = None
@@ -176,6 +185,40 @@ class _FakeConversationService:
     async def search_messages(self, conversation_id: int, query: str, **kwargs):
         self.search_call = (conversation_id, query, kwargs)
         return []
+
+    async def list_messages(self, conversation_id: int, **kwargs):
+        self.list_messages_call = (conversation_id, kwargs)
+        return [], 0
+
+    async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):
+        self.get_message_path_call = (conversation_id, message_public_id, kwargs)
+        return []
+
+    async def locate_message(self, conversation_id: int, message_public_id: str, **kwargs):
+        self.locate_message_call = (conversation_id, message_public_id, kwargs)
+        return None
+
+    async def list_message_children(
+        self, conversation_id: int, message_public_id: str, **kwargs
+    ):
+        self.list_message_children_call = (conversation_id, message_public_id, kwargs)
+        return []
+
+    async def fork_conversation(self, conversation_id: int, message_public_id: str, payload):
+        self.fork_conversation_call = (conversation_id, message_public_id, payload)
+        return None
+
+    async def edit_message(self, conversation_id: int, message_public_id: str, payload):
+        self.edit_message_call = (conversation_id, message_public_id, payload)
+        return None
+
+    async def retry_message(self, conversation_id: int, message_public_id: str, payload):
+        self.retry_message_call = (conversation_id, message_public_id, payload)
+        return None
+
+    async def list_runs(self, conversation_id: int, **kwargs):
+        self.list_runs_call = (conversation_id, kwargs)
+        return [], 0
 
     async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
         self.action_call = (conversation_id, message_public_id, payload)
@@ -517,6 +560,102 @@ def test_cross_user_message_action_is_blocked_before_service_call() -> None:
     assert conversation_service.get_calls == [7]
     assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.action_call is None
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "request_kwargs", "service_attr"),
+    [
+        pytest.param(
+            "get",
+            "/api/v1/conversations/7/messages",
+            {"params": {"branch_id": "main"}},
+            "list_messages_call",
+            id="messages",
+        ),
+        pytest.param(
+            "get",
+            "/api/v1/conversations/7/messages/msg_answer/path",
+            {"params": {"limit": 5}},
+            "get_message_path_call",
+            id="message-path",
+        ),
+        pytest.param(
+            "get",
+            "/api/v1/conversations/7/messages/msg_answer/locate",
+            {"params": {"before": 1, "after": 1}},
+            "locate_message_call",
+            id="message-locate",
+        ),
+        pytest.param(
+            "get",
+            "/api/v1/conversations/7/messages/msg_answer/children",
+            {"params": {"include_deleted": True}},
+            "list_message_children_call",
+            id="message-children",
+        ),
+        pytest.param(
+            "post",
+            "/api/v1/conversations/7/messages/msg_answer/fork",
+            {"json": {}},
+            "fork_conversation_call",
+            id="message-fork",
+        ),
+        pytest.param(
+            "post",
+            "/api/v1/conversations/7/messages/msg_answer/edit",
+            {"json": {"content": "edit"}},
+            "edit_message_call",
+            id="message-edit",
+        ),
+        pytest.param(
+            "post",
+            "/api/v1/conversations/7/messages/msg_answer/retry",
+            {"json": {}},
+            "retry_message_call",
+            id="message-retry",
+        ),
+        pytest.param(
+            "get",
+            "/api/v1/conversations/7/runs",
+            {"params": {"limit": 10, "status": "completed"}},
+            "list_runs_call",
+            id="runs",
+        ),
+    ],
+)
+def test_cross_user_conversation_child_routes_are_scoped_before_service_call(
+    method: str,
+    path: str,
+    request_kwargs: dict,
+    service_attr: str,
+) -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            )
+        }
+    )
+    client = _client(conversation_service)
+
+    response = client.request(
+        method.upper(),
+        path,
+        headers={"X-Mock-User": "sales"},
+        **request_kwargs,
+    )
+
+    assert response.status_code == 403
+    assert conversation_service.get_calls == [7]
+    scope = conversation_service.get_scope_calls[0]
+    assert scope.user_id == "user-sales-001"
+    assert scope.team_id == "team-revenue"
+    assert scope.include_team_scope is False
+    assert getattr(conversation_service, service_attr) is None
 
 
 def test_cross_user_chat_is_blocked_before_llm_service_call() -> None:
