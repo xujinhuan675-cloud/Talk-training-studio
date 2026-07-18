@@ -29,6 +29,7 @@ import {
   saveScenarioTrainingProgress,
 } from '../data/trainingScenarios'
 import { useI18n, type TranslateInline } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageSection, PageShell, PageStatGrid } from '../components/ui/page'
@@ -263,7 +264,7 @@ const HomePage: React.FC = () => {
               {dailyStarting ? tr('启动中', 'Starting') : tr('开始推荐训练', 'Start recommended drill')}
             </Button>
             <Button asChild variant="secondary">
-              <Link to="/scenario-training">
+              <Link to={APP_ROUTES.practiceScenarios}>
                 {tr('更换场景', 'Change scenario')}
                 <ChevronRight size={15} />
               </Link>
@@ -282,7 +283,7 @@ const HomePage: React.FC = () => {
           </div>
           <div className="home-task-list">
             {latestRoom ? (
-              <Link to={`/chat/${latestRoom.id}`} className="home-task-item">
+              <Link to={APP_ROUTES.conversation(latestRoom.id)} className="home-task-item">
                 <span className="home-task-icon success">
                   <MessageSquare size={17} />
                 </span>
@@ -304,7 +305,7 @@ const HomePage: React.FC = () => {
               </div>
             )}
 
-            <Link to="/training-history" className="home-task-item">
+            <Link to={APP_ROUTES.reviewSessions} className="home-task-item">
               <span className="home-task-icon warning">
                 <History size={17} />
               </span>
@@ -315,7 +316,7 @@ const HomePage: React.FC = () => {
               <ChevronRight size={15} />
             </Link>
 
-            <Link to="/growth" className="home-task-item">
+            <Link to={APP_ROUTES.growth} className="home-task-item">
               <span className="home-task-icon accent">
                 <TrendingUp size={17} />
               </span>
@@ -333,7 +334,7 @@ const HomePage: React.FC = () => {
         title={tr('功能区', 'Function area')}
       >
         <div className="home-entry-grid">
-          <Link to="/scenario-training" className="home-entry-card primary">
+          <Link to={APP_ROUTES.practiceScenarios} className="home-entry-card primary">
             <span className="home-entry-icon success">
               <ClipboardList size={19} />
             </span>
@@ -344,7 +345,7 @@ const HomePage: React.FC = () => {
             <ChevronRight size={16} />
           </Link>
 
-          <Link to="/chat" className="home-entry-card">
+          <Link to={APP_ROUTES.conversations} className="home-entry-card">
             <span className="home-entry-icon neutral">
               <MessageSquare size={19} />
             </span>
@@ -355,7 +356,7 @@ const HomePage: React.FC = () => {
             <ChevronRight size={16} />
           </Link>
 
-          <Link to="/defense-prep" className="home-entry-card">
+          <Link to={APP_ROUTES.practiceDefense} className="home-entry-card">
             <span className="home-entry-icon accent">
               <FileText size={19} />
             </span>
@@ -367,7 +368,7 @@ const HomePage: React.FC = () => {
           </Link>
 
           {canUseManagementActions && (
-            <Link to="/battle-prep" className="home-entry-card">
+            <Link to={APP_ROUTES.practiceBattle} className="home-entry-card">
               <span className="home-entry-icon warning">
                 <Swords size={19} />
               </span>
@@ -387,7 +388,7 @@ const HomePage: React.FC = () => {
           title={tr('对话记录', 'Conversation log')}
           actions={(
             <Button asChild variant="ghost" size="sm">
-              <Link to="/chat">
+              <Link to={APP_ROUTES.conversations}>
                 {tr('全部房间', 'All rooms')}
                 <ChevronRight size={14} />
               </Link>
@@ -399,7 +400,7 @@ const HomePage: React.FC = () => {
               <div className="home-empty-block">
                 <p>{tr('暂无对话记录', 'No conversation records')}</p>
                 <Button asChild variant="secondary" size="sm">
-                  <Link to="/scenario-training">{tr('开始第一次训练', 'Start first practice')}</Link>
+                  <Link to={APP_ROUTES.practiceScenarios}>{tr('开始第一次训练', 'Start first practice')}</Link>
                 </Button>
               </div>
             ) : (
@@ -412,7 +413,7 @@ const HomePage: React.FC = () => {
                     ? (persona.avatar_color || getAvatarColor(firstPersonaId))
                     : getAvatarColor(room.id)
                   return (
-                    <Link key={room.id} to={`/chat/${room.id}`} className="home-recent-item">
+                    <Link key={room.id} to={APP_ROUTES.conversation(room.id)} className="home-recent-item">
                       <span className="home-recent-avatar" style={{ backgroundColor: color }}>
                         {initial}
                       </span>
@@ -434,7 +435,7 @@ const HomePage: React.FC = () => {
           title={tr('能力进度', 'Skill progress')}
           actions={(
             <Button asChild variant="ghost" size="sm">
-              <Link to="/growth">
+              <Link to={APP_ROUTES.growth}>
                 {t('nav.growth')}
                 <ChevronRight size={14} />
               </Link>

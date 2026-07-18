@@ -92,6 +92,7 @@ import {
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import { getErrorMessage } from '../utils/errors'
 import '../App.css'
 import './ChatPage.css'
@@ -997,7 +998,7 @@ function ChatArea() {
   const scenarioTrainingPoints = scenarioTrainingCard?.trainingPoints.length
     ? scenarioTrainingCard.trainingPoints
     : scenarioTrainingPointsFromState
-  const trainingBackPath = scenarioTrainingId ? '/scenario-training' : '/training-studio'
+  const trainingBackPath = scenarioTrainingId ? APP_ROUTES.practiceScenarios : APP_ROUTES.practiceCustom
   const trainingContextTitle = scenarioTrainingCard?.title
     || scenarioTitleFromState
     || chat.selectedRoom?.room.name
@@ -1039,7 +1040,7 @@ function ChatArea() {
     sourceLanguageLabel || liveCoachLanguagePair.sourceLanguage,
     targetLanguageLabel || liveCoachLanguagePair.targetLanguage,
   ]).join(' -> ')
-  const resolvedTrainingBackPath = isLiveCoachSession ? '/live-coach' : trainingBackPath
+  const resolvedTrainingBackPath = isLiveCoachSession ? APP_ROUTES.practiceLiveCoach : trainingBackPath
   const resolvedTrainingContextTitle = isLiveCoachSession ? tr('实时教练', 'Live coach') : trainingContextTitle
   const resolvedTrainingContextSubtitle = isLiveCoachSession
     ? compactStrings([
@@ -1417,7 +1418,7 @@ function ChatArea() {
         <div className="chat-page-header-left">
           <button
             className="chat-page-back-btn"
-            onClick={() => navigate('/chat')}
+            onClick={() => navigate(APP_ROUTES.conversations)}
             title={tr('返回对话列表', 'Back to conversation list')}
           >
             <ArrowLeft size={18} />
@@ -2135,12 +2136,12 @@ export default function ChatPage() {
         <RoomList
           selectedRoomId={roomId}
           onSelectRoom={(room: ChatRoom) => {
-            navigate(`/chat/${room.id}`)
+            navigate(APP_ROUTES.conversation(room.id))
           }}
           onCreateRoom={() => setShowCreateDialog(true)}
           onRoomDeleted={(id) => {
             if (roomId === id) {
-              navigate('/chat')
+              navigate(APP_ROUTES.conversations)
             }
           }}
           refreshKey={refreshKey}
@@ -2177,7 +2178,7 @@ export default function ChatPage() {
         onClose={() => setShowCreateDialog(false)}
         onCreated={(newRoomId: number) => {
           setRefreshKey((k) => k + 1)
-          navigate(`/chat/${newRoomId}`)
+          navigate(APP_ROUTES.conversation(newRoomId))
         }}
       />
     </div>

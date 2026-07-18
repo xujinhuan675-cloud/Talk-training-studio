@@ -20,6 +20,7 @@ import {
   type ScenarioLeaderboardScenarioStat,
 } from '../data/trainingScenarios'
 import { getUserDisplayRoleName, type AuthUser } from '../services/auth'
+import { APP_ROUTES } from '../appRoutes'
 import './ScenarioLeaderboardPage.css'
 
 const PROGRESS_STORAGE_PREFIX = 'talkwise.scenarioTraining.progress.v1'
@@ -150,7 +151,7 @@ export default function ScenarioLeaderboardPage() {
               </select>
             </label>
           )}
-          <Link to="/scenario-training" className="scenario-leaderboard-link">
+          <Link to={APP_ROUTES.practiceScenarios} className="scenario-leaderboard-link">
             <ClipboardList size={16} />
             场景训练
             <ArrowRight size={15} />

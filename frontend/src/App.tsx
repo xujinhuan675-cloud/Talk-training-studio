@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import Layout from './components/layout/Layout'
 import HomePage from './pages/HomePage'
 import ChatPage from './pages/ChatPage'
@@ -19,6 +19,7 @@ import { AppProvider } from './contexts/AppContext'
 import { AuthProvider, useAuthContext } from './contexts/AuthContext'
 import { I18nProvider } from './i18n'
 import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from './services/auth'
+import { APP_ROUTES } from './appRoutes'
 
 function RequireSystemRole({
   roles,
@@ -35,7 +36,7 @@ function RequireSystemRole({
   }
 
   if (!hasAnySystemRole(roles)) {
-    return <Navigate to="/scenario-training" replace state={{ from: location }} />
+    return <Navigate to={APP_ROUTES.practiceScenarios} replace state={{ from: location }} />
   }
 
   return <>{children}</>
@@ -43,6 +44,32 @@ function RequireSystemRole({
 
 function managementOnly(element: ReactNode) {
   return <RequireSystemRole roles={MANAGEMENT_SYSTEM_ROLES}>{element}</RequireSystemRole>
+}
+
+function RedirectTo({ to }: { to: string }) {
+  const location = useLocation()
+  return <Navigate to={`${to}${location.search}`} replace state={location.state} />
+}
+
+function LegacyConversationRedirect() {
+  const { roomId } = useParams()
+  const location = useLocation()
+  const target = roomId ? APP_ROUTES.conversation(roomId) : APP_ROUTES.conversations
+  return <Navigate to={`${target}${location.search}`} replace state={location.state} />
+}
+
+function LegacyTrainingResultRedirect() {
+  const { sessionId } = useParams()
+  const location = useLocation()
+  const target = sessionId ? APP_ROUTES.reviewSession(sessionId) : APP_ROUTES.reviewSessions
+  return <Navigate to={`${target}${location.search}`} replace state={location.state} />
+}
+
+function LegacyPersonaEditRedirect() {
+  const { id } = useParams()
+  const location = useLocation()
+  const target = id ? APP_ROUTES.configPersonaEdit(id) : APP_ROUTES.config
+  return <Navigate to={`${target}${location.search}`} replace state={location.state} />
 }
 
 function App() {
@@ -53,25 +80,45 @@ function App() {
           <Routes>
             <Route element={<Layout />}>
               <Route index element={<HomePage />} />
-              <Route path="training-studio" element={managementOnly(<TrainingStudioPage />)} />
-              <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
-              <Route path="scenario-training" element={<ScenarioTrainingPage />} />
-              <Route path="scenario-leaderboard" element={<ScenarioLeaderboardPage />} />
-              <Route path="scenario-config" element={managementOnly(<ScenarioConfigPage />)} />
-              <Route path="training-history" element={<TrainingHistoryPage />} />
-              <Route path="training-result" element={<TrainingResultPage />} />
-              <Route path="training-result/:sessionId" element={<TrainingResultPage />} />
-              <Route path="training/history" element={<TrainingHistoryPage />} />
-              <Route path="training/result" element={<TrainingResultPage />} />
-              <Route path="training/result/:sessionId" element={<TrainingResultPage />} />
-              <Route path="chat" element={<ChatPage />} />
-              <Route path="chat/:roomId" element={<ChatPage />} />
-              <Route path="battle-prep" element={managementOnly(<BattlePrepPage />)} />
-              <Route path="defense-prep" element={<DefensePrepPage />} />
+              <Route path="practice">
+                <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
+                <Route path="scenarios" element={<ScenarioTrainingPage />} />
+                <Route path="custom" element={managementOnly(<TrainingStudioPage />)} />
+                <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
+                <Route path="defense-prep" element={<DefensePrepPage />} />
+                <Route path="battle-prep" element={managementOnly(<BattlePrepPage />)} />
+              </Route>
+              <Route path="conversations" element={<ChatPage />} />
+              <Route path="conversations/:roomId" element={<ChatPage />} />
+              <Route path="review">
+                <Route index element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
+                <Route path="sessions" element={<TrainingHistoryPage />} />
+                <Route path="sessions/:sessionId" element={<TrainingResultPage />} />
+              </Route>
               <Route path="growth" element={<GrowthPage />} />
-              <Route path="settings" element={managementOnly(<SettingsPage />)} />
-              <Route path="persona/new" element={managementOnly(<PersonaBuilderPage />)} />
-              <Route path="persona/:id/edit" element={managementOnly(<PersonaEditorPage />)} />
+              <Route path="growth/leaderboard" element={<ScenarioLeaderboardPage />} />
+              <Route path="config" element={managementOnly(<SettingsPage />)} />
+              <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
+              <Route path="config/personas/new" element={managementOnly(<PersonaBuilderPage />)} />
+              <Route path="config/personas/:id/edit" element={managementOnly(<PersonaEditorPage />)} />
+              <Route path="scenario-training" element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
+              <Route path="training-studio" element={<RedirectTo to={APP_ROUTES.practiceCustom} />} />
+              <Route path="live-coach" element={<RedirectTo to={APP_ROUTES.practiceLiveCoach} />} />
+              <Route path="battle-prep" element={<RedirectTo to={APP_ROUTES.practiceBattle} />} />
+              <Route path="defense-prep" element={<RedirectTo to={APP_ROUTES.practiceDefense} />} />
+              <Route path="chat" element={<LegacyConversationRedirect />} />
+              <Route path="chat/:roomId" element={<LegacyConversationRedirect />} />
+              <Route path="training-history" element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
+              <Route path="training-result" element={<LegacyTrainingResultRedirect />} />
+              <Route path="training-result/:sessionId" element={<LegacyTrainingResultRedirect />} />
+              <Route path="training/history" element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
+              <Route path="training/result" element={<LegacyTrainingResultRedirect />} />
+              <Route path="training/result/:sessionId" element={<LegacyTrainingResultRedirect />} />
+              <Route path="scenario-leaderboard" element={<RedirectTo to={APP_ROUTES.growthLeaderboard} />} />
+              <Route path="scenario-config" element={<RedirectTo to={APP_ROUTES.configScenarios} />} />
+              <Route path="settings" element={<RedirectTo to={APP_ROUTES.config} />} />
+              <Route path="persona/new" element={<RedirectTo to={APP_ROUTES.configPersonaNew} />} />
+              <Route path="persona/:id/edit" element={<LegacyPersonaEditRedirect />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

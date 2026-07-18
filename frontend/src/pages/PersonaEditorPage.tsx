@@ -25,6 +25,7 @@ import EvidencePopover from '../components/persona-editor/EvidencePopover'
 import FloatingCTA from '../components/persona-editor/FloatingCTA'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
 import { useI18n } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import '../components/persona-editor/personaEditor.css'
 import './PersonaEditorPage.css'
 
@@ -412,7 +413,7 @@ export default function PersonaEditorPage() {
     if (!id) return
     try {
       const room = await startBattleFromPersona(id)
-      navigate(`/chat/${room.id}`)
+      navigate(APP_ROUTES.conversation(room.id))
     } catch (e: unknown) {
       const msg = (e as Error)?.message || String(e)
       setSaveError(tr('开演练失败：{message}', 'Failed to start practice: {message}', { message: msg }))
@@ -436,7 +437,7 @@ export default function PersonaEditorPage() {
     return (
       <div className="editor-status error">
         <p>{tr('加载失败：{error}', 'Failed to load: {error}', { error: error || tr('persona 不存在', 'persona does not exist') })}</p>
-        <button type="button" onClick={() => navigate('/settings')}>
+        <button type="button" onClick={() => navigate(APP_ROUTES.config)}>
           {tr('返回设置', 'Back to Settings')}
         </button>
       </div>

@@ -11,6 +11,7 @@ import PersonaBuildProgress from '../components/PersonaBuildProgress'
 import SpeakerSelector from '../components/SpeakerSelector'
 import type { DetectedSpeaker } from '../services/api'
 import { useI18n, type TranslateInline } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import './PersonaBuilderPage.css'
 
 type SegmentType = 'chat' | 'email' | 'meeting' | 'other'
@@ -83,7 +84,7 @@ export default function PersonaBuilderPage() {
   // AC8: persist_done 后 2 秒自动跳转
   useEffect(() => {
     if (status === 'done' && personaId) {
-      const t = setTimeout(() => navigate(`/persona/${personaId}/edit`), 2000)
+      const t = setTimeout(() => navigate(APP_ROUTES.configPersonaEdit(personaId)), 2000)
       return () => clearTimeout(t)
     }
   }, [status, personaId, navigate])
@@ -203,7 +204,7 @@ export default function PersonaBuilderPage() {
   }
 
   const handleManualGoto = () => {
-    if (personaId) navigate(`/persona/${personaId}/edit`)
+    if (personaId) navigate(APP_ROUTES.configPersonaEdit(personaId))
   }
 
   const handleBackToInput = () => {

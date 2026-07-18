@@ -1,16 +1,15 @@
 import type { ReactNode } from 'react'
 import {
   ClipboardList,
-  Dumbbell,
   History,
   Home,
   MessageSquare,
   Settings,
   TrendingUp,
-  Trophy,
 } from 'lucide-react'
 import type { TranslationKey } from '../../i18n'
 import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from '../../services/auth'
+import { APP_ROUTES } from '../../appRoutes'
 
 export interface AppNavItem {
   to: string
@@ -25,56 +24,70 @@ export interface AppNavItem {
 }
 
 export const desktopNavItems: AppNavItem[] = [
-  { to: '/', icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
+  { to: APP_ROUTES.workbench, icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
   {
-    to: '/scenario-training',
+    to: APP_ROUTES.practiceScenarios,
     icon: <ClipboardList size={18} />,
-    labelKey: 'nav.scenarioTraining',
+    labelKey: 'nav.practice',
+    matchPrefix: APP_ROUTES.practice,
+    matchPrefixes: ['/scenario-training', '/training-studio', '/live-coach', '/battle-prep', '/defense-prep'],
   },
   {
-    to: '/training-studio',
-    icon: <Dumbbell size={18} />,
-    labelKey: 'nav.trainingStudio',
-    matchPaths: ['/live-coach', '/battle-prep', '/defense-prep'],
-    roles: MANAGEMENT_SYSTEM_ROLES,
+    to: APP_ROUTES.conversations,
+    icon: <MessageSquare size={18} />,
+    labelKey: 'nav.conversations',
+    matchPrefix: APP_ROUTES.conversations,
+    matchPrefixes: ['/chat'],
   },
-  { to: '/chat', icon: <MessageSquare size={18} />, labelKey: 'nav.chat' },
   {
-    to: '/training-history',
+    to: APP_ROUTES.reviewSessions,
     icon: <History size={18} />,
-    labelKey: 'nav.trainingHistory',
-    matchPaths: ['/training-result', '/training/history', '/training/result'],
+    labelKey: 'nav.review',
+    matchPrefix: APP_ROUTES.review,
+    matchPrefixes: ['/training-history', '/training-result', '/training/history', '/training/result'],
   },
-  { to: '/scenario-leaderboard', icon: <Trophy size={18} />, labelKey: 'nav.scenarioLeaderboard' },
-  { to: '/growth', icon: <TrendingUp size={18} />, labelKey: 'nav.growth' },
   {
-    to: '/settings',
+    to: APP_ROUTES.growth,
+    icon: <TrendingUp size={18} />,
+    labelKey: 'nav.growth',
+    matchPrefix: APP_ROUTES.growth,
+    matchPrefixes: ['/scenario-leaderboard'],
+  },
+  {
+    to: APP_ROUTES.config,
     icon: <Settings size={18} />,
-    labelKey: 'nav.settings',
-    matchPaths: ['/scenario-config'],
+    labelKey: 'nav.config',
+    matchPrefix: APP_ROUTES.config,
+    matchPrefixes: ['/settings', '/scenario-config', '/persona'],
     roles: MANAGEMENT_SYSTEM_ROLES,
   },
 ]
 
 export const mobileNavItems: AppNavItem[] = [
-  { to: '/', icon: <Home size={20} />, labelKey: 'nav.home' },
+  { to: APP_ROUTES.workbench, icon: <Home size={20} />, labelKey: 'nav.home' },
   {
-    to: '/scenario-training',
+    to: APP_ROUTES.practiceScenarios,
     icon: <ClipboardList size={20} />,
-    labelKey: 'nav.scenarioTrainingShort',
+    labelKey: 'nav.practice',
     elevated: true,
-    matchPrefix: '/scenario-training',
-    matchPrefixes: ['/training-studio', '/live-coach', '/scenario-config', '/scenario-leaderboard', '/battle-prep', '/defense-prep'],
+    matchPrefix: APP_ROUTES.practice,
+    matchPrefixes: ['/scenario-training', '/training-studio', '/live-coach', '/battle-prep', '/defense-prep'],
   },
-  { to: '/chat', icon: <MessageSquare size={20} />, labelKey: 'nav.chat', matchPrefix: '/chat' },
   {
-    to: '/training-history',
-    icon: <History size={20} />,
-    labelKey: 'nav.trainingHistory',
-    matchPrefix: '/training-history',
-    matchPrefixes: ['/training-result', '/training/history', '/training/result'],
+    to: APP_ROUTES.conversations,
+    icon: <MessageSquare size={20} />,
+    labelKey: 'nav.conversations',
+    matchPrefix: APP_ROUTES.conversations,
+    matchPrefixes: ['/chat'],
   },
-  { to: '/growth', icon: <TrendingUp size={20} />, labelKey: 'nav.growth', matchPrefix: '/growth' },
+  {
+    to: APP_ROUTES.reviewSessions,
+    icon: <History size={20} />,
+    labelKey: 'nav.review',
+    matchPrefix: APP_ROUTES.review,
+    matchPrefixes: ['/training-history', '/training-result', '/training/history', '/training/result'],
+  },
+  { to: APP_ROUTES.growth, icon: <TrendingUp size={20} />, labelKey: 'nav.growth', matchPrefix: APP_ROUTES.growth },
 ]
 
 export function isNavItemActive(pathname: string, item: AppNavItem): boolean {

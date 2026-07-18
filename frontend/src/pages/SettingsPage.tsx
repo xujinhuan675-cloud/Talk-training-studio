@@ -52,6 +52,7 @@ import {
 } from '../services/voiceConfig'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
 import { useI18n } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import './SettingsPage.css'
 
 /** Reusable confirm dialog state hook */
@@ -106,10 +107,10 @@ export function SettingsShell({
 
   const selectTab = (tab: SettingsTabKey) => {
     if (tab === 'training') {
-      navigate('/scenario-config')
+      navigate(APP_ROUTES.configScenarios)
       return
     }
-    navigate(`/settings?tab=${tab}`)
+    navigate(`${APP_ROUTES.config}?tab=${tab}`)
   }
 
   return (
@@ -174,7 +175,7 @@ function PersonasTab() {
         <div className="settings-header-actions">
           <button
             className="persona-build-btn"
-            onClick={() => navigate('/persona/new')}
+            onClick={() => navigate(APP_ROUTES.configPersonaNew)}
             title={tr('粘贴素材让 AI 生成对手画像', 'Paste materials for AI to generate opponent profiles')}
           >
             <Sparkles size={14} />
@@ -200,7 +201,7 @@ function PersonasTab() {
           <div
             key={p.id}
             className={`settings-list-item${editing?.id === p.id ? ' selected' : ''}`}
-            onClick={() => navigate(`/persona/${encodeURIComponent(p.id)}/edit`)}
+            onClick={() => navigate(APP_ROUTES.configPersonaEdit(p.id))}
           >
             <div className="settings-item-avatar">
               <Avatar name={p.name} color={p.avatar_color || '#2D9C6F'} size={40} />
@@ -212,7 +213,7 @@ function PersonasTab() {
             <div className="settings-item-actions">
               <button
                 className="settings-item-btn"
-                onClick={(e) => { e.stopPropagation(); navigate(`/persona/${encodeURIComponent(p.id)}/edit`) }}
+                onClick={(e) => { e.stopPropagation(); navigate(APP_ROUTES.configPersonaEdit(p.id)) }}
                 title={tr('查看详情', 'View details')}
               >
                 <Eye size={14} />

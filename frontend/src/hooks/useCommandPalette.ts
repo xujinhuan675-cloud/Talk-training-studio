@@ -4,6 +4,7 @@ import type { ChatRoom, PersonaSummary } from '../services/api'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n } from '../i18n'
 import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from '../services/auth'
+import { APP_ROUTES } from '../appRoutes'
 
 export interface CommandResult {
   id: string
@@ -68,7 +69,7 @@ export function useCommandPalette(
         icon: 'ClipboardList',
         onSelect: () => {
           close()
-          navigate('/scenario-training')
+          navigate(APP_ROUTES.practiceScenarios)
         },
       },
       {
@@ -79,7 +80,7 @@ export function useCommandPalette(
         roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {
           close()
-          navigate('/training-studio')
+          navigate(APP_ROUTES.practiceCustom)
         },
       },
       {
@@ -91,7 +92,7 @@ export function useCommandPalette(
         roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {
           close()
-          navigate('/battle-prep')
+          navigate(APP_ROUTES.practiceBattle)
         },
       },
       {
@@ -102,7 +103,7 @@ export function useCommandPalette(
         shortcut: '\u2318\u21E7N',
         onSelect: () => {
           close()
-          navigate('/chat')
+          navigate(APP_ROUTES.conversations)
         },
       },
       {
@@ -113,7 +114,7 @@ export function useCommandPalette(
         shortcut: '\u2318G',
         onSelect: () => {
           close()
-          navigate('/growth')
+          navigate(APP_ROUTES.growth)
         },
       },
       {
@@ -123,7 +124,7 @@ export function useCommandPalette(
         icon: 'History',
         onSelect: () => {
           close()
-          navigate('/training-history')
+          navigate(APP_ROUTES.reviewSessions)
         },
       },
       {
@@ -133,7 +134,7 @@ export function useCommandPalette(
         icon: 'Trophy',
         onSelect: () => {
           close()
-          navigate('/scenario-leaderboard')
+          navigate(APP_ROUTES.growthLeaderboard)
         },
       },
       {
@@ -144,7 +145,7 @@ export function useCommandPalette(
         roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {
           close()
-          navigate('/scenario-config')
+          navigate(APP_ROUTES.configScenarios)
         },
       },
     ],
@@ -175,7 +176,7 @@ export function useCommandPalette(
         icon: 'MessageSquare',
         onSelect: () => {
           close()
-          navigate(`/chat/${room.id}`)
+          navigate(APP_ROUTES.conversation(room.id))
         },
       })
     }
@@ -206,7 +207,7 @@ export function useCommandPalette(
         icon: 'User',
         onSelect: () => {
           close()
-          navigate('/settings')
+          navigate(APP_ROUTES.config)
         },
       })
     }
@@ -242,19 +243,19 @@ export function useCommandPalette(
         // Cmd+B -> battle prep
         if (meta && e.key === 'b' && canUseManagementActions) {
           e.preventDefault()
-          navigate('/battle-prep')
+          navigate(APP_ROUTES.practiceBattle)
           return
         }
         // Cmd+Shift+N -> new chat
         if (meta && e.shiftKey && e.key === 'N') {
           e.preventDefault()
-          navigate('/chat')
+          navigate(APP_ROUTES.conversations)
           return
         }
         // Cmd+G -> growth
         if (meta && e.key === 'g') {
           e.preventDefault()
-          navigate('/growth')
+          navigate(APP_ROUTES.growth)
           return
         }
       }

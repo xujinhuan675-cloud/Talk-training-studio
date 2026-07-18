@@ -30,10 +30,10 @@ test('buildTrainingModeChatPath carries the selected training mode', () => {
   const voicePath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice'), 'http://localhost')
   const videoPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'video'), 'http://localhost')
 
-  assert.equal(voicePath.pathname, '/chat/42')
+  assert.equal(voicePath.pathname, '/conversations/42')
   assert.equal(voicePath.searchParams.get('trainingMode'), 'voice')
   assert.equal(voicePath.searchParams.get('interactionMode'), 'turn_based')
-  assert.equal(videoPath.pathname, '/chat/42')
+  assert.equal(videoPath.pathname, '/conversations/42')
   assert.equal(videoPath.searchParams.get('trainingMode'), 'video')
   assert.equal(videoPath.searchParams.get('interactionMode'), 'turn_based')
 })
@@ -42,7 +42,7 @@ test('buildTrainingModeChatPath carries realtime as interaction mode', () => {
   const path = trainingMode.buildTrainingModeChatPath(42, 'voice', null, 'realtime')
   const url = new URL(path, 'http://localhost')
 
-  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.pathname, '/conversations/42')
   assert.equal(url.searchParams.get('trainingMode'), 'voice')
   assert.equal(url.searchParams.get('interactionMode'), 'realtime')
 })
@@ -51,7 +51,7 @@ test('buildTrainingModeChatPath maps legacy realtime mode to voice plus realtime
   const path = trainingMode.buildTrainingModeChatPath(42, 'realtime')
   const url = new URL(path, 'http://localhost')
 
-  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.pathname, '/conversations/42')
   assert.equal(url.searchParams.get('trainingMode'), 'voice')
   assert.equal(url.searchParams.get('interactionMode'), 'realtime')
 })
@@ -60,7 +60,7 @@ test('buildTrainingModeChatPath carries training mode and training session id', 
   const path = trainingMode.buildTrainingModeChatPath(42, 'voice', 'training-session-1')
   const url = new URL(path, 'http://localhost')
 
-  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.pathname, '/conversations/42')
   assert.equal(url.searchParams.get('trainingMode'), 'voice')
   assert.equal(url.searchParams.get('trainingSessionId'), 'training-session-1')
 })
@@ -73,7 +73,7 @@ test('buildTrainingModeChatPath carries live coach profile and language pair', (
   })
   const url = new URL(path, 'http://localhost')
 
-  assert.equal(url.pathname, '/chat/42')
+  assert.equal(url.pathname, '/conversations/42')
   assert.equal(url.searchParams.get('trainingMode'), 'voice')
   assert.equal(url.searchParams.get('interactionMode'), 'realtime')
   assert.equal(url.searchParams.get('trainingProfile'), 'live_coach')

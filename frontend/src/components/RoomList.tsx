@@ -4,6 +4,7 @@ import { MessageSquare, Users, Plus, Trash2 } from 'lucide-react'
 import { fetchRooms, deleteRoom, type ChatRoom } from '../services/api'
 import ConfirmDialog from './layout/ConfirmDialog'
 import { useI18n } from '../i18n'
+import { APP_ROUTES } from '../appRoutes'
 import './RoomList.css'
 
 interface RoomListProps {
@@ -53,7 +54,7 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onCreateRoom, o
   /** Check if a room is active by URL or by selectedRoomId prop */
   const isActive = (roomId: number) => {
     // Check URL path
-    if (location.pathname === `/chat/${roomId}`) return true
+    if (location.pathname === APP_ROUTES.conversation(roomId)) return true
     // Fallback to prop-based selection (for current routing setup)
     return selectedRoomId === roomId
   }
@@ -67,7 +68,7 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onCreateRoom, o
   const renderRoom = (room: ChatRoom) => (
     <Link
       key={room.id}
-      to={`/chat/${room.id}`}
+      to={APP_ROUTES.conversation(room.id)}
       className={`room-item ${isActive(room.id) ? 'active' : ''} ${room.type === 'battle_prep' ? 'battle-prep' : ''}`}
       onClick={() => onSelectRoom(room)}
       style={{ textDecoration: 'none', color: 'inherit' }}

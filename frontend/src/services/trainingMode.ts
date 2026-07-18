@@ -9,6 +9,7 @@ export const INTERACTION_MODE_QUERY_PARAM = 'interactionMode'
 export const TRAINING_PROFILE_QUERY_PARAM = 'trainingProfile'
 export const SOURCE_LANGUAGE_QUERY_PARAM = 'sourceLanguage'
 export const TARGET_LANGUAGE_QUERY_PARAM = 'targetLanguage'
+const CONVERSATION_ROUTE_PREFIX = '/conversations'
 
 const TRAINING_MODES = new Set<NormalizedTrainingMode>(['text', 'voice', 'video'])
 const INTERACTION_MODES = new Set<InteractionMode>(['turn_based', 'realtime'])
@@ -86,7 +87,7 @@ export function buildTrainingModeChatPath(
   if (targetLanguage) {
     params.set(TARGET_LANGUAGE_QUERY_PARAM, targetLanguage)
   }
-  return `/chat/${roomId}?${params.toString()}`
+  return `${CONVERSATION_ROUTE_PREFIX}/${roomId}?${params.toString()}`
 }
 
 export function getTrainingModeFromLocation(search: string, state: unknown): NormalizedTrainingMode | null {
