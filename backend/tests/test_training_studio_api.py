@@ -967,6 +967,77 @@ async def test_training_session_complete_with_explicit_report_id_skips_generatio
 
 
 @pytest.mark.asyncio
+async def test_training_session_complete_persists_message_tree_branch_metadata(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            metadata={"source": "scenario_training"},
+            scenario_template_id="new-customer-discount",
+        ),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+    app.state.analysis_reader_service.reports[777] = FakeReport(id=777, room_id=42)
+    branch_metadata = {
+        "messageTreeSelection": {
+            "provider": "talkwise-conversation",
+            "conversationId": "7",
+            "selectedMessageId": "msg-tail",
+            "branchId": "branch-review",
+            "path": [
+                {"publicId": "msg-root", "role": "user", "content": "Can we revisit pricing?"},
+                {
+                    "publicId": "msg-tail",
+                    "role": "assistant",
+                    "content": "Use a measurable pilot.",
+                    "branchId": "branch-review",
+                },
+            ],
+            "purpose": "training_replay_context",
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "selectedPath": {
+            "branchId": "branch-review",
+            "tailMessageId": "msg-tail",
+            "messageIds": ["msg-root", "msg-tail"],
+            "purpose": "training_replay_context",
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "currentBranchTail": {
+            "branchId": "branch-review",
+            "messageId": "msg-tail",
+        },
+    }
+
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={"report_id": 777, "generate_report": False, "metadata": branch_metadata},
+    )
+
+    assert complete_resp.status_code == 200
+    completed_metadata = complete_resp.json()["data"]["task_config"]["metadata"]
+    assert completed_metadata["source"] == "scenario_training"
+    assert completed_metadata["messageTreeSelection"]["selectedMessageId"] == "msg-tail"
+    assert completed_metadata["messageTreeSelection"]["affectsScoring"] is False
+    assert completed_metadata["selectedPath"]["affectsCompletion"] is False
+    get_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}")
+    assert get_resp.status_code == 200
+    persisted_metadata = get_resp.json()["data"]["task_config"]["metadata"]
+    assert persisted_metadata["messageTreeSelection"]["path"][1]["publicId"] == "msg-tail"
+
+
+@pytest.mark.asyncio
 async def test_training_session_complete_rejects_unowned_explicit_report_id(
     client: AsyncClient,
     app: FastAPI,

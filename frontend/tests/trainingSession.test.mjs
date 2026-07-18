@@ -138,6 +138,47 @@ test('completeTrainingSession posts an empty JSON body by default', async () => 
   assert.deepEqual(JSON.parse(calls[0].init.body), {})
 })
 
+test('completeTrainingSession can persist message tree branch metadata', async () => {
+  const calls = installFetchStub()
+  const metadata = trainingSession.buildTrainingCompletionBranchMetadata({
+    provider: 'talkwise-conversation',
+    conversationId: '7',
+    selectedMessageId: 'msg-tail',
+    branchId: 'branch-review',
+    sourceMessageId: 99,
+    path: [
+      {
+        publicId: 'msg-root',
+        role: 'user',
+        content: 'Can we revisit pricing?',
+        branchId: 'main',
+        parentMessageId: null,
+      },
+      {
+        publicId: 'msg-tail',
+        role: 'assistant',
+        content: 'Use a pilot with a measurable success bar.',
+        branchId: 'branch-review',
+        parentMessageId: 'msg-root',
+      },
+    ],
+  })
+
+  await trainingSession.completeTrainingSession('session-1', {
+    generate_report: false,
+    metadata,
+  })
+
+  const body = JSON.parse(calls[0].init.body)
+  assert.equal(body.generate_report, false)
+  assert.equal(body.metadata.messageTreeSelection.provider, 'talkwise-conversation')
+  assert.equal(body.metadata.messageTreeSelection.selectedMessageId, 'msg-tail')
+  assert.equal(body.metadata.messageTreeSelection.forkPointMessageId, 'msg-root')
+  assert.equal(body.metadata.messageTreeSelection.affectsScoring, false)
+  assert.equal(body.metadata.selectedPath.affectsCompletion, false)
+  assert.deepEqual(body.metadata.selectedPath.messageIds, ['msg-root', 'msg-tail'])
+})
+
 test('training session requests surface FastAPI detail string errors', async () => {
   globalThis.fetch = async () => ({
     ok: false,
@@ -269,6 +310,38 @@ test('getTrainingConversationBranchInfo extracts selected path metadata from a s
   assert.deepEqual(info.selectedPath.map((item) => item.publicId), ['msg-root', 'msg-leaf'])
   assert.match(info.pathSummary, /Selected answer/)
   assert.equal(info.lastReplyPreview, 'Selected answer')
+})
+
+test('buildTrainingCompletionBranchMetadata serializes selected path as replay-only metadata', () => {
+  const metadata = trainingSession.buildTrainingCompletionBranchMetadata({
+    provider: 'talkwise-conversation',
+    conversationId: 'conv-branch',
+    selectedMessageId: 'msg-leaf',
+    branchId: 'branch-review',
+    path: [
+      { publicId: 'msg-root', role: 'user', content: 'Can we revisit pricing?', branchId: 'main' },
+      { publicId: 'msg-leaf', role: 'assistant', content: 'Frame it as a pilot.', branchId: 'branch-review' },
+    ],
+  })
+
+  const info = trainingSession.getTrainingConversationBranchInfo({
+    session: {
+      task_config: {
+        metadata,
+      },
+    },
+  })
+
+  assert.equal(metadata.messageTreeSelection.purpose, 'training_replay_context')
+  assert.equal(metadata.messageTreeSelection.replayContextOnly, true)
+  assert.equal(metadata.messageTreeSelection.affectsScoring, false)
+  assert.equal(metadata.messageTreeSelection.affectsCompletion, false)
+  assert.equal(info.source, 'session')
+  assert.equal(info.sourceDetail, 'session.task_config.metadata')
+  assert.equal(info.branchId, 'branch-review')
+  assert.equal(info.selectedTailMessageId, 'msg-leaf')
+  assert.equal(info.forkPointMessageId, 'msg-root')
+  assert.equal(info.lastReplyPreview, 'Frame it as a pilot.')
 })
 
 test('getTrainingConversationBranchInfo extracts id-only selected path state without inventing text', () => {

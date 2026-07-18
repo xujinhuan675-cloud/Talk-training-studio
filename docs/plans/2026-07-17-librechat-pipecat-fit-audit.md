@@ -298,3 +298,25 @@ git diff --cached --check
 4. 扩 API isolation tests 到 training session/report/guidance/realtime binding。
 
 这四件事完成后，再进入 LibreChat text runtime 和 Pipecat runtime 的具体迁移会更稳。
+
+
+## 2026-07-18 进度快照
+
+本轮已落地:
+
+- `POST /training-studio/sessions/{id}/complete` 现在支持 `metadata`，并把完成时的分支选择写回 `task_config.metadata`
+- `ChatPage` 完成训练时会把当前 `messageTreeSelection` 序列化成 replay-only metadata
+- 前后端测试已经覆盖 `complete -> session persistence -> branch info round-trip`
+
+当前判断:
+
+- 文本 conversation / message tree: 约 50-60%
+- auth / ACL: 约 40-50%
+- Pipecat realtime: 约 45-55%
+- MCP / Agent: 约 15-20%
+
+下一步建议:
+
+1. 先把 realtime readiness / error 映射收敛成单一 helper
+2. 再补 conversation child-route auth matrix
+3. 之后再做 opt-in text runtime start path

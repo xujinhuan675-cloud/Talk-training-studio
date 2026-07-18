@@ -52,6 +52,7 @@ import {
 } from '../services/api'
 import {
   completeTrainingSession,
+  buildTrainingCompletionBranchMetadata,
   getTrainingGuidanceStreamUrl,
   getTrainingSessionReport,
   persistTrainingGuidanceEvents,
@@ -1227,7 +1228,11 @@ function ChatArea() {
           }
         }
       }
-      const session = await completeTrainingSession(trainingSessionId, { generate_report: hasMessages })
+      const completionBranchMetadata = buildTrainingCompletionBranchMetadata(messageTreeSelection)
+      const session = await completeTrainingSession(trainingSessionId, {
+        generate_report: hasMessages,
+        ...(completionBranchMetadata ? { metadata: completionBranchMetadata } : {}),
+      })
       setTrainingSessionCompleted(true)
       const reportId = Number(session.report_id)
       const scenarioScore = Number.isFinite(reportId) && reportId > 0
@@ -1267,6 +1272,7 @@ function ChatArea() {
     interactionMode,
     isLiveCoachSession,
     liveCoachGuidanceMetadata,
+    messageTreeSelection,
     navigate,
     progressScope,
     resolvedTrainingBackPath,

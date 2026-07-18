@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
@@ -197,9 +198,11 @@ class TrainingSessionService:
         report_id: str | None = None,
         score_id: str | None = None,
         *,
+        metadata: Mapping[str, object] | None = None,
         access_scope: TrainingSessionAccessScope | None = None,
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
+        _merge_task_config_metadata(session, metadata)
         session.complete(report_id=report_id, score_id=score_id)
         return await self._save(session)
 
@@ -483,3 +486,17 @@ class TrainingSessionService:
             return None
         text = str(value).strip()
         return text or None
+
+
+def _merge_task_config_metadata(
+    session: TrainingSession,
+    metadata: Mapping[str, object] | None,
+) -> None:
+    if not metadata:
+        return
+    merged = dict(session.task_config.metadata or {})
+    for key, value in metadata.items():
+        text_key = str(key).strip()
+        if text_key:
+            merged[text_key] = deepcopy(value)
+    session.task_config.metadata = merged

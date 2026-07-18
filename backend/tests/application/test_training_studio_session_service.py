@@ -213,6 +213,79 @@ async def test_session_service_selected_branch_metadata_is_not_scoring_completio
     assert progress[0].score_id is None
 
 
+async def test_session_service_complete_merges_branch_metadata_into_task_config():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+            "user_id": "user-sales-001",
+            "metadata": {
+                "source": "scenario_training",
+                "scenario_training": {"id": "new-customer-discount"},
+            },
+        }
+    )
+    await service.start_session(session.session_id, room_id="42")
+    completion_metadata = {
+        "messageTreeSelection": {
+            "provider": "talkwise-conversation",
+            "conversationId": "7",
+            "selectedMessageId": "msg-tail",
+            "branchId": "branch-review",
+            "path": [
+                {"publicId": "msg-root", "role": "user", "content": "Can we revisit pricing?"},
+                {
+                    "publicId": "msg-tail",
+                    "role": "assistant",
+                    "content": "Use a measurable pilot.",
+                    "branchId": "branch-review",
+                },
+            ],
+            "purpose": "training_replay_context",
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "selectedPath": {
+            "branchId": "branch-review",
+            "tailMessageId": "msg-tail",
+            "messageIds": ["msg-root", "msg-tail"],
+            "purpose": "training_replay_context",
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "currentBranchTail": {
+            "branchId": "branch-review",
+            "messageId": "msg-tail",
+        },
+    }
+
+    completed = await service.complete_session(
+        session.session_id,
+        report_id="report-1",
+        metadata=completion_metadata,
+    )
+    completion_metadata["messageTreeSelection"]["path"][0]["publicId"] = "mutated"
+
+    assert completed.task_config.metadata["source"] == "scenario_training"
+    assert completed.task_config.metadata["scenario_training"] == {
+        "id": "new-customer-discount"
+    }
+    assert completed.task_config.metadata["messageTreeSelection"]["selectedMessageId"] == (
+        "msg-tail"
+    )
+    assert completed.task_config.metadata["messageTreeSelection"]["path"][0]["publicId"] == (
+        "msg-root"
+    )
+    assert completed.task_config.metadata["selectedPath"]["affectsScoring"] is False
+    progress = await service.list_scenario_progress(user_id="user-sales-001")
+    assert progress[0].status == "completed"
+    assert progress[0].report_id == "report-1"
+    assert progress[0].score_status == "pending"
+
+
 class FakeTrainingUow:
     def __init__(self, repository, evaluations):
         self.training_session_repository = repository

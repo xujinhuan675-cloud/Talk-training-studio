@@ -59,6 +59,7 @@ export interface CompleteTrainingSessionRequest {
   report_id?: number | string | null
   score_id?: number | string | null
   generate_report?: boolean
+  metadata?: Record<string, unknown>
 }
 
 export interface TrainingSessionReportDTO {
@@ -94,6 +95,15 @@ export interface TrainingConversationBranchInfoSources {
   session?: TrainingSessionDTO | null
   report?: TrainingSessionReportDTO | null
   progress?: unknown
+}
+
+export interface TrainingConversationBranchSelectionInput {
+  provider?: string | null
+  conversationId?: string | number | null
+  selectedMessageId?: string | number | null
+  branchId?: string | number | null
+  sourceMessageId?: string | number | null
+  path?: Array<ConversationTreeMessage | TrainingConversationBranchPathItem> | null
 }
 
 export interface TranscriptTurnDTO {
@@ -517,6 +527,77 @@ function lastReplyFromPath(path: TrainingConversationBranchPathItem[]): string |
     Boolean(item.content) && !['user', 'system'].includes(item.role.toLowerCase())
   ))
   return assistantReply?.content || items.find((item) => Boolean(item.content))?.content
+}
+
+function forkPointFromPath(path: TrainingConversationBranchPathItem[]): string | undefined {
+  for (let index = 1; index < path.length; index += 1) {
+    const previous = path[index - 1]
+    const current = path[index]
+    if (!current.branchId || current.branchId === previous.branchId) continue
+    return previous.publicId
+  }
+  return undefined
+}
+
+function optionalRecordEntry(
+  record: Record<string, unknown>,
+  key: string,
+  value: string | number | boolean | undefined | null,
+): void {
+  if (value !== undefined && value !== null && value !== '') {
+    record[key] = value
+  }
+}
+
+export function buildTrainingCompletionBranchMetadata(
+  selection?: TrainingConversationBranchSelectionInput | null,
+): Record<string, unknown> | undefined {
+  if (!selection) return undefined
+  const selectedPath = (selection.path ?? [])
+    .map(normalizeBranchPathItem)
+    .filter((item): item is TrainingConversationBranchPathItem => Boolean(item))
+  const lastPathItem = selectedPath[selectedPath.length - 1]
+  const selectedMessageId = cleanText(selection.selectedMessageId) ?? lastPathItem?.publicId
+  if (!selectedMessageId && selectedPath.length === 0) return undefined
+
+  const branchId = cleanText(selection.branchId) ?? lastPathItem?.branchId ?? undefined
+  const forkPointMessageId = forkPointFromPath(selectedPath)
+  const pathSummary = compactPathSummary(selectedPath)
+  const lastReplyPreview = lastReplyFromPath(selectedPath)
+  const messageIds = selectedPath.map((item) => item.publicId)
+  const replayContext = {
+    purpose: 'training_replay_context',
+    replayContextOnly: true,
+    affectsScoring: false,
+    affectsCompletion: false,
+  }
+  const messageTreeSelection: Record<string, unknown> = {
+    ...replayContext,
+    selectedMessageId,
+    path: selectedPath,
+    pathCount: selectedPath.length,
+  }
+  optionalRecordEntry(messageTreeSelection, 'provider', cleanText(selection.provider))
+  optionalRecordEntry(messageTreeSelection, 'conversationId', cleanText(selection.conversationId))
+  optionalRecordEntry(messageTreeSelection, 'branchId', branchId)
+  optionalRecordEntry(messageTreeSelection, 'sourceMessageId', cleanText(selection.sourceMessageId))
+  optionalRecordEntry(messageTreeSelection, 'forkPointMessageId', forkPointMessageId)
+  optionalRecordEntry(messageTreeSelection, 'pathSummary', pathSummary)
+  optionalRecordEntry(messageTreeSelection, 'lastReplyPreview', lastReplyPreview)
+
+  return {
+    messageTreeSelection,
+    selectedPath: {
+      ...replayContext,
+      branchId: branchId ?? null,
+      tailMessageId: selectedMessageId ?? null,
+      messageIds,
+    },
+    currentBranchTail: {
+      branchId: branchId ?? null,
+      messageId: selectedMessageId ?? null,
+    },
+  }
 }
 
 function branchInfoFromCandidate(

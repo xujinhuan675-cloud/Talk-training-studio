@@ -622,6 +622,7 @@ class CompleteTrainingSessionDTO(BaseModel):
     report_id: int | str | None = None
     score_id: int | str | None = None
     generate_report: bool = True
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class FailTrainingSessionDTO(BaseModel):
@@ -2117,6 +2118,7 @@ async def complete_training_session(
             session_id,
             report_id=report_id or None,
             score_id=score_id,
+            metadata=body.metadata,
             access_scope=_training_session_access_scope_for_current_user(current_user),
         )
     except PermissionError as exc:
