@@ -41,6 +41,8 @@ export interface LaunchTrainingSessionFlowParams<TCreateRequest, TBattlePayload,
     roomId: number | string
     startedSession: TrainingLaunchStartedSession
     trainingSession: TrainingLaunchSession
+    trainingMode: TrainingMode
+    interactionMode: InteractionMode
   }) => TNavigationState
   navigate: (to: string, options: { state: TNavigationState }) => void
   afterStartSession?: (context: {
@@ -48,6 +50,8 @@ export interface LaunchTrainingSessionFlowParams<TCreateRequest, TBattlePayload,
     roomId: number | string
     startedSession: TrainingLaunchStartedSession
     trainingSession: TrainingLaunchSession
+    trainingMode: TrainingMode
+    interactionMode: InteractionMode
   }) => void | Promise<void>
 }
 
@@ -60,8 +64,8 @@ export interface LaunchTrainingSessionFlowResult<TNavigationState> {
   state: TNavigationState
 }
 
-export async function launchTrainingSessionFlow<TCreateRequest, TNavigationState>(
-  params: LaunchTrainingSessionFlowParams<TCreateRequest, unknown, TNavigationState>,
+export async function launchTrainingSessionFlow<TCreateRequest, TBattlePayload, TNavigationState>(
+  params: LaunchTrainingSessionFlowParams<TCreateRequest, TBattlePayload, TNavigationState>,
 ): Promise<LaunchTrainingSessionFlowResult<TNavigationState>> {
   const trainingSession = await params.createTrainingSession(params.createTrainingSessionRequest)
   const room = params.battlePayload == null ? null : await params.startBattle(params.battlePayload)
@@ -80,12 +84,16 @@ export async function launchTrainingSessionFlow<TCreateRequest, TNavigationState
     roomId,
     startedSession,
     trainingSession,
+    trainingMode: params.trainingMode,
+    interactionMode: params.interactionMode,
   })
   await params.afterStartSession?.({
     room,
     roomId,
     startedSession,
     trainingSession,
+    trainingMode: params.trainingMode,
+    interactionMode: params.interactionMode,
   })
   const chatPath = params.buildChatPath(
     roomId,
