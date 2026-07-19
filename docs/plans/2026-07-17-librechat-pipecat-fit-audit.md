@@ -48,18 +48,18 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | TalkWise 训练语义 | 70% | TrainingCore、session、scenario、report、live guidance 已有，训练闭环基本清晰，但还没有完全统一文本/语音/视频。 |
 | 文本分支体验 | 70% | 已有 message tree action、edit/retry/fork、path/tail/fork point UI，离 LibreChat 的长期分支稳定性还有一点距离。 |
 | 训练复盘/历史 | 70% | 已展示 session/report/progress 来源、当前路径、最后回复和空状态，数据契约仍需继续收紧。 |
-| Pipecat/realtime | 55% | 已有 readiness、provider-neutral transcript、audio output、runner，Pipecat 还不是唯一 runtime。 |
+| Pipecat/realtime | 65-70% | 已切到 Pipecat-only runtime，独立 OpenAI realtime 路径已移除；仍缺真实浏览器音频链路验收和更完整 turn/interruption 事件。 |
 | 认证/隔离 | 60% | conversation / session / report / guidance / realtime 的边界开始统一收口，但完整 ACL 形状还未迁完。 |
 | MCP/Agent/Tool | 15% | 当前项目没有系统性 Agent/MCP 基底，应从 LibreChat 迁移或适配。 |
 | 成熟部署/运维 | 25% | 本地开发和测试可用，管理面板、权限覆盖、token/usage、审计不足。 |
 
 ## 成熟底座迁移进度仪表盘
 
-更新日期：2026-07-18。
+更新日期：2026-07-19。
 
 本节用于给后续 AI 快速判断：当前 TalkWise 哪些核心部分已经迁到 LibreChat / Pipecat 的成熟底座思路上，哪些还只是概念或 inventory，哪些成熟项目能力未来可继续迁入。后续每轮迁移后应优先更新本节，再更新更细的功能域说明。
 
-总体判断：当前不是“已迁完”，而是已经从概念对齐进入按成熟底座切块迁移的中期偏后。第一批边界已经落地，但 LibreChat / Pipecat 还没有成为唯一 source of truth。
+总体判断：当前不是“已迁完”，而是已经从概念对齐进入按成熟底座切块迁移的中期偏后。第一批边界已经落地；LibreChat 尚未成为文本唯一 source of truth，Pipecat 已成为 realtime voice 的当前 runtime source of truth。
 
 ### 当前项目核心部分对齐程度
 
@@ -71,8 +71,8 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | model/provider registry | LibreChat | 45-55% | 已有 LLM registry、model specs、capability readiness。还不是完整 provider/preset/runtime registry。 |
 | auth / ACL / resource scope | LibreChat | 55-65% | 已把 conversation / agent config list 的 user/team scope 下沉到 repository 查询层，conversation/session/report/guidance/realtime 的边界也在继续收口。 |
 | MCP / Agent / Tool | LibreChat | 15-20% | 已有 capability inventory 和具体 MCP server readiness 校验。还没有 tool dispatcher、MCP lifecycle、OAuth MCP、tool call runtime。 |
-| realtime websocket / transcript | Pipecat | 50-60% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、live guidance trigger。Pipecat final transcript 已对齐 `transcript.done -> transcript.persisted` 顺序。 |
-| Pipecat runtime source of truth | Pipecat | 25-35% | 现在是 Pipecat path 可用、OpenAI realtime path 并存。还没收敛成 Pipecat 为主、OpenAI realtime 作为 Pipecat service/fallback。 |
+| realtime websocket / transcript | Pipecat | 65-70% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、live guidance trigger；独立 OpenAI realtime 和客户端转写持久化入口已删除。 |
+| Pipecat runtime source of truth | Pipecat | 65-70% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；OpenAI 只作为 Pipecat STT/TTS/LLM 服务配置或 legacy `.env` 容忍字段。 |
 | files / RAG / training materials | LibreChat | 15-25% | 项目里有文件/素材相关雏形，但还没迁入 LibreChat 式 file ownership、RAG、agent file scope。 |
 | usage / moderation / admin ops | LibreChat | 10-20% | 当前不是重点，只适合 auth/ACL 稳定后再迁。 |
 
@@ -80,7 +80,7 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 
 - TalkWise 自己的训练产品层已经有 65% 左右的形状。
 - LibreChat 文本底座约 40-50%，已经开始落到 conversation、capability、resource scope，但还不是统一 runtime。
-- Pipecat realtime 底座约 40-50%，已经有 adapter/event/persistence 链路，但还没成为唯一实时语音 runtime。
+- Pipecat realtime 底座约 65-70%，Pipecat-only runtime 已落地；剩余主要是浏览器音频 E2E、VAD/turn/interruption 和 metrics/tracing。
 - MCP/Agent 和生产级 auth/ACL 还明显处在早期。
 
 当前已经落地的方向是“先修边界，再迁 runtime”：
@@ -88,7 +88,7 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 - 文本侧开始对齐 LibreChat 的 ownership / capability / message-tree 思路。
 - 语音侧开始对齐 Pipecat 的 provider-neutral event lifecycle。
 - TrainingCore 保持为上层产品语义，不被通用 chat/realtime runtime 接管。
-- 训练/实时相关入口保留优先：迁移和收口阶段不删除现有 API / 前端入口；前端根据 capability、auth、runtime availability 决定展示、置灰、折叠或提供 fallback。
+- 产品层训练/实时入口保留优先；已废弃的独立 runtime/provider API 可以直接删除或折叠。前端根据 capability、auth、runtime availability 决定展示、置灰、折叠或提供 fallback。
 - MCP / Agent / Tool 不要求现在暴露独立产品入口：先做 registry、discovery、readiness 和窄 tool consumer，入口按具体训练/管理 workflow 需要再接。
 
 ### 成熟项目未来可迁移能力
@@ -155,7 +155,7 @@ LibreChat 不应迁入的方式：
 | VAD/turn/interruption | Silero VAD、Krisp/AIC/RNNoise、smart turn、user turn start/stop、mute、idle、interruption | 高 | 直接支撑电话式训练：自动起止、打断、沉默、追问和压力升级。 |
 | WebSocket/FastAPI transport | FastAPI websocket、client/server websocket、base input/output transport | 高 | 优先替换当前薄 websocket 语音链路。前端保持 TalkWise UI，后端运行 Pipecat transport。 |
 | WebRTC/LiveKit/Daily | smallwebrtc、LiveKit、Daily、local transports | 中高 | WebSocket 先稳定；视频会议式训练进入 Phase 3/4 时再选 WebRTC/LiveKit/Daily。 |
-| OpenAI realtime/S2S | OpenAI realtime STT/S2S、Responses、Grok/Gemini/Nova Sonic 等 | 高 | OpenAI realtime 可以作为 Pipecat service 路径之一，避免维护独立 OpenAI websocket 分支。 |
+| OpenAI realtime/S2S | OpenAI realtime STT/S2S、Responses、Grok/Gemini/Nova Sonic 等 | 高 | 只允许作为 Pipecat service/config 能力进入，不再维护独立 OpenAI websocket/SDP runtime 分支。 |
 | RTVI | RTVI processor/observer/UI protocol | 中高 | 后续前端实时状态、配置、metrics 可对齐 RTVI；第一轮不强制引入完整客户端 SDK。 |
 | audio processing | resamplers、mixers、filters、audio buffer、word timestamp | 中高 | 用于语音复盘指标：停顿、语速、重叠、输出同步、环境音。 |
 | observability/metrics/tracing | latency observer、turn tracking、startup timing、OpenTelemetry、Sentry | 中高 | 进入 P1。实时训练必须有延迟、turn、错误原因和 provider 事件可观测。 |
@@ -231,7 +231,7 @@ LibreChat auth/ACL/MCP/Agent
 ### P1: Realtime 底座收敛 Pipecat
 
 1. 当前 `/realtime/capabilities` 保留，前端按 capability / auth / runtime state 视情况展示；readiness 来源应优先来自 Pipecat adapter capability。
-2. OpenAI realtime 独立 websocket 路径保留入口，但实现降级为 Pipecat service 或 fallback。
+2. OpenAI realtime 独立 websocket/SDP 路径不再保留；OpenAI 只作为 Pipecat service/config 能力，旧 provider alias 返回不支持。
 3. 接入 Pipecat VAD/turn/interruption，产生 TalkWise 可读事件：user_turn.started/stopped、assistant_speaking、interrupted、silence_timeout。
 4. audio output、transcript.done、guidance trigger 必须都落到同一 Training Session。
 
@@ -427,6 +427,10 @@ focused 验证：
 
 下一步建议：
 
-1. 用连接浏览器或 FlowGuide 验证 Pipecat WebSocket 录音、音频输出和转写持久化的真实 UI 行为。
-2. 补 Pipecat turn/interruption/silence timeout 的 TalkWise 事件映射。
-3. 再进入训练相关窄 tool consumer 和 file/material resource ownership。
+1. 补 Pipecat turn/interruption/silence timeout 的 TalkWise 事件映射。
+2. 再进入训练相关窄 tool consumer 和 file/material resource ownership。
+3. 根据前两项落地结果，复盘 text runtime / auth / MCP / Agent / realtime 哪块最值得继续。
+
+延期待完成：
+
+- 真实浏览器验证本轮不做。后续用连接浏览器或 FlowGuide 验证 Pipecat WebSocket 录音、音频输出和转写持久化的真实 UI 行为。
