@@ -1,27 +1,8 @@
 import React from 'react'
 import { type ProfileCard as ProfileCardData } from '../services/api'
 import { useI18n } from '../i18n'
+import { GROWTH_DIMENSIONS, getGrowthDimensionLabel } from '../utils/growthLabels'
 import './ProfileCard.css'
-
-const DIMENSION_LABELS_ZH: Record<string, string> = {
-  persuasion: '说服力',
-  emotional_management: '情绪管理',
-  active_listening: '倾听回应',
-  structured_expression: '结构表达',
-  conflict_resolution: '冲突处理',
-  stakeholder_alignment: '利益对齐',
-}
-
-const DIMENSION_LABELS_EN: Record<string, string> = {
-  persuasion: 'Persuasion',
-  emotional_management: 'Emotion Management',
-  active_listening: 'Active Listening',
-  structured_expression: 'Structured Expression',
-  conflict_resolution: 'Conflict Resolution',
-  stakeholder_alignment: 'Stakeholder Alignment',
-}
-
-const DIMENSIONS = Object.keys(DIMENSION_LABELS_ZH)
 
 interface Props {
   data: ProfileCardData
@@ -43,7 +24,7 @@ function getBarStyle(score: number): React.CSSProperties {
 }
 
 export default function ProfileCard({ data, cardRef }: Props) {
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
 
   // If style_label is empty, the user has insufficient evaluations
   if (!data.style_label) {
@@ -82,11 +63,11 @@ export default function ProfileCard({ data, cardRef }: Props) {
 
       {/* 6 progress bars */}
       <div className="profile-bars">
-        {DIMENSIONS.map((dim) => {
+        {GROWTH_DIMENSIONS.map((dim) => {
           const score = data.scores?.[dim] ?? 0
           return (
             <div key={dim} className="profile-bar-row">
-              <span className="profile-bar-label">{tr(DIMENSION_LABELS_ZH[dim], DIMENSION_LABELS_EN[dim])}</span>
+              <span className="profile-bar-label">{getGrowthDimensionLabel(dim, t)}</span>
               <div className="profile-bar-track">
                 {/* Use inline style for width and gradient — needed for html2canvas */}
                 <div className="profile-bar-fill" style={getBarStyle(score)} />

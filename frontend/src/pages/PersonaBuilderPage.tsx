@@ -10,16 +10,16 @@ import { useSpeakerDetection } from '../hooks/useSpeakerDetection'
 import PersonaBuildProgress from '../components/PersonaBuildProgress'
 import SpeakerSelector from '../components/SpeakerSelector'
 import type { DetectedSpeaker } from '../services/api'
-import { useI18n, type TranslateInline } from '../i18n'
+import { useI18n, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './PersonaBuilderPage.css'
 
 type SegmentType = 'chat' | 'email' | 'meeting' | 'other'
-const SEGMENT_TAGS: { type: SegmentType; labelZh: string; labelEn: string; klass: string }[] = [
-  { type: 'chat', labelZh: '聊天', labelEn: 'Chat', klass: 'tag-chat' },
-  { type: 'email', labelZh: '邮件', labelEn: 'Email', klass: 'tag-email' },
-  { type: 'meeting', labelZh: '纪要', labelEn: 'Meeting Notes', klass: 'tag-meeting' },
-  { type: 'other', labelZh: '其他', labelEn: 'Other', klass: 'tag-other' },
+const SEGMENT_TAGS: { type: SegmentType; labelKey: TranslationKey; klass: string }[] = [
+  { type: 'chat', labelKey: 'personaBuilder.segment.chat', klass: 'tag-chat' },
+  { type: 'email', labelKey: 'personaBuilder.segment.email', klass: 'tag-email' },
+  { type: 'meeting', labelKey: 'personaBuilder.segment.meeting', klass: 'tag-meeting' },
+  { type: 'other', labelKey: 'personaBuilder.segment.other', klass: 'tag-other' },
 ]
 
 interface Segment {
@@ -55,7 +55,7 @@ type Phase = 'input' | 'speaker-select' | 'building'
 
 export default function PersonaBuilderPage() {
   const navigate = useNavigate()
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
   const [segments, setSegments] = useState<Segment[]>([newSegment()])
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
@@ -254,15 +254,15 @@ export default function PersonaBuilderPage() {
                 <div className="segment-head">
                   <span className="segment-index">{tr('素材 #{index}', 'Material #{index}', { index: idx + 1 })}</span>
                   <div className="segment-tags">
-                    {SEGMENT_TAGS.map((t) => (
+                    {SEGMENT_TAGS.map((segmentTag) => (
                       <button
-                        key={t.type}
+                        key={segmentTag.type}
                         type="button"
-                        className={`type-tag ${t.klass} ${seg.type === t.type ? 'active' : ''}`}
-                        onClick={() => updateSegment(seg.id, { type: t.type })}
+                        className={`type-tag ${segmentTag.klass} ${seg.type === segmentTag.type ? 'active' : ''}`}
+                        onClick={() => updateSegment(seg.id, { type: segmentTag.type })}
                         disabled={status === 'running'}
                       >
-                        {tr(t.labelZh, t.labelEn)}
+                        {t(segmentTag.labelKey)}
                       </button>
                     ))}
                   </div>

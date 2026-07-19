@@ -18,28 +18,9 @@ import {
   type ProfileCard as ProfileCardData,
 } from '../services/api'
 import ProfileCardDialog from './ProfileCardDialog'
-import { useI18n, type TranslateInline } from '../i18n'
+import { useI18n, type Translate } from '../i18n'
+import { GROWTH_DIMENSIONS, getGrowthDimensionLabel } from '../utils/growthLabels'
 import './GrowthDashboard.css'
-
-const DIMENSION_LABELS_ZH: Record<string, string> = {
-  persuasion: '说服力',
-  emotional_management: '情绪管理',
-  active_listening: '倾听回应',
-  structured_expression: '结构化表达',
-  conflict_resolution: '冲突处理',
-  stakeholder_alignment: '利益对齐',
-}
-
-const DIMENSION_LABELS_EN: Record<string, string> = {
-  persuasion: 'Persuasion',
-  emotional_management: 'Emotion Management',
-  active_listening: 'Active Listening',
-  structured_expression: 'Structured Expression',
-  conflict_resolution: 'Conflict Resolution',
-  stakeholder_alignment: 'Stakeholder Alignment',
-}
-
-const DIMENSIONS = Object.keys(DIMENSION_LABELS_ZH)
 
 interface RadarDataPoint {
   dimension: string
@@ -47,13 +28,13 @@ interface RadarDataPoint {
   average: number
 }
 
-function buildRadarData(dashboard: GrowthDashboardData, tr: TranslateInline): RadarDataPoint[] {
+function buildRadarData(dashboard: GrowthDashboardData, t: Translate): RadarDataPoint[] {
   const evals = dashboard.evaluations
-  return DIMENSIONS.map((dim) => {
+  return GROWTH_DIMENSIONS.map((dim) => {
     const latest = evals.length > 0 ? (evals[0].scores[dim]?.score ?? 0) : 0
     const allScores = evals.map((ev) => ev.scores[dim]?.score ?? 0).filter((s) => s > 0)
     const average = allScores.length > 0 ? Math.round((allScores.reduce((a, b) => a + b, 0) / allScores.length) * 10) / 10 : 0
-    return { dimension: tr(DIMENSION_LABELS_ZH[dim], DIMENSION_LABELS_EN[dim]), latest, average }
+    return { dimension: getGrowthDimensionLabel(dim, t), latest, average }
   })
 }
 
@@ -68,7 +49,7 @@ interface Props {
 }
 
 export default function GrowthDashboard({ onCreateRoom }: Props) {
-  const { tr, locale } = useI18n()
+  const { t, tr, locale } = useI18n()
   const [data, setData] = useState<GrowthDashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [insight, setInsight] = useState<string | null>(null)
@@ -138,7 +119,7 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
     )
   }
 
-  const radarData = buildRadarData(data, tr)
+  const radarData = buildRadarData(data, t)
   const { overview, evaluations } = data
 
   return (
@@ -232,9 +213,9 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {DIMENSIONS.map((dim) => (
+                {GROWTH_DIMENSIONS.map((dim) => (
                   <tr key={dim}>
-                    <td className="trends-dim-name">{tr(DIMENSION_LABELS_ZH[dim], DIMENSION_LABELS_EN[dim])}</td>
+                    <td className="trends-dim-name">{getGrowthDimensionLabel(dim, t)}</td>
                     {evaluations.map((ev) => {
                       const sc = ev.scores[dim]?.score ?? 0
                       return (
@@ -270,13 +251,13 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
           <div className="detail-meta">
             {evaluations[0].room_name} &middot; {tr('总分 {score}/5', 'Total {score}/5', { score: evaluations[0].overall_score.toFixed(1) })}
           </div>
-          {DIMENSIONS.map((dim) => {
+          {GROWTH_DIMENSIONS.map((dim) => {
             const sc = evaluations[0].scores[dim]
             if (!sc) return null
             return (
               <div key={dim} className="detail-item">
                 <div className="detail-dim-header">
-                  <span className="detail-dim-name">{tr(DIMENSION_LABELS_ZH[dim], DIMENSION_LABELS_EN[dim])}</span>
+                  <span className="detail-dim-name">{getGrowthDimensionLabel(dim, t)}</span>
                   <span className="detail-dim-score" style={{ color: scoreColor(sc.score) }}>
                     {sc.score}/5
                   </span>
@@ -299,7 +280,7 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
             disabled={insightLoading}
           >
             {insightLoading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
-            {insightLoading ? tr('生成中...', 'Generating...') : tr('生成洞察', 'Generate Insights')}
+            {insightLoading ? t('common.generating') : tr('生成洞察', 'Generate Insights')}
           </button>
         </div>
         {insightLoading && (
@@ -326,7 +307,7 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
             : tr('生成沟通力名片', 'Generate communication profile card')}
         >
           {profileCardLoading ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />}
-          {profileCardLoading ? tr('生成中...', 'Generating...') : tr('生成我的名片', 'Generate My Card')}
+          {profileCardLoading ? t('common.generating') : tr('生成我的名片', 'Generate My Card')}
         </button>
       </div>
 

@@ -29,7 +29,7 @@ export default function AnalysisPanel({
   onGenerateNewReport,
   onScrollToMessage,
 }: AnalysisPanelProps) {
-  const { tr, locale } = useI18n()
+  const { t, tr, locale } = useI18n()
   const videoDimensions: Array<{
     key: string
     title: string
@@ -75,7 +75,7 @@ export default function AnalysisPanel({
               onClick={onGenerateNewReport}
               disabled={analyzingRoom}
             >
-              {analyzingRoom ? tr('生成中...', 'Generating...') : tr('+ 新报告', '+ New Report')}
+              {analyzingRoom ? t('common.generating') : tr('+ 新报告', '+ New Report')}
             </button>
           </div>
         )}
@@ -89,7 +89,7 @@ export default function AnalysisPanel({
               onClick={onGenerateNewReport}
               disabled={analyzingRoom}
             >
-              {analyzingRoom ? tr('生成中...', 'Generating...') : tr('重新分析', 'Analyze Again')}
+              {analyzingRoom ? t('common.generating') : tr('重新分析', 'Analyze Again')}
             </button>
           </div>
         )}

@@ -1,6 +1,6 @@
 import { Check, Users, MessageSquare, ChevronRight } from 'lucide-react'
 import type { DetectedSpeaker } from '../services/api'
-import { useI18n } from '../i18n'
+import { useI18n, type TranslationKey } from '../i18n'
 import './SpeakerSelector.css'
 
 interface Props {
@@ -12,10 +12,10 @@ interface Props {
   disabled?: boolean
 }
 
-const DOMINANCE_BADGE: Record<string, { labelZh: string; labelEn: string; cls: string }> = {
-  high: { labelZh: '强势', labelEn: 'Strong', cls: 'badge-high' },
-  medium: { labelZh: '中等', labelEn: 'Medium', cls: 'badge-medium' },
-  low: { labelZh: '温和', labelEn: 'Mild', cls: 'badge-low' },
+const DOMINANCE_BADGE: Record<string, { labelKey: TranslationKey; cls: string }> = {
+  high: { labelKey: 'speaker.dominance.high', cls: 'badge-high' },
+  medium: { labelKey: 'speaker.dominance.medium', cls: 'badge-medium' },
+  low: { labelKey: 'speaker.dominance.low', cls: 'badge-low' },
 }
 
 export default function SpeakerSelector({
@@ -26,7 +26,7 @@ export default function SpeakerSelector({
   onSkip,
   disabled,
 }: Props) {
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
 
   return (
     <div className="speaker-selector">
@@ -55,7 +55,7 @@ export default function SpeakerSelector({
                 <div className="speaker-name-row">
                   <span className="speaker-name">{s.name}</span>
                   {s.role && <span className="speaker-role">{s.role}</span>}
-                  <span className={`speaker-badge ${badge.cls}`}>{tr(badge.labelZh, badge.labelEn)}</span>
+                  <span className={`speaker-badge ${badge.cls}`}>{t(badge.labelKey)}</span>
                 </div>
                 <div className="speaker-meta">
                   <MessageSquare size={12} />

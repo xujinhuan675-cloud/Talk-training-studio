@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function ProfileCardDialog({ open, onClose, data }: Props) {
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
   const cardRef = useRef<HTMLDivElement>(null)
   const [downloading, setDownloading] = useState(false)
 
@@ -52,7 +52,7 @@ export default function ProfileCardDialog({ open, onClose, data }: Props) {
         {/* Footer buttons — outside cardRef, not captured in PNG */}
         <div className="pc-footer">
           <button className="pc-btn-download" onClick={handleDownload} disabled={downloading}>
-            {downloading ? tr('生成中...', 'Generating...') : tr('下载图片', 'Download Image')}
+            {downloading ? t('common.generating') : t('common.downloadImage')}
           </button>
         </div>
       </div>

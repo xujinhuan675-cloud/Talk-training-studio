@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function CheatSheetDialog({ open, onClose, data, personaName }: Props) {
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
   const cardRef = useRef<HTMLDivElement>(null)
   const [downloading, setDownloading] = useState(false)
 
@@ -133,7 +133,7 @@ export default function CheatSheetDialog({ open, onClose, data, personaName }: P
             {tr('复制全文', 'Copy All')}
           </button>
           <button className="cs-btn-download" onClick={handleDownload} disabled={downloading}>
-            {downloading ? tr('生成中...', 'Generating...') : tr('下载图片', 'Download Image')}
+            {downloading ? t('common.generating') : t('common.downloadImage')}
           </button>
         </div>
       </div>

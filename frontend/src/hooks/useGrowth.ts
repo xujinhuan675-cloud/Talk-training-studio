@@ -6,6 +6,13 @@ import {
   type CompetencyEvaluation,
   type ChatRoom,
 } from '../services/api'
+import {
+  GROWTH_DIMENSIONS,
+  growthDimensionLabelKey,
+  growthSkillKey,
+  type GrowthDimensionKey,
+} from '../utils/growthLabels'
+import type { TranslationKey } from '../i18n'
 
 // ---------------------------------------------------------------------------
 // Grade-to-XP mapping
@@ -154,39 +161,12 @@ export function computeStreak(rooms: ChatRoom[]): number {
 // Daily challenge
 // ---------------------------------------------------------------------------
 
-const DIMENSION_KEYS = [
-  'persuasion',
-  'emotional_management',
-  'active_listening',
-  'structured_expression',
-  'conflict_resolution',
-  'stakeholder_alignment',
-] as const
-
-export type DimensionKey = (typeof DIMENSION_KEYS)[number]
-
-const DIMENSION_LABELS: Record<DimensionKey, string> = {
-  persuasion: '说服力',
-  emotional_management: '情绪管理',
-  active_listening: '倾听回应',
-  structured_expression: '结构化表达',
-  conflict_resolution: '冲突处理',
-  stakeholder_alignment: '利益对齐',
-}
-
-const CHALLENGE_SUGGESTIONS: Record<DimensionKey, string> = {
-  persuasion: '尝试一场需要说服反对者的模拟对话',
-  emotional_management: '练习一场情绪波动较大的冲突场景',
-  active_listening: '在下一场对话中专注倾听并复述对方要点',
-  structured_expression: '用金字塔原理结构化你的下一次发言',
-  conflict_resolution: '模拟一场需要调解各方分歧的会议',
-  stakeholder_alignment: '练习寻找多方利益交集的沟通策略',
-}
+export type DimensionKey = GrowthDimensionKey
 
 export interface DailyChallenge {
   weakestDimension: DimensionKey
-  dimensionLabel: string
-  suggestion: string
+  dimensionLabelKey: TranslationKey
+  suggestionKey: TranslationKey
 }
 
 /**
@@ -198,7 +178,7 @@ export function computeDailyChallenge(
   let weakest: DimensionKey | null = null
   let lowestAvg = Infinity
 
-  for (const dim of DIMENSION_KEYS) {
+  for (const dim of GROWTH_DIMENSIONS) {
     const trend = dimensionTrends[dim]
     if (!trend || trend.length === 0) continue
     const avg = trend.reduce((sum, t) => sum + t.score, 0) / trend.length
@@ -212,8 +192,8 @@ export function computeDailyChallenge(
 
   return {
     weakestDimension: weakest,
-    dimensionLabel: DIMENSION_LABELS[weakest],
-    suggestion: CHALLENGE_SUGGESTIONS[weakest],
+    dimensionLabelKey: growthDimensionLabelKey(weakest),
+    suggestionKey: growthSkillKey(weakest, 'suggestion'),
   }
 }
 
@@ -223,7 +203,7 @@ export function computeDailyChallenge(
 
 export interface SkillPathNode {
   dimension: DimensionKey
-  label: string
+  labelKey: TranslationKey
   unlocked: boolean
   averageScore: number
   evaluationCount: number
@@ -238,7 +218,7 @@ export interface SkillPathNode {
 export function computeSkillPath(
   dimensionTrends: Record<string, { date: string | null; score: number }[]>,
 ): SkillPathNode[] {
-  return DIMENSION_KEYS.map((dim) => {
+  return GROWTH_DIMENSIONS.map((dim) => {
     const trend = dimensionTrends[dim] || []
     const avg = trend.length > 0
       ? trend.reduce((sum, t) => sum + t.score, 0) / trend.length
@@ -248,7 +228,7 @@ export function computeSkillPath(
     const unlocked = dimEvalCount >= 3 && avg >= 3.0
     return {
       dimension: dim,
-      label: DIMENSION_LABELS[dim],
+      labelKey: growthDimensionLabelKey(dim),
       unlocked,
       averageScore: Math.round(avg * 10) / 10,
       evaluationCount: dimEvalCount,

@@ -22,40 +22,20 @@ import {
   Download,
   Share2,
 } from 'lucide-react'
-import { useGrowth, type SkillPathNode, type DimensionKey } from '../hooks/useGrowth'
+import { useGrowth, type SkillPathNode } from '../hooks/useGrowth'
 import { generateProfileCard, type ProfileCard as ProfileCardData } from '../services/api'
 import ProfileCard from '../components/ProfileCard'
-import { useI18n, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
+import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { PageShell } from '../components/ui/page'
+import { GROWTH_DIMENSIONS, getGrowthDimensionLabel, growthSkillKey } from '../utils/growthLabels'
 import './GrowthPage.css'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DIMENSIONS: DimensionKey[] = [
-  'persuasion',
-  'emotional_management',
-  'active_listening',
-  'structured_expression',
-  'conflict_resolution',
-  'stakeholder_alignment',
-]
-const DIMENSION_SET = new Set<string>(DIMENSIONS)
 const RECENT_EVALUATION_LIMIT = 5
-
-function isDimensionKey(value: string | undefined): value is DimensionKey {
-  return Boolean(value && DIMENSION_SET.has(value))
-}
-
-function growthDimensionLabelKey(dim: DimensionKey): TranslationKey {
-  return `growth.dimension.${dim}.label` as TranslationKey
-}
-
-function growthSkillKey(dim: DimensionKey, field: 'name' | 'desc' | 'unlock' | 'suggestion'): TranslationKey {
-  return `growth.skill.${dim}.${field}` as TranslationKey
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,19 +51,15 @@ function buildRadarData(
   evaluations: { scores: Record<string, { score: number }> }[],
   t: Translate,
 ): RadarDataPoint[] {
-  return DIMENSIONS.map((dim) => {
+  return GROWTH_DIMENSIONS.map((dim) => {
     const latest = evaluations.length > 0 ? (evaluations[0].scores[dim]?.score ?? 0) : 0
     const allScores = evaluations.map((ev) => ev.scores[dim]?.score ?? 0).filter((s) => s > 0)
     const average =
       allScores.length > 0
         ? Math.round((allScores.reduce((a, b) => a + b, 0) / allScores.length) * 10) / 10
         : 0
-    return { dimension: t(growthDimensionLabelKey(dim)), latest, average }
+    return { dimension: getGrowthDimensionLabel(dim, t), latest, average }
   })
-}
-
-function getDimensionLabel(dim: string | undefined, t: Translate): string {
-  return isDimensionKey(dim) ? t(growthDimensionLabelKey(dim)) : dim || ''
 }
 
 function scoreToGrade(score: number): string {
@@ -111,7 +87,7 @@ function computeDimensionChanges(
 ): Record<string, number> {
   const changes: Record<string, number> = {}
   if (evaluations.length < 2) return changes
-  for (const dim of DIMENSIONS) {
+  for (const dim of GROWTH_DIMENSIONS) {
     const latest = evaluations[0].scores[dim]?.score ?? 0
     const previous = evaluations[1].scores[dim]?.score ?? 0
     changes[dim] = Math.round((latest - previous) * 10) / 10
@@ -151,8 +127,8 @@ function buildFeedbackSummary(
     if (entry[1].score > best[1].score) best = entry
     if (entry[1].score < worst[1].score) worst = entry
   }
-  const bestLabel = getDimensionLabel(best?.[0], t)
-  const worstLabel = getDimensionLabel(worst?.[0], t)
+  const bestLabel = getGrowthDimensionLabel(best?.[0], t)
+  const worstLabel = getGrowthDimensionLabel(worst?.[0], t)
   if (best && worst && best[0] !== worst[0]) {
     return tr(
       '{bestLabel} 表现最佳 ({bestScore})，{worstLabel} 有提升空间 ({worstScore})',
@@ -336,14 +312,14 @@ const GrowthPage: React.FC = () => {
         {/* Week-over-week dimension changes */}
         {evaluations.length > 1 && Object.keys(dimChanges).length > 0 && (
           <div className="gp-dimension-changes">
-            {DIMENSIONS.map((dim) => {
+            {GROWTH_DIMENSIONS.map((dim) => {
               const change = dimChanges[dim] ?? 0
               const arrow =
                 change > 0 ? 'up' : change < 0 ? 'down' : 'same'
               return (
                 <div key={dim} className="gp-dim-change">
                   <span className="gp-dim-change-name">
-                    {getDimensionLabel(dim, t)}
+                    {getGrowthDimensionLabel(dim, t)}
                   </span>
                   <span className={`gp-dim-change-arrow ${arrow}`}>
                     {arrow === 'up' && <><ArrowUp size={12} />+{change}</>}
@@ -460,7 +436,7 @@ const GrowthPage: React.FC = () => {
               ) : (
                 <Download size={14} />
               )}
-              {downloading ? t('common.generating') : tr('下载为图片', 'Download Image')}
+              {downloading ? t('common.generating') : t('common.downloadImage')}
             </button>
           )}
         </div>
