@@ -301,6 +301,36 @@ export default function RealtimeVoiceRecorder({
       setStatus('error')
       return
     }
+    if (event.type === 'user_turn.started') {
+      setStatus('listening')
+      setPreview(tr('正在听你说话', 'Listening to you'))
+      return
+    }
+    if (event.type === 'user_turn.stopped') {
+      setStatus('processing')
+      setPreview(tr('正在整理你的回答', 'Processing your turn'))
+      return
+    }
+    if (event.type === 'assistant_speaking.started') {
+      setStatus('speaking')
+      setPreview(tr('AI 正在说话', 'AI is speaking'))
+      return
+    }
+    if (event.type === 'assistant_speaking.stopped') {
+      setStatus('listening')
+      setPreview(tr('AI 已暂停', 'AI paused'))
+      return
+    }
+    if (event.type === 'interrupted') {
+      setStatus('listening')
+      setPreview(tr('已打断 AI 输出', 'AI output interrupted'))
+      return
+    }
+    if (event.type === 'silence_timeout') {
+      setStatus('listening')
+      setPreview(tr('等待下一句输入', 'Waiting for the next turn'))
+      return
+    }
 
     if (event.type === 'transcript.delta' && event.text.trim()) {
       setPreview(event.text.trim())

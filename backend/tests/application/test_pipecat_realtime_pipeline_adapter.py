@@ -98,6 +98,75 @@ class FakeLLMContextAssistantTurnFrame:
 
 
 @dataclass
+class FakeInterruptionFrame:
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 501
+    name: str = "FakeInterruptionFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeUserStartedSpeakingFrame:
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 502
+    name: str = "FakeUserStartedSpeakingFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeUserStoppedSpeakingFrame:
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 503
+    name: str = "FakeUserStoppedSpeakingFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeVADUserStartedSpeakingFrame:
+    start_secs: float = 0.0
+    timestamp: float = 0.0
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 504
+    name: str = "FakeVADUserStartedSpeakingFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeVADUserStoppedSpeakingFrame:
+    stop_secs: float = 0.0
+    timestamp: float = 0.0
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 505
+    name: str = "FakeVADUserStoppedSpeakingFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeBotStartedSpeakingFrame:
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 506
+    name: str = "FakeBotStartedSpeakingFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeBotStoppedSpeakingFrame:
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 507
+    name: str = "FakeBotStoppedSpeakingFrame"
+    pts: int | None = None
+
+
+@dataclass
+class FakeUserIdleTimeoutUpdateFrame:
+    timeout: float
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 508
+    name: str = "FakeUserIdleTimeoutUpdateFrame"
+    pts: int | None = None
+
+
+@dataclass
 class FakeTextFrame:
     text: str
 
@@ -286,6 +355,14 @@ def fake_runtime(websocket=True):
         FrameProcessor=FakeFrameProcessor,
         FrameDirection=FakeFrameDirection,
         InterimTranscriptionFrame=FakeInterimTranscriptionFrame,
+        InterruptionFrame=FakeInterruptionFrame,
+        UserStartedSpeakingFrame=FakeUserStartedSpeakingFrame,
+        UserStoppedSpeakingFrame=FakeUserStoppedSpeakingFrame,
+        VADUserStartedSpeakingFrame=FakeVADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame=FakeVADUserStoppedSpeakingFrame,
+        BotStartedSpeakingFrame=FakeBotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame=FakeBotStoppedSpeakingFrame,
+        UserIdleTimeoutUpdateFrame=FakeUserIdleTimeoutUpdateFrame,
         FastAPIWebsocketParams=FakeFastAPIWebsocketParams if websocket else None,
         FastAPIWebsocketTransport=FakeFastAPIWebsocketTransport if websocket else None,
         SileroVADAnalyzer=FakeSileroVADAnalyzer,
@@ -1550,6 +1627,53 @@ async def test_talkwise_event_processor_preserves_assistant_frame_metadata():
 
 
 @pytest.mark.asyncio
+async def test_talkwise_event_processor_maps_turn_and_interruption_frames():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            metadata={"talkwise": {"trainingSessionId": "training-1", "roomId": 7}},
+        ),
+    )
+
+    frames = [
+        FakeUserStartedSpeakingFrame(),
+        FakeVADUserStoppedSpeakingFrame(stop_secs=0.8, timestamp=123.4),
+        FakeBotStartedSpeakingFrame(),
+        FakeBotStoppedSpeakingFrame(),
+        FakeInterruptionFrame(metadata={"reason": "barge_in"}),
+        FakeUserIdleTimeoutUpdateFrame(timeout=6.5),
+    ]
+    for frame in frames:
+        await processor.process_frame(frame, FakeFrameDirection.DOWNSTREAM)
+
+    events = [await queue.get() for _ in frames]
+    assert [event["type"] for event in events] == [
+        "user_turn.started",
+        "user_turn.stopped",
+        "assistant_speaking.started",
+        "assistant_speaking.stopped",
+        "interrupted",
+        "silence_timeout",
+    ]
+    assert events[0]["payload"]["participant"] == "user"
+    assert events[0]["payload"]["signal"] == "user_turn"
+    assert events[1]["payload"]["signal"] == "vad"
+    assert events[1]["payload"]["silenceSeconds"] == 0.8
+    assert events[1]["payload"]["timestamp"] == 123.4
+    assert events[2]["payload"]["participant"] == "assistant"
+    assert events[4]["metadata"]["reason"] == "barge_in"
+    assert events[5]["payload"]["timeoutSeconds"] == 6.5
+    assert events[5]["metadata"]["talkwise"] == {
+        "trainingSessionId": "training-1",
+        "roomId": 7,
+    }
+
+
+@pytest.mark.asyncio
 async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_event():
     runtime = fake_runtime(websocket=False)
     queue = asyncio.Queue()
@@ -1721,6 +1845,10 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     )
     assert "pipecat.frames.frames.InterimTranscriptionFrame" in snapshot["frameEntrypoints"]
     assert "pipecat.frames.frames.TTSAudioRawFrame" in snapshot["frameEntrypoints"]
+    assert "pipecat.frames.frames.InterruptionFrame" in snapshot["frameEntrypoints"]
+    assert "pipecat.frames.frames.VADUserStartedSpeakingFrame" in snapshot["frameEntrypoints"]
+    assert "pipecat.frames.frames.BotStartedSpeakingFrame" in snapshot["frameEntrypoints"]
+    assert "pipecat.frames.frames.UserIdleTimeoutUpdateFrame" in snapshot["frameEntrypoints"]
     assert snapshot["audioFrameFields"]["pipecat.frames.frames.OutputAudioRawFrame"] == (
         "audio",
         "sample_rate",
@@ -1732,6 +1860,10 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     )
     assert (
         "TTSAudioRawFrame to provider-neutral audio.output event mirroring"
+        in snapshot["talkwiseResponsibilities"]
+    )
+    assert (
+        "Pipecat turn/interruption/silence frames to TalkWise realtime event mirroring"
         in snapshot["talkwiseResponsibilities"]
     )
     assert "pipecat.audio.vad.silero.SileroVADAnalyzer" == snapshot["vadEntrypoint"]

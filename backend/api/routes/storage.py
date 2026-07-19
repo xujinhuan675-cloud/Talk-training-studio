@@ -16,9 +16,12 @@ from fastapi import (
 )
 
 from api.dependencies import (
+    CurrentUser,
     get_file_asset_service,
+    get_current_user,
     get_idempotency_service,
 )
+from api.conversation_scope import owned_metadata_scope_for_current_user
 from application.dto import (
     PresignUploadRequestDTO,
     CompleteUploadRequestDTO,
@@ -51,6 +54,25 @@ router = APIRouter(
 )
 
 
+def _file_asset_metadata_for_current_user(
+    *,
+    current_user: CurrentUser,
+    kind: str,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "resourceType": "file_asset",
+        "usageScope": kind,
+        "ownerUserId": current_user.user_id,
+        "authScope": {
+            "userId": current_user.user_id,
+            "teamId": current_user.team_id,
+        },
+    }
+    if current_user.team_id:
+        metadata["teamId"] = current_user.team_id
+    return metadata
+
+
 @router.post(
     "/presign-upload",
     summary="生成直传预签名",
@@ -61,6 +83,7 @@ async def presign_upload(
     payload: PresignUploadRequestDTO,
     service: FileAssetApplicationService = Depends(get_file_asset_service),
     idempotency: IdempotencyService = Depends(get_idempotency_service),
+    current_user: CurrentUser = Depends(get_current_user),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     scope = f"{request.method}:{request.url.path}"
@@ -127,6 +150,10 @@ async def presign_upload(
             kind=payload.kind,
             method=payload.method or "PUT",
             expires_in=payload.expires_in,
+            metadata=_file_asset_metadata_for_current_user(
+                current_user=current_user,
+                kind=payload.kind,
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -167,20 +194,20 @@ async def presign_upload(
 async def confirm_presigned_upload(
     payload: CompleteUploadRequestDTO,
     service: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
         payload.ensure_identifier()
     except ValueError as exc:  # pragma: no cover - defensive guard
         raise HTTPException(status_code=400, detail=t("file.identifier.missing")) from exc
 
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
     if payload.id is not None:
-        asset = await service.get_asset_raw(payload.id)
+        asset = await service.get_asset_raw(payload.id, metadata_scope=metadata_scope)
     elif payload.key:
-        asset = await service.get_asset_by_key_raw(payload.key)
+        asset = await service.get_asset_by_key_raw(payload.key, metadata_scope=metadata_scope)
     else:  # pragma: no cover - already guarded
         raise HTTPException(status_code=400, detail=t("file.identifier.missing"))
-
-    # No permission check
 
     await service.confirm_direct_upload(asset_id=asset.id)
 
@@ -196,6 +223,7 @@ async def upload_file(
     file: UploadFile = File(..., description="要上传的文件"),
     kind: str = Query("uploads", description="业务分类（如 avatar、document 等）"),
     service: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """由应用服务器中转上传文件到对象存储（编排已下沉到 Application Service）。"""
 
@@ -214,5 +242,9 @@ async def upload_file(
         filename=file.filename or "upload.bin",
         kind=kind,
         content_type=file.content_type,
+        metadata=_file_asset_metadata_for_current_user(
+            current_user=current_user,
+            kind=kind,
+        ),
     )
     return success_response(data=resp, message=t("file.upload.success"))

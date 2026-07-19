@@ -54,6 +54,7 @@ class FakeFileAssetService:
     def __init__(self) -> None:
         self.presign_calls = 0
         self.generate_calls = 0
+        self.last_metadata = None
 
     async def presign_upload(
         self,
@@ -65,8 +66,10 @@ class FakeFileAssetService:
         kind: str,
         method: str = "PUT",
         expires_in: int = 600,
+        metadata=None,
     ):
         _ = (user_id, mime_type, kind, expires_in, size_bytes)
+        self.last_metadata = metadata
         self.presign_calls += 1
         file_summary = FileAssetSummaryDTO(
             id=self.presign_calls,
@@ -137,6 +140,7 @@ async def test_presign_upload_idempotent_replay() -> None:
     assert r1.json()["data"]["file"]["id"] == r2.json()["data"]["file"]["id"]
     assert fake.presign_calls == 1
     assert fake.generate_calls == 1
+    assert fake.last_metadata["authScope"]["userId"] == "user-admin-001"
 
 
 @pytest.mark.asyncio
@@ -169,3 +173,37 @@ async def test_presign_upload_idempotency_key_reused_with_different_payload() ->
     assert r1.status_code == 200
     assert r2.status_code == 422
     assert r2.json()["code"] == 10003
+
+
+@pytest.mark.asyncio
+async def test_presign_upload_stamps_current_user_file_scope() -> None:
+    fake = FakeFileAssetService()
+    app = make_test_app(fake)
+
+    payload = {
+        "filename": "training-material.txt",
+        "mime_type": "text/plain",
+        "size_bytes": 1,
+        "kind": "training_material",
+        "method": "PUT",
+        "expires_in": 600,
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/storage/presign-upload",
+            json=payload,
+            headers={"X-Mock-User": "sales"},
+        )
+
+    assert response.status_code == 200
+    assert fake.last_metadata == {
+        "resourceType": "file_asset",
+        "usageScope": "training_material",
+        "ownerUserId": "user-sales-001",
+        "teamId": "team-revenue",
+        "authScope": {
+            "userId": "user-sales-001",
+            "teamId": "team-revenue",
+        },
+    }

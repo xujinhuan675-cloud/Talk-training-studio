@@ -237,6 +237,14 @@ class PipecatRuntime:
     FrameProcessor: type
     FrameDirection: type
     InterimTranscriptionFrame: type | None = None
+    InterruptionFrame: type | None = None
+    UserStartedSpeakingFrame: type | None = None
+    UserStoppedSpeakingFrame: type | None = None
+    VADUserStartedSpeakingFrame: type | None = None
+    VADUserStoppedSpeakingFrame: type | None = None
+    BotStartedSpeakingFrame: type | None = None
+    BotStoppedSpeakingFrame: type | None = None
+    UserIdleTimeoutUpdateFrame: type | None = None
     FastAPIWebsocketParams: type | None = None
     FastAPIWebsocketTransport: type | None = None
     SileroVADAnalyzer: type | None = None
@@ -895,6 +903,14 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
             processor_module, "pipecat.processors.frame_processor", "FrameDirection"
         ),
         InterimTranscriptionFrame=getattr(frames_module, "InterimTranscriptionFrame", None),
+        InterruptionFrame=getattr(frames_module, "InterruptionFrame", None),
+        UserStartedSpeakingFrame=getattr(frames_module, "UserStartedSpeakingFrame", None),
+        UserStoppedSpeakingFrame=getattr(frames_module, "UserStoppedSpeakingFrame", None),
+        VADUserStartedSpeakingFrame=getattr(frames_module, "VADUserStartedSpeakingFrame", None),
+        VADUserStoppedSpeakingFrame=getattr(frames_module, "VADUserStoppedSpeakingFrame", None),
+        BotStartedSpeakingFrame=getattr(frames_module, "BotStartedSpeakingFrame", None),
+        BotStoppedSpeakingFrame=getattr(frames_module, "BotStoppedSpeakingFrame", None),
+        UserIdleTimeoutUpdateFrame=getattr(frames_module, "UserIdleTimeoutUpdateFrame", None),
         FastAPIWebsocketParams=websocket_params,
         FastAPIWebsocketTransport=websocket_transport,
         SileroVADAnalyzer=silero_vad_analyzer,
@@ -1876,6 +1892,8 @@ def _event_from_pipecat_frame(
             config=config,
             audio_sequence=audio_sequence,
         )
+    if event := _talkwise_turn_event_from_pipecat_frame(runtime, frame, config=config):
+        return event
     if runtime.InterimTranscriptionFrame is not None and isinstance(
         frame, runtime.InterimTranscriptionFrame
     ):
@@ -1919,6 +1937,147 @@ def _event_from_pipecat_frame(
         }
         return _with_frame_metadata(event, frame, config=config)
     return None
+
+
+def _talkwise_turn_event_from_pipecat_frame(
+    runtime: PipecatRuntime,
+    frame: Any,
+    *,
+    config: RealtimePipelineConfig,
+) -> Mapping[str, Any] | None:
+    if _is_pipecat_frame(frame, runtime.UserStartedSpeakingFrame):
+        return _talkwise_realtime_event(
+            "user_turn.started",
+            frame,
+            config=config,
+            participant="user",
+            state="started",
+            signal="user_turn",
+        )
+    if _is_pipecat_frame(frame, runtime.VADUserStartedSpeakingFrame):
+        return _talkwise_realtime_event(
+            "user_turn.started",
+            frame,
+            config=config,
+            participant="user",
+            state="started",
+            signal="vad",
+            payload={"speechSeconds": _frame_float(frame, "start_secs")},
+        )
+    if _is_pipecat_frame(frame, runtime.UserStoppedSpeakingFrame):
+        return _talkwise_realtime_event(
+            "user_turn.stopped",
+            frame,
+            config=config,
+            participant="user",
+            state="stopped",
+            signal="user_turn",
+        )
+    if _is_pipecat_frame(frame, runtime.VADUserStoppedSpeakingFrame):
+        return _talkwise_realtime_event(
+            "user_turn.stopped",
+            frame,
+            config=config,
+            participant="user",
+            state="stopped",
+            signal="vad",
+            payload={"silenceSeconds": _frame_float(frame, "stop_secs")},
+        )
+    if _is_pipecat_frame(frame, runtime.BotStartedSpeakingFrame):
+        return _talkwise_realtime_event(
+            "assistant_speaking.started",
+            frame,
+            config=config,
+            participant="assistant",
+            state="started",
+            signal="bot_speaking",
+        )
+    if _is_pipecat_frame(frame, runtime.BotStoppedSpeakingFrame):
+        return _talkwise_realtime_event(
+            "assistant_speaking.stopped",
+            frame,
+            config=config,
+            participant="assistant",
+            state="stopped",
+            signal="bot_speaking",
+        )
+    if _is_pipecat_frame(frame, runtime.InterruptionFrame):
+        return _talkwise_realtime_event(
+            "interrupted",
+            frame,
+            config=config,
+            participant="user",
+            state="interrupted",
+            signal="interruption",
+        )
+    if _is_pipecat_frame(frame, runtime.UserIdleTimeoutUpdateFrame):
+        return _talkwise_realtime_event(
+            "silence_timeout",
+            frame,
+            config=config,
+            participant="user",
+            state="updated",
+            signal="user_idle_timeout",
+            payload={"timeoutSeconds": _frame_float(frame, "timeout")},
+        )
+    return None
+
+
+def _is_pipecat_frame(frame: Any, frame_type: type | None) -> bool:
+    return frame_type is not None and isinstance(frame, frame_type)
+
+
+def _talkwise_realtime_event(
+    event_type: str,
+    frame: Any,
+    *,
+    config: RealtimePipelineConfig,
+    participant: str,
+    state: str,
+    signal: str,
+    payload: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    event_payload: dict[str, Any] = {
+        "schemaVersion": 1,
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "provider": config.provider,
+        "source": "pipecat",
+        "participant": participant,
+        "state": state,
+        "signal": signal,
+        "sourceEvent": frame.__class__.__name__,
+    }
+    if payload:
+        for key, value in payload.items():
+            safe_value = _json_safe_metadata(value)
+            if safe_value is not None:
+                event_payload[str(key)] = safe_value
+    timestamp = _json_safe_metadata(getattr(frame, "timestamp", None))
+    if timestamp is not None:
+        event_payload["timestamp"] = timestamp
+
+    event = {
+        "type": event_type,
+        "schemaVersion": 1,
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "provider": config.provider,
+        "source": "pipecat",
+        "participant": participant,
+        "state": state,
+        "signal": signal,
+        "payload": event_payload,
+    }
+    return _with_frame_metadata(event, frame, config=config)
+
+
+def _frame_float(frame: Any, attr_name: str) -> float | None:
+    value = getattr(frame, attr_name, None)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _tts_audio_event_from_pipecat_frame(
@@ -2694,8 +2853,14 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "pipecat.frames.frames.TranscriptionFrame",
             "pipecat.frames.frames.LLMContextAssistantTurnFrame",
             "pipecat.frames.frames.TTSAudioRawFrame",
+            "pipecat.frames.frames.InterruptionFrame",
             "pipecat.frames.frames.UserStartedSpeakingFrame",
             "pipecat.frames.frames.UserStoppedSpeakingFrame",
+            "pipecat.frames.frames.VADUserStartedSpeakingFrame",
+            "pipecat.frames.frames.VADUserStoppedSpeakingFrame",
+            "pipecat.frames.frames.BotStartedSpeakingFrame",
+            "pipecat.frames.frames.BotStoppedSpeakingFrame",
+            "pipecat.frames.frames.UserIdleTimeoutUpdateFrame",
         ),
         "audioFrameFields": {
             "pipecat.frames.frames.OutputAudioRawFrame": (
@@ -2740,6 +2905,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             "interim transcript frame mirroring",
             "final transcript frame mirroring",
             "TTSAudioRawFrame to provider-neutral audio.output event mirroring",
+            "Pipecat turn/interruption/silence frames to TalkWise realtime event mirroring",
         ),
     }
 

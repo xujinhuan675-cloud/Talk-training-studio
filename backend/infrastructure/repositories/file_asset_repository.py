@@ -7,9 +7,11 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset import FileAsset, FileAssetRepository
 from domain.common.exceptions import FileAssetNotFoundException
 from infrastructure.models.file_asset import FileAssetModel
+from infrastructure.repositories.metadata_scope import apply_owned_metadata_scope
 import hashlib
 
 
@@ -53,6 +55,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         owner_id: Optional[int],
         kind: Optional[str],
         status: Optional[str],
+        metadata_scope: OwnedMetadataScope | None = None,
     ):
         if owner_id is not None:
             query = query.where(FileAssetModel.owner_id == owner_id)
@@ -60,6 +63,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
             query = query.where(FileAssetModel.kind == kind)
         if status:
             query = query.where(FileAssetModel.status == status)
+        query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
         return query
 
     async def create(self, asset: FileAsset) -> FileAsset:
@@ -137,15 +141,27 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         await self.session.delete(model)
         await self.session.flush()
 
-    async def get_by_id(self, asset_id: int) -> Optional[FileAsset]:
-        result = await self.session.execute(
-            select(FileAssetModel).where(FileAssetModel.id == asset_id)
-        )
+    async def get_by_id(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[FileAsset]:
+        query = select(FileAssetModel).where(FileAssetModel.id == asset_id)
+        query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
-    async def get_by_key(self, key: str) -> Optional[FileAsset]:
-        result = await self.session.execute(select(FileAssetModel).where(FileAssetModel.key == key))
+    async def get_by_key(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[FileAsset]:
+        query = select(FileAssetModel).where(FileAssetModel.key == key)
+        query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
@@ -157,6 +173,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[FileAsset]:
         query = select(FileAssetModel)
         query = self._apply_filters(
@@ -164,6 +181,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
             owner_id=owner_id,
             kind=kind,
             status=status,
+            metadata_scope=metadata_scope,
         )
         query = query.order_by(
             FileAssetModel.created_at.desc(),
@@ -180,6 +198,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         owner_id: Optional[int] = None,
         kind: Optional[str] = None,
         status: Optional[str] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> int:
         query = select(func.count()).select_from(FileAssetModel)
         query = self._apply_filters(
@@ -187,6 +206,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
             owner_id=owner_id,
             kind=kind,
             status=status,
+            metadata_scope=metadata_scope,
         )
         result = await self.session.execute(query)
         return int(result.scalar() or 0)

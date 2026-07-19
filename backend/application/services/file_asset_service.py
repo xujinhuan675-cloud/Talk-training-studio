@@ -26,6 +26,7 @@ from domain.common.exceptions import (
     FileTooLargeException,
     InvalidFileNameException,
 )
+from domain.conversation.repository import OwnedMetadataScope
 from os.path import splitext
 
 
@@ -303,6 +304,7 @@ class FileAssetApplicationService:
         kind: str,
         method: str = "PUT",
         expires_in: int = 600,
+        metadata: Optional[dict[str, Any]] = None,
     ):
         """Prepare client direct-upload: generate presigned request and persist pending asset."""
         if self._storage is None:
@@ -363,6 +365,7 @@ class FileAssetApplicationService:
             content_type=content_type,
             kind=kind,
             metadata={
+                **(metadata or {}),
                 "expected_size": size_bytes,
                 "upload_method": method,
             },
@@ -404,6 +407,7 @@ class FileAssetApplicationService:
         filename: str,
         kind: str,
         content_type: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> StorageUploadResponseDTO:
         """Server-side relay upload and persistence to DB.
 
@@ -445,7 +449,11 @@ class FileAssetApplicationService:
             size=outcome.size,
             etag=outcome.etag,
             url=db_url,
-            metadata={"upload_source": "relay", "filename": filename or ""},
+            metadata={
+                **(metadata or {}),
+                "upload_source": "relay",
+                "filename": filename or "",
+            },
         )
 
         return StorageUploadResponseDTO(
@@ -467,6 +475,7 @@ class FileAssetApplicationService:
         kind: str,
         content_type: Optional[str] = None,
         size_hint: Optional[int] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> StorageUploadResponseDTO:
         """Server-side relay upload with streaming body to reduce peak memory usage."""
         if self._storage is None:
@@ -507,7 +516,11 @@ class FileAssetApplicationService:
             size=outcome.size,
             etag=outcome.etag,
             url=db_url,
-            metadata={"upload_source": "relay", "filename": filename or ""},
+            metadata={
+                **(metadata or {}),
+                "upload_source": "relay",
+                "filename": filename or "",
+            },
         )
 
         return StorageUploadResponseDTO(
@@ -581,23 +594,47 @@ class FileAssetApplicationService:
             updated = await repo.update(asset)
             return self._to_dto(updated)
 
-    async def get_asset(self, asset_id: int) -> FileAssetDTO:
+    async def get_asset(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> FileAssetDTO:
         async with self._uow_factory(readonly=True) as uow:
-            asset = await uow.file_asset_repository.get_by_id(asset_id)
+            asset = await uow.file_asset_repository.get_by_id(
+                asset_id,
+                metadata_scope=metadata_scope,
+            )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
             return self._to_dto(asset)
 
-    async def get_asset_raw(self, asset_id: int) -> FileAsset:
+    async def get_asset_raw(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> FileAsset:
         async with self._uow_factory(readonly=True) as uow:
-            asset = await uow.file_asset_repository.get_by_id(asset_id)
+            asset = await uow.file_asset_repository.get_by_id(
+                asset_id,
+                metadata_scope=metadata_scope,
+            )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
             return asset
 
-    async def get_asset_by_key_raw(self, key: str) -> FileAsset:
+    async def get_asset_by_key_raw(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> FileAsset:
         async with self._uow_factory(readonly=True) as uow:
-            asset = await uow.file_asset_repository.get_by_key(key)
+            asset = await uow.file_asset_repository.get_by_key(
+                key,
+                metadata_scope=metadata_scope,
+            )
             if asset is None:
                 raise FileAssetNotFoundException(key=key)
             return asset
@@ -610,6 +647,7 @@ class FileAssetApplicationService:
         status: Optional[str],
         skip: int,
         limit: int,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> Tuple[list[FileAssetDTO], int]:
         async with self._uow_factory(readonly=True) as uow:
             repo = uow.file_asset_repository
@@ -619,17 +657,27 @@ class FileAssetApplicationService:
                 status=status,
                 skip=skip,
                 limit=limit,
+                metadata_scope=metadata_scope,
             )
             total = await repo.count(
                 owner_id=owner_id,
                 kind=kind,
                 status=status,
+                metadata_scope=metadata_scope,
             )
             return [self._to_dto(item) for item in items], total
 
-    async def soft_delete(self, asset_id: int) -> FileAssetDTO:
+    async def soft_delete(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> FileAssetDTO:
         async with self._uow_factory() as uow:
-            asset = await uow.file_asset_repository.get_by_id(asset_id)
+            asset = await uow.file_asset_repository.get_by_id(
+                asset_id,
+                metadata_scope=metadata_scope,
+            )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
             if asset.is_deleted():

@@ -82,6 +82,19 @@ export type RealtimeServerEvent =
       payload: { reason: string }
       createdAt?: string
     }
+  | {
+      type:
+        | 'user_turn.started'
+        | 'user_turn.stopped'
+        | 'assistant_speaking.started'
+        | 'assistant_speaking.stopped'
+        | 'interrupted'
+        | 'silence_timeout'
+      sessionId: string
+      status: RealtimeSessionStatus
+      payload: Record<string, unknown>
+      createdAt?: string
+    }
   | { type: 'session.ready'; sessionId: string }
   | RealtimeAudioOutputEvent
   | { type: 'transcript.delta'; text: string }

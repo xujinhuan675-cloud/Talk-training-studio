@@ -1111,6 +1111,49 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
     assert state.messages[0].metadata["realtime"]["responseId"] == "response_pipecat_2"
 
 
+def test_realtime_websocket_relays_pipecat_turn_events() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "user_turn.stopped",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "provider": "pipecat",
+            "source": "pipecat",
+            "participant": "user",
+            "state": "stopped",
+            "payload": {
+                "signal": "vad",
+                "silenceSeconds": 0.8,
+                "secret": "sk-should-not-leak",
+            },
+        }
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "audio.commit"})
+        committed = ws.receive_json()
+        events = [ws.receive_json() for _ in range(2)]
+
+    turn_event = next(event for event in events if event["type"] == "user_turn.stopped")
+    assert committed["status"] == "processing"
+    assert turn_event["status"] == "processing"
+    assert turn_event["payload"]["runtime"] == REALTIME_RUNTIME_PIPECAT
+    assert turn_event["payload"]["provider"] == "pipecat"
+    assert turn_event["payload"]["participant"] == "user"
+    assert turn_event["payload"]["state"] == "stopped"
+    assert turn_event["payload"]["payload"] == {"signal": "vad", "silenceSeconds": 0.8}
+
+
 def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> None:
     app, _state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()

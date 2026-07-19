@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from domain.conversation.repository import OwnedMetadataScope
+
 from .entity import FileAsset
 
 
@@ -24,10 +26,20 @@ class FileAssetRepository(ABC):
     async def delete_by_key(self, key: str) -> None: ...
 
     @abstractmethod
-    async def get_by_id(self, asset_id: int) -> Optional[FileAsset]: ...
+    async def get_by_id(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[FileAsset]: ...
 
     @abstractmethod
-    async def get_by_key(self, key: str) -> Optional[FileAsset]: ...
+    async def get_by_key(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> Optional[FileAsset]: ...
 
     @abstractmethod
     async def list(
@@ -38,6 +50,7 @@ class FileAssetRepository(ABC):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[FileAsset]: ...
 
     @abstractmethod
@@ -47,4 +60,5 @@ class FileAssetRepository(ABC):
         owner_id: Optional[int] = None,
         kind: Optional[str] = None,
         status: Optional[str] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> int: ...

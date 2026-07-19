@@ -8,8 +8,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from api.dependencies import (
+    CurrentUser,
     get_file_asset_service,
+    get_current_user,
 )
+from api.conversation_scope import owned_metadata_scope_for_current_user
 from application.dto import (
     FileAssetDTO,
     FileAccessURLRequestDTO,
@@ -43,15 +46,17 @@ async def list_files(
     signed: bool = Query(False, description="是否返回带签名的临时URL"),
     expires_in: int = Query(600, ge=60, le=3600, description="签名URL有效期(秒)"),
     service: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    owner_id = None  # No user filtering
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
     skip = (page - 1) * size
     assets, total = await service.list_assets(
-        owner_id=owner_id,
+        owner_id=None,
         kind=kind,
         status=None if status in {None, "all"} else status,
         skip=skip,
         limit=size,
+        metadata_scope=metadata_scope,
     )
     # 动态覆盖URL为签名URL（仅响应中，不入库）
     if signed:
@@ -90,9 +95,10 @@ async def get_file_detail(
     expires_in: int = Query(600, ge=60, le=3600, description="签名URL有效期(秒)"),
     filename: Optional[str] = Query(None, description="下载/预览文件名，默认原始文件名"),
     service: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    asset = await service.get_asset_raw(asset_id)
-    # No permission check
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    asset = await service.get_asset_raw(asset_id, metadata_scope=metadata_scope)
     dto = FileAssetDTO.model_validate(asset)
     if signed:
         fname = filename or dto.original_filename or f"file-{dto.id}"
@@ -119,9 +125,10 @@ async def generate_preview_url(
     asset_id: int,
     payload: FileAccessURLRequestDTO,
     service: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    asset = await service.get_asset_raw(asset_id)
-    # No permission check
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    asset = await service.get_asset_raw(asset_id, metadata_scope=metadata_scope)
     data = await service.generate_access_url_for_asset(
         asset=asset,
         expires_in=payload.expires_in,
@@ -140,9 +147,10 @@ async def generate_download_url(
     asset_id: int,
     payload: FileAccessURLRequestDTO,
     service: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    asset = await service.get_asset_raw(asset_id)
-    # No permission check
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    asset = await service.get_asset_raw(asset_id, metadata_scope=metadata_scope)
     data = await service.generate_access_url_for_asset(
         asset=asset,
         expires_in=payload.expires_in,
@@ -160,11 +168,10 @@ async def generate_download_url(
 async def delete_file(
     asset_id: int,
     service: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    asset = await service.get_asset_raw(asset_id)
-    # No permission check
-
-    updated = await service.soft_delete(asset_id)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    updated = await service.soft_delete(asset_id, metadata_scope=metadata_scope)
     return success_response(
         {"deleted": True, "status": updated.status}, message=t("file.delete.soft.success")
     )

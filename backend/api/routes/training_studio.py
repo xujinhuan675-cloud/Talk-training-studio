@@ -1604,6 +1604,17 @@ def _json_safe_realtime_value(value: object) -> object | None:
     return sanitize_realtime_public_value(value)
 
 
+def _pipeline_realtime_event_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    event_payload: dict[str, object] = {}
+    for key, value in payload.items():
+        if key == "type":
+            continue
+        safe_value = _json_safe_realtime_value(value)
+        if safe_value is not None:
+            event_payload[str(key)] = safe_value
+    return event_payload
+
+
 def _pipeline_audio_output_payload(
     payload: Mapping[str, object],
     *,
@@ -2632,18 +2643,18 @@ async def realtime_training_session(
                     payload=payload,
                 )
             elif event_type == "training.live_guidance.triggered":
-                trigger_payload: dict[str, object] = {}
-                for key, value in payload.items():
-                    if key == "type":
-                        continue
-                    safe_value = _json_safe_realtime_value(value)
-                    if safe_value is not None:
-                        trigger_payload[str(key)] = safe_value
                 await _send_wire_event(
                     websocket,
                     "training.live_guidance.triggered",
                     session,
-                    trigger_payload,
+                    _pipeline_realtime_event_payload(payload),
+                )
+            elif event_type:
+                await _send_wire_event(
+                    websocket,
+                    event_type,
+                    session,
+                    _pipeline_realtime_event_payload(payload),
                 )
 
         runner = RealtimePipelineSessionRunner(
