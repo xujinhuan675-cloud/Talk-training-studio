@@ -23,7 +23,7 @@ import {
 import { launchTrainingSessionFlow } from '../services/trainingLaunch'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
-import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
+import { PageHeader, PageShell } from '../components/ui/page'
 import {
   buildScenarioTrainingBattlePayload,
   buildScenarioTrainingRouteState,
@@ -230,16 +230,6 @@ export default function ScenarioTrainingPage() {
     [category, difficulty, query, scenarios],
   )
 
-  const requiredTotal = scenarios.filter((scenario) => scenario.required).length
-  const completedRequired = scenarios.filter(
-    (scenario) => scenario.required && scenario.status === 'completed',
-  ).length
-  const averageScore = scenarios
-    .map((scenario) => scenario.score)
-    .filter((score): score is number => typeof score === 'number')
-  const scoreText = averageScore.length
-    ? Math.round(averageScore.reduce((sum, score) => sum + score, 0) / averageScore.length)
-    : '--'
   const startScenario = async (scenario: ScenarioTrainingCard) => {
     setStartingScenarioId(scenario.id)
     setError(null)
@@ -300,27 +290,7 @@ export default function ScenarioTrainingPage() {
 
   return (
     <PageShell width="wide" className="scenario-training-page">
-      <PageHeader
-        title={tr('场景训练', 'Scenario training')}
-        stats={(
-          <PageStatGrid
-            stats={[
-              {
-                label: tr('必练完成', 'Required done'),
-                value: `${completedRequired}/${requiredTotal}`,
-              },
-              {
-                label: tr('平均分', 'Average score'),
-                value: scoreText,
-              },
-              {
-                label: tr('匹配场景', 'Matched scenarios'),
-                value: filteredScenarios.length,
-              },
-            ]}
-          />
-        )}
-      />
+      <PageHeader title={tr('训练目录', 'Training catalog')} />
 
       <section className="scenario-training-toolbar" aria-label={tr('筛选与模式', 'Filters and mode')}>
         <label className="scenario-training-search">

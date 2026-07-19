@@ -140,12 +140,6 @@ export default function BattlePrepPage() {
         {/* ---- Step 1: Describe Meeting ---- */}
         {step === 1 && (
           <div className="bpp-card">
-            <p className="bpp-hint">
-              {tr(
-                '详细描述你即将参加的会议，AI 将为你生成专属对手角色并制定训练计划。',
-                'Describe the meeting you are about to attend. AI will create a tailored opponent and training plan.',
-              )}
-            </p>
 
             <textarea
               className="bpp-textarea"
@@ -189,10 +183,6 @@ export default function BattlePrepPage() {
         {/* ---- Step 2: Review Opponent ---- */}
         {step === 2 && prepResult && (
           <div className="bpp-card">
-            <p className="bpp-hint">
-              {tr('AI 已生成对手角色，你可以在此微调，然后选择训练点。', 'AI has generated an opponent. Refine it here, then choose training points.')}
-            </p>
-
             {/* Persona preview */}
             <div className="bpp-persona-preview">
               <div className="bpp-persona-avatar">{personaInitial}</div>

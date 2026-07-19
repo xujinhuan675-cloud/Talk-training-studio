@@ -7,8 +7,8 @@
   width: var(--navrail-expanded-width);
   flex-shrink: 0;
   background: var(--bg-card);
-  border-right: 1px solid var(--border);
-  padding: 14px 10px 12px;
+  border-right: 1px solid var(--border-light);
+  padding: 12px 10px 10px;
   gap: 12px;
   overflow: hidden;
   transition: width var(--transition-fast), padding var(--transition-fast);
@@ -16,15 +16,45 @@
 
 .navrail--collapsed {
   width: var(--navrail-collapsed-width);
-  padding: 12px 0;
+  padding: 12px 8px 10px;
   align-items: center;
 }
 
-.navrail-items {
+.navrail-content {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.navrail-section {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
+}
+
+.navrail-section + .navrail-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
+}
+
+.navrail-section-label {
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.navrail-section-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -33,26 +63,31 @@
   align-items: center;
   width: 100%;
   min-width: 0;
-  height: 36px;
-  padding: 0 9px;
+  min-height: 38px;
+  padding: 0 10px;
   gap: 10px;
-  border-radius: 6px;
-  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
   text-decoration: none;
-  opacity: 0.72;
-  transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
 }
 
 .navrail-link:hover {
-  opacity: 1;
-  background: var(--bg-base);
+  background: var(--surface-2);
   color: var(--text-primary);
 }
 
 .navrail-link.active {
-  background: var(--green-soft);
-  color: var(--green);
-  opacity: 1;
+  background: var(--primary-light);
+  border-color: var(--border-accent);
+  color: var(--primary);
+  font-weight: 700;
 }
 
 .navrail-link-icon {
@@ -80,7 +115,8 @@
   gap: 8px;
   flex-shrink: 0;
   width: 100%;
-  padding-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
 }
 
 .navrail-toggle {
@@ -91,17 +127,21 @@
   padding: 0 11px;
   gap: 10px;
   flex-shrink: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-secondary);
   cursor: pointer;
   font: inherit;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .navrail-toggle:hover {
   background: var(--bg-base);
+  border-color: var(--border-light);
   color: var(--text-primary);
 }
 
@@ -122,11 +162,29 @@
   font-weight: 600;
 }
 
+.navrail--collapsed .navrail-content {
+  align-items: center;
+  padding-right: 0;
+}
+
+.navrail--collapsed .navrail-section {
+  width: 100%;
+  gap: 4px;
+}
+
+.navrail--collapsed .navrail-section + .navrail-section {
+  padding-top: 10px;
+}
+
+.navrail--collapsed .navrail-section-label {
+  display: none;
+}
+
 .navrail--collapsed .navrail-link-label {
   display: none;
 }
 
-.navrail--collapsed .navrail-items {
+.navrail--collapsed .navrail-section-items {
   align-items: center;
   width: 100%;
 }
@@ -137,11 +195,12 @@
 }
 
 .navrail--collapsed .navrail-link {
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  min-height: 36px;
   justify-content: center;
   padding: 0;
   gap: 0;
+  border-radius: 10px;
 }
 
 .navrail--collapsed .navrail-toggle {
@@ -150,6 +209,7 @@
   justify-content: center;
   padding: 0;
   gap: 0;
+  border-radius: 10px;
 }
 
 .navrail--collapsed .navrail-toggle-label {

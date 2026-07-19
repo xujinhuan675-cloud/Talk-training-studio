@@ -771,6 +771,60 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           </div>
         </header>
 
+        <div className="training-studio-grid">
+          <div className="training-studio-main">
+            <label className="training-studio-goal">
+              <span>{t('training.goal.label')}</span>
+              <textarea
+                value={goal}
+                onChange={(event) => setGoal(event.target.value)}
+                rows={4}
+                placeholder={t('training.goal.placeholder')}
+                disabled={starting !== null}
+              />
+            </label>
+
+            {mode === 'live_coach' && (
+              <section className="training-studio-live-coach-panel" aria-label={t('training.liveCoach.panelAria')}>
+                <label>
+                  <span>{t('training.liveCoach.sourceLanguage')}</span>
+                  <select
+                    value={liveCoachSourceLanguage}
+                    onChange={(event) => setLiveCoachSourceLanguage(event.target.value)}
+                    disabled={starting !== null}
+                  >
+                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {getLiveCoachLanguageLabel(option.code, locale)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t('training.liveCoach.targetLanguage')}</span>
+                  <select
+                    value={liveCoachTargetLanguage}
+                    onChange={(event) => setLiveCoachTargetLanguage(event.target.value)}
+                    disabled={starting !== null}
+                  >
+                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {getLiveCoachLanguageLabel(option.code, locale)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="training-studio-live-coach-badge">
+                  <Languages size={14} />
+                  {t('training.liveCoach.languageAdapter')}
+                </div>
+              </section>
+            )}
+
+            <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
+          </div>
+        </div>
+
         <section
           className="training-studio-capability-panel"
           aria-label={tr('Backend capability readiness', 'Backend capability readiness')}
@@ -782,13 +836,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 <ShieldCheck size={14} />
                 {tr('Mature foundation alignment', 'Mature foundation alignment')}
               </span>
-              <h2>{tr('Runtime, model, realtime, and agent readiness', 'Runtime, model, realtime, and agent readiness')}</h2>
-              <p>
-                {tr(
-                  'Provider/model catalog, Realtime/Pipecat diagnostics, branch-aware review metadata, and agent/MCP capability signals are shown as product status without exposing secrets.',
-                  'Provider/model catalog, Realtime/Pipecat diagnostics, branch-aware review metadata, and agent/MCP capability signals are shown as product status without exposing secrets.',
-                )}
-              </p>
+              <h2>{tr('Runtime and readiness', 'Runtime and readiness')}</h2>
+              <p>{tr('Model catalog, realtime checks, and agent signals stay visible without exposing secrets.', 'Model catalog, realtime checks, and agent signals stay visible without exposing secrets.')}</p>
             </div>
             <div className="training-studio-capability-actions">
               <span className={`training-studio-capability-status ${capabilityReadiness.overallStatus}`}>
@@ -925,12 +974,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                   {tr('通话前诊断', 'Pre-call diagnostics')}
                 </span>
                 <h2>{tr('Realtime / Pipecat readiness', 'Realtime / Pipecat readiness')}</h2>
-                <p>
-                  {tr(
-                    '读取后端 /realtime/capabilities，仅展示配置状态、模块状态和错误元数据，不展示任何密钥。',
-                    'Reads backend /realtime/capabilities and shows only config state, module state, and error metadata. Secrets are never displayed.',
-                  )}
-                </p>
+                <p>{tr('读取 /realtime/capabilities，仅显示配置、模块和错误元数据。', 'Reads /realtime/capabilities and shows config, module, and error metadata only.')}</p>
               </div>
               <button
                 className="training-studio-realtime-refresh"
@@ -1101,59 +1145,6 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           </section>
         )}
 
-        <div className="training-studio-grid">
-          <div className="training-studio-main">
-            <label className="training-studio-goal">
-              <span>{t('training.goal.label')}</span>
-              <textarea
-                value={goal}
-                onChange={(event) => setGoal(event.target.value)}
-                rows={4}
-                placeholder={t('training.goal.placeholder')}
-                disabled={starting !== null}
-              />
-            </label>
-
-            {mode === 'live_coach' && (
-              <section className="training-studio-live-coach-panel" aria-label={t('training.liveCoach.panelAria')}>
-                <label>
-                  <span>{t('training.liveCoach.sourceLanguage')}</span>
-                  <select
-                    value={liveCoachSourceLanguage}
-                    onChange={(event) => setLiveCoachSourceLanguage(event.target.value)}
-                    disabled={starting !== null}
-                  >
-                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
-                      <option key={option.code} value={option.code}>
-                        {getLiveCoachLanguageLabel(option.code, locale)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>{t('training.liveCoach.targetLanguage')}</span>
-                  <select
-                    value={liveCoachTargetLanguage}
-                    onChange={(event) => setLiveCoachTargetLanguage(event.target.value)}
-                    disabled={starting !== null}
-                  >
-                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
-                      <option key={option.code} value={option.code}>
-                        {getLiveCoachLanguageLabel(option.code, locale)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="training-studio-live-coach-badge">
-                  <Languages size={14} />
-                  {t('training.liveCoach.languageAdapter')}
-                </div>
-              </section>
-            )}
-
-            <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
-          </div>
-        </div>
       </div>
     </div>
   )

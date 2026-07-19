@@ -5,6 +5,9 @@ import {
   Home,
   MessageSquare,
   Settings,
+  SlidersHorizontal,
+  Swords,
+  Trophy,
   TrendingUp,
 } from 'lucide-react'
 import type { TranslationKey } from '../../i18n'
@@ -23,40 +26,91 @@ export interface AppNavItem {
   elevated?: boolean
 }
 
-export const desktopNavItems: AppNavItem[] = [
-  { to: APP_ROUTES.workbench, icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
+export interface AppNavSection {
+  id: string
+  labelKey: TranslationKey
+  items: readonly AppNavItem[]
+}
+
+export const desktopNavSections: AppNavSection[] = [
   {
-    to: APP_ROUTES.practiceScenarios,
-    icon: <ClipboardList size={18} />,
-    labelKey: 'nav.practice',
-    matchPrefix: APP_ROUTES.practice,
+    id: 'workspace',
+    labelKey: 'nav.section.workspace',
+    items: [{ to: APP_ROUTES.workbench, icon: <Home size={18} />, labelKey: 'nav.home', exact: true }],
   },
   {
-    to: APP_ROUTES.conversations,
-    icon: <MessageSquare size={18} />,
-    labelKey: 'nav.conversations',
-    matchPrefix: APP_ROUTES.conversations,
+    id: 'practice',
+    labelKey: 'nav.section.practice',
+    items: [
+      {
+        to: APP_ROUTES.practiceScenarios,
+        icon: <ClipboardList size={18} />,
+        labelKey: 'nav.scenarioTraining',
+        exact: true,
+      },
+      {
+        to: APP_ROUTES.practiceBattle,
+        icon: <Swords size={18} />,
+        labelKey: 'nav.battlePrep',
+        exact: true,
+        roles: MANAGEMENT_SYSTEM_ROLES,
+      },
+    ],
   },
   {
-    to: APP_ROUTES.reviewSessions,
-    icon: <History size={18} />,
-    labelKey: 'nav.review',
-    matchPrefix: APP_ROUTES.review,
+    id: 'records',
+    labelKey: 'nav.section.records',
+    items: [
+      {
+        to: APP_ROUTES.conversations,
+        icon: <MessageSquare size={18} />,
+        labelKey: 'nav.conversations',
+        matchPrefix: APP_ROUTES.conversations,
+      },
+      {
+        to: APP_ROUTES.reviewSessions,
+        icon: <History size={18} />,
+        labelKey: 'nav.review',
+        matchPrefix: APP_ROUTES.review,
+      },
+    ],
   },
   {
-    to: APP_ROUTES.growth,
-    icon: <TrendingUp size={18} />,
-    labelKey: 'nav.growth',
-    matchPrefix: APP_ROUTES.growth,
+    id: 'growth',
+    labelKey: 'nav.section.growth',
+    items: [
+      { to: APP_ROUTES.growth, icon: <TrendingUp size={18} />, labelKey: 'nav.growth', exact: true },
+      {
+        to: APP_ROUTES.growthLeaderboard,
+        icon: <Trophy size={18} />,
+        labelKey: 'nav.scenarioLeaderboard',
+        exact: true,
+      },
+    ],
   },
   {
-    to: APP_ROUTES.config,
-    icon: <Settings size={18} />,
-    labelKey: 'nav.config',
-    matchPrefix: APP_ROUTES.config,
-    roles: MANAGEMENT_SYSTEM_ROLES,
+    id: 'management',
+    labelKey: 'nav.section.management',
+    items: [
+      {
+        to: APP_ROUTES.config,
+        icon: <Settings size={18} />,
+        labelKey: 'nav.config',
+        exact: true,
+        roles: MANAGEMENT_SYSTEM_ROLES,
+      },
+      {
+        to: APP_ROUTES.configScenarios,
+        icon: <SlidersHorizontal size={18} />,
+        labelKey: 'nav.scenarioConfig',
+        exact: true,
+        roles: MANAGEMENT_SYSTEM_ROLES,
+      },
+    ],
   },
 ]
+
+export const desktopNavItems: AppNavItem[] = desktopNavSections.flatMap((section) => section.items)
 
 export const mobileNavItems: AppNavItem[] = [
   { to: APP_ROUTES.workbench, icon: <Home size={20} />, labelKey: 'nav.home' },

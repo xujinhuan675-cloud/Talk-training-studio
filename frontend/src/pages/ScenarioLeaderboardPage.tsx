@@ -131,12 +131,7 @@ export default function ScenarioLeaderboardPage() {
             <Trophy size={16} />
             {isManagementView ? '团队训练看板' : '我的排行状态'}
           </span>
-          <h1>{isManagementView ? '团队榜、未完成名单与成员能力概览' : '我的排行、完成度与能力概览'}</h1>
-          <p>
-            {isManagementView
-              ? '基于当前场景目录和本地训练进度聚合；团队榜仅展示完成全部必练场景的成员，分数取已评分必练场景均分。'
-              : '基于同团队训练进度计算你的入榜状态；完整成员榜与未完成名单仅向团队管理者开放。'}
-          </p>
+          <h1>{isManagementView ? '团队能力概览' : '我的能力概览'}</h1>
         </div>
         <div className="scenario-leaderboard-actions">
           {isManagementView && visibleAuthUsers.length > 1 && (
@@ -164,9 +159,6 @@ export default function ScenarioLeaderboardPage() {
           <Users size={15} />
           {teamLabel}
         </span>
-        <span>{summary.totalUsers} 名成员</span>
-        <span>{summary.totalRequired} 个必练场景</span>
-        <span>数据源：本地 progress / catalog</span>
       </section>
 
       {isManagementView ? (
@@ -201,7 +193,7 @@ export default function ScenarioLeaderboardPage() {
                   <Medal size={17} />
                   团队榜
                 </h2>
-                <span>完成全部必练后入榜</span>
+                <span>达标后入榜</span>
               </div>
               {team.ranks.length ? (
                 <div className="scenario-leaderboard-table">
@@ -210,7 +202,7 @@ export default function ScenarioLeaderboardPage() {
                       <span className="rank">#{row.rank}</span>
                       <div className="person">
                         <strong>{row.name}</strong>
-                        <small>{row.teamName} · {row.roleName || '成员'} · 已练 {row.practicedCount} 个场景</small>
+                        <small>{row.teamName} · {row.roleName || '成员'} · 已练 {row.practicedCount}</small>
                       </div>
                       <span className="score">{formatScore(row.averageScore)}</span>
                       <span className="completion">{row.completedRequired}/{row.totalRequired}</span>
@@ -220,7 +212,7 @@ export default function ScenarioLeaderboardPage() {
               ) : (
                 <p className="scenario-leaderboard-empty">
                   <AlertCircle size={16} />
-                  暂无完成全部必练场景的成员
+                  暂无入榜成员
                 </p>
               )}
             </div>
@@ -243,7 +235,7 @@ export default function ScenarioLeaderboardPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="scenario-leaderboard-empty">暂无已评分场景，完成训练后生成薄弱维度。</p>
+                  <p className="scenario-leaderboard-empty">暂无评分数据</p>
                 )}
               </section>
 
@@ -263,7 +255,7 @@ export default function ScenarioLeaderboardPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="scenario-leaderboard-empty">暂无团队场景均分。</p>
+                  <p className="scenario-leaderboard-empty">暂无场景均分</p>
                 )}
               </section>
             </aside>
@@ -303,7 +295,7 @@ export default function ScenarioLeaderboardPage() {
             ) : (
               <p className="scenario-leaderboard-empty">
                 <CheckCircle2 size={16} />
-                全部成员均已完成必练场景
+                全部成员已达标
               </p>
             )}
           </section>
@@ -375,7 +367,7 @@ export default function ScenarioLeaderboardPage() {
                 <AlertCircle size={16} />
                 {personalMissingRequired > 0
                   ? `还有 ${personalMissingRequired} 个必练场景未完成：${personal.unfinishedRequired.map((scenario) => scenario.title).join('、')}`
-                  : '必练已完成，等待训练评分刷新后进入排行。'}
+                  : '等待评分刷新后入榜。'}
               </div>
             )}
 
@@ -418,7 +410,7 @@ export default function ScenarioLeaderboardPage() {
             </div>
           </>
         ) : (
-          <p className="scenario-leaderboard-empty">暂无可展示成员。</p>
+          <p className="scenario-leaderboard-empty">暂无成员</p>
         )}
       </section>
     </main>

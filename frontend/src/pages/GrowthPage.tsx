@@ -321,14 +321,10 @@ const GrowthPage: React.FC = () => {
           <div className="gp-empty-icon">
             <Sparkles size={48} strokeWidth={1.5} />
           </div>
-          <h2>{tr('还没有能力评估数据', 'No competency evaluation data yet')}</h2>
-          <p>
-            {tr('在聊天室中与 AI 角色对话，然后点击"分析"按钮生成能力评估。', 'Chat with AI personas, then click “Analyze” to generate a competency evaluation.')}
-            <br />
-            {tr('完成 2 次以上评估后，就能看到成长趋势。', 'After 2 or more evaluations, growth trends will appear here.')}
-          </p>
+          <h2>{tr('暂无评估数据', 'No evaluation data yet')}</h2>
+          <p>{tr('完成一次练习并生成评估后，这里会显示总览和趋势。', 'Complete one practice and generate an evaluation to see the overview and trends.')}</p>
           <button className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.conversations)}>
-            {tr('开始一场练习', 'Start a practice session')}
+            {tr('去练习', 'Start practice')}
           </button>
         </div>
       </PageShell>
@@ -461,7 +457,45 @@ const GrowthPage: React.FC = () => {
         )}
       </section>
 
-      {/* 2. Skill Path Detail (vertical timeline) */}
+      {/* 2. Evaluation History */}
+      <section className="gp-eval-history">
+        <h3 className="gp-eval-history-title">{tr('评估历史', 'Evaluation History')}</h3>
+        <div className="gp-eval-list">
+          {evaluations.map((ev) => {
+            const grade = scoreToGrade(ev.overall_score)
+            const cls = gradeClass(ev.overall_score)
+            const date = ev.created_at
+              ? new Date(ev.created_at).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US')
+              : ''
+            const feedback = buildFeedbackSummary(ev.scores, tr)
+            return (
+              <Link
+                key={ev.id}
+                to={APP_ROUTES.conversation(ev.room_id)}
+                className="gp-eval-card"
+              >
+                <div className={`gp-eval-grade gp-eval-grade--${cls}`}>
+                  {grade}
+                </div>
+                <div className="gp-eval-info">
+                  <span className="gp-eval-name">
+                    {ev.room_name || tr('评估 #{id}', 'Evaluation #{id}', { id: ev.id })}
+                  </span>
+                  <span className="gp-eval-meta">
+                    {date} &middot; {tr('总分 {score}/5', 'Total {score}/5', { score: ev.overall_score.toFixed(1) })}
+                  </span>
+                  {feedback && (
+                    <span className="gp-eval-feedback">{feedback}</span>
+                  )}
+                </div>
+                <ChevronRight size={16} className="gp-eval-arrow" />
+              </Link>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* 3. Skill Path Detail (vertical timeline) */}
       <section className="gp-skill-path">
         <h3 className="gp-skill-path-title">{tr('技能路径', 'Skill Path')}</h3>
         <div className="gp-timeline">
@@ -500,44 +534,6 @@ const GrowthPage: React.FC = () => {
                   </div>
                 )}
               </div>
-            )
-          })}
-        </div>
-      </section>
-
-      {/* 3. Evaluation History */}
-      <section className="gp-eval-history">
-        <h3 className="gp-eval-history-title">{tr('评估历史', 'Evaluation History')}</h3>
-        <div className="gp-eval-list">
-          {evaluations.map((ev) => {
-            const grade = scoreToGrade(ev.overall_score)
-            const cls = gradeClass(ev.overall_score)
-            const date = ev.created_at
-              ? new Date(ev.created_at).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US')
-              : ''
-            const feedback = buildFeedbackSummary(ev.scores, tr)
-            return (
-              <Link
-                key={ev.id}
-                to={APP_ROUTES.conversation(ev.room_id)}
-                className="gp-eval-card"
-              >
-                <div className={`gp-eval-grade gp-eval-grade--${cls}`}>
-                  {grade}
-                </div>
-                <div className="gp-eval-info">
-                  <span className="gp-eval-name">
-                    {ev.room_name || tr('评估 #{id}', 'Evaluation #{id}', { id: ev.id })}
-                  </span>
-                  <span className="gp-eval-meta">
-                    {date} &middot; {tr('总分 {score}/5', 'Total {score}/5', { score: ev.overall_score.toFixed(1) })}
-                  </span>
-                  {feedback && (
-                    <span className="gp-eval-feedback">{feedback}</span>
-                  )}
-                </div>
-                <ChevronRight size={16} className="gp-eval-arrow" />
-              </Link>
             )
           })}
         </div>

@@ -37,7 +37,7 @@ import { useI18n, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
-import { PageHeader, PageSection, PageShell, PageStatGrid } from '../components/ui/page'
+import { PageHeader, PageSection, PageShell } from '../components/ui/page'
 import { Surface } from '../components/ui/surface'
 import './HomePage.css'
 
@@ -125,10 +125,6 @@ const HomePage: React.FC = () => {
   const dailyProgressPercent = Math.round(dailyChallenge.progress * 100)
   const dailyXpLabel = formatXp(dailyChallenge.xp, tr)
   const operatorLabel = currentUser?.teamName ?? currentUser?.name ?? tr('模拟用户', 'Mock user')
-  const dailyStatusLabel = dailyStarting ? tr('启动中', 'Starting') : tr('可开始', 'Ready')
-  const latestRoomTime = latestRoom
-    ? (timeAgo(latestRoom.last_message_at, tr) || tr('暂无时间', 'No time'))
-    : tr('没有可继续的对话', 'No active conversation')
 
   const startDailyChallenge = async () => {
     const scenario = getScenarioTrainingCardById(dailyChallenge.scenarioId)
@@ -205,30 +201,7 @@ const HomePage: React.FC = () => {
       <PageHeader
         icon={<Target size={16} />}
         eyebrow={t('nav.home')}
-        title={tr('训练入口', 'Training Index')}
-        description={tr('选择训练、会话或复盘。', 'Open practice, conversations, or review.')}
-        stats={(
-          <PageStatGrid
-            stats={[
-              {
-                label: tr('推荐训练', 'Recommended'),
-                value: dailyStatusLabel,
-                tone: 'success',
-              },
-              {
-                label: tr('会话记录', 'Sessions'),
-                value: rooms.length,
-                detail: latestRoomTime,
-                tone: 'warning',
-              },
-              {
-                label: tr('使用身份', 'Identity'),
-                value: operatorLabel,
-                tone: 'accent',
-              },
-            ]}
-          />
-        )}
+        title={tr('训练工作台', 'Training workbench')}
       />
 
       <div className="home-workbench-grid">
@@ -253,23 +226,6 @@ const HomePage: React.FC = () => {
             <div className="home-status-card">
               <span>{tr('范围', 'Scope')}</span>
               <strong>{operatorLabel}</strong>
-            </div>
-          </div>
-
-          <div className="home-progress-block">
-            <div className="home-progress-copy">
-              <span>{tr('进度', 'Progress')}</span>
-              <strong>{dailyProgressPercent}%</strong>
-            </div>
-            <div
-              className="home-progress-track"
-              role="progressbar"
-              aria-label={tr('进度', 'Progress')}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={dailyProgressPercent}
-            >
-              <span style={{ width: `${dailyProgressPercent}%` }} />
             </div>
           </div>
 
@@ -351,7 +307,7 @@ const HomePage: React.FC = () => {
       </div>
 
       <PageSection
-        title={tr('目录', 'Catalog')}
+        title={tr('入口', 'Entry points')}
       >
         <div className="home-entry-grid">
           <Link to={APP_ROUTES.practiceScenarios} className="home-entry-card primary">
@@ -420,7 +376,7 @@ const HomePage: React.FC = () => {
               <div className="home-empty-block">
                 <p>{tr('暂无对话记录', 'No conversation records')}</p>
                 <Button asChild variant="secondary" size="sm">
-                  <Link to={APP_ROUTES.practiceScenarios}>{tr('开始第一次训练', 'Start first practice')}</Link>
+                  <Link to={APP_ROUTES.practiceScenarios}>{tr('开始练习', 'Start practice')}</Link>
                 </Button>
               </div>
             ) : (

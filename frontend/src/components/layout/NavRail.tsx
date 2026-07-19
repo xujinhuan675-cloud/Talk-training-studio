@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n'
-import { desktopNavItems, isNavItemActive } from './navigation'
+import { desktopNavSections, isNavItemActive } from './navigation'
 import './NavRail.css'
 
 const STORAGE_KEY = 'talkwise.navrail.collapsed'
@@ -20,10 +20,15 @@ const NavRail: React.FC = () => {
     return window.localStorage.getItem(STORAGE_KEY) === 'true'
   })
 
-  const visibleNavItems = desktopNavItems.filter((item) => {
-    if (!item.roles) return true
-    return hasAnySystemRole(item.roles)
-  })
+  const visibleSections = desktopNavSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!item.roles) return true
+        return hasAnySystemRole(item.roles)
+      }),
+    }))
+    .filter((section) => section.items.length > 0)
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, String(collapsed))
@@ -33,20 +38,34 @@ const NavRail: React.FC = () => {
   const toggleText = collapsed ? tr('展开', 'Expand') : tr('收起', 'Collapse')
   return (
     <nav className={`navrail${collapsed ? ' navrail--collapsed' : ''}`} aria-label={tr('主导航', 'Primary navigation')}>
-      <div className="navrail-items">
-        {visibleNavItems.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={`navrail-link${isNavItemActive(location.pathname, item) ? ' active' : ''}`}
-            title={t(item.labelKey)}
-            aria-label={t(item.labelKey)}
-          >
-            <span className="navrail-link-icon" aria-hidden="true">
-              {item.icon}
-            </span>
-            <span className="navrail-link-label">{t(item.labelKey)}</span>
-          </Link>
+      <div className="navrail-content">
+        {visibleSections.map((section) => (
+          <div className="navrail-section" key={section.id}>
+            {!collapsed ? (
+              <div className="navrail-section-label">{t(section.labelKey)}</div>
+            ) : null}
+            <div className="navrail-section-items">
+              {section.items.map((item) => {
+                const active = isNavItemActive(location.pathname, item)
+
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={`navrail-link${active ? ' active' : ''}`}
+                    title={t(item.labelKey)}
+                    aria-label={t(item.labelKey)}
+                    aria-current={active ? 'page' : undefined}
+                  >
+                    <span className="navrail-link-icon" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span className="navrail-link-label">{t(item.labelKey)}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
         ))}
       </div>
       <div className="navrail-footer">

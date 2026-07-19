@@ -23,7 +23,7 @@ import {
 import { buildTrainingModeChatPath } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
-import { PageHeader, PageShell, PageStatGrid } from '../components/ui/page'
+import { PageHeader, PageShell } from '../components/ui/page'
 import { APP_ROUTES } from '../appRoutes'
 import {
   getScenarioTrainingCardById,
@@ -171,17 +171,6 @@ function compactHistoryBranchText(value: string, maxLength = 30): string {
   return `${text.slice(0, maxLength - 3)}...`
 }
 
-function historyBranchSourceText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
-  if (info.source === 'session') return tr('metadata：会话', 'metadata: session')
-  if (info.source === 'report') return tr('metadata：报告', 'metadata: report')
-  return tr('metadata：进度', 'metadata: progress')
-}
-
-function historyBranchSourceDetailText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
-  const source = historyBranchSourceText(info, tr)
-  return info.sourceDetail ? `${source} · ${info.sourceDetail}` : source
-}
-
 function historyBranchPathTextStateText(
   state: TrainingConversationBranchInfo['pathTextState'],
   tr: TranslateInline,
@@ -200,21 +189,19 @@ function historyBranchPathText(info: TrainingConversationBranchInfo, tr: Transla
 
 function historyBranchEmptyText(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   if (info.pathTextState === 'id_only') {
-    return tr('metadata 只有消息 ID，没有保存最后回复正文。', 'Metadata has message IDs only; no last reply text was saved.')
+    return tr('仅保存了消息 ID。', 'Only message IDs were saved.')
   }
-  return tr('metadata 没有保存可预览的路径正文。', 'Metadata has no previewable path text.')
+  return tr('未保存路径预览。', 'No path preview saved.')
 }
 
 function historyBranchTitle(info: TrainingConversationBranchInfo, tr: TranslateInline): string {
   return [
-    historyBranchSourceDetailText(info, tr),
     historyBranchPathText(info, tr),
     historyBranchPathTextStateText(info.pathTextState, tr),
     info.branchId ? tr('分支：{value}', 'Branch: {value}', { value: info.branchId }) : '',
     info.forkPointMessageId ? tr('分叉点：{value}', 'Fork point: {value}', { value: info.forkPointMessageId }) : '',
     info.selectedTailMessageId ? tr('尾节点：{value}', 'Tail: {value}', { value: info.selectedTailMessageId }) : '',
     info.pathSummary ? compactHistoryBranchText(info.pathSummary, 90) : '',
-    info.lastReplyPreview ? tr('最后回复：{value}', 'Last reply: {value}', { value: compactHistoryBranchText(info.lastReplyPreview, 90) }) : '',
   ].filter(Boolean).join(' · ')
 }
 
@@ -230,19 +217,18 @@ function historyBranchSummaryText(info: TrainingConversationBranchInfo, tr: Tran
       value: compactHistoryBranchText(info.lastReplyPreview, 72),
     })
   }
-  if (!info.pathSummary) return historyBranchEmptyText(info, tr)
+  if (info.pathSummary) return compactHistoryBranchText(info.pathSummary, 72)
   if (info.forkPointMessageId) {
     return tr('分叉点：{value}', 'Fork point: {value}', {
       value: compactHistoryBranchText(info.forkPointMessageId, 48),
     })
   }
-  if (info.pathSummary) return compactHistoryBranchText(info.pathSummary, 72)
   if (info.selectedTailMessageId) {
     return tr('尾节点：{value}', 'Tail: {value}', {
       value: compactHistoryBranchText(info.selectedTailMessageId, 48),
     })
   }
-  return ''
+  return historyBranchEmptyText(info, tr)
 }
 
 function historyEntryMetaText(entry: HistoryEntry, tr: TranslateInline): string {
@@ -491,12 +477,6 @@ export default function TrainingHistoryPage() {
     () => entries.filter((entry) => matchesEntry(entry, query, scenarioFilter, statusFilter)),
     [entries, query, scenarioFilter, statusFilter],
   )
-  const completedCount = filteredEntries.filter((entry) => entry.status === 'completed').length
-  const reviewableCount = filteredEntries.filter((entry) => entry.sessionId).length
-  const scoredEntries = entries.filter((entry) => entry.score !== undefined)
-  const averageScore = scoredEntries.length
-    ? Math.round(scoredEntries.reduce((sum, entry) => sum + (entry.score ?? 0), 0) / scoredEntries.length)
-    : undefined
   const hasActiveFilters = Boolean(query.trim()) || scenarioFilter !== 'all' || statusFilter !== 'all'
   const selectedScenarioLabel = scenarioFilter === 'all'
     ? tr('全部场景', 'All scenarios')
@@ -515,33 +495,7 @@ export default function TrainingHistoryPage() {
       <PageHeader
         eyebrow={tr('训练记录', 'Training history')}
         icon={<History size={16} />}
-        title={tr('筛选可复盘记录', 'Filter reviewable records')}
-        description={tr(
-          '按场景、状态和关键词定位记录，再进入复盘或对话回放。',
-          'Find records by scenario, status, and keyword, then open the review or replay.',
-        )}
-        stats={(
-          <PageStatGrid
-            stats={[
-              {
-                label: tr('匹配记录', 'Matching records'),
-                value: filteredEntries.length,
-              },
-              {
-                label: tr('可复盘', 'Reviewable'),
-                value: reviewableCount,
-              },
-              {
-                label: tr('已完成', 'Completed'),
-                value: completedCount,
-              },
-              {
-                label: tr('平均分', 'Average score'),
-                value: averageScore ?? '--',
-              },
-            ]}
-          />
-        )}
+        title={tr('训练历史', 'History')}
       />
 
       <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>
@@ -586,10 +540,10 @@ export default function TrainingHistoryPage() {
 
       <section className="training-history-filter-summary" aria-label={tr('当前筛选', 'Current filters')}>
         <div>
-          <span>{tr('{count} 条匹配记录', '{count} matching records', { count: filteredEntries.length })}</span>
-          <strong>{selectedScenarioLabel}</strong>
-          <strong>{selectedStatusLabel}</strong>
-          {query.trim() && <strong>{tr('关键词：{query}', 'Keyword: {query}', { query: query.trim() })}</strong>}
+          <span>{tr('{count} 条', '{count} records', { count: filteredEntries.length })}</span>
+          {scenarioFilter !== 'all' && <strong>{selectedScenarioLabel}</strong>}
+          {statusFilter !== 'all' && <strong>{selectedStatusLabel}</strong>}
+          {query.trim() && <strong>{query.trim()}</strong>}
         </div>
         {hasActiveFilters && (
           <button type="button" onClick={resetFilters}>
@@ -673,14 +627,6 @@ export default function TrainingHistoryPage() {
                     >
                       <GitBranch size={12} />
                       {historyBranchTagText(entry.branchInfo, tr)}
-                    </span>
-                  )}
-                  {entry.branchInfo && (
-                    <span
-                      className="training-history-branch-source-tag"
-                      title={historyBranchTitle(entry.branchInfo, tr)}
-                    >
-                      {historyBranchSourceText(entry.branchInfo, tr)}
                     </span>
                   )}
                 </div>

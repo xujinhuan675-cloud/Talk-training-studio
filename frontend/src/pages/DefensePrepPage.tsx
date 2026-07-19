@@ -143,12 +143,6 @@ export default function DefensePrepPage() {
         {/* ---- Step 1: Upload + Select ---- */}
         {step === 1 && (
           <div className="dp-card">
-            <p className="dp-hint">
-              {tr(
-                '上传你的汇报文档，选择答辩官和场景类型，AI 将为你生成针对性的答辩问题。',
-                'Upload your presentation document, choose reviewers and a scenario, and AI will generate targeted defense questions.',
-              )}
-            </p>
 
             {/* File upload */}
             <div className="dp-section-label">{tr('上传文档', 'Upload Document')}</div>
@@ -251,10 +245,6 @@ export default function DefensePrepPage() {
         {/* ---- Step 2: Confirm + Start ---- */}
         {step === 2 && session && (
           <div className="dp-card">
-            <p className="dp-hint">
-              {tr('AI 已完成分析，以下是答辩准备概要，确认后即可开始模拟答辩。', 'AI has finished analysis. Review the preparation summary below, then start the mock defense.')}
-            </p>
-
             {/* Summary */}
             <div className="dp-summary">
               <div className="dp-summary-row">
