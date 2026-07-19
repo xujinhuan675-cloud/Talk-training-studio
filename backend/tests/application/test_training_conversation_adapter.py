@@ -110,6 +110,10 @@ class _UnitOfWork:
 class _ConversationState:
     conversations: dict[int, ConversationEntity] = field(default_factory=dict)
     messages: list[ConversationMessage] = field(default_factory=list)
+    conversation_get_calls: list[dict[str, object]] = field(default_factory=list)
+    conversation_update_calls: list[dict[str, object]] = field(default_factory=list)
+    message_create_calls: list[ConversationMessage] = field(default_factory=list)
+    message_list_calls: list[dict[str, object]] = field(default_factory=list)
 
 
 def _conversation_scope() -> OwnedMetadataScope:
@@ -190,6 +194,9 @@ class _ConversationRepository:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> ConversationEntity | None:
+        self._state.conversation_get_calls.append(
+            {"conversation_id": conversation_id, "metadata_scope": metadata_scope}
+        )
         conversation = self._state.conversations.get(conversation_id)
         if conversation is None:
             return None
@@ -203,6 +210,9 @@ class _ConversationRepository:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> ConversationEntity:
+        self._state.conversation_update_calls.append(
+            {"conversation_id": conversation.id, "metadata_scope": metadata_scope}
+        )
         if conversation.id is None:
             raise AssertionError("Conversation id is required for update")
         if not _matches_conversation_scope(conversation.metadata, metadata_scope):
@@ -216,6 +226,7 @@ class _ConversationMessageRepository:
         self._state = state
 
     async def create(self, message: ConversationMessage) -> ConversationMessage:
+        self._state.message_create_calls.append(message)
         saved = ConversationMessage(
             id=len(self._state.messages) + 1,
             conversation_id=message.conversation_id,
@@ -260,6 +271,13 @@ class _ConversationMessageRepository:
         statuses: list[str] | None = None,
         include_deleted: bool = False,
     ) -> list[ConversationMessage]:
+        self._state.message_list_calls.append(
+            {
+                "conversation_id": conversation_id,
+                "branch_id": branch_id,
+                "limit": limit,
+            }
+        )
         allowed_statuses = set(statuses or [])
         messages = [
             message
@@ -499,6 +517,21 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
         "Yes, if we define a measurable success metric first.",
     ]
     assert recent_turns[1].metadata["parent_message_id"] == state.messages[0].public_id
+    assert [call["metadata_scope"].user_id for call in state.conversation_get_calls] == [
+        "user-sales-001",
+        "user-sales-001",
+        "user-sales-001",
+    ]
+    assert [call["metadata_scope"].team_id for call in state.conversation_get_calls] == [
+        "team-revenue",
+        "team-revenue",
+        "team-revenue",
+    ]
+    assert all(call["metadata_scope"].allow_unscoped is False for call in state.conversation_get_calls)
+    assert all(
+        call["metadata_scope"].allow_unscoped is False
+        for call in state.conversation_update_calls
+    )
 
 
 @pytest.mark.asyncio
@@ -565,6 +598,24 @@ async def test_conversation_adapter_stamps_session_auth_metadata_over_task_metad
 
 
 @pytest.mark.asyncio
+async def test_conversation_adapter_rejects_message_tree_session_without_auth_scope() -> None:
+    state = _ConversationState()
+    adapter = ConversationTrainingConversationAdapter(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs),
+        default_model="gpt-training",
+    )
+    session_service = TrainingSessionService(id_factory=lambda: "training-text-no-auth")
+    session = await session_service.create_session(
+        CreateTrainingSessionDTO(task_config=_task_config(), mode="text")
+    )
+
+    with pytest.raises(ValueError, match="metadata auth scope is required"):
+        await adapter.create_conversation(session)
+
+    assert state.conversations == {}
+
+
+@pytest.mark.asyncio
 async def test_conversation_adapter_model_selection_metadata_cannot_shadow_training_semantics(
 ) -> None:
     state = _ConversationState()
@@ -609,7 +660,12 @@ async def test_conversation_adapter_model_selection_metadata_cannot_shadow_train
     )
 
     started = await orchestrator.start_session(
-        CreateTrainingSessionDTO(task_config=task_config, mode="text")
+        CreateTrainingSessionDTO(
+            task_config=task_config,
+            mode="text",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        )
     )
 
     assert state.conversations[1].model == "gpt-selected"
@@ -756,3 +812,94 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
     assert forked.conversation.metadata["selectedPath"]["affectsScoring"] is False
     assert forked.conversation.status == "active"
     assert forked.messages[-1].metadata["forked_from_message_id"] == retry.public_id
+
+
+@pytest.mark.asyncio
+async def test_conversation_adapter_scoped_miss_does_not_create_message() -> None:
+    state = _ConversationState(
+        conversations={
+            1: ConversationEntity(
+                id=1,
+                title="Other owner",
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                    "authScope": {"userId": "user-cs-001", "teamId": "team-service"},
+                },
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+        }
+    )
+    adapter = ConversationTrainingConversationAdapter(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs),
+        default_model="gpt-training",
+    )
+    conversation = ConversationRef(
+        provider="talkwise-conversation",
+        conversation_id="1",
+        metadata={
+            "ownerUserId": "user-sales-001",
+            "teamId": "team-revenue",
+            "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            "branchId": "main",
+        },
+    )
+
+    with pytest.raises(ValueError, match="Conversation 1 not found"):
+        await adapter.append_turn(
+            conversation,
+            TrainingTurn(speaker="user", text="This should not be persisted."),
+        )
+
+    assert state.message_create_calls == []
+    assert state.messages == []
+    assert state.conversation_get_calls[0]["metadata_scope"].user_id == "user-sales-001"
+    assert state.conversation_update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_adapter_scoped_miss_does_not_read_messages() -> None:
+    state = _ConversationState(
+        conversations={
+            1: ConversationEntity(
+                id=1,
+                title="Other owner",
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                    "authScope": {"userId": "user-cs-001", "teamId": "team-service"},
+                },
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+        },
+        messages=[
+            ConversationMessage(
+                id=1,
+                conversation_id=1,
+                role="user",
+                content="Hidden",
+                branch_id="main",
+            )
+        ],
+    )
+    adapter = ConversationTrainingConversationAdapter(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs),
+        default_model="gpt-training",
+    )
+    conversation = ConversationRef(
+        provider="talkwise-conversation",
+        conversation_id="1",
+        metadata={
+            "ownerUserId": "user-sales-001",
+            "teamId": "team-revenue",
+            "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            "branchId": "main",
+        },
+    )
+
+    with pytest.raises(ValueError, match="Conversation 1 not found"):
+        await adapter.recent_turns(conversation, limit=5)
+
+    assert state.message_list_calls == []

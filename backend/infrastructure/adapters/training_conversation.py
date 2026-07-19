@@ -15,6 +15,7 @@ from application.services.training_studio.training_core import (
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import Conversation as ConversationEntity
 from domain.conversation.entity import Message as ConversationMessage
+from domain.conversation.repository import OwnedMetadataScope
 from domain.stakeholder.entity import ChatRoom
 from domain.stakeholder.entity import Message as StakeholderMessage
 from domain.training_studio.session import TrainingSession
@@ -50,6 +51,8 @@ class ConversationTrainingConversationAdapter:
         self._default_model = default_model
 
     async def create_conversation(self, session: TrainingSession) -> ConversationRef:
+        metadata = _conversation_metadata_for_session(session)
+        _conversation_scope_for_metadata(metadata, operation="create_conversation")
         async with self._uow_factory() as uow:
             conversation = await uow.conversation_repository.create(
                 ConversationEntity(
@@ -57,7 +60,7 @@ class ConversationTrainingConversationAdapter:
                     title=_conversation_title_for_session(session),
                     system_prompt=_metadata_text(session, "system_prompt", "instructions"),
                     model=_metadata_text(session, "model") or self._default_model,
-                    metadata=_conversation_metadata_for_session(session),
+                    metadata=metadata,
                 )
             )
         if conversation.id is None:
@@ -78,6 +81,10 @@ class ConversationTrainingConversationAdapter:
         turn: TrainingTurn,
     ) -> ConversationRef:
         conversation_id = _require_conversation_id(conversation)
+        scope = _conversation_scope_for_metadata(
+            conversation.metadata,
+            operation="append_turn",
+        )
         turn_metadata = dict(turn.metadata)
         metadata = {
             **turn_metadata,
@@ -91,6 +98,12 @@ class ConversationTrainingConversationAdapter:
             or _branch_tail_message_id_for_branch(conversation.metadata, branch_id)
         )
         async with self._uow_factory() as uow:
+            persisted = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
+            if persisted is None:
+                raise ValueError(f"Conversation {conversation_id} not found")
             saved = await uow.message_repository.create(
                 ConversationMessage(
                     id=None,
@@ -110,9 +123,6 @@ class ConversationTrainingConversationAdapter:
                 parent_message_id=parent_message_id,
                 saved_message_id=saved.public_id,
             )
-            persisted = await uow.conversation_repository.get_by_id(conversation_id)
-            if persisted is None:
-                raise ValueError(f"Conversation {conversation_id} not found")
             persisted.metadata = _conversation_metadata_with_branch_state(
                 persisted.metadata,
                 branch_id=branch_id,
@@ -120,7 +130,7 @@ class ConversationTrainingConversationAdapter:
                 selected_message_ids=selected_message_ids,
             )
             persisted._touch()
-            await uow.conversation_repository.update(persisted)
+            await uow.conversation_repository.update(persisted, metadata_scope=scope)
         updated_metadata = _conversation_metadata_with_branch_state(
             conversation.metadata,
             branch_id=branch_id,
@@ -142,8 +152,18 @@ class ConversationTrainingConversationAdapter:
         limit: int,
     ) -> Sequence[TrainingTurn]:
         conversation_id = _require_conversation_id(conversation)
+        scope = _conversation_scope_for_metadata(
+            conversation.metadata,
+            operation="recent_turns",
+        )
         branch_id = _branch_id_from_metadata(conversation.metadata)
         async with self._uow_factory(readonly=True) as uow:
+            persisted = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
+            if persisted is None:
+                raise ValueError(f"Conversation {conversation_id} not found")
             messages = await uow.message_repository.list_by_conversation(
                 conversation_id,
                 branch_id=branch_id,
@@ -396,6 +416,45 @@ def _conversation_auth_metadata_for_session(session: TrainingSession) -> dict[st
     if auth_scope:
         metadata["authScope"] = auth_scope
     return metadata
+
+
+def _conversation_scope_for_metadata(
+    metadata: Mapping[str, object] | None,
+    *,
+    operation: str,
+) -> OwnedMetadataScope:
+    metadata = dict(metadata or {})
+    auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), Mapping) else {}
+    user_id = _optional_metadata_text(auth_scope, "userId") or _optional_metadata_text(
+        auth_scope,
+        "user_id",
+    )
+    if user_id is None:
+        user_id = (
+            _optional_metadata_text(metadata, "ownerUserId")
+            or _optional_metadata_text(metadata, "owner_user_id")
+            or _optional_metadata_text(metadata, "createdByUserId")
+            or _optional_metadata_text(metadata, "created_by_user_id")
+        )
+    team_id = _optional_metadata_text(auth_scope, "teamId") or _optional_metadata_text(
+        auth_scope,
+        "team_id",
+    )
+    if team_id is None:
+        team_id = (
+            _optional_metadata_text(metadata, "teamId")
+            or _optional_metadata_text(metadata, "team_id")
+            or _optional_metadata_text(metadata, "ownerTeamId")
+            or _optional_metadata_text(metadata, "owner_team_id")
+        )
+    if user_id is None and team_id is None:
+        raise ValueError(f"metadata auth scope is required for message-tree {operation}")
+    return OwnedMetadataScope(
+        user_id=user_id or "",
+        team_id=team_id,
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
 
 
 def _conversation_metadata_with_branch_state(
