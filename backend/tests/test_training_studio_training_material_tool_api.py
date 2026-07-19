@@ -127,6 +127,34 @@ def test_training_material_tool_consumer_lists_scoped_safe_materials() -> None:
     assert fake.read_calls == []
 
 
+def test_training_material_tool_consumer_leader_uses_team_scope() -> None:
+    fake = _FakeFileAssetService(
+        assets=[
+            _material_asset(
+                metadata={
+                    "title": "Team material",
+                    "summary": "Shared renewal material",
+                    "ownerUserId": "user-peer-001",
+                    "teamId": "team-revenue",
+                }
+            )
+        ]
+    )
+    client = _client(fake)
+
+    response = client.get(
+        "/api/v1/training-studio/tool-consumers/training-materials",
+        headers={"X-Mock-User": "leader"},
+    )
+
+    assert response.status_code == 200
+    scope = fake.list_calls[0]["metadata_scope"]
+    assert scope.user_id == "user-leader-001"
+    assert scope.team_id == "team-revenue"
+    assert scope.include_team_scope is True
+    assert scope.allow_unscoped is False
+
+
 def test_training_material_tool_consumer_lists_opt_in_content_excerpt() -> None:
     fake = _FakeFileAssetService(assets=[_material_asset()])
     fake.content_by_id[1] = (

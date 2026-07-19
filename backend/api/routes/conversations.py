@@ -46,6 +46,20 @@ _conversation_user = require_system_roles("admin", "leader", "staff")
 _agent_config_user = require_system_roles("admin", "leader", "staff")
 
 
+def _conversation_read_scope(current_user: CurrentUser):
+    return owned_metadata_scope_for_current_user(
+        current_user,
+        allow_unscoped=True,
+    )
+
+
+def _conversation_mutation_scope(current_user: CurrentUser):
+    return owned_metadata_scope_for_current_user(
+        current_user,
+        allow_unscoped=False,
+    )
+
+
 async def _get_accessible_conversation(
     service: ConversationApplicationService,
     conversation_id: int,
@@ -53,10 +67,7 @@ async def _get_accessible_conversation(
 ) -> ConversationDTO:
     return await service.get_conversation(
         conversation_id,
-        metadata_scope=owned_metadata_scope_for_current_user(
-            current_user,
-            allow_unscoped=True,
-        ),
+        metadata_scope=_conversation_read_scope(current_user),
     )
 
 
@@ -67,10 +78,7 @@ async def _get_mutable_conversation(
 ) -> ConversationDTO:
     return await service.get_conversation(
         conversation_id,
-        metadata_scope=owned_metadata_scope_for_current_user(
-            current_user,
-            allow_unscoped=False,
-        ),
+        metadata_scope=_conversation_mutation_scope(current_user),
     )
 
 
@@ -202,7 +210,8 @@ async def list_messages(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    metadata_scope = _conversation_read_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
     skip = (page - 1) * size
     items, total = await service.list_messages(
         conversation_id,
@@ -211,6 +220,7 @@ async def list_messages(
         branch_id=branch_id,
         statuses=statuses,
         include_deleted=include_deleted,
+        metadata_scope=metadata_scope,
     )
     return paginated_response(items=items, total=total, page=page, size=size)
 
@@ -236,7 +246,8 @@ async def search_messages(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    metadata_scope = _conversation_read_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
     items = await service.search_messages(
         conversation_id,
         q,
@@ -250,6 +261,7 @@ async def search_messages(
         include_path=include_path,
         context_before=context_before,
         context_after=context_after,
+        metadata_scope=metadata_scope,
     )
     return success_response(items, message=t("ok"))
 
@@ -266,8 +278,18 @@ async def apply_message_action(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_mutable_conversation(service, conversation_id, current_user)
-    item = await service.apply_message_action(conversation_id, message_public_id, payload)
+    metadata_scope = (
+        _conversation_read_scope(current_user)
+        if payload.action == "branch"
+        else _conversation_mutation_scope(current_user)
+    )
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
+    item = await service.apply_message_action(
+        conversation_id,
+        message_public_id,
+        payload,
+        metadata_scope=metadata_scope,
+    )
     return success_response(item, message=t("ok"))
 
 
@@ -285,13 +307,15 @@ async def get_message_path(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    metadata_scope = _conversation_read_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
     items = await service.get_message_path(
         conversation_id,
         message_public_id,
         limit=limit,
         include_deleted=include_deleted,
         statuses=statuses,
+        metadata_scope=metadata_scope,
     )
     return success_response(items, message=t("ok"))
 
@@ -309,12 +333,14 @@ async def locate_message(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    metadata_scope = _conversation_read_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
     item = await service.locate_message(
         conversation_id,
         message_public_id,
         before=before,
         after=after,
+        metadata_scope=metadata_scope,
     )
     return success_response(item, message=t("ok"))
 
@@ -332,12 +358,14 @@ async def list_message_children(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    metadata_scope = _conversation_read_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
     items = await service.list_message_children(
         conversation_id,
         message_public_id,
         statuses=statuses,
         include_deleted=include_deleted,
+        metadata_scope=metadata_scope,
     )
     return success_response(items, message=t("ok"))
 
@@ -354,7 +382,8 @@ async def fork_conversation(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    source = await _get_mutable_conversation(service, conversation_id, current_user)
+    metadata_scope = _conversation_mutation_scope(current_user)
+    source = await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
     payload = payload.model_copy(
         update={
             "metadata": conversation_metadata_for_current_user(
@@ -364,7 +393,12 @@ async def fork_conversation(
             ),
         },
     )
-    item = await service.fork_conversation(conversation_id, message_public_id, payload)
+    item = await service.fork_conversation(
+        conversation_id,
+        message_public_id,
+        payload,
+        metadata_scope=metadata_scope,
+    )
     return success_response(item, message=t("ok"))
 
 
@@ -380,8 +414,14 @@ async def edit_message(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_mutable_conversation(service, conversation_id, current_user)
-    item = await service.edit_message(conversation_id, message_public_id, payload)
+    metadata_scope = _conversation_mutation_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
+    item = await service.edit_message(
+        conversation_id,
+        message_public_id,
+        payload,
+        metadata_scope=metadata_scope,
+    )
     return success_response(item, message=t("ok"))
 
 
@@ -397,8 +437,14 @@ async def retry_message(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_mutable_conversation(service, conversation_id, current_user)
-    item = await service.retry_message(conversation_id, message_public_id, payload)
+    metadata_scope = _conversation_mutation_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
+    item = await service.retry_message(
+        conversation_id,
+        message_public_id,
+        payload,
+        metadata_scope=metadata_scope,
+    )
     return success_response(item, message=t("ok"))
 
 
@@ -417,7 +463,8 @@ async def list_runs(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    metadata_scope = _conversation_read_scope(current_user)
+    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
     items = await service.list_runs(
         conversation_id,
         skip=skip,
@@ -425,6 +472,7 @@ async def list_runs(
         provider=provider,
         status=status,
         trigger_message_id=trigger_message_id,
+        metadata_scope=metadata_scope,
     )
     return success_response(items, message=t("ok"))
 

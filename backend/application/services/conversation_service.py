@@ -28,6 +28,7 @@ from application.dto import (
     UpdateAgentConfigDTO,
     UpdateConversationDTO,
 )
+from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import (
     AgentConfig,
@@ -61,6 +62,64 @@ def _clean_statuses(values: Sequence[str] | None) -> list[str] | None:
     statuses = [_clean_optional_text(value) for value in values]
     cleaned = [status for status in statuses if status]
     return cleaned or None
+
+
+def _require_metadata_scope(
+    scope: OwnedMetadataScope | None,
+    *,
+    operation: str,
+) -> OwnedMetadataScope:
+    if scope is None:
+        raise DomainValidationException(
+            "metadata_scope is required for conversation access",
+            field="metadata_scope",
+            details={"operation": operation},
+            message_key="conversation.scope.required",
+        )
+    return scope
+
+
+def _require_mutation_metadata_scope(
+    scope: OwnedMetadataScope | None,
+    *,
+    operation: str,
+) -> OwnedMetadataScope:
+    scope = _require_metadata_scope(scope, operation=operation)
+    if scope.allow_unscoped:
+        raise DomainValidationException(
+            "metadata_scope.allow_unscoped is not allowed for conversation mutations",
+            field="metadata_scope.allow_unscoped",
+            details={"operation": operation},
+            message_key="conversation.scope.allow_unscoped_forbidden",
+        )
+    return scope
+
+
+_ACL_METADATA_KEYS = {
+    "authScope",
+    "ownerUserId",
+    "owner_user_id",
+    "createdByUserId",
+    "created_by_user_id",
+    "teamId",
+    "team_id",
+    "ownerTeamId",
+    "owner_team_id",
+}
+
+
+def _merge_metadata_preserving_acl(
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(existing or {})
+    for key, value in dict(incoming or {}).items():
+        if key not in _ACL_METADATA_KEYS:
+            merged[key] = value
+    for key in _ACL_METADATA_KEYS:
+        if existing and key in existing:
+            merged[key] = existing[key]
+    return merged
 
 
 async def _raise_conversation_not_found(
@@ -349,10 +408,11 @@ class ConversationApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> ConversationDTO:
+        scope = _require_metadata_scope(metadata_scope, operation="get_conversation")
         async with self._uow_factory(readonly=True) as uow:
             conv = await uow.conversation_repository.get_by_id(
                 conversation_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if conv is None:
                 await _raise_conversation_not_found(conversation_id)
@@ -366,16 +426,17 @@ class ConversationApplicationService:
         limit: int = 20,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> Tuple[list[ConversationDTO], int]:
+        scope = _require_metadata_scope(metadata_scope, operation="list_conversations")
         async with self._uow_factory(readonly=True) as uow:
             items = await uow.conversation_repository.list(
                 status=status,
                 skip=skip,
                 limit=limit,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             total = await uow.conversation_repository.count(
                 status=status,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             return [ConversationDTO.model_validate(c) for c in items], total
 
@@ -386,10 +447,11 @@ class ConversationApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> ConversationDTO:
+        scope = _require_mutation_metadata_scope(metadata_scope, operation="update_conversation")
         async with self._uow_factory() as uow:
             conv = await uow.conversation_repository.get_by_id(
                 conversation_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if conv is None:
                 await _raise_conversation_not_found(conversation_id)
@@ -407,7 +469,7 @@ class ConversationApplicationService:
                 conv._touch()
             updated = await uow.conversation_repository.update(
                 conv,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             return ConversationDTO.model_validate(updated)
 
@@ -417,17 +479,18 @@ class ConversationApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> ConversationDTO:
+        scope = _require_mutation_metadata_scope(metadata_scope, operation="delete_conversation")
         async with self._uow_factory() as uow:
             conv = await uow.conversation_repository.get_by_id(
                 conversation_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if conv is None:
                 await _raise_conversation_not_found(conversation_id)
             conv.soft_delete()
             updated = await uow.conversation_repository.update(
                 conv,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             return ConversationDTO.model_validate(updated)
 
@@ -442,9 +505,14 @@ class ConversationApplicationService:
         branch_id: str | None = None,
         statuses: Sequence[str] | None = None,
         include_deleted: bool = False,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> Tuple[list[MessageDTO_Agent], int]:
+        scope = _require_metadata_scope(metadata_scope, operation="list_messages")
         async with self._uow_factory(readonly=True) as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             items = await uow.message_repository.list_by_conversation(
@@ -471,9 +539,14 @@ class ConversationApplicationService:
         limit: int = 200,
         include_deleted: bool = False,
         statuses: Sequence[str] | None = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[MessageDTO_Agent]:
+        scope = _require_metadata_scope(metadata_scope, operation="get_message_path")
         async with self._uow_factory(readonly=True) as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
 
@@ -495,9 +568,14 @@ class ConversationApplicationService:
         *,
         statuses: Sequence[str] | None = None,
         include_deleted: bool = False,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[MessageDTO_Agent]:
+        scope = _require_metadata_scope(metadata_scope, operation="list_message_children")
         async with self._uow_factory(readonly=True) as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             parent = await uow.message_repository.get_by_public_id(message_public_id)
@@ -522,37 +600,49 @@ class ConversationApplicationService:
         conversation_id: int,
         message_public_id: str,
         dto: MessageActionDTO,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> MessageActionResultDTO:
         action = dto.action
         if action == "branch":
+            scope = _require_metadata_scope(metadata_scope, operation="apply_message_action")
             return await self._build_message_action_result(
                 conversation_id=conversation_id,
                 message_public_id=message_public_id,
                 action=action,
                 include_deleted=dto.include_deleted,
                 statuses=dto.statuses,
+                metadata_scope=scope,
             )
+        scope = _require_mutation_metadata_scope(
+            metadata_scope,
+            operation=f"apply_message_action.{action}",
+        )
         if action == "edit":
             created = await self.edit_message(
                 conversation_id,
                 message_public_id,
                 EditMessageDTO(content=dto.content or "", metadata=dto.metadata),
+                metadata_scope=scope,
             )
             return await self._build_message_action_result(
                 conversation_id=conversation_id,
                 message_public_id=created.public_id or "",
                 action=action,
+                metadata_scope=scope,
             )
         if action == "retry":
             created = await self.retry_message(
                 conversation_id,
                 message_public_id,
                 RetryMessageDTO(content=dto.content or "", metadata=dto.metadata),
+                metadata_scope=scope,
             )
             return await self._build_message_action_result(
                 conversation_id=conversation_id,
                 message_public_id=created.public_id or "",
                 action=action,
+                metadata_scope=scope,
             )
 
         forked = await self.fork_conversation(
@@ -565,17 +655,26 @@ class ConversationApplicationService:
                 statuses=dto.statuses,
                 metadata=dto.metadata,
             ),
+            metadata_scope=scope,
         )
         forked_message_id = forked.source_to_forked_id.get(message_public_id)
-        result = await self._build_message_action_result(
-            conversation_id=forked.conversation.id,
-            message_public_id=forked_message_id or "",
-            action=action,
+        message = next(
+            (item for item in forked.messages if item.public_id == forked_message_id),
+            None,
         )
-        result.conversation = forked.conversation
-        result.messages = forked.messages
-        result.source_to_forked_id = forked.source_to_forked_id
-        return result
+        if message is None:
+            raise MessageNotFoundException()
+        return MessageActionResultDTO(
+            action=action,
+            message=message,
+            path=forked.messages,
+            children=[],
+            siblings=[message],
+            branch_id=message.branch_id,
+            conversation=forked.conversation,
+            messages=forked.messages,
+            source_to_forked_id=forked.source_to_forked_id,
+        )
 
     async def _build_message_action_result(
         self,
@@ -585,9 +684,17 @@ class ConversationApplicationService:
         action: Literal["branch", "edit", "retry", "fork"],
         include_deleted: bool = False,
         statuses: Sequence[str] | None = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> MessageActionResultDTO:
+        scope = _require_metadata_scope(
+            metadata_scope,
+            operation="build_message_action_result",
+        )
         async with self._uow_factory(readonly=True) as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             message = await uow.message_repository.get_by_public_id(message_public_id)
@@ -649,9 +756,15 @@ class ConversationApplicationService:
         conversation_id: int,
         message_public_id: str,
         dto: ForkConversationDTO,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> ForkConversationResultDTO:
+        scope = _require_mutation_metadata_scope(metadata_scope, operation="fork_conversation")
         async with self._uow_factory() as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
 
@@ -675,8 +788,7 @@ class ConversationApplicationService:
 
             now = _utcnow()
             metadata = {
-                **(conv.metadata or {}),
-                **(dto.metadata or {}),
+                **_merge_metadata_preserving_acl(conv.metadata, dto.metadata),
                 "forked_from_conversation_id": conversation_id,
                 "forked_from_message_id": message_public_id,
                 "fork_option": dto.option,
@@ -743,7 +855,10 @@ class ConversationApplicationService:
                 id_map,
             )
             forked_conversation.updated_at = _utcnow()
-            forked_conversation = await uow.conversation_repository.update(forked_conversation)
+            forked_conversation = await uow.conversation_repository.update(
+                forked_conversation,
+                metadata_scope=scope,
+            )
 
             return ForkConversationResultDTO(
                 conversation=ConversationDTO.model_validate(forked_conversation),
@@ -756,9 +871,15 @@ class ConversationApplicationService:
         conversation_id: int,
         message_public_id: str,
         dto: EditMessageDTO,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> MessageDTO_Agent:
+        scope = _require_mutation_metadata_scope(metadata_scope, operation="edit_message")
         async with self._uow_factory() as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             source = await uow.message_repository.get_by_public_id(message_public_id)
@@ -785,9 +906,15 @@ class ConversationApplicationService:
         conversation_id: int,
         message_public_id: str,
         dto: RetryMessageDTO,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> MessageDTO_Agent:
+        scope = _require_mutation_metadata_scope(metadata_scope, operation="retry_message")
         async with self._uow_factory() as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             source = await uow.message_repository.get_by_public_id(message_public_id)
@@ -816,9 +943,14 @@ class ConversationApplicationService:
         *,
         before: int = 2,
         after: int = 2,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> MessageLocationDTO:
+        scope = _require_metadata_scope(metadata_scope, operation="locate_message")
         async with self._uow_factory(readonly=True) as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
 
@@ -860,7 +992,9 @@ class ConversationApplicationService:
         include_path: bool = True,
         context_before: int = 1,
         context_after: int = 1,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[MessageSearchResultDTO]:
+        scope = _require_metadata_scope(metadata_scope, operation="search_messages")
         normalized_query = _clean_optional_text(query)
         if normalized_query is None:
             return []
@@ -868,7 +1002,10 @@ class ConversationApplicationService:
         include_deleted_locators = bool(cleaned_statuses and "deleted" in cleaned_statuses)
 
         async with self._uow_factory(readonly=True) as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
 
@@ -923,9 +1060,14 @@ class ConversationApplicationService:
         provider: str | None = None,
         status: str | None = None,
         trigger_message_id: str | None = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> list[RunDTO]:
+        scope = _require_metadata_scope(metadata_scope, operation="list_runs")
         async with self._uow_factory(readonly=True) as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             items = await uow.run_repository.list_by_conversation(

@@ -37,7 +37,10 @@ def _task_config() -> TrainingTaskConfig:
         framework="prep",
         difficulty="medium",
         category="sales",
-        metadata={"messageTreeSelection": {"affectsScoring": False}},
+        metadata={
+            "messageTreeSelection": {"affectsScoring": False},
+            "growthReport": {"status": "existing"},
+        },
     )
 
 
@@ -357,6 +360,35 @@ def test_material_review_admin_uses_explicit_scopes_without_unscoped_material_ac
     assert material_scope.allow_unscoped is False
 
 
+def test_material_review_admin_rejects_material_outside_explicit_scope() -> None:
+    session_service = _FakeTrainingSessionService(
+        [_session(user_id="user-admin-001", team_id="team-ops")]
+    )
+    file_service = _FakeFileAssetService(
+        [_material_asset(owner_user_id="user-cs-001", team_id="team-service")]
+    )
+    client = _client(session_service, file_service)
+
+    response = client.post(
+        "/api/v1/training-studio/tool-consumers/review-assistant/material-review",
+        json={"session_id": "training-1", "material_ids": [7]},
+        headers={"X-Mock-User": "admin"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Training material not found"
+    session_scope = session_service.get_calls[0]["access_scope"]
+    assert session_scope.user_id == "user-admin-001"
+    assert session_scope.team_id == "team-ops"
+    assert session_scope.include_team_scope is True
+    material_scope = file_service.get_calls[0]["metadata_scope"]
+    assert material_scope.user_id == "user-admin-001"
+    assert material_scope.team_id == "team-ops"
+    assert material_scope.include_team_scope is True
+    assert material_scope.allow_unscoped is False
+    assert file_service.read_calls == []
+
+
 def test_material_review_uses_optional_llm_adapter_when_configured() -> None:
     session_service = _FakeTrainingSessionService([_session()])
     file_service = _FakeFileAssetService([_material_asset()])
@@ -411,6 +443,7 @@ def test_material_review_does_not_pollute_scoring_growth_or_completion() -> None
         "status": session.status,
         "report_id": session.report_id,
         "score_id": session.score_id,
+        "completed_at": session.completed_at,
         "message_count": session.message_count,
     }
     session_service = _FakeTrainingSessionService([session])
@@ -429,4 +462,5 @@ def test_material_review_does_not_pollute_scoring_growth_or_completion() -> None
     assert session.status == before["status"]
     assert session.report_id == before["report_id"]
     assert session.score_id == before["score_id"]
+    assert session.completed_at == before["completed_at"]
     assert session.message_count == before["message_count"]

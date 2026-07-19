@@ -24,9 +24,11 @@ _MAX_LLM_REPORT_SUMMARY_CHARS = 2000
 _MAX_LLM_REPORT_VALUE_CHARS = 800
 _MAX_LLM_REPORT_ITEMS = 5
 _MAX_LLM_REPORT_KEYS = 8
+_MAX_LLM_REPORT_CONTAINER_DEPTH = 4
 _MAX_LLM_REPLAY_TURN_CHARS = 800
 _MAX_LLM_MATERIAL_SNIPPET_CHARS = 4000
 _SUGGESTION_LIMIT = 3
+_TRUNCATED_NESTED_REPORT_CONTENT = "[truncated nested report content]"
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 
 _MATERIAL_REVIEW_SYSTEM_PROMPT = """You are a Training Studio review assistant.
@@ -187,6 +189,8 @@ def _bounded_report_value(value: Any, *, depth: int = 0) -> Any:
         return _limit_text(value, _MAX_LLM_REPORT_VALUE_CHARS)
     if value is None or isinstance(value, (bool, int, float)):
         return value
+    if depth >= _MAX_LLM_REPORT_CONTAINER_DEPTH and isinstance(value, (list, dict)):
+        return _TRUNCATED_NESTED_REPORT_CONTENT
     if isinstance(value, list):
         return [
             _bounded_report_value(item, depth=depth + 1)
@@ -194,10 +198,7 @@ def _bounded_report_value(value: Any, *, depth: int = 0) -> Any:
         ]
     if isinstance(value, dict):
         if depth >= 2:
-            return _limit_text(
-                json.dumps(value, ensure_ascii=False, default=str),
-                _MAX_LLM_REPORT_VALUE_CHARS,
-            )
+            return _TRUNCATED_NESTED_REPORT_CONTENT
         result: dict[str, Any] = {}
         for index, (raw_key, raw_item) in enumerate(value.items()):
             if index >= _MAX_LLM_REPORT_KEYS:
@@ -258,14 +259,17 @@ def _llm_points_field(
         material_id = _positive_int(item.get("material_id"))
         if material_id is None or material_id not in material_titles:
             continue
-        point = _compact(item.get("point"))
+        point = _compact_llm_text(item.get("point"))
         if not point:
             continue
         dedupe_key = (material_id, point.lower())
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        evidence = _limit_text(_compact(item.get("evidence")), _MAX_LLM_EVIDENCE_CHARS) or None
+        evidence = (
+            _limit_text(_compact_llm_text(item.get("evidence")), _MAX_LLM_EVIDENCE_CHARS)
+            or None
+        )
         points.append(
             MaterialReviewPointDTO(
                 material_id=material_id,
@@ -288,7 +292,7 @@ def _llm_suggestions_field(parsed: dict[str, Any], key: str) -> list[str] | None
     suggestions: list[str] = []
     seen: set[str] = set()
     for item in value:
-        text = _limit_text(_compact(item), _MAX_LLM_SUGGESTION_CHARS)
+        text = _limit_text(_compact_llm_text(item), _MAX_LLM_SUGGESTION_CHARS)
         dedupe_key = text.lower()
         if text and dedupe_key not in seen:
             suggestions.append(text)
@@ -321,6 +325,12 @@ def _compact(value: Any) -> str:
         return ""
     text = str(value).replace("\x00", " ")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _compact_llm_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return _compact(value)
 
 
 def _limit_text(text: str, limit: int) -> str:

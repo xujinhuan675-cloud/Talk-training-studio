@@ -14,9 +14,14 @@ from application.dto import (
     RetryMessageDTO,
 )
 from application.ports.llm import LLMMessage, LLMProviderMetadata, LLMResponse
-from application.services.chat_service import ChatApplicationService
-from application.services.conversation_service import ConversationApplicationService
+from application.services.chat_service import ChatApplicationService as _BaseChatApplicationService
+from application.services.conversation_service import (
+    ConversationApplicationService as _BaseConversationApplicationService,
+)
+from domain.common.exceptions import DomainValidationException
 from domain.conversation.entity import Conversation, Message
+from domain.conversation.exceptions import ConversationNotFoundException
+from domain.conversation.repository import OwnedMetadataScope
 from infrastructure.models.base import Base
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
@@ -60,6 +65,123 @@ class _FailingLLM(_FakeLLM):
         raise exc
 
 
+def _metadata() -> dict:
+    return {
+        "ownerUserId": "user-sales-001",
+        "teamId": "team-revenue",
+        "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+    }
+
+
+def _scope() -> OwnedMetadataScope:
+    return OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+
+
+def _wrong_scope() -> OwnedMetadataScope:
+    return OwnedMetadataScope(
+        user_id="user-service-001",
+        team_id="team-service",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+
+
+def _read_scope() -> OwnedMetadataScope:
+    return OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=True,
+    )
+
+
+class ChatApplicationService(_BaseChatApplicationService):
+    async def send_message_sync(self, conversation_id: int, dto: ChatRequestDTO, **kwargs):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().send_message_sync(conversation_id, dto, **kwargs)
+
+
+class ConversationApplicationService(_BaseConversationApplicationService):
+    async def list_messages(self, conversation_id: int, **kwargs):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().list_messages(conversation_id, **kwargs)
+
+    async def get_message_path(self, conversation_id: int, message_public_id: str, **kwargs):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().get_message_path(conversation_id, message_public_id, **kwargs)
+
+    async def list_message_children(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        **kwargs,
+    ):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().list_message_children(conversation_id, message_public_id, **kwargs)
+
+    async def apply_message_action(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        dto: MessageActionDTO,
+        **kwargs,
+    ):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().apply_message_action(
+            conversation_id,
+            message_public_id,
+            dto,
+            **kwargs,
+        )
+
+    async def fork_conversation(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        dto: ForkConversationDTO,
+        **kwargs,
+    ):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().fork_conversation(conversation_id, message_public_id, dto, **kwargs)
+
+    async def edit_message(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        dto: EditMessageDTO,
+        **kwargs,
+    ):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().edit_message(conversation_id, message_public_id, dto, **kwargs)
+
+    async def retry_message(
+        self,
+        conversation_id: int,
+        message_public_id: str,
+        dto: RetryMessageDTO,
+        **kwargs,
+    ):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().retry_message(conversation_id, message_public_id, dto, **kwargs)
+
+    async def locate_message(self, conversation_id: int, message_public_id: str, **kwargs):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().locate_message(conversation_id, message_public_id, **kwargs)
+
+    async def search_messages(self, conversation_id: int, query: str, **kwargs):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().search_messages(conversation_id, query, **kwargs)
+
+    async def list_runs(self, conversation_id: int, **kwargs):
+        kwargs.setdefault("metadata_scope", _scope())
+        return await super().list_runs(conversation_id, **kwargs)
+
+
 @pytest.fixture
 async def session_factory():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -79,6 +201,7 @@ async def _seed_conversation(session_factory):
                 title="Message tree",
                 system_prompt="Stay concise.",
                 model="gpt-test",
+                metadata=_metadata(),
             )
         )
         first_user = await uow.message_repository.create(
@@ -105,6 +228,124 @@ async def _seed_conversation(session_factory):
         )
         await uow.commit()
     return conversation, first_user, first_assistant, off_path_user
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_requires_metadata_scope(session_factory):
+    llm = _FakeLLM()
+    service = _BaseChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    with pytest.raises(DomainValidationException):
+        await service.send_message_sync(
+            7,
+            ChatRequestDTO(message="Hello."),
+        )
+
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_requires_metadata_scope(session_factory):
+    llm = _FakeLLM()
+    service = _BaseChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    stream = service.send_message_stream(
+        7,
+        ChatRequestDTO(message="Hello.", stream=True),
+    )
+
+    with pytest.raises(DomainValidationException):
+        await anext(stream)
+
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_rejects_read_scope(session_factory):
+    llm = _FakeLLM()
+    service = _BaseChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    with pytest.raises(DomainValidationException):
+        await service.send_message_sync(
+            7,
+            ChatRequestDTO(message="Hello."),
+            metadata_scope=_read_scope(),
+        )
+
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_rejects_read_scope(session_factory):
+    llm = _FakeLLM()
+    service = _BaseChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    stream = service.send_message_stream(
+        7,
+        ChatRequestDTO(message="Hello.", stream=True),
+        metadata_scope=_read_scope(),
+    )
+
+    with pytest.raises(DomainValidationException):
+        await anext(stream)
+
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_scoped_miss_does_not_create_messages_or_runs(session_factory):
+    conversation, *_ = await _seed_conversation(session_factory)
+    llm = _FakeLLM()
+    service = _BaseChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+
+    with pytest.raises(ConversationNotFoundException):
+        await service.send_message_sync(
+            conversation.id,
+            ChatRequestDTO(message="Hello."),
+            metadata_scope=_wrong_scope(),
+        )
+
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        messages = await uow.message_repository.list_by_conversation(conversation.id)
+        runs = await uow.run_repository.list_by_conversation(conversation.id)
+
+    assert [message.content for message in messages] == [
+        "Root user turn.",
+        "Root assistant turn.",
+        "Unrelated branch turn.",
+    ]
+    assert runs == []
+    assert llm.calls == []
 
 
 @pytest.mark.asyncio
@@ -827,6 +1068,7 @@ async def test_conversation_service_fork_remaps_selected_path_metadata(session_f
     )
     async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
         conversation.metadata = {
+            **_metadata(),
             "selectedPath": {
                 "branchId": first_assistant.branch_id,
                 "tailMessageId": first_assistant.public_id,
@@ -1258,6 +1500,7 @@ async def test_conversation_service_fork_preserves_parent_before_child_order(
                 title="Out-of-order source",
                 system_prompt=None,
                 model="gpt-test",
+                metadata=_metadata(),
             )
         )
         parent = await uow.message_repository.create(

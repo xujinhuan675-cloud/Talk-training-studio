@@ -9,9 +9,27 @@ from sqlalchemy.orm import sessionmaker
 from application.ports.llm import LLMEndpointMetadata, LLMModelMetadata, LLMProviderMetadata
 from application.services.conversation_service import ConversationApplicationService
 from domain.conversation.entity import Conversation, Message, Run
+from domain.conversation.repository import OwnedMetadataScope
 from infrastructure.external.llm.openai_provider import OpenAIProvider
 from infrastructure.models.base import Base
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
+
+
+def _metadata() -> dict:
+    return {
+        "ownerUserId": "user-sales-001",
+        "teamId": "team-revenue",
+        "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+    }
+
+
+def _scope() -> OwnedMetadataScope:
+    return OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
 
 
 @pytest.fixture
@@ -29,7 +47,7 @@ async def session_factory():
 async def test_search_messages_filters_provider_and_model(session_factory):
     async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
         conversation = await uow.conversation_repository.create(
-            Conversation(id=None, title="Provider search", model="gpt-test")
+            Conversation(id=None, title="Provider search", model="gpt-test", metadata=_metadata())
         )
         openai_message = await uow.message_repository.create(
             Message(
@@ -66,6 +84,7 @@ async def test_search_messages_filters_provider_and_model(session_factory):
         provider="openai",
         model="gpt-4o",
         limit=1,
+        metadata_scope=_scope(),
     )
 
     assert [result.message.public_id for result in results] == [openai_message.public_id]
@@ -75,7 +94,7 @@ async def test_search_messages_filters_provider_and_model(session_factory):
 async def test_list_runs_filters_provider_status_and_trigger_message(session_factory):
     async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
         conversation = await uow.conversation_repository.create(
-            Conversation(id=None, title="Run filters", model="gpt-test")
+            Conversation(id=None, title="Run filters", model="gpt-test", metadata=_metadata())
         )
         trigger = await uow.message_repository.create(
             Message(
@@ -130,6 +149,7 @@ async def test_list_runs_filters_provider_status_and_trigger_message(session_fac
         provider="openai",
         status="completed",
         trigger_message_id=trigger.public_id,
+        metadata_scope=_scope(),
     )
 
     assert [run.id for run in runs] == [matching.id]
@@ -145,7 +165,12 @@ async def test_list_runs_filters_before_pagination(session_factory):
     base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
         conversation = await uow.conversation_repository.create(
-            Conversation(id=None, title="Run filter pagination", model="gpt-test")
+            Conversation(
+                id=None,
+                title="Run filter pagination",
+                model="gpt-test",
+                metadata=_metadata(),
+            )
         )
         matching = await uow.run_repository.create(
             Run(
@@ -185,6 +210,7 @@ async def test_list_runs_filters_before_pagination(session_factory):
         status="completed",
         trigger_message_id="msg_oldest",
         limit=1,
+        metadata_scope=_scope(),
     )
 
     assert [run.id for run in runs] == [matching.id]

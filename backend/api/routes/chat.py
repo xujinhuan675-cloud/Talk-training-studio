@@ -42,17 +42,22 @@ async def chat(
     conversation_service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_chat_user),
 ):
+    metadata_scope = owned_metadata_scope_for_current_user(
+        current_user,
+        allow_unscoped=False,
+    )
     await conversation_service.get_conversation(
         conversation_id,
-        metadata_scope=owned_metadata_scope_for_current_user(
-            current_user,
-            allow_unscoped=False,
-        ),
+        metadata_scope=metadata_scope,
     )
 
     if payload.stream:
         return StreamingResponse(
-            service.send_message_stream(conversation_id, payload),
+            service.send_message_stream(
+                conversation_id,
+                payload,
+                metadata_scope=metadata_scope,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -61,5 +66,9 @@ async def chat(
             },
         )
 
-    result = await service.send_message_sync(conversation_id, payload)
+    result = await service.send_message_sync(
+        conversation_id,
+        payload,
+        metadata_scope=metadata_scope,
+    )
     return success_response(result, message=t("ok"))

@@ -88,8 +88,8 @@ class _FakeChatService:
             context=[message],
         )
 
-    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
-        self.action_call = (conversation_id, message_public_id, payload)
+    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.action_call = (conversation_id, message_public_id, payload, kwargs)
         message = _message("Selected action branch", public_id=message_public_id)
         return MessageActionResultDTO(
             action=payload.action,
@@ -100,16 +100,16 @@ class _FakeChatService:
             branch_id="main",
         )
 
-    async def edit_message(self, conversation_id: int, message_public_id: str, payload):
-        self.edit_call = (conversation_id, message_public_id, payload)
+    async def edit_message(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.edit_call = (conversation_id, message_public_id, payload, kwargs)
         return _message(payload.content, public_id="msg_edit")
 
-    async def retry_message(self, conversation_id: int, message_public_id: str, payload):
-        self.retry_call = (conversation_id, message_public_id, payload)
+    async def retry_message(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.retry_call = (conversation_id, message_public_id, payload, kwargs)
         return _message(payload.content, public_id="msg_retry")
 
-    async def fork_conversation(self, conversation_id: int, message_public_id: str, payload):
-        self.fork_call = (conversation_id, message_public_id, payload)
+    async def fork_conversation(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.fork_call = (conversation_id, message_public_id, payload, kwargs)
         message = _message("Forked root", public_id="msg_forked")
         return ForkConversationResultDTO(
             conversation=_conversation(),
@@ -123,6 +123,15 @@ def _client(service: _FakeChatService) -> TestClient:
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_conversation_service] = lambda: service
     return TestClient(app)
+
+
+def _pop_scope(kwargs: dict, *, allow_unscoped: bool):
+    scope = kwargs.pop("metadata_scope")
+    assert scope.user_id == "user-admin-001"
+    assert scope.team_id == "team-ops"
+    assert scope.include_team_scope is True
+    assert scope.allow_unscoped is allow_unscoped
+    return scope
 
 
 def test_search_messages_route_returns_branch_context() -> None:
@@ -146,6 +155,7 @@ def test_search_messages_route_returns_branch_context() -> None:
     data = response.json()["data"]
     assert data[0]["message"]["public_id"] == "msg_search"
     assert data[0]["path"][0]["content"] == "Pilot metric discussion"
+    _pop_scope(service.search_call[2], allow_unscoped=True)
     assert service.search_call == (
         7,
         "pilot",
@@ -180,6 +190,7 @@ def test_get_message_path_route_passes_tree_filters() -> None:
     assert response.status_code == 200
     data = response.json()["data"]
     assert data[0]["public_id"] == "msg_selected"
+    _pop_scope(service.path_call[2], allow_unscoped=True)
     assert service.path_call == (
         7,
         "msg_selected",
@@ -206,6 +217,7 @@ def test_list_message_children_route_passes_tree_filters() -> None:
     assert response.status_code == 200
     data = response.json()["data"]
     assert data[0]["public_id"] == "msg_child"
+    _pop_scope(service.children_call[2], allow_unscoped=True)
     assert service.children_call == (
         7,
         "msg_parent",
@@ -226,6 +238,7 @@ def test_locate_message_route_returns_message_location() -> None:
     data = response.json()["data"]
     assert data["message"]["public_id"] == "msg_selected"
     assert data["context"][0]["content"] == "Selected branch turn"
+    _pop_scope(service.locate_call[2], allow_unscoped=True)
     assert service.locate_call == (7, "msg_selected", {"before": 1, "after": 4})
 
 
@@ -256,6 +269,7 @@ def test_message_action_route_returns_controlled_tree_context() -> None:
     assert service.action_call[2].include_deleted is True
     assert service.action_call[2].statuses == ["active", "superseded"]
     assert service.action_call[2].metadata == {"source": "training_room"}
+    _pop_scope(service.action_call[3], allow_unscoped=True)
 
 
 def test_fork_conversation_route_creates_copied_tree() -> None:
@@ -282,6 +296,7 @@ def test_fork_conversation_route_creates_copied_tree() -> None:
     assert service.fork_call[2].option == "includeBranches"
     assert service.fork_call[2].include_deleted is True
     assert service.fork_call[2].statuses == ["active", "superseded"]
+    _pop_scope(service.fork_call[3], allow_unscoped=False)
 
 
 def test_edit_message_route_creates_branch_message() -> None:
@@ -298,6 +313,7 @@ def test_edit_message_route_creates_branch_message() -> None:
     assert service.edit_call[0:2] == (7, "msg_original")
     assert service.edit_call[2].content == "Edited turn"
     assert service.edit_call[2].metadata == {"reason": "typo"}
+    _pop_scope(service.edit_call[3], allow_unscoped=False)
 
 
 def test_retry_message_route_creates_branch_message() -> None:
@@ -314,3 +330,4 @@ def test_retry_message_route_creates_branch_message() -> None:
     assert service.retry_call[0:2] == (7, "msg_answer")
     assert service.retry_call[2].content == "Retry answer"
     assert service.retry_call[2].metadata == {"temperature": 0.2}
+    _pop_scope(service.retry_call[3], allow_unscoped=False)

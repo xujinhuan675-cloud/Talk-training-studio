@@ -21,9 +21,27 @@ from application.services.conversation_service import ConversationApplicationSer
 from core.exceptions import register_exception_handlers
 from domain.conversation.entity import Conversation, Message
 from domain.conversation.exceptions import MessageNotFoundException
+from domain.conversation.repository import OwnedMetadataScope
 from infrastructure.models.base import Base
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 from shared.codes import BusinessCode
+
+
+def _metadata() -> dict:
+    return {
+        "ownerUserId": "user-sales-001",
+        "teamId": "team-revenue",
+        "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+    }
+
+
+def _scope() -> OwnedMetadataScope:
+    return OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
 
 
 def _message(content: str, public_id: str = "msg_1") -> MessageDTO_Agent:
@@ -65,8 +83,8 @@ class _FakeActionService:
     async def get_conversation(self, conversation_id: int, **kwargs):
         return _conversation(conversation_id=conversation_id)
 
-    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
-        self.action_call = (conversation_id, message_public_id, payload)
+    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.action_call = (conversation_id, message_public_id, payload, kwargs)
         return None
 
     async def retry_message(
@@ -74,8 +92,9 @@ class _FakeActionService:
         conversation_id: int,
         message_public_id: str,
         payload: RetryMessageDTO,
+        **kwargs,
     ):
-        self.retry_call = (conversation_id, message_public_id, payload)
+        self.retry_call = (conversation_id, message_public_id, payload, kwargs)
         return _message(payload.content, public_id="msg_retry")
 
 
@@ -141,7 +160,7 @@ def test_message_action_route_rejects_edit_without_content() -> None:
 async def test_search_deleted_status_returns_locatable_path_and_context(session_factory) -> None:
     async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
         conversation = await uow.conversation_repository.create(
-            Conversation(id=None, title="Deleted search")
+            Conversation(id=None, title="Deleted search", metadata=_metadata())
         )
         root = await uow.message_repository.create(
             Message(id=None, conversation_id=conversation.id, role="user", content="root")
@@ -166,6 +185,7 @@ async def test_search_deleted_status_returns_locatable_path_and_context(session_
         statuses=[" deleted ", ""],
         context_before=1,
         context_after=0,
+        metadata_scope=_scope(),
     )
 
     assert [result.message.public_id for result in results] == [deleted.public_id]
@@ -185,10 +205,10 @@ async def test_message_actions_reject_public_id_from_another_conversation(
 ) -> None:
     async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
         requested_conversation = await uow.conversation_repository.create(
-            Conversation(id=None, title="Requested")
+            Conversation(id=None, title="Requested", metadata=_metadata())
         )
         other_conversation = await uow.conversation_repository.create(
-            Conversation(id=None, title="Other")
+            Conversation(id=None, title="Other", metadata=_metadata())
         )
         other_message = await uow.message_repository.create(
             Message(
@@ -208,24 +228,35 @@ async def test_message_actions_reject_public_id_from_another_conversation(
     )
 
     with pytest.raises(MessageNotFoundException):
-        await service.get_message_path(requested_conversation.id, other_message.public_id)
+        await service.get_message_path(
+            requested_conversation.id,
+            other_message.public_id,
+            metadata_scope=_scope(),
+        )
     with pytest.raises(MessageNotFoundException):
-        await service.list_message_children(requested_conversation.id, other_message.public_id)
+        await service.list_message_children(
+            requested_conversation.id,
+            other_message.public_id,
+            metadata_scope=_scope(),
+        )
     with pytest.raises(MessageNotFoundException):
         await service.edit_message(
             requested_conversation.id,
             other_message.public_id,
             EditMessageDTO(content="edit"),
+            metadata_scope=_scope(),
         )
     with pytest.raises(MessageNotFoundException):
         await service.retry_message(
             requested_conversation.id,
             other_message.public_id,
             RetryMessageDTO(),
+            metadata_scope=_scope(),
         )
     with pytest.raises(MessageNotFoundException):
         await service.fork_conversation(
             requested_conversation.id,
             other_message.public_id,
             ForkConversationDTO(),
+            metadata_scope=_scope(),
         )

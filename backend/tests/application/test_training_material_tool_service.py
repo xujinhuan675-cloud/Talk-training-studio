@@ -310,3 +310,5 @@ async def test_training_material_consumer_requires_metadata_scope() -> None:
         await service.list_materials(metadata_scope=None)
     with pytest.raises(DomainValidationException):
         await service.get_material(1, metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.get_material_by_key("training_material/1.txt", metadata_scope=None)

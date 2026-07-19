@@ -5,8 +5,17 @@ from typing import Any
 
 import pytest
 
-from application.dto import CreateAgentConfigDTO, UpdateAgentConfigDTO
+from application.dto import (
+    CreateAgentConfigDTO,
+    EditMessageDTO,
+    ForkConversationDTO,
+    MessageActionDTO,
+    RetryMessageDTO,
+    UpdateConversationDTO,
+    UpdateAgentConfigDTO,
+)
 from application.services.conversation_service import ConversationApplicationService
+from domain.common.exceptions import DomainValidationException
 from domain.conversation.entity import AgentConfig, Conversation
 from domain.conversation.exceptions import (
     AgentConfigNameExistsException,
@@ -22,6 +31,15 @@ def _scope() -> OwnedMetadataScope:
         team_id="team-revenue",
         include_team_scope=False,
         allow_unscoped=False,
+    )
+
+
+def _read_scope() -> OwnedMetadataScope:
+    return OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=True,
     )
 
 
@@ -150,6 +168,157 @@ def _service_with_repositories(
     return ConversationApplicationService(uow_factory=uow_factory)
 
 
+async def _call_conversation_child_method(
+    service: ConversationApplicationService,
+    method_name: str,
+    *,
+    metadata_scope=None,
+) -> None:
+    if method_name == "list_messages":
+        await service.list_messages(7, metadata_scope=metadata_scope)
+        return
+    if method_name == "get_message_path":
+        await service.get_message_path(7, "msg-1", metadata_scope=metadata_scope)
+        return
+    if method_name == "list_message_children":
+        await service.list_message_children(7, "msg-1", metadata_scope=metadata_scope)
+        return
+    if method_name == "apply_message_action":
+        await service.apply_message_action(
+            7,
+            "msg-1",
+            MessageActionDTO(action="branch"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "fork_conversation":
+        await service.fork_conversation(
+            7,
+            "msg-1",
+            ForkConversationDTO(option="directPath"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "edit_message":
+        await service.edit_message(
+            7,
+            "msg-1",
+            EditMessageDTO(content="edited"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "retry_message":
+        await service.retry_message(
+            7,
+            "msg-1",
+            RetryMessageDTO(content="retry"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "locate_message":
+        await service.locate_message(7, "msg-1", metadata_scope=metadata_scope)
+        return
+    if method_name == "search_messages":
+        await service.search_messages(7, "needle", metadata_scope=metadata_scope)
+        return
+    if method_name == "list_runs":
+        await service.list_runs(7, metadata_scope=metadata_scope)
+        return
+    raise AssertionError(f"Unknown method under test: {method_name}")
+
+
+async def _call_conversation_top_level_method(
+    service: ConversationApplicationService,
+    method_name: str,
+    *,
+    metadata_scope=None,
+) -> None:
+    if method_name == "get_conversation":
+        await service.get_conversation(7, metadata_scope=metadata_scope)
+        return
+    if method_name == "list_conversations":
+        await service.list_conversations(metadata_scope=metadata_scope)
+        return
+    if method_name == "update_conversation":
+        await service.update_conversation(
+            7,
+            UpdateConversationDTO(title="updated"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "delete_conversation":
+        await service.delete_conversation(7, metadata_scope=metadata_scope)
+        return
+    raise AssertionError(f"Unknown method under test: {method_name}")
+
+
+async def _call_conversation_mutation_method(
+    service: ConversationApplicationService,
+    method_name: str,
+    *,
+    metadata_scope=None,
+) -> None:
+    if method_name == "update_conversation":
+        await service.update_conversation(
+            7,
+            UpdateConversationDTO(title="updated"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "delete_conversation":
+        await service.delete_conversation(7, metadata_scope=metadata_scope)
+        return
+    if method_name == "apply_message_action_edit":
+        await service.apply_message_action(
+            7,
+            "msg-1",
+            MessageActionDTO(action="edit", content="edited"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "apply_message_action_retry":
+        await service.apply_message_action(
+            7,
+            "msg-1",
+            MessageActionDTO(action="retry", content="retry"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "apply_message_action_fork":
+        await service.apply_message_action(
+            7,
+            "msg-1",
+            MessageActionDTO(action="fork"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "fork_conversation":
+        await service.fork_conversation(
+            7,
+            "msg-1",
+            ForkConversationDTO(option="directPath"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "edit_message":
+        await service.edit_message(
+            7,
+            "msg-1",
+            EditMessageDTO(content="edited"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "retry_message":
+        await service.retry_message(
+            7,
+            "msg-1",
+            RetryMessageDTO(content="retry"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    raise AssertionError(f"Unknown method under test: {method_name}")
+
+
 @pytest.mark.asyncio
 async def test_agent_config_create_and_update_name_checks_are_metadata_scoped() -> None:
     repo = _FakeAgentConfigRepository()
@@ -187,6 +356,28 @@ async def test_agent_config_unscoped_name_check_still_detects_visible_conflict()
     assert repo.get_by_name_calls == [{"name": "shared-hidden", "metadata_scope": None}]
 
 
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "get_conversation",
+        "list_conversations",
+        "update_conversation",
+        "delete_conversation",
+    ],
+)
+@pytest.mark.asyncio
+async def test_conversation_top_level_methods_require_metadata_scope(
+    method_name: str,
+) -> None:
+    repo = _ScopedMissConversationRepository()
+    service = _service_with_repositories(conversation_repository=repo)
+
+    with pytest.raises(DomainValidationException):
+        await _call_conversation_top_level_method(service, method_name)
+
+    assert repo.get_by_id_calls == []
+
+
 @pytest.mark.asyncio
 async def test_scoped_conversation_miss_does_not_fall_back_to_unscoped_probe() -> None:
     repo = _ScopedMissConversationRepository()
@@ -195,6 +386,112 @@ async def test_scoped_conversation_miss_does_not_fall_back_to_unscoped_probe() -
 
     with pytest.raises(ConversationNotFoundException):
         await service.get_conversation(7, metadata_scope=scope)
+
+    assert repo.get_by_id_calls == [{"conversation_id": 7, "metadata_scope": scope}]
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "update_conversation",
+        "delete_conversation",
+        "apply_message_action_edit",
+        "apply_message_action_retry",
+        "apply_message_action_fork",
+        "fork_conversation",
+        "edit_message",
+        "retry_message",
+    ],
+)
+@pytest.mark.asyncio
+async def test_conversation_mutation_methods_reject_read_scope(
+    method_name: str,
+) -> None:
+    repo = _ScopedMissConversationRepository()
+    service = _service_with_repositories(conversation_repository=repo)
+
+    with pytest.raises(DomainValidationException):
+        await _call_conversation_mutation_method(
+            service,
+            method_name,
+            metadata_scope=_read_scope(),
+        )
+
+    assert repo.get_by_id_calls == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_branch_action_allows_read_scope_for_lookup() -> None:
+    repo = _ScopedMissConversationRepository()
+    service = _service_with_repositories(conversation_repository=repo)
+    scope = _read_scope()
+
+    with pytest.raises(ConversationNotFoundException):
+        await service.apply_message_action(
+            7,
+            "msg-1",
+            MessageActionDTO(action="branch"),
+            metadata_scope=scope,
+        )
+
+    assert repo.get_by_id_calls == [{"conversation_id": 7, "metadata_scope": scope}]
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "list_messages",
+        "get_message_path",
+        "list_message_children",
+        "apply_message_action",
+        "fork_conversation",
+        "edit_message",
+        "retry_message",
+        "locate_message",
+        "search_messages",
+        "list_runs",
+    ],
+)
+@pytest.mark.asyncio
+async def test_conversation_child_methods_require_metadata_scope(method_name: str) -> None:
+    repo = _ScopedMissConversationRepository()
+    service = _service_with_repositories(conversation_repository=repo)
+
+    with pytest.raises(DomainValidationException):
+        await _call_conversation_child_method(service, method_name)
+
+    assert repo.get_by_id_calls == []
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "list_messages",
+        "get_message_path",
+        "list_message_children",
+        "apply_message_action",
+        "fork_conversation",
+        "edit_message",
+        "retry_message",
+        "locate_message",
+        "search_messages",
+        "list_runs",
+    ],
+)
+@pytest.mark.asyncio
+async def test_conversation_child_methods_do_not_fall_back_after_scoped_miss(
+    method_name: str,
+) -> None:
+    repo = _ScopedMissConversationRepository()
+    service = _service_with_repositories(conversation_repository=repo)
+    scope = _scope()
+
+    with pytest.raises(ConversationNotFoundException):
+        await _call_conversation_child_method(
+            service,
+            method_name,
+            metadata_scope=scope,
+        )
 
     assert repo.get_by_id_calls == [{"conversation_id": 7, "metadata_scope": scope}]
 

@@ -250,6 +250,44 @@ async def test_material_review_llm_adapter_preserves_fallback_when_structured_po
 
 
 @pytest.mark.asyncio
+async def test_material_review_llm_adapter_preserves_fallback_on_wrong_typed_fields() -> None:
+    result = await TrainingMaterialReviewService().build_review_async(
+        session=_session(),
+        materials=[_material()],
+        requested_material_ids=[7],
+        report=MaterialReviewReportContext(summary="The learner used ROI proof."),
+        replay=MaterialReviewReplayContext(turns=[]),
+        async_llm_callback=MaterialReviewLLMAdapter(
+            _FakeLLM(
+                json.dumps(
+                    {
+                        "matched_points": [
+                            {
+                                "material_id": 7,
+                                "point": {"text": "dict must not become a point"},
+                                "evidence": ["list must not become evidence"],
+                            }
+                        ],
+                        "missed_points": [
+                            {"material_id": 7, "point": ["list must not become a point"]}
+                        ],
+                        "suggested_rewrites": [
+                            {"text": "dict must not become a suggestion"},
+                            42,
+                        ],
+                    }
+                )
+            )
+        ),
+    )
+
+    assert result.source_state.strategy == "deterministic_fallback"
+    assert result.source_state.llm_used is False
+    assert result.matched_points or result.missed_points
+    assert result.suggested_rewrites
+
+
+@pytest.mark.asyncio
 async def test_material_review_llm_payload_bounds_report_replay_and_snippets() -> None:
     llm = _FakeLLM(
         json.dumps(
@@ -272,6 +310,7 @@ async def test_material_review_llm_payload_bounds_report_replay_and_snippets() -
                 "communication_suggestions": [
                     {"suggestion": f"{index}-{long_text}"} for index in range(10)
                 ],
+                "micro_drills": [{"nested": {"too": {"deep": long_text}}}],
                 "unsupported_key": long_text,
             },
         ),
@@ -284,6 +323,9 @@ async def test_material_review_llm_payload_bounds_report_replay_and_snippets() -
     assert len(payload["report"]["content"]["communication_suggestions"]) == 5
     first_suggestion = payload["report"]["content"]["communication_suggestions"][0]["suggestion"]
     assert len(first_suggestion) <= 803
+    assert payload["report"]["content"]["micro_drills"][0]["nested"] == (
+        "[truncated nested report content]"
+    )
     assert "unsupported_key" not in payload["report"]["content"]
     assert len(payload["replay"]["turns"][0]) <= 803
     assert len(payload["materials"][0]["content_excerpt"]) <= 4003

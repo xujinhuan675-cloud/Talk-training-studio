@@ -24,6 +24,7 @@ from infrastructure.adapters.training_conversation import (
     ConversationTrainingConversationAdapter,
     StakeholderRoomTrainingConversationAdapter,
 )
+from domain.conversation.repository import OwnedMetadataScope
 
 
 def _utcnow() -> datetime:
@@ -111,6 +112,58 @@ class _ConversationState:
     messages: list[ConversationMessage] = field(default_factory=list)
 
 
+def _conversation_scope() -> OwnedMetadataScope:
+    return OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+
+
+def _metadata_text(metadata: dict[str, object], *keys: str) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return None
+
+
+def _matches_conversation_scope(
+    metadata: dict[str, object] | None,
+    scope: OwnedMetadataScope | None,
+) -> bool:
+    if scope is None:
+        return True
+    metadata = dict(metadata or {})
+    auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), dict) else {}
+    owner_user_id = _metadata_text(auth_scope, "userId", "user_id") or _metadata_text(
+        metadata,
+        "ownerUserId",
+        "owner_user_id",
+        "createdByUserId",
+        "created_by_user_id",
+    )
+    owner_team_id = _metadata_text(auth_scope, "teamId", "team_id") or _metadata_text(
+        metadata,
+        "teamId",
+        "team_id",
+        "ownerTeamId",
+        "owner_team_id",
+    )
+    if owner_user_id and owner_user_id == scope.user_id:
+        return True
+    if scope.include_team_scope and owner_team_id and owner_team_id == scope.team_id:
+        return True
+    if not owner_user_id and owner_team_id and owner_team_id == scope.team_id:
+        return True
+    if not owner_user_id and not owner_team_id:
+        return scope.allow_unscoped
+    return False
+
+
 class _ConversationRepository:
     def __init__(self, state: _ConversationState) -> None:
         self._state = state
@@ -131,12 +184,29 @@ class _ConversationRepository:
         self._state.conversations[saved.id] = saved
         return saved
 
-    async def get_by_id(self, conversation_id: int) -> ConversationEntity | None:
-        return self._state.conversations.get(conversation_id)
+    async def get_by_id(
+        self,
+        conversation_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> ConversationEntity | None:
+        conversation = self._state.conversations.get(conversation_id)
+        if conversation is None:
+            return None
+        if not _matches_conversation_scope(conversation.metadata, metadata_scope):
+            return None
+        return conversation
 
-    async def update(self, conversation: ConversationEntity) -> ConversationEntity:
+    async def update(
+        self,
+        conversation: ConversationEntity,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> ConversationEntity:
         if conversation.id is None:
             raise AssertionError("Conversation id is required for update")
+        if not _matches_conversation_scope(conversation.metadata, metadata_scope):
+            raise AssertionError("Conversation is outside metadata scope")
         self._state.conversations[conversation.id] = conversation
         return conversation
 
@@ -344,7 +414,12 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
     )
 
     started = await orchestrator.start_session(
-        CreateTrainingSessionDTO(task_config=_task_config(), mode="text")
+        CreateTrainingSessionDTO(
+            task_config=_task_config(),
+            mode="text",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        )
     )
     first_ref = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
@@ -577,7 +652,12 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
     )
 
     started = await orchestrator.start_session(
-        CreateTrainingSessionDTO(task_config=_task_config(), mode="text")
+        CreateTrainingSessionDTO(
+            task_config=_task_config(),
+            mode="text",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        )
     )
     user_ref = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
@@ -627,6 +707,7 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
             content="Can we restart from the budget objection?",
             metadata={"reason": "clarity", "message_tree_status": "edited"},
         ),
+        metadata_scope=_conversation_scope(),
     )
     retry = await message_tree.retry_message(
         1,
@@ -635,6 +716,7 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
             content="Retry the counterpart answer with a sharper metric.",
             metadata={"temperature": 0.1, "message_tree_status": "retry"},
         ),
+        metadata_scope=_conversation_scope(),
     )
     forked = await message_tree.fork_conversation(
         1,
@@ -649,6 +731,7 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
                 "status": "review-draft",
             },
         ),
+        metadata_scope=_conversation_scope(),
     )
 
     assert _training_semantics(state.conversations[1].metadata) == expected_semantics

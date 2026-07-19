@@ -18,6 +18,7 @@ from application.dto import (
 )
 from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMProviderMetadata, LLMResponse
 from core.logging_config import get_logger
+from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import Message, Run
 from domain.conversation.exceptions import (
@@ -25,6 +26,7 @@ from domain.conversation.exceptions import (
     ConversationNotFoundException,
     LLMProviderException,
 )
+from domain.conversation.repository import OwnedMetadataScope
 
 logger = get_logger(__name__)
 _HISTORY_MESSAGE_STATUSES = {"active", "superseded"}
@@ -32,6 +34,37 @@ _HISTORY_MESSAGE_STATUSES = {"active", "superseded"}
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _require_metadata_scope(
+    scope: OwnedMetadataScope | None,
+    *,
+    operation: str,
+) -> OwnedMetadataScope:
+    if scope is None:
+        raise DomainValidationException(
+            "metadata_scope is required for chat conversation access",
+            field="metadata_scope",
+            details={"operation": operation},
+            message_key="chat.scope.required",
+        )
+    return scope
+
+
+def _require_mutation_metadata_scope(
+    scope: OwnedMetadataScope | None,
+    *,
+    operation: str,
+) -> OwnedMetadataScope:
+    scope = _require_metadata_scope(scope, operation=operation)
+    if scope.allow_unscoped:
+        raise DomainValidationException(
+            "metadata_scope.allow_unscoped is not allowed for chat mutations",
+            field="metadata_scope.allow_unscoped",
+            details={"operation": operation},
+            message_key="chat.scope.allow_unscoped_forbidden",
+        )
+    return scope
 
 
 @dataclass(frozen=True)
@@ -186,14 +219,23 @@ class ChatApplicationService:
         self,
         conversation_id: int,
         dto: ChatRequestDTO,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> AsyncIterator[str]:
         """Send a user message and stream the assistant response as SSE events.
 
         Yields SSE-formatted strings: `data: {...}\\n\\n`
         """
+        scope = _require_mutation_metadata_scope(
+            metadata_scope,
+            operation="send_message_stream",
+        )
         # Phase 1: persist user message and create run
         async with self._uow_factory() as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             if not conv.is_active():
@@ -351,11 +393,20 @@ class ChatApplicationService:
         self,
         conversation_id: int,
         dto: ChatRequestDTO,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> dict:
         """Send a user message and return the full assistant response (non-streaming)."""
+        scope = _require_mutation_metadata_scope(
+            metadata_scope,
+            operation="send_message_sync",
+        )
         # Phase 1: persist user message and create run
         async with self._uow_factory() as uow:
-            conv = await uow.conversation_repository.get_by_id(conversation_id)
+            conv = await uow.conversation_repository.get_by_id(
+                conversation_id,
+                metadata_scope=scope,
+            )
             if conv is None:
                 raise ConversationNotFoundException(conversation_id)
             if not conv.is_active():

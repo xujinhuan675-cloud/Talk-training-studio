@@ -209,24 +209,24 @@ class _FakeConversationService:
         self.list_message_children_call = (conversation_id, message_public_id, kwargs)
         return []
 
-    async def fork_conversation(self, conversation_id: int, message_public_id: str, payload):
-        self.fork_conversation_call = (conversation_id, message_public_id, payload)
+    async def fork_conversation(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.fork_conversation_call = (conversation_id, message_public_id, payload, kwargs)
         return None
 
-    async def edit_message(self, conversation_id: int, message_public_id: str, payload):
-        self.edit_message_call = (conversation_id, message_public_id, payload)
+    async def edit_message(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.edit_message_call = (conversation_id, message_public_id, payload, kwargs)
         return None
 
-    async def retry_message(self, conversation_id: int, message_public_id: str, payload):
-        self.retry_message_call = (conversation_id, message_public_id, payload)
+    async def retry_message(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.retry_message_call = (conversation_id, message_public_id, payload, kwargs)
         return None
 
     async def list_runs(self, conversation_id: int, **kwargs):
         self.list_runs_call = (conversation_id, kwargs)
-        return [], 0
+        return []
 
-    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload):
-        self.action_call = (conversation_id, message_public_id, payload)
+    async def apply_message_action(self, conversation_id: int, message_public_id: str, payload, **kwargs):
+        self.action_call = (conversation_id, message_public_id, payload, kwargs)
         return None
 
     async def create_agent_config(self, payload, **kwargs):
@@ -292,12 +292,12 @@ class _FakeChatService:
         self.sync_call = None
         self.stream_call = None
 
-    async def send_message_sync(self, conversation_id: int, payload):
-        self.sync_call = (conversation_id, payload)
+    async def send_message_sync(self, conversation_id: int, payload, **kwargs):
+        self.sync_call = (conversation_id, payload, kwargs)
         return {"message_id": 1, "content": "ok"}
 
-    async def send_message_stream(self, conversation_id: int, payload):
-        self.stream_call = (conversation_id, payload)
+    async def send_message_stream(self, conversation_id: int, payload, **kwargs):
+        self.stream_call = (conversation_id, payload, kwargs)
         yield "event: done\ndata: {}\n\n"
 
 
@@ -715,6 +715,75 @@ def test_cross_user_message_action_is_blocked_before_service_call() -> None:
     assert conversation_service.action_call is None
 
 
+def test_conversation_child_routes_pass_metadata_scope_to_service_calls() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            )
+        }
+    )
+    client = _client(conversation_service)
+    headers = {"X-Mock-User": "sales"}
+
+    responses = [
+        client.get("/api/v1/conversations/7/messages", headers=headers),
+        client.get("/api/v1/conversations/7/messages/search", params={"q": "deal"}, headers=headers),
+        client.get("/api/v1/conversations/7/messages/msg_answer/path", headers=headers),
+        client.get("/api/v1/conversations/7/messages/msg_answer/locate", headers=headers),
+        client.get("/api/v1/conversations/7/messages/msg_answer/children", headers=headers),
+        client.get("/api/v1/conversations/7/runs", headers=headers),
+        client.post(
+            "/api/v1/conversations/7/messages/msg_answer/actions",
+            json={"action": "retry"},
+            headers=headers,
+        ),
+        client.post(
+            "/api/v1/conversations/7/messages/msg_answer/fork",
+            json={},
+            headers=headers,
+        ),
+        client.post(
+            "/api/v1/conversations/7/messages/msg_answer/edit",
+            json={"content": "edit"},
+            headers=headers,
+        ),
+        client.post(
+            "/api/v1/conversations/7/messages/msg_answer/retry",
+            json={},
+            headers=headers,
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [200] * len(responses)
+    read_calls = [
+        conversation_service.list_messages_call,
+        conversation_service.search_call,
+        conversation_service.get_message_path_call,
+        conversation_service.locate_message_call,
+        conversation_service.list_message_children_call,
+        conversation_service.list_runs_call,
+    ]
+    write_calls = [
+        conversation_service.action_call,
+        conversation_service.fork_conversation_call,
+        conversation_service.edit_message_call,
+        conversation_service.retry_message_call,
+    ]
+    for call in read_calls:
+        scope = call[-1]["metadata_scope"]
+        assert scope.user_id == "user-sales-001"
+        assert scope.allow_unscoped is True
+    for call in write_calls:
+        scope = call[-1]["metadata_scope"]
+        assert scope.user_id == "user-sales-001"
+        assert scope.allow_unscoped is False
+
+
 @pytest.mark.parametrize(
     ("method", "path", "request_kwargs", "service_attr"),
     [
@@ -837,6 +906,65 @@ def test_cross_user_chat_is_blocked_before_llm_service_call() -> None:
     assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert chat_service.sync_call is None
     assert chat_service.stream_call is None
+
+
+def test_chat_route_passes_current_user_scope_to_chat_service() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            )
+        }
+    )
+    chat_service = _FakeChatService()
+    client = _client(conversation_service, chat_service)
+
+    response = client.post(
+        "/api/v1/conversations/7/chat",
+        headers={"X-Mock-User": "sales"},
+        json={"message": "hello", "stream": False},
+    )
+
+    assert response.status_code == 200
+    scope = chat_service.sync_call[-1]["metadata_scope"]
+    assert scope.user_id == "user-sales-001"
+    assert scope.team_id == "team-revenue"
+    assert scope.include_team_scope is False
+    assert scope.allow_unscoped is False
+
+
+def test_chat_stream_route_passes_current_user_scope_to_chat_service() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            )
+        }
+    )
+    chat_service = _FakeChatService()
+    client = _client(conversation_service, chat_service)
+
+    response = client.post(
+        "/api/v1/conversations/7/chat",
+        headers={"X-Mock-User": "sales"},
+        json={"message": "hello", "stream": True},
+    )
+
+    assert response.status_code == 200
+    assert chat_service.sync_call is None
+    scope = chat_service.stream_call[-1]["metadata_scope"]
+    assert scope.user_id == "user-sales-001"
+    assert scope.team_id == "team-revenue"
+    assert scope.include_team_scope is False
+    assert scope.allow_unscoped is False
 
 
 def test_agent_config_routes_reject_unsupported_system_roles_before_service_call() -> None:
