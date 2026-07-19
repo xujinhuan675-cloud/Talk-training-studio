@@ -140,6 +140,7 @@ class _FakeConversationService:
         self.agent_config_update_call = None
         self.agent_config_delete_call = None
         self.get_calls: list[int] = []
+        self.create_scope_calls = []
         self.get_scope_calls = []
         self.update_scope_calls = []
         self.delete_scope_calls = []
@@ -148,8 +149,9 @@ class _FakeConversationService:
         self.agent_config_update_scope_calls = []
         self.agent_config_delete_scope_calls = []
 
-    async def create_conversation(self, payload):
+    async def create_conversation(self, payload, **kwargs):
         self.created_payload = payload
+        self.create_scope_calls.append(kwargs.get("metadata_scope"))
         return _conversation(21, metadata=payload.metadata)
 
     async def list_conversations(self, **kwargs):
@@ -339,6 +341,9 @@ def test_create_conversation_stamps_current_mock_user_scope() -> None:
     assert metadata["authScope"]["teamId"] == "team-revenue"
     assert metadata["source"] == "test"
     assert conversation_service.created_payload.metadata["ownerUserId"] == "user-sales-001"
+    assert conversation_service.create_scope_calls[0].user_id == "user-sales-001"
+    assert conversation_service.create_scope_calls[0].team_id == "team-revenue"
+    assert conversation_service.create_scope_calls[0].allow_unscoped is False
 
 
 def test_cross_user_conversation_search_is_scoped_before_search_call() -> None:

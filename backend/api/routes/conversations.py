@@ -110,7 +110,10 @@ async def create_conversation(
     current_user: CurrentUser = Depends(_conversation_user),
 ):
     payload = conversation_create_payload_for_user(payload, current_user)
-    conv = await service.create_conversation(payload)
+    conv = await service.create_conversation(
+        payload,
+        metadata_scope=_conversation_mutation_scope(current_user),
+    )
     return success_response(conv, message=t("ok"))
 
 

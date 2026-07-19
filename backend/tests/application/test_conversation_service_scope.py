@@ -7,6 +7,7 @@ import pytest
 
 from application.dto import (
     CreateAgentConfigDTO,
+    CreateConversationDTO,
     EditMessageDTO,
     ForkConversationDTO,
     MessageActionDTO,
@@ -18,7 +19,6 @@ from application.services.conversation_service import ConversationApplicationSer
 from domain.common.exceptions import DomainValidationException
 from domain.conversation.entity import AgentConfig, Conversation
 from domain.conversation.exceptions import (
-    AgentConfigNameExistsException,
     AgentConfigNotFoundException,
     ConversationNotFoundException,
 )
@@ -92,6 +92,9 @@ class _FakeAgentConfigRepository:
         self.get_by_name_calls: list[dict[str, Any]] = []
         self.create_calls: list[AgentConfig] = []
         self.update_calls: list[dict[str, Any]] = []
+        self.delete_calls: list[dict[str, Any]] = []
+        self.list_calls: list[dict[str, Any]] = []
+        self.count_calls: list[dict[str, Any]] = []
 
     async def get_by_name(self, name: str, *, metadata_scope=None):
         self.get_by_name_calls.append({"name": name, "metadata_scope": metadata_scope})
@@ -113,6 +116,17 @@ class _FakeAgentConfigRepository:
         self.update_calls.append({"config": config, "metadata_scope": metadata_scope})
         self.config = config
         return config
+
+    async def delete(self, config_id: int, *, metadata_scope=None):
+        self.delete_calls.append({"config_id": config_id, "metadata_scope": metadata_scope})
+
+    async def list(self, *, skip: int = 0, limit: int = 20, metadata_scope=None):
+        self.list_calls.append({"skip": skip, "limit": limit, "metadata_scope": metadata_scope})
+        return [self.config][skip : skip + limit]
+
+    async def count(self, *, metadata_scope=None):
+        self.count_calls.append({"metadata_scope": metadata_scope})
+        return 1
 
 
 class _ScopedMissAgentConfigRepository(_FakeAgentConfigRepository):
@@ -144,6 +158,16 @@ class _FakeUnitOfWork:
 
     async def __aexit__(self, exc_type, exc, tb):
         return None
+
+
+class _FakeConversationCreateRepository:
+    def __init__(self) -> None:
+        self.create_calls: list[Conversation] = []
+
+    async def create(self, conversation: Conversation) -> Conversation:
+        conversation.id = 17
+        self.create_calls.append(conversation)
+        return conversation
 
 
 def _service(repo: _FakeAgentConfigRepository) -> ConversationApplicationService:
@@ -319,6 +343,38 @@ async def _call_conversation_mutation_method(
     raise AssertionError(f"Unknown method under test: {method_name}")
 
 
+async def _call_agent_config_method(
+    service: ConversationApplicationService,
+    method_name: str,
+    *,
+    metadata_scope=None,
+) -> None:
+    metadata = dict(_config(7, "current").metadata)
+    if method_name == "create_agent_config":
+        await service.create_agent_config(
+            CreateAgentConfigDTO(name="new-agent", metadata=metadata),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "get_agent_config":
+        await service.get_agent_config(7, metadata_scope=metadata_scope)
+        return
+    if method_name == "list_agent_configs":
+        await service.list_agent_configs(metadata_scope=metadata_scope)
+        return
+    if method_name == "update_agent_config":
+        await service.update_agent_config(
+            7,
+            UpdateAgentConfigDTO(name="renamed"),
+            metadata_scope=metadata_scope,
+        )
+        return
+    if method_name == "delete_agent_config":
+        await service.delete_agent_config(7, metadata_scope=metadata_scope)
+        return
+    raise AssertionError(f"Unknown method under test: {method_name}")
+
+
 @pytest.mark.asyncio
 async def test_agent_config_create_and_update_name_checks_are_metadata_scoped() -> None:
     repo = _FakeAgentConfigRepository()
@@ -326,7 +382,7 @@ async def test_agent_config_create_and_update_name_checks_are_metadata_scoped() 
     scope = _scope()
 
     created = await service.create_agent_config(
-        CreateAgentConfigDTO(name="shared-hidden"),
+        CreateAgentConfigDTO(name="shared-hidden", metadata=dict(_config(8, "new").metadata)),
         metadata_scope=scope,
     )
     updated = await service.update_agent_config(
@@ -346,14 +402,125 @@ async def test_agent_config_create_and_update_name_checks_are_metadata_scoped() 
 
 
 @pytest.mark.asyncio
-async def test_agent_config_unscoped_name_check_still_detects_visible_conflict() -> None:
+async def test_create_conversation_requires_metadata_scope() -> None:
+    repo = _FakeConversationCreateRepository()
+    service = _service_with_repositories(conversation_repository=repo)
+
+    with pytest.raises(DomainValidationException):
+        await service.create_conversation(
+            CreateConversationDTO(title="Unscoped", metadata=dict(_config(1, "x").metadata)),
+        )
+
+    assert repo.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_rejects_metadata_outside_scope() -> None:
+    repo = _FakeConversationCreateRepository()
+    service = _service_with_repositories(conversation_repository=repo)
+
+    with pytest.raises(DomainValidationException):
+        await service.create_conversation(
+            CreateConversationDTO(
+                title="Forged",
+                metadata={"ownerUserId": "user-cs-001", "teamId": "team-service"},
+            ),
+            metadata_scope=_scope(),
+        )
+
+    assert repo.create_calls == []
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "create_agent_config",
+        "get_agent_config",
+        "list_agent_configs",
+        "update_agent_config",
+        "delete_agent_config",
+    ],
+)
+@pytest.mark.asyncio
+async def test_agent_config_methods_require_metadata_scope(method_name: str) -> None:
     repo = _FakeAgentConfigRepository()
     service = _service(repo)
 
-    with pytest.raises(AgentConfigNameExistsException):
-        await service.create_agent_config(CreateAgentConfigDTO(name="shared-hidden"))
+    with pytest.raises(DomainValidationException):
+        await _call_agent_config_method(service, method_name)
 
-    assert repo.get_by_name_calls == [{"name": "shared-hidden", "metadata_scope": None}]
+    assert repo.get_by_name_calls == []
+    assert repo.create_calls == []
+    assert repo.update_calls == []
+    assert repo.delete_calls == []
+    assert repo.list_calls == []
+    assert repo.count_calls == []
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ["create_agent_config", "update_agent_config", "delete_agent_config"],
+)
+@pytest.mark.asyncio
+async def test_agent_config_mutations_reject_read_scope(method_name: str) -> None:
+    repo = _FakeAgentConfigRepository()
+    service = _service(repo)
+
+    with pytest.raises(DomainValidationException):
+        await _call_agent_config_method(
+            service,
+            method_name,
+            metadata_scope=_read_scope(),
+        )
+
+    assert repo.get_by_name_calls == []
+    assert repo.create_calls == []
+    assert repo.update_calls == []
+    assert repo.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_config_create_rejects_metadata_outside_scope() -> None:
+    repo = _FakeAgentConfigRepository()
+    service = _service(repo)
+
+    with pytest.raises(DomainValidationException):
+        await service.create_agent_config(
+            CreateAgentConfigDTO(
+                name="forged-agent",
+                metadata={"ownerUserId": "user-cs-001", "teamId": "team-service"},
+            ),
+            metadata_scope=_scope(),
+        )
+
+    assert repo.get_by_name_calls == []
+    assert repo.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_config_update_preserves_acl_metadata() -> None:
+    repo = _FakeAgentConfigRepository()
+    service = _service(repo)
+
+    updated = await service.update_agent_config(
+        7,
+        UpdateAgentConfigDTO(
+            metadata={
+                "ownerUserId": "user-cs-001",
+                "teamId": "team-service",
+                "label": "review helper",
+            },
+        ),
+        metadata_scope=_scope(),
+    )
+
+    assert updated.metadata["ownerUserId"] == "user-sales-001"
+    assert updated.metadata["teamId"] == "team-revenue"
+    assert updated.metadata["authScope"] == {
+        "userId": "user-sales-001",
+        "teamId": "team-revenue",
+    }
+    assert updated.metadata["label"] == "review helper"
 
 
 @pytest.mark.parametrize(
