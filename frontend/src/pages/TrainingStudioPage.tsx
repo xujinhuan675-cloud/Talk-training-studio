@@ -35,6 +35,7 @@ import {
   getDefaultTrainingStudioConfig,
   getExpressionFrameworkLabel,
   getInterviewScenarioPreset,
+  getPipecatReadinessStatus,
   getProductScenarioPreset,
   getTrainingDifficultyLabel,
   getTrainingLevelLabel,
@@ -229,11 +230,15 @@ function getPipecatRealtimeStatus(
   capabilities: RealtimeCapabilities['pipecat'],
   tr: TranslateInline,
 ): RealtimeDiagnosticStatus {
-  if (capabilities.readyForCall) {
+  const readinessStatus = getPipecatReadinessStatus(capabilities)
+  if (readinessStatus === 'ready') {
     return { label: tr('可发起通话', 'Ready for call'), tone: 'ready' }
   }
-  if (capabilities.readiness?.status) {
-    return { label: sanitizeRealtimeDiagnosticText(capabilities.readiness.status), tone: 'blocked' }
+  if (readinessStatus === 'warning') {
+    return { label: tr('需处理阻塞项', 'Needs attention'), tone: 'warning' }
+  }
+  if (readinessStatus === 'blocked') {
+    return { label: tr('已阻塞', 'Blocked'), tone: 'blocked' }
   }
   if (capabilities.available) {
     return { label: tr('需处理阻塞项', 'Blocked'), tone: 'warning' }

@@ -825,6 +825,41 @@ function countRealtimeBlockingIssues(capabilities: RealtimeCapabilities | null |
   ].length
 }
 
+function normalizeTrainingStudioReadinessStatus(value: unknown): TrainingStudioReadinessStatus {
+  const status = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (status === 'ready' || status === 'warning' || status === 'blocked' || status === 'unknown') {
+    return status
+  }
+  if (status === 'available') return 'ready'
+  if (status === 'unavailable' || status === 'missingdependency' || status === 'missing_dependency') {
+    return 'blocked'
+  }
+  return 'unknown'
+}
+
+export function getPipecatReadinessStatus(
+  capabilities: RealtimeCapabilities['pipecat'] | null | undefined,
+): TrainingStudioReadinessStatus {
+  if (!capabilities) return 'unknown'
+
+  const backendStatus = normalizeTrainingStudioReadinessStatus(capabilities.readiness?.status)
+  if (backendStatus !== 'unknown') return backendStatus
+  if (capabilities.readyForCall) return 'ready'
+  if (
+    capabilities.available
+    || capabilities.coreAvailable
+    || capabilities.websocketAvailable
+    || capabilities.vadAvailable
+    || capabilities.sttAvailable
+    || capabilities.ttsAvailable
+    || capabilities.llmAvailable
+    || capabilities.turnDetectionAvailable
+  ) {
+    return 'warning'
+  }
+  return 'blocked'
+}
+
 function normalizeRuntimeCapabilityKind(value: unknown): RuntimeCapabilityKind {
   return String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
 }
@@ -951,23 +986,25 @@ function buildRealtimeReadinessItem(
     }
   }
 
-  const pipecatReady = Boolean(capabilities.pipecat.readyForCall)
-  const partialReady = pipecatReady
-    || capabilities.pipecat.available
-    || readyFeatureCount > 0
-  const status: TrainingStudioReadinessStatus = pipecatReady
-    ? 'ready'
-    : partialReady
-      ? 'warning'
-      : 'blocked'
+  const status = getPipecatReadinessStatus(capabilities.pipecat)
+  const pipecatReady = status === 'ready'
+  const statusLabel = pipecatReady
+    ? 'can start calls'
+    : status === 'warning'
+      ? 'is not fully ready'
+      : 'is blocked'
 
   return {
     key: 'realtime-runtime',
     label: 'Realtime runtime',
     status,
-    detail: `Pipecat ${pipecatReady ? 'can start calls' : 'is not fully ready'} with ${readyFeatureCount}/${totalFeatureCount} pipeline features available.`,
+    detail: `Pipecat ${statusLabel} with ${readyFeatureCount}/${totalFeatureCount} pipeline features available.`,
     tags: [
-      pipecatReady ? 'Pipecat call-ready' : 'Pipecat checked',
+      pipecatReady
+        ? 'Pipecat call-ready'
+        : status === 'warning'
+          ? 'Pipecat needs attention'
+          : 'Pipecat blocked',
     ],
     metrics: [
       { label: 'pipecat features', value: `${readyFeatureCount}/${totalFeatureCount}` },

@@ -165,6 +165,43 @@ test('buildTrainingStudioCapabilityReadiness summarizes ready model and realtime
   assert.equal(readiness.realtimeCounts.pipecatReadyFeatures, 7)
 })
 
+test('buildTrainingStudioCapabilityReadiness trusts backend Pipecat readiness status', () => {
+  const pipecat = {
+    available: true,
+    coreAvailable: true,
+    websocketAvailable: true,
+    vadAvailable: true,
+    sttAvailable: true,
+    ttsAvailable: true,
+    llmAvailable: true,
+    turnDetectionAvailable: true,
+    missingModules: [],
+    optionalMissingModules: [],
+    error: null,
+    readyForCall: false,
+    readiness: {
+      ready: false,
+      status: 'blocked',
+      blockingReasons: [
+        {
+          code: 'MISSING_OPENAI_API_KEY',
+          message: 'backend readiness says the call cannot start',
+        },
+      ],
+    },
+  }
+
+  const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
+    realtimeCapabilities: { pipecat },
+  })
+
+  assert.equal(trainingStudio.getPipecatReadinessStatus(pipecat), 'blocked')
+  assert.equal(readiness.realtime.status, 'blocked')
+  assert.equal(readiness.overallStatus, 'blocked')
+  assert.equal(readiness.realtimeCounts.blockingIssues, 1)
+  assert.equal(readiness.realtime.tags.includes('Pipecat blocked'), true)
+})
+
 test('buildTrainingStudioCapabilityReadiness marks tool-only agent readiness as warning', () => {
   const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
     modelChoices: [
