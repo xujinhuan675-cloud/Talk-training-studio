@@ -1035,19 +1035,13 @@ async def _require_guidance_persistence_room_id(
 async def _require_active_guidance_room_id(
     session_id: str,
     svc: TrainingSessionService,
-    current_user: CurrentUser | None = None,
+    current_user: CurrentUser,
 ) -> int:
-    if current_user is None:
-        try:
-            session = await svc.get_session(session_id)
-        except ValueError as exc:
-            raise _not_found_if_missing(exc) from exc
-    else:
-        session = await _require_accessible_training_session(
-            session_id,
-            svc=svc,
-            current_user=current_user,
-        )
+    session = await _require_accessible_training_session(
+        session_id,
+        svc=svc,
+        current_user=current_user,
+    )
     if session.status != TrainingSessionStatus.ACTIVE:
         raise HTTPException(
             status_code=400, detail="Training session must be active before requesting guidance"
@@ -1071,19 +1065,13 @@ async def _generate_training_guidance(
     svc: TrainingSessionService,
     chatroom_svc: ChatRoomApplicationService,
     guidance_svc: TrainingLiveGuidanceService,
-    current_user: CurrentUser | None = None,
+    current_user: CurrentUser,
 ) -> dict[str, object]:
-    if current_user is None:
-        try:
-            session = await svc.get_session(session_id)
-        except ValueError as exc:
-            raise _not_found_if_missing(exc) from exc
-    else:
-        session = await _require_accessible_training_session(
-            session_id,
-            svc=svc,
-            current_user=current_user,
-        )
+    session = await _require_accessible_training_session(
+        session_id,
+        svc=svc,
+        current_user=current_user,
+    )
 
     if session.status != TrainingSessionStatus.ACTIVE:
         raise HTTPException(
@@ -1366,7 +1354,7 @@ async def _resolve_realtime_binding(
     *,
     svc: TrainingSessionService,
     uow_factory: Callable[..., AbstractUnitOfWork],
-    current_user: CurrentUser | None = None,
+    current_user: CurrentUser,
 ) -> tuple[str, int] | None:
     if session_id is None and room_id is None:
         return None
@@ -1376,11 +1364,7 @@ async def _resolve_realtime_binding(
     try:
         training_session = await svc.get_session(
             session_id,
-            access_scope=(
-                _training_session_access_scope_for_current_user(current_user)
-                if current_user is not None
-                else None
-            ),
+            access_scope=_training_session_access_scope_for_current_user(current_user),
         )
     except PermissionError as exc:
         raise _session_access_denied(exc) from exc
@@ -1419,13 +1403,15 @@ async def _build_realtime_voice_context(
     provider: str,
     svc: TrainingSessionService,
     uow_factory: Callable[..., AbstractUnitOfWork],
+    current_user: CurrentUser,
 ) -> dict[str, object]:
     """Build the TrainingCore-derived context shared by text and voice runtimes."""
 
-    try:
-        session = await svc.get_session(binding[0])
-    except ValueError as exc:
-        raise _not_found_if_missing(exc) from exc
+    session = await _require_accessible_training_session(
+        binding[0],
+        svc=svc,
+        current_user=current_user,
+    )
     metadata = training_core_metadata_for_session(
         session,
         runtime="realtime_voice",
@@ -1773,15 +1759,7 @@ def _build_video_answer_url(
 
 
 def _training_material_tool_scope_for_current_user(current_user: CurrentUser) -> OwnedMetadataScope:
-    scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
-    if scope is not None:
-        return scope
-    return OwnedMetadataScope(
-        user_id=current_user.user_id,
-        team_id=current_user.team_id,
-        include_team_scope=bool(current_user.team_id),
-        allow_unscoped=False,
-    )
+    return owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
 
 
 def _training_material_tool_consumer(
@@ -2911,6 +2889,7 @@ async def realtime_training_session(
             provider=provider,
             svc=svc,
             uow_factory=uow_factory,
+            current_user=current_user,
         )
         await runner.start(
             binding=RealtimeSessionBinding(

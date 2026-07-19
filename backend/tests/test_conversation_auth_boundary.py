@@ -525,14 +525,14 @@ def test_leader_single_resource_routes_use_team_metadata_scope() -> None:
     assert conversation_service.agent_config_delete_scope_calls[0].include_team_scope is True
 
 
-def test_admin_single_resource_routes_pass_unscoped_metadata_scope() -> None:
-    other_metadata = {
-        "ownerUserId": "user-cs-001",
-        "teamId": "team-service",
+def test_admin_single_resource_routes_use_explicit_metadata_scope() -> None:
+    admin_metadata = {
+        "ownerUserId": "user-admin-001",
+        "teamId": "team-ops",
     }
     conversation_service = _FakeConversationService(
-        conversations={7: _conversation(7, metadata=other_metadata)},
-        agent_configs={8: _agent_config(8, metadata={})},
+        conversations={7: _conversation(7, metadata=admin_metadata)},
+        agent_configs={8: _agent_config(8, metadata=admin_metadata)},
     )
     client = _client(conversation_service)
     headers = {"X-Mock-User": "admin"}
@@ -547,12 +547,138 @@ def test_admin_single_resource_routes_pass_unscoped_metadata_scope() -> None:
     ]
 
     assert [response.status_code for response in responses] == [200, 200, 200, 200, 200, 200]
-    assert conversation_service.get_scope_calls == [None]
-    assert conversation_service.update_scope_calls == [None]
-    assert conversation_service.delete_scope_calls == [None]
-    assert conversation_service.agent_config_get_scope_calls == [None, None]
-    assert conversation_service.agent_config_update_scope_calls == [None]
-    assert conversation_service.agent_config_delete_scope_calls == [None]
+    conversation_scopes = (
+        conversation_service.get_scope_calls
+        + conversation_service.update_scope_calls
+        + conversation_service.delete_scope_calls
+    )
+    agent_config_scopes = (
+        conversation_service.agent_config_get_scope_calls
+        + conversation_service.agent_config_update_scope_calls
+        + conversation_service.agent_config_delete_scope_calls
+    )
+    assert conversation_scopes
+    assert agent_config_scopes
+    for scope in conversation_scopes + agent_config_scopes:
+        assert scope is not None
+        assert scope.user_id == "user-admin-001"
+        assert scope.team_id == "team-ops"
+        assert scope.include_team_scope is True
+    assert conversation_service.get_scope_calls[0].allow_unscoped is True
+    assert conversation_service.update_scope_calls[0].allow_unscoped is False
+    assert conversation_service.delete_scope_calls[0].allow_unscoped is False
+    assert {scope.allow_unscoped for scope in agent_config_scopes} == {False}
+
+
+def test_admin_single_resource_routes_reject_resources_outside_explicit_scope() -> None:
+    other_metadata = {
+        "ownerUserId": "user-cs-001",
+        "teamId": "team-service",
+    }
+    conversation_service = _FakeConversationService(
+        conversations={7: _conversation(7, metadata=other_metadata)},
+        agent_configs={8: _agent_config(8, metadata=other_metadata)},
+    )
+    client = _client(conversation_service)
+    headers = {"X-Mock-User": "admin"}
+
+    responses = [
+        client.get("/api/v1/conversations/7", headers=headers),
+        client.patch("/api/v1/conversations/7", headers=headers, json={"title": "admin"}),
+        client.delete("/api/v1/conversations/7", headers=headers),
+        client.get("/api/v1/agent-configs/8", headers=headers),
+        client.patch("/api/v1/agent-configs/8", headers=headers, json={"name": "admin-agent"}),
+        client.delete("/api/v1/agent-configs/8", headers=headers),
+    ]
+
+    assert [response.status_code for response in responses] == [403, 403, 403, 403, 403, 403]
+    assert conversation_service.update_call is None
+    assert conversation_service.delete_call is None
+    assert conversation_service.agent_config_update_call is None
+    assert conversation_service.agent_config_delete_call is None
+
+
+def test_non_admin_cannot_update_or_delete_unscoped_conversation() -> None:
+    conversation_service = _FakeConversationService(
+        conversations={7: _conversation(7, metadata={})}
+    )
+    client = _client(conversation_service)
+    headers = {"X-Mock-User": "sales"}
+
+    update_resp = client.patch(
+        "/api/v1/conversations/7",
+        headers=headers,
+        json={"title": "unscoped update"},
+    )
+    delete_resp = client.delete("/api/v1/conversations/7", headers=headers)
+
+    assert update_resp.status_code == 403
+    assert delete_resp.status_code == 403
+    assert conversation_service.update_scope_calls[0].allow_unscoped is False
+    assert conversation_service.delete_scope_calls[0].allow_unscoped is False
+    assert conversation_service.update_call is None
+    assert conversation_service.delete_call is None
+
+
+@pytest.mark.parametrize(
+    ("path", "request_kwargs", "service_attr"),
+    [
+        pytest.param(
+            "/api/v1/conversations/7/messages/msg_answer/actions",
+            {"json": {"action": "retry"}},
+            "action_call",
+            id="message-action",
+        ),
+        pytest.param(
+            "/api/v1/conversations/7/messages/msg_answer/edit",
+            {"json": {"content": "edit"}},
+            "edit_message_call",
+            id="message-edit",
+        ),
+        pytest.param(
+            "/api/v1/conversations/7/messages/msg_answer/retry",
+            {"json": {}},
+            "retry_message_call",
+            id="message-retry",
+        ),
+    ],
+)
+def test_non_admin_cannot_mutate_unscoped_conversation_tree(
+    path: str,
+    request_kwargs: dict,
+    service_attr: str,
+) -> None:
+    conversation_service = _FakeConversationService(
+        conversations={7: _conversation(7, metadata={})}
+    )
+    client = _client(conversation_service)
+
+    response = client.post(path, headers={"X-Mock-User": "sales"}, **request_kwargs)
+
+    assert response.status_code == 403
+    assert conversation_service.get_calls == [7]
+    assert conversation_service.get_scope_calls[0].allow_unscoped is False
+    assert getattr(conversation_service, service_attr) is None
+
+
+def test_non_admin_cannot_chat_against_unscoped_conversation() -> None:
+    conversation_service = _FakeConversationService(
+        conversations={7: _conversation(7, metadata={})}
+    )
+    chat_service = _FakeChatService()
+    client = _client(conversation_service, chat_service)
+
+    response = client.post(
+        "/api/v1/conversations/7/chat",
+        headers={"X-Mock-User": "sales"},
+        json={"message": "hello", "stream": False},
+    )
+
+    assert response.status_code == 403
+    assert conversation_service.get_calls == [7]
+    assert conversation_service.get_scope_calls[0].allow_unscoped is False
+    assert chat_service.sync_call is None
+    assert chat_service.stream_call is None
 
 
 def test_cross_user_message_action_is_blocked_before_service_call() -> None:

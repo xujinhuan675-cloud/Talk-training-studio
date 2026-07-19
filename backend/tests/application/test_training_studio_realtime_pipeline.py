@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from application.ports.realtime import (
@@ -60,8 +62,12 @@ class _RealtimePersistenceUoW:
 
 
 class _TrainingSessionRecorder:
-    def __init__(self) -> None:
+    def __init__(self, *, room_id: str | None = None) -> None:
         self.calls: list[tuple[str, int]] = []
+        self.room_id = room_id
+
+    async def get_session(self, session_id: str):
+        return SimpleNamespace(session_id=session_id, room_id=self.room_id)
 
     async def record_turns(self, session_id: str, count: int = 1):
         self.calls.append((session_id, count))
@@ -209,7 +215,7 @@ async def test_transcript_sink_persists_without_transport_dependency():
 async def test_persistence_sink_writes_room_message_publishes_and_records_turn():
     room = ChatRoom(id=12, name="Realtime room", type="battle_prep")
     messages = _MessageRepository()
-    recorder = _TrainingSessionRecorder()
+    recorder = _TrainingSessionRecorder(room_id="12")
     published = []
     transcript = build_realtime_transcript(
         {
@@ -247,6 +253,35 @@ async def test_persistence_sink_writes_room_message_publishes_and_records_turn()
     assert published[0][0] == 12
     assert published[0][1].content == "We can define the pilot metric first."
     assert recorder.calls == [("training-6", 1)]
+
+
+@pytest.mark.asyncio
+async def test_persistence_sink_rejects_transcript_when_session_room_does_not_match_binding():
+    room = ChatRoom(id=12, name="Realtime room", type="battle_prep")
+    messages = _MessageRepository()
+    recorder = _TrainingSessionRecorder(room_id="99")
+    transcript = build_realtime_transcript(
+        {
+            "type": "transcript.done",
+            "text": "This should not be persisted.",
+        },
+        binding=RealtimeSessionBinding(training_session_id="training-6", room_id=12),
+        provider="pipecat",
+        realtime_session_id="rt-6",
+    )
+    assert transcript is not None
+
+    sink = RealtimeTranscriptPersistenceSink(
+        uow_factory=lambda **_kwargs: _RealtimePersistenceUoW(room, messages),
+        session_service=recorder,
+    )
+
+    with pytest.raises(PermissionError):
+        await sink.persist(transcript)
+
+    assert messages.messages == []
+    assert recorder.calls == []
+    assert room.last_message_at is None
 
 
 @pytest.mark.asyncio

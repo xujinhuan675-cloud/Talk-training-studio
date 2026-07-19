@@ -60,6 +60,20 @@ async def _get_accessible_conversation(
     )
 
 
+async def _get_mutable_conversation(
+    service: ConversationApplicationService,
+    conversation_id: int,
+    current_user: CurrentUser,
+) -> ConversationDTO:
+    return await service.get_conversation(
+        conversation_id,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=False,
+        ),
+    )
+
+
 async def _get_accessible_agent_config(
     service: ConversationApplicationService,
     config_id: int,
@@ -147,7 +161,7 @@ async def update_conversation(
         payload,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=True,
+            allow_unscoped=False,
         ),
     )
     return success_response(conv, message=t("ok"))
@@ -167,7 +181,7 @@ async def delete_conversation(
         conversation_id,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=True,
+            allow_unscoped=False,
         ),
     )
     return success_response(conv, message=t("ok"))
@@ -252,7 +266,7 @@ async def apply_message_action(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    await _get_mutable_conversation(service, conversation_id, current_user)
     item = await service.apply_message_action(conversation_id, message_public_id, payload)
     return success_response(item, message=t("ok"))
 
@@ -366,7 +380,7 @@ async def edit_message(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    await _get_mutable_conversation(service, conversation_id, current_user)
     item = await service.edit_message(conversation_id, message_public_id, payload)
     return success_response(item, message=t("ok"))
 
@@ -383,7 +397,7 @@ async def retry_message(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    await _get_accessible_conversation(service, conversation_id, current_user)
+    await _get_mutable_conversation(service, conversation_id, current_user)
     item = await service.retry_message(conversation_id, message_public_id, payload)
     return success_response(item, message=t("ok"))
 

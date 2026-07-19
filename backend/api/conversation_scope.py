@@ -79,9 +79,6 @@ def user_can_access_owned_metadata(
     *,
     allow_unscoped: bool = True,
 ) -> bool:
-    if current_user.is_admin:
-        return True
-
     metadata = _as_mapping(metadata)
     owner_user_id = _conversation_owner_user_id(metadata)
     owner_team_id = _conversation_owner_team_id(metadata)
@@ -90,7 +87,11 @@ def user_can_access_owned_metadata(
         return allow_unscoped
     if owner_user_id and owner_user_id == current_user.user_id:
         return True
-    if current_user.is_leader and owner_team_id and owner_team_id == current_user.team_id:
+    if (
+        (current_user.is_admin or current_user.is_leader)
+        and owner_team_id
+        and owner_team_id == current_user.team_id
+    ):
         return True
     if not owner_user_id and owner_team_id and owner_team_id == current_user.team_id:
         return True
@@ -101,13 +102,11 @@ def owned_metadata_scope_for_current_user(
     current_user: CurrentUser,
     *,
     allow_unscoped: bool,
-) -> OwnedMetadataScope | None:
-    if current_user.is_admin:
-        return None
+) -> OwnedMetadataScope:
     return OwnedMetadataScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        include_team_scope=current_user.is_leader,
+        include_team_scope=current_user.is_admin or current_user.is_leader,
         allow_unscoped=allow_unscoped,
     )
 

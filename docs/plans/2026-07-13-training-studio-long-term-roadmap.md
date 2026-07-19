@@ -210,7 +210,7 @@ Training Studio 的长期形态是：
 下一阶段优先顺序：
 
 1. 训练素材窄 tool consumer 已接入复盘助手前端，并落地素材对照卡片和可替换 LLM adapter；下一步只做素材对照质量评估、提示词微调、异常观测和真实配置 smoke，继续保留 deterministic fallback。
-2. auth / ACL 漏洞点稳定后再作为核心切片推进，尤其是未来会被 tool/RAG 使用的 get/update/delete/list/count helper。
+2. auth / ACL 已开始核心切片：共享 `OwnedMetadataScope` 对 admin 改为显式 user/team scope，conversation/chat 写路径禁止 legacy unscoped mutation；下一步继续处理服务层 `metadata_scope=None` full-access footgun、真实用户/团队 auth 和 TrainingSession admin scope 产品语义。
 3. text runtime / message-tree 的真实 UI reload/fork 操作验收单独排期靠后；当前先保留服务契约和测试矩阵，不阻塞复盘助手接入。
 4. Pipecat 下一步只做 metrics/tracing、provider error taxonomy、turn latency 统计；真实浏览器麦克风 E2E 单独排期靠后。
 5. 视频模式先保持用户视频回答上传和后续分析，不进入会议式虚拟人实现。

@@ -196,6 +196,7 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
         metadata = transcript_to_message_metadata(transcript)
         sender_type, sender_id = _sender_for_transcript(transcript)
         room_id = transcript.binding.room_id
+        await self._require_matching_training_session(transcript)
 
         async with self._uow_factory() as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
@@ -230,6 +231,17 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
             message_id=message.id,
             payload=payload,
         )
+
+    async def _require_matching_training_session(self, transcript: RealtimeTranscript) -> None:
+        if self._session_service is None:
+            return
+        get_session = getattr(self._session_service, "get_session", None)
+        if get_session is None:
+            return
+        session = await get_session(transcript.binding.training_session_id)
+        session_room_id = str(getattr(session, "room_id", "") or "").strip()
+        if session_room_id != str(transcript.binding.room_id):
+            raise PermissionError("Realtime transcript binding does not match training session room")
 
 
 def _sender_for_transcript(transcript: RealtimeTranscript) -> tuple[str, str]:
