@@ -3,9 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   ChevronRight,
   ClipboardList,
-  History,
   Play,
-  Settings,
   SlidersHorizontal,
   Target,
   TrendingUp,
@@ -25,6 +23,7 @@ import {
   type InteractionMode,
   type TrainingProfile,
 } from '../services/trainingMode'
+import { useGrowth } from '../hooks/useGrowth'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageSection, PageShell } from '../components/ui/page'
@@ -168,11 +167,23 @@ function sessionPath(session: TrainingSessionDTO): string {
   return APP_ROUTES.reviewSession(session.session_id)
 }
 
+function xpProgressText(currentXP: number, nextLevelXP: number | null, tr: TranslateInline): string {
+  if (nextLevelXP === null) return tr('{xp} XP · 已达最高等级', '{xp} XP · max level', { xp: currentXP })
+  return tr('{xp} / {next} XP', '{xp} / {next} XP', {
+    xp: currentXP,
+    next: nextLevelXP,
+  })
+}
+
 const HomePage: React.FC = () => {
   const { currentUser, hasAnySystemRole } = useAuthContext()
   const { tr, t } = useI18n()
   const [sessions, setSessions] = useState<TrainingSessionDTO[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
+  const {
+    loading: growthLoading,
+    levelInfo,
+  } = useGrowth()
 
   useEffect(() => {
     let cancelled = false
@@ -200,28 +211,11 @@ const HomePage: React.FC = () => {
   const recentSessions = sessions.slice(0, 3)
   const latestSession = recentSessions[0]
   const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
-
-  const quickLinks = [
-    {
-      to: APP_ROUTES.reviewSessions,
-      icon: <History size={16} />,
-      label: t('nav.review'),
-    },
-    {
-      to: APP_ROUTES.growth,
-      icon: <TrendingUp size={16} />,
-      label: t('nav.growth'),
-    },
-    ...(canUseManagementActions
-      ? [
-          {
-            to: APP_ROUTES.config,
-            icon: <Settings size={16} />,
-            label: t('nav.config'),
-          },
-        ]
-      : []),
-  ]
+  const growthLevelText = growthLoading ? '--' : tr('Lv.{level}', 'Lv.{level}', { level: levelInfo.level })
+  const growthXpText = growthLoading
+    ? t('common.loading')
+    : xpProgressText(levelInfo.currentXP, levelInfo.nextLevelXP, tr)
+  const growthProgress = growthLoading ? 0 : Math.round(levelInfo.progress * 100)
 
   return (
     <PageShell className="home-page" width="wide">
@@ -231,81 +225,74 @@ const HomePage: React.FC = () => {
         title={tr('训练工作台', 'Training workbench')}
       />
 
-      <div className="home-main-grid">
-        <Surface className="home-start-panel" variant="accent" padding="lg">
-          <div className="home-start-copy">
-            <Badge tone="success">{tr('主流程', 'Primary flow')}</Badge>
-            <h2>{t('common.startTraining')}</h2>
-          </div>
+      <div className="home-main-stack">
+        <div className="home-workflow-stack">
+          <Surface className="home-start-panel" variant="accent" padding="lg">
+            <div className="home-start-header">
+              <div className="home-start-copy">
+                <Badge tone="success">{tr('主流程', 'Primary flow')}</Badge>
+                <h2>{t('common.startTraining')}</h2>
+              </div>
 
-          <div className="home-start-actions">
-            <Button asChild variant="primary" className="home-start-button">
-              <Link to={APP_ROUTES.practiceScenarios}>
-                <Play size={16} />
-                {t('nav.scenarioTraining')}
+              <Link to={APP_ROUTES.growth} className="home-start-growth" aria-label={t('nav.growth')}>
+                <span className="home-start-growth-icon" aria-hidden="true">
+                  <TrendingUp size={16} />
+                </span>
+                <span className="home-start-growth-copy">
+                  <strong>{growthLevelText}</strong>
+                  <em>{growthXpText}</em>
+                  <span className="home-start-growth-meter" aria-hidden="true">
+                    <span style={{ width: `${growthProgress}%` }} />
+                  </span>
+                </span>
+                <ChevronRight size={15} />
               </Link>
-            </Button>
-            {canUseManagementActions && (
-              <Button asChild variant="secondary">
-                <Link to={APP_ROUTES.practiceCustom}>
-                  <SlidersHorizontal size={16} />
-                  {t('nav.trainingStudio')}
+            </div>
+
+            <div className="home-start-actions">
+              <Button asChild variant="primary" className="home-start-button">
+                <Link to={APP_ROUTES.practiceScenarios}>
+                  <Play size={16} />
+                  {t('nav.scenarioTraining')}
                 </Link>
               </Button>
-            )}
-          </div>
-
-          {latestSession ? (
-            <Link to={sessionPath(latestSession)} className="home-continue-link">
-              <span className="home-continue-icon" aria-hidden="true">
-                <ClipboardList size={15} />
-              </span>
-              <span className="home-continue-copy">
-                <strong>
-                  {isContinuableSession(latestSession)
-                    ? tr('继续最近训练', 'Continue latest training')
-                    : tr('查看最近训练结果', 'View latest training result')}
-                </strong>
-                <em>{sessionTitle(latestSession, tr)} · {timeAgo(sessionTime(latestSession), tr) || tr('未记录时间', 'No time')}</em>
-              </span>
-              <ChevronRight size={15} />
-            </Link>
-          ) : (
-            <div className="home-continue-link is-empty">
-              <span className="home-continue-icon" aria-hidden="true">
-                <ClipboardList size={15} />
-              </span>
-              <span className="home-continue-copy">
-                <strong>{sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}</strong>
-                <em>{tr('从训练目录开始', 'Start from the catalog')}</em>
-              </span>
-            </div>
-          )}
-        </Surface>
-
-        <div className="home-side-stack">
-          <PageSection className="home-quick-section" title={tr('训练后', 'After training')}>
-            <Surface className="home-link-surface" padding="sm">
-              <div className="home-link-list">
-                {quickLinks.map((item) => (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    className="home-link-item"
-                    aria-label={item.label}
-                  >
-                    <span className="home-link-icon" aria-hidden="true">
-                      {item.icon}
-                    </span>
-                    <span className="home-link-copy">
-                      <strong>{item.label}</strong>
-                    </span>
-                    <ChevronRight size={15} />
+              {canUseManagementActions && (
+                <Button asChild variant="secondary">
+                  <Link to={APP_ROUTES.practiceCustom}>
+                    <SlidersHorizontal size={16} />
+                    {t('nav.trainingStudio')}
                   </Link>
-                ))}
+                </Button>
+              )}
+            </div>
+
+            {latestSession ? (
+              <Link to={sessionPath(latestSession)} className="home-continue-link">
+                <span className="home-continue-icon" aria-hidden="true">
+                  <ClipboardList size={15} />
+                </span>
+                <span className="home-continue-copy">
+                  <strong>
+                    {isContinuableSession(latestSession)
+                      ? tr('继续最近训练', 'Continue latest training')
+                      : tr('查看最近训练结果', 'View latest training result')}
+                  </strong>
+                  <em>{sessionTitle(latestSession, tr)} · {timeAgo(sessionTime(latestSession), tr) || tr('未记录时间', 'No time')}</em>
+                </span>
+                <ChevronRight size={15} />
+              </Link>
+            ) : (
+              <div className="home-continue-link is-empty">
+                <span className="home-continue-icon" aria-hidden="true">
+                  <ClipboardList size={15} />
+                </span>
+                <span className="home-continue-copy">
+                  <strong>{sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}</strong>
+                  <em>{tr('从训练目录开始', 'Start from the catalog')}</em>
+                </span>
               </div>
-            </Surface>
-          </PageSection>
+            )}
+          </Surface>
 
           <PageSection
             className="home-recent-section"
