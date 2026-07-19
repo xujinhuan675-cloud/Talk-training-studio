@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +14,8 @@ from application.services.training_studio.training_material_tool_service import 
     TrainingMaterialAssetSummaryDTO,
 )
 from domain.training_studio.session import TrainingSession
+
+logger = logging.getLogger(__name__)
 
 _MAX_MATERIALS = 5
 _MAX_MATERIAL_POINTS = 3
@@ -70,6 +74,25 @@ class MaterialReviewDTO(BaseModel):
     referenced_materials: list[TrainingMaterialAssetSummaryDTO] = Field(default_factory=list)
     source_state: MaterialReviewSourceStateDTO
     limits: MaterialReviewLimitsDTO
+
+
+class MaterialReviewPatchDTO(BaseModel):
+    matched_points: list[MaterialReviewPointDTO] | None = None
+    missed_points: list[MaterialReviewPointDTO] | None = None
+    suggested_rewrites: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class MaterialReviewLLMState:
+    session: TrainingSession
+    materials: list[TrainingMaterialAssetSummaryDTO]
+    requested_material_ids: list[int]
+    report: MaterialReviewReportContext
+    replay: MaterialReviewReplayContext
+    fallback: MaterialReviewDTO
+
+
+AsyncMaterialReviewCallback = Callable[[MaterialReviewLLMState], Awaitable[MaterialReviewPatchDTO | None]]
 
 
 class TrainingMaterialReviewService:
@@ -131,6 +154,70 @@ class TrainingMaterialReviewService:
                 report_context_truncated=report_context.truncated or report_truncated,
                 replay_transcript_truncated=replay_context.truncated,
             ),
+        )
+
+    async def build_review_async(
+        self,
+        *,
+        session: TrainingSession,
+        materials: list[TrainingMaterialAssetSummaryDTO],
+        requested_material_ids: list[int],
+        report: MaterialReviewReportContext | None = None,
+        replay: MaterialReviewReplayContext | None = None,
+        async_llm_callback: AsyncMaterialReviewCallback | None = None,
+    ) -> MaterialReviewDTO:
+        report_context = report or MaterialReviewReportContext()
+        replay_context = replay or MaterialReviewReplayContext(turns=[])
+        fallback = self.build_review(
+            session=session,
+            materials=materials,
+            requested_material_ids=requested_material_ids,
+            report=report_context,
+            replay=replay_context,
+        )
+        if async_llm_callback is None:
+            return fallback
+        try:
+            llm_patch = await async_llm_callback(
+                MaterialReviewLLMState(
+                    session=session,
+                    materials=materials[:_MAX_MATERIALS],
+                    requested_material_ids=requested_material_ids,
+                    report=report_context,
+                    replay=replay_context,
+                    fallback=fallback,
+                )
+            )
+        except Exception:
+            logger.exception("Training material review LLM callback failed")
+            return fallback
+        if llm_patch is None:
+            return fallback
+        source_state = fallback.source_state.model_copy(
+            update={
+                "strategy": "llm_adapter",
+                "llm_used": True,
+            }
+        )
+        return fallback.model_copy(
+            update={
+                "matched_points": (
+                    fallback.matched_points
+                    if llm_patch.matched_points is None
+                    else llm_patch.matched_points
+                ),
+                "missed_points": (
+                    fallback.missed_points
+                    if llm_patch.missed_points is None
+                    else llm_patch.missed_points
+                ),
+                "suggested_rewrites": (
+                    fallback.suggested_rewrites
+                    if llm_patch.suggested_rewrites is None
+                    else llm_patch.suggested_rewrites
+                ),
+                "source_state": source_state,
+            }
         )
 
 

@@ -8,11 +8,18 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_analysis_reader_service, get_chatroom_service, get_file_asset_service
+from api.dependencies import (
+    get_analysis_reader_service,
+    get_chatroom_service,
+    get_file_asset_service,
+    get_stakeholder_llm_client,
+)
 from api.routes.training_studio import get_training_session_service, router
 from application.dto import FileAssetDTO
+from application.ports.llm import LLMResponse
 from application.services.stakeholder.dto import MessageDTO
 from domain.common.exceptions import FileAssetNotFoundException
+from domain.conversation.repository import OwnedMetadataScope
 from domain.training_studio.catalog import TrainingTaskConfig
 from domain.training_studio.session import TrainingSession, TrainingSessionStatus
 from domain.training_studio.session_repository import (
@@ -58,7 +65,12 @@ def _session(
     )
 
 
-def _material_asset(asset_id: int = 7) -> FileAssetDTO:
+def _material_asset(
+    asset_id: int = 7,
+    *,
+    owner_user_id: str = "user-sales-001",
+    team_id: str = "team-revenue",
+) -> FileAssetDTO:
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     return FileAssetDTO(
         id=asset_id,
@@ -76,8 +88,8 @@ def _material_asset(asset_id: int = 7) -> FileAssetDTO:
         metadata={
             "title": "Renewal playbook",
             "summary": "Ask about success criteria and show ROI proof.",
-            "ownerUserId": "user-sales-001",
-            "teamId": "team-revenue",
+            "ownerUserId": owner_user_id,
+            "teamId": team_id,
         },
         url=None,
         status="active",
@@ -120,7 +132,7 @@ class _FakeFileAssetService:
     async def get_asset(self, asset_id: int, *, metadata_scope=None):
         self.get_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
         asset = self.assets.get(asset_id)
-        if asset is None:
+        if asset is None or not _matches_metadata_scope(asset.metadata, metadata_scope):
             raise FileAssetNotFoundException(asset_id)
         return asset
 
@@ -128,6 +140,9 @@ class _FakeFileAssetService:
         self.read_calls.append(
             {"asset_id": asset_id, "metadata_scope": metadata_scope, "max_bytes": max_bytes}
         )
+        asset = self.assets.get(asset_id)
+        if asset is None or not _matches_metadata_scope(asset.metadata, metadata_scope):
+            raise FileAssetNotFoundException(asset_id)
         return b"Discovery question: confirm success criteria.\nUse ROI proof.", False
 
 
@@ -169,12 +184,59 @@ class _FakeChatroomService:
         )
 
 
+class _FakeLLM:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.calls: list[dict[str, Any]] = []
+
+    async def generate(self, messages, **kwargs):
+        self.calls.append({"messages": messages, "kwargs": kwargs})
+        return LLMResponse(content=self.content, model="fake-review-model")
+
+
+def _matches_metadata_scope(
+    metadata: dict[str, Any] | None,
+    scope: OwnedMetadataScope | None,
+) -> bool:
+    if scope is None:
+        return True
+    metadata = metadata or {}
+    auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), dict) else {}
+    owner_user_id = (
+        auth_scope.get("userId")
+        or auth_scope.get("user_id")
+        or metadata.get("ownerUserId")
+        or metadata.get("owner_user_id")
+        or metadata.get("createdByUserId")
+        or metadata.get("created_by_user_id")
+    )
+    owner_team_id = (
+        auth_scope.get("teamId")
+        or auth_scope.get("team_id")
+        or metadata.get("teamId")
+        or metadata.get("team_id")
+        or metadata.get("ownerTeamId")
+        or metadata.get("owner_team_id")
+    )
+    owner_user_id = str(owner_user_id).strip() if owner_user_id else ""
+    owner_team_id = str(owner_team_id).strip() if owner_team_id else ""
+
+    if owner_user_id and owner_user_id == scope.user_id:
+        return True
+    if scope.team_id and owner_team_id == scope.team_id:
+        return bool(scope.include_team_scope or not owner_user_id)
+    if not owner_user_id and not owner_team_id:
+        return scope.allow_unscoped
+    return False
+
+
 def _client(
     session_service: _FakeTrainingSessionService,
     file_service: _FakeFileAssetService,
     *,
     reader: _FakeAnalysisReader | None = None,
     chatroom: _FakeChatroomService | None = None,
+    llm: _FakeLLM | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
@@ -182,6 +244,7 @@ def _client(
     app.dependency_overrides[get_file_asset_service] = lambda: file_service
     app.dependency_overrides[get_analysis_reader_service] = lambda: reader or _FakeAnalysisReader()
     app.dependency_overrides[get_chatroom_service] = lambda: chatroom or _FakeChatroomService()
+    app.dependency_overrides[get_stakeholder_llm_client] = lambda: llm
     return TestClient(app)
 
 
@@ -248,11 +311,31 @@ def test_material_review_leader_uses_team_scoped_session_and_material_access() -
     assert response.json()["data"]["referenced_materials"][0]["id"] == 7
 
 
+def test_material_review_rejects_existing_material_outside_scope_without_reading_content() -> None:
+    session_service = _FakeTrainingSessionService([_session()])
+    file_service = _FakeFileAssetService(
+        [_material_asset(owner_user_id="user-cs-001", team_id="team-service")]
+    )
+    client = _client(session_service, file_service)
+
+    response = client.post(
+        "/api/v1/training-studio/tool-consumers/review-assistant/material-review",
+        json={"session_id": "training-1", "material_ids": [7]},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Training material not found"
+    assert file_service.read_calls == []
+
+
 def test_material_review_admin_uses_explicit_scopes_without_unscoped_material_access() -> None:
     session_service = _FakeTrainingSessionService(
         [_session(user_id="user-admin-001", team_id="team-ops")]
     )
-    file_service = _FakeFileAssetService([_material_asset()])
+    file_service = _FakeFileAssetService(
+        [_material_asset(owner_user_id="user-admin-001", team_id="team-ops")]
+    )
     client = _client(session_service, file_service)
 
     response = client.post(
@@ -272,6 +355,53 @@ def test_material_review_admin_uses_explicit_scopes_without_unscoped_material_ac
     assert material_scope.team_id == "team-ops"
     assert material_scope.include_team_scope is True
     assert material_scope.allow_unscoped is False
+
+
+def test_material_review_uses_optional_llm_adapter_when_configured() -> None:
+    session_service = _FakeTrainingSessionService([_session()])
+    file_service = _FakeFileAssetService([_material_asset()])
+    llm = _FakeLLM(
+        """
+        {
+          "matched_points": [
+            {
+              "material_id": 7,
+              "point": "The learner paired ROI proof with a success metric.",
+              "evidence": "The report says the learner used ROI proof."
+            }
+          ],
+          "missed_points": [
+            {
+              "material_id": 7,
+              "point": "Ask who owns renewal approval.",
+              "evidence": null
+            }
+          ],
+          "suggested_rewrites": [
+            "Next drill: ask for the approval owner before proposing a discount."
+          ]
+        }
+        """
+    )
+    client = _client(session_service, file_service, llm=llm)
+
+    response = client.post(
+        "/api/v1/training-studio/tool-consumers/review-assistant/material-review",
+        json={"session_id": "training-1", "material_ids": [7]},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["source_state"]["strategy"] == "llm_adapter"
+    assert data["source_state"]["llm_used"] is True
+    assert data["matched_points"][0]["material_id"] == 7
+    assert data["matched_points"][0]["material_title"] == "Renewal playbook"
+    assert data["suggested_rewrites"] == [
+        "Next drill: ask for the approval owner before proposing a discount."
+    ]
+    assert len(llm.calls) == 1
+    assert session_service.mutating_calls == []
 
 
 def test_material_review_does_not_pollute_scoring_growth_or_completion() -> None:

@@ -108,6 +108,9 @@ from application.services.training_studio.session_service import (
     TrainingSessionDTO,
     TrainingSessionService,
 )
+from application.services.training_studio.material_review_llm_adapter import (
+    MaterialReviewLLMAdapter,
+)
 from application.services.training_studio.material_review_service import (
     MaterialReviewReplayContext,
     MaterialReviewReportContext,
@@ -2382,10 +2385,12 @@ async def get_scenario_templates(
 )
 async def create_review_assistant_material_review(
     body: MaterialReviewRequestDTO,
+    _rate_limit: None = Depends(enforce_ai_rate_limit),
     file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
     session_svc: TrainingSessionService = Depends(get_training_session_service),
     reader_svc: AnalysisReaderService = Depends(get_analysis_reader_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    llm: LLMPort | None = Depends(get_stakeholder_llm_client),
     current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
     material_ids = normalize_material_review_ids(body.material_ids, body.selected_material_ids)
@@ -2419,12 +2424,13 @@ async def create_review_assistant_material_review(
         _material_review_report_context(session, reader_svc=reader_svc),
         _material_review_replay_context(session, chatroom_svc=chatroom_svc),
     )
-    review = TrainingMaterialReviewService().build_review(
+    review = await TrainingMaterialReviewService().build_review_async(
         session=session,
         materials=materials,
         requested_material_ids=material_ids,
         report=report_context,
         replay=replay_context,
+        async_llm_callback=MaterialReviewLLMAdapter(llm) if llm is not None else None,
     )
     return success_response(data=review.model_dump(mode="json"))
 
