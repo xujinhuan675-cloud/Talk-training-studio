@@ -76,7 +76,7 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | Text runtime / message-tree UI 验收 | 文字训练复盘依赖 selected path；edit/retry/fork/reload/search 不能污染评分和成长。 | 当前保留服务契约和测试矩阵；真实 UI reload/fork 操作 E2E 单独排期靠后，不阻塞复盘助手接入。 |
 | Auth / ACL / resource scope 遗漏点 | 训练 session、report、guidance、file/material、agent config 不能跨用户/团队泄漏。 | 继续把 `OwnedMetadataScope` 扩到 get/update/delete/list/count 漏洞点，先做 guard 和测试。 |
 | Files / training material ownership | 素材进入 persona builder、复盘或 tool consumer 前必须先有权限边界。 | 先做素材读写/list/search 的 owner/team scope，不先做通用 RAG。 |
-| 训练相关窄 tool consumer | MCP/Agent 只有 inventory 还不能产生训练价值，但不能先做完整 marketplace/dispatcher。 | 本轮接入复盘助手前端，只展示有权限素材的安全摘要和受控正文片段；不做通用 dispatcher、RAG 正文检索或 Agent marketplace。 |
+| 训练相关窄 tool consumer | MCP/Agent 只有 inventory 还不能产生训练价值，但不能先做完整 marketplace/dispatcher。 | 已接入复盘助手前端，并新增只读素材对照接口；只展示有权限素材的安全摘要、受控正文片段和 deterministic 对照结果，不做通用 dispatcher、RAG 正文检索或 Agent marketplace。 |
 
 当前暂不做、只放路线图的能力：
 
@@ -92,6 +92,7 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 - File asset 服务层把 `metadata_scope` 继续下沉到 `upsert_active_asset`、物理 purge by id/key，降低未来 tool/RAG 误用 legacy helper 的跨作用域风险。
 - Training Studio 增加局部训练素材 tool consumer API，默认只返回当前用户/团队 scope 内 `training_material` 的安全 metadata excerpt，不暴露 MCP/Agent 主导航。
 - 复盘助手前端接入训练素材 tool consumer，在训练结果页读取和展示有权限素材的安全摘要，并通过 `include_content_excerpt=true` opt-in 读取 text-like 素材的受控正文片段。
+- 复盘助手新增 `POST /training-studio/tool-consumers/review-assistant/material-review` 窄接口，把当前训练 session/report/replay 与选中素材 snippet 做只读结构化对照，返回 matched_points、missed_points、suggested_rewrites、referenced_materials、source_state/limits；不写 scoring/growth/completion metadata。
 - Conversation fork 完成后会 remap `selectedPath`、`currentBranchTail`、`messageTreeSelection` 中的 source message id，避免 fork 后 replay/reload 指向源会话分支。
 
 ### 当前项目核心部分对齐程度
@@ -103,10 +104,10 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 75% | 已有当前路径、tail、fork metadata remap、结果/历史展示和 replay-only metadata 验收；还缺真实 UI reload/fork 操作 E2E。 |
 | model/provider registry | LibreChat | 45-55% | 已有 LLM registry、model specs、capability readiness。还不是完整 provider/preset/runtime registry。 |
 | auth / ACL / resource scope | LibreChat | 65-70% | 已把 conversation / file asset / agent config 相关 user/team scope 下沉到 repository 查询层，file asset legacy helper 的 scope pass-through 已补；conversation/session/report/guidance/realtime 的边界也在继续收口。 |
-| MCP / Agent / Tool | LibreChat | 35-40% | 已有 capability inventory、Agent config 绑定扫描、具体 MCP server readiness 校验，以及复盘助手前端接入的训练素材窄 tool consumer。仍不做通用 dispatcher/marketplace。 |
+| MCP / Agent / Tool | LibreChat | 40-45% | 已有 capability inventory、Agent config 绑定扫描、具体 MCP server readiness 校验，以及复盘助手前端接入的训练素材窄 tool consumer 和素材对照只读接口。仍不做通用 dispatcher/marketplace。 |
 | realtime websocket / transcript | Pipecat | 70-75% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、turn/interruption/silence 事件、live guidance trigger，并公开 smoke event contract；独立 OpenAI realtime 和客户端转写持久化入口已删除。 |
 | Pipecat runtime source of truth | Pipecat | 70-75% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；本机 capability 可返回 `readyForCall=true` 和 smoke contract。仍缺真实浏览器麦克风 E2E。 |
-| files / RAG / training materials | LibreChat | 45% | file asset ownership 与服务层 scope 已补强；training material 安全摘要和受控正文片段已接入复盘助手前端。素材全文/RAG/persona builder 自动接入仍不进入当前切片。 |
+| files / RAG / training materials | LibreChat | 50% | file asset ownership 与服务层 scope 已补强；training material 安全摘要、受控正文片段和复盘素材对照卡片已接入。素材全文/RAG/persona builder 自动接入仍不进入当前切片。 |
 | usage / moderation / admin ops | LibreChat | 10-20% | 当前不是重点，只适合 auth/ACL 稳定后再迁。 |
 
 第一部分结论：
@@ -456,13 +457,13 @@ focused 验证：
 
 - Pipecat realtime: 65-70%。可见入口已切到 Pipecat，独立 OpenAI runtime 已移除；仍缺真实浏览器音频链路端到端验收、VAD/turn/interruption 更完整事件、metrics/tracing。
 - auth / ACL / resource scope: 60-70%。realtime binding 仍走现有 user/team scope，旧 REST 转写逃逸入口已删除。
-- MCP / Agent / Tool: 20-25%。本轮未继续推进，仍保持 readiness/inventory 阶段。
+- MCP / Agent / Tool: 40-45%。训练素材窄 consumer 已从 inventory 进入复盘助手产品闭环，但仍不做通用 dispatcher/marketplace。
 
 下一步建议：
 
-1. 先验收复盘助手前端读取训练素材安全摘要和受控正文片段的产品闭环。
-2. 继续补 auth / ACL 漏洞点，尤其是未来会被 tool/RAG 使用的 get/update/delete/list/count helper。
-3. 根据复盘助手接入结果，再决定 persona builder、素材检索或报告辅助生成哪一个窄 consumer 值得继续。
+1. 继续补 auth / ACL 漏洞点，尤其是未来会被 tool/RAG 使用的 get/update/delete/list/count helper。
+2. 如果要增强素材对照质量，优先在当前 material-review DTO 后面接可替换 LLM adapter，保留 deterministic fallback 和 source_state/limits。
+3. 再决定 persona builder 或报告辅助生成哪一个窄 consumer 值得继续；仍不做通用 RAG、Agent marketplace 或主导航入口。
 
 延期待完成：
 

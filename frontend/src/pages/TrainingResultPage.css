@@ -549,6 +549,142 @@
   margin-top: 12px;
 }
 
+.training-result-material-review-panel {
+  min-width: 0;
+  margin-top: 14px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 12px;
+}
+
+.training-result-material-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.training-result-material-review-head span {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.training-result-material-review-head em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-result-material-review-state {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.training-result-material-review-state.empty {
+  padding: 12px;
+}
+
+.training-result-material-review-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.training-result-material-review-stats span {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.training-result-material-review-limit {
+  margin: 0 0 10px;
+  color: #9a651d;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.training-result-material-review-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.training-result-material-review-sections > div {
+  min-width: 0;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--bg-card);
+}
+
+.training-result-material-review-sections > div.wide {
+  grid-column: span 2;
+}
+
+.training-result-material-review-sections strong {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.training-result-material-review-sections ul,
+.training-result-material-review-sections ol {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.training-result-material-review-sections li + li {
+  margin-top: 6px;
+}
+
+.training-result-material-review-sections li span {
+  color: var(--text-secondary);
+}
+
+.training-result-material-review-sections li em {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.training-result-material-review-sections p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .training-result-branch {
   margin-bottom: 14px;
 }
@@ -997,6 +1133,20 @@
   }
 
   .training-result-branch-item.wide {
+    grid-column: span 1;
+  }
+
+  .training-result-material-review-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .training-result-material-review-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .training-result-material-review-sections > div.wide {
     grid-column: span 1;
   }
 

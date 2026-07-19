@@ -30,11 +30,27 @@ from application.services.training_studio.training_material_tool_service import 
     TrainingMaterialAssetSummaryDTO,
     TrainingMaterialToolConsumerService,
 )
+from application.services.training_studio.material_review_service import (
+    MaterialReviewDTO,
+    MaterialReviewLimitsDTO,
+    MaterialReviewPointDTO,
+    MaterialReviewReplayContext,
+    MaterialReviewReportContext,
+    MaterialReviewSourceStateDTO,
+    TrainingMaterialReviewService,
+    normalize_material_review_ids,
+)
 
 __all__ = [
     "CatalogOptionDTO",
     "ConversationRef",
     "JsonFileScenarioConfigStore",
+    "MaterialReviewDTO",
+    "MaterialReviewLimitsDTO",
+    "MaterialReviewPointDTO",
+    "MaterialReviewReplayContext",
+    "MaterialReviewReportContext",
+    "MaterialReviewSourceStateDTO",
     "RealtimePipelineRunnerStateError",
     "RealtimePipelineSessionRunner",
     "RubricWeightsDTO",
@@ -46,10 +62,12 @@ __all__ = [
     "TrainingCoreOrchestrator",
     "TrainingMaterialAssetListDTO",
     "TrainingMaterialAssetSummaryDTO",
+    "TrainingMaterialReviewService",
     "TrainingMaterialToolConsumerService",
     "TrainingScenarioConfigService",
     "TrainingTaskConfigDTO",
     "TrainingTurn",
+    "normalize_material_review_ids",
     "training_branch_metadata",
     "training_core_metadata_for_session",
 ]

@@ -209,7 +209,7 @@ Training Studio 的长期形态是：
 
 下一阶段优先顺序：
 
-1. 先把训练素材窄 tool consumer 接入复盘助手前端，让复盘页能读取当前用户/团队有权限的素材安全摘要和受控正文片段。
+1. 训练素材窄 tool consumer 已接入复盘助手前端，并落地素材对照卡片；下一步若增强质量，优先在当前只读 material-review DTO 后接可替换 LLM adapter，保留 deterministic fallback。
 2. 继续补 auth / ACL 漏洞点，尤其是未来会被 tool/RAG 使用的 get/update/delete/list/count helper。
 3. text runtime / message-tree 的真实 UI reload/fork 操作验收单独排期靠后；当前先保留服务契约和测试矩阵，不阻塞复盘助手接入。
 4. Pipecat 下一步只做 metrics/tracing、provider error taxonomy、turn latency 统计；真实浏览器麦克风 E2E 单独排期靠后。

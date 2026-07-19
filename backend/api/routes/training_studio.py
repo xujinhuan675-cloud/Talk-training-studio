@@ -108,6 +108,12 @@ from application.services.training_studio.session_service import (
     TrainingSessionDTO,
     TrainingSessionService,
 )
+from application.services.training_studio.material_review_service import (
+    MaterialReviewReplayContext,
+    MaterialReviewReportContext,
+    TrainingMaterialReviewService,
+    normalize_material_review_ids,
+)
 from application.services.training_studio.training_material_tool_service import (
     TrainingMaterialToolConsumerService,
 )
@@ -658,6 +664,12 @@ class PersistTrainingGuidanceEventsDTO(BaseModel):
     total_turn_count: int | None = Field(default=None, ge=0, le=10000)
     trigger: dict[str, object] | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class MaterialReviewRequestDTO(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=120)
+    material_ids: list[int] = Field(default_factory=list, max_length=10)
+    selected_material_ids: list[int] = Field(default_factory=list, max_length=10)
 
 
 def _storybank_entry_to_dict(entry) -> dict:
@@ -1775,6 +1787,102 @@ def _training_material_tool_consumer(
     return TrainingMaterialToolConsumerService(file_assets)
 
 
+def _material_review_session_access_scope_for_current_user(
+    current_user: CurrentUser,
+) -> TrainingSessionAccessScope:
+    return TrainingSessionAccessScope(
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
+        include_team_scope=current_user.is_admin or current_user.is_leader,
+    )
+
+
+async def _require_material_review_training_session(
+    session_id: str,
+    *,
+    svc: TrainingSessionService,
+    current_user: CurrentUser,
+):
+    try:
+        return await svc.get_session(
+            session_id,
+            access_scope=_material_review_session_access_scope_for_current_user(current_user),
+        )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+
+
+async def _material_review_report_context(
+    session,
+    *,
+    reader_svc: AnalysisReaderService,
+) -> MaterialReviewReportContext:
+    if not session.report_id:
+        return MaterialReviewReportContext()
+    try:
+        report_lookup_id = int(session.report_id)
+    except (TypeError, ValueError):
+        return MaterialReviewReportContext()
+    with suppress(Exception):
+        report = await reader_svc.get_report(report_lookup_id)
+        if report is None or str(report.room_id) != str(session.room_id):
+            return MaterialReviewReportContext()
+        return MaterialReviewReportContext(
+            summary=report.summary or "",
+            content=_material_review_report_content(report.content),
+        )
+    return MaterialReviewReportContext()
+
+
+def _material_review_report_content(content: object) -> dict[str, Any]:
+    if hasattr(content, "model_dump"):
+        dumped = content.model_dump(mode="json")
+        return dumped if isinstance(dumped, dict) else {}
+    return dict(content) if isinstance(content, dict) else {}
+
+
+async def _material_review_replay_context(
+    session,
+    *,
+    chatroom_svc: ChatRoomApplicationService,
+) -> MaterialReviewReplayContext:
+    try:
+        room_id = int(session.room_id) if session.room_id is not None else None
+    except (TypeError, ValueError):
+        return MaterialReviewReplayContext(turns=[])
+    if room_id is None:
+        return MaterialReviewReplayContext(turns=[])
+
+    replay_limit = 40
+    with suppress(Exception):
+        detail = await chatroom_svc.get_room_detail(room_id, message_limit=replay_limit)
+        turns = [
+            _material_review_message_text(message)
+            for message in detail.messages
+            if message.content.strip() and not _is_training_guidance_message(message)
+        ]
+        return MaterialReviewReplayContext(
+            turns=[turn for turn in turns if turn],
+            truncated=len(detail.messages) >= replay_limit,
+        )
+    return MaterialReviewReplayContext(turns=[])
+
+
+def _material_review_message_text(message: MessageDTO) -> str:
+    if message.sender_type == "user":
+        speaker = "User"
+    elif message.sender_type == "system":
+        speaker = "System"
+    else:
+        speaker = "Counterpart"
+    content = re.sub(r"\s+", " ", message.content).strip()
+    if len(content) > 500:
+        content = f"{content[:500].rstrip()}..."
+    return f"{speaker}: {content}" if content else ""
+
+
 @router.post("/sessions", status_code=201, summary="Create a Training Studio session")
 async def create_training_session(
     body: CreateTrainingSessionDTO,
@@ -2266,6 +2374,59 @@ async def get_scenario_templates(
 ):
     templates = svc.get_scenario_templates()
     return success_response(data=[template.model_dump(mode="json") for template in templates])
+
+
+@router.post(
+    "/tool-consumers/review-assistant/material-review",
+    summary="Compare a training session against scoped material snippets",
+)
+async def create_review_assistant_material_review(
+    body: MaterialReviewRequestDTO,
+    file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
+    session_svc: TrainingSessionService = Depends(get_training_session_service),
+    reader_svc: AnalysisReaderService = Depends(get_analysis_reader_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+):
+    material_ids = normalize_material_review_ids(body.material_ids, body.selected_material_ids)
+    if not material_ids:
+        raise HTTPException(status_code=422, detail="material_ids is required")
+
+    session = await _require_material_review_training_session(
+        body.session_id,
+        svc=session_svc,
+        current_user=current_user,
+    )
+
+    material_service = _training_material_tool_consumer(file_assets)
+    material_scope = _training_material_tool_scope_for_current_user(current_user)
+    materials = []
+    try:
+        for material_id in material_ids:
+            materials.append(
+                await material_service.get_material(
+                    material_id,
+                    metadata_scope=material_scope,
+                    include_content_excerpt=True,
+                )
+            )
+    except FileAssetNotFoundException as exc:
+        raise HTTPException(status_code=404, detail="Training material not found") from exc
+    except DomainValidationException as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+
+    report_context, replay_context = await asyncio.gather(
+        _material_review_report_context(session, reader_svc=reader_svc),
+        _material_review_replay_context(session, chatroom_svc=chatroom_svc),
+    )
+    review = TrainingMaterialReviewService().build_review(
+        session=session,
+        materials=materials,
+        requested_material_ids=material_ids,
+        report=report_context,
+        replay=replay_context,
+    )
+    return success_response(data=review.model_dump(mode="json"))
 
 
 @router.get(

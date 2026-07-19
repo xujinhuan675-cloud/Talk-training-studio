@@ -15,9 +15,12 @@ import {
 import { fetchRoomDetail, type ChatRoomDetail, type Message } from '../services/api'
 import {
   getTrainingConversationBranchInfo,
+  getReviewAssistantMaterialReviewDisplayState,
   getTrainingSession,
   getTrainingSessionReport,
   listTrainingMaterialToolConsumerMaterials,
+  requestReviewAssistantMaterialReview,
+  type MaterialReviewDTO,
   type TrainingMaterialAssetSummaryDTO,
   type TrainingConversationBranchInfo,
   type TrainingSessionDTO,
@@ -487,6 +490,34 @@ function materialReferenceMeta(
   ].filter(Boolean).join(' · ') || tr('安全摘要', 'Safe excerpt')
 }
 
+function materialReviewSourceMeta(review: MaterialReviewDTO | null, tr: TranslateInline): string {
+  if (!review) return tr('待生成', 'Pending')
+  const sources = [
+    review.source_state.report_used ? tr('报告', 'Report') : '',
+    review.source_state.replay_used ? tr('回放', 'Replay') : '',
+    review.source_state.material_snippet_used ? tr('素材片段', 'Material snippet') : '',
+  ].filter(Boolean)
+  return sources.join(' · ') || tr('deterministic fallback', 'deterministic fallback')
+}
+
+function materialReviewLimitMeta(review: MaterialReviewDTO | null, tr: TranslateInline): string {
+  if (!review) return ''
+  const limits = [
+    review.limits.material_selection_truncated ? tr('素材已截断', 'materials truncated') : '',
+    review.limits.material_snippets_truncated ? tr('片段已截断', 'snippets truncated') : '',
+    review.limits.report_context_truncated ? tr('报告上下文已截断', 'report context truncated') : '',
+    review.limits.replay_transcript_truncated ? tr('回放已截断', 'replay truncated') : '',
+  ].filter(Boolean)
+  return limits.join(' · ')
+}
+
+function materialReviewPointKey(
+  point: MaterialReviewDTO['matched_points'][number],
+  index: number,
+): string {
+  return `${point.material_id}-${index}-${point.point.slice(0, 24)}`
+}
+
 export default function TrainingResultPage() {
   const navigate = useNavigate()
   const { locale, t, tr } = useI18n()
@@ -513,6 +544,9 @@ export default function TrainingResultPage() {
   const [materialsTotal, setMaterialsTotal] = useState(0)
   const [materialsError, setMaterialsError] = useState<string | null>(null)
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null)
+  const [materialReviewState, setMaterialReviewState] = useState<LoadState>('idle')
+  const [materialReview, setMaterialReview] = useState<MaterialReviewDTO | null>(null)
+  const [materialReviewError, setMaterialReviewError] = useState<string | null>(null)
   const [progress, setProgress] = useState<ScenarioTrainingProgress>(() => (
     getScenarioTrainingProgress(progressScope)
   ))
@@ -611,6 +645,43 @@ export default function TrainingResultPage() {
     })
   }, [materials])
 
+  const selectedMaterialReady = selectedMaterialId !== null
+    && materials.some((material) => material.id === selectedMaterialId)
+
+  useEffect(() => {
+    if (!sessionId || !selectedMaterialReady || selectedMaterialId === null) {
+      setMaterialReview(null)
+      setMaterialReviewError(null)
+      setMaterialReviewState('idle')
+      return
+    }
+
+    let cancelled = false
+    setMaterialReview(null)
+    setMaterialReviewError(null)
+    setMaterialReviewState('loading')
+
+    requestReviewAssistantMaterialReview({
+      sessionId,
+      selectedMaterialIds: [selectedMaterialId],
+    })
+      .then((result) => {
+        if (cancelled) return
+        setMaterialReview(result)
+        setMaterialReviewState('ready')
+      })
+      .catch((requestError: unknown) => {
+        if (cancelled) return
+        setMaterialReview(null)
+        setMaterialReviewError(getErrorMessage(requestError, tr('无法生成素材对照。', 'Could not build material review.')))
+        setMaterialReviewState('error')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedMaterialId, selectedMaterialReady, sessionId, tr])
+
   const scenarioId = session?.scenario_template_id || ''
   const scenarioProgress = scenarioId ? progress[scenarioId] : undefined
   const content = useMemo(() => asRecord(report?.content) ?? {}, [report])
@@ -659,6 +730,14 @@ export default function TrainingResultPage() {
   )
   const selectedMaterialTags = selectedMaterial ? materialTags(selectedMaterial) : []
   const selectedMaterialContentExcerpt = selectedMaterial ? materialContentExcerpt(selectedMaterial) : ''
+  const materialReviewDisplayState = getReviewAssistantMaterialReviewDisplayState({
+    materialsState,
+    materialsCount: materials.length,
+    materialReviewState,
+    materialReview,
+    materialReviewError,
+  })
+  const materialReviewLimit = materialReviewLimitMeta(materialReview, tr)
   const isLiveCoachSession = isLiveCoachTrainingSession(session)
   const liveCoachLanguages = getLiveCoachLanguages(session)
   const liveCoachLanguagePair = getLiveCoachLanguagePair(session, locale, tr)
@@ -1038,6 +1117,81 @@ export default function TrainingResultPage() {
                     ))}
                   </div>
                 )}
+                <div className="training-result-material-review-panel" aria-live="polite">
+                  <div className="training-result-material-review-head">
+                    <span>{tr('素材对照', 'Material review')}</span>
+                    <em>{materialReviewSourceMeta(materialReview, tr)}</em>
+                  </div>
+                  {materialReviewDisplayState === 'loading' ? (
+                    <div className="training-result-material-review-state">
+                      <Loader2 className="training-result-spin" size={15} />
+                      <span>{tr('正在生成素材对照。', 'Building material review.')}</span>
+                    </div>
+                  ) : materialReviewDisplayState === 'error' ? (
+                    <div className="training-result-notice compact">
+                      <AlertCircle size={15} />
+                      <span>{materialReviewError}</span>
+                    </div>
+                  ) : materialReviewDisplayState === 'empty' ? (
+                    <div className="training-result-material-review-state empty">
+                      {tr('素材对照暂未返回命中、遗漏或改写建议。', 'No matched points, missed points, or rewrite suggestions returned yet.')}
+                    </div>
+                  ) : materialReview && (
+                    <>
+                      <div className="training-result-material-review-stats">
+                        <span>{tr('命中 {count}', 'Matched {count}', { count: materialReview.matched_points.length })}</span>
+                        <span>{tr('遗漏 {count}', 'Missed {count}', { count: materialReview.missed_points.length })}</span>
+                        <span>{tr('改写 {count}', 'Rewrites {count}', { count: materialReview.suggested_rewrites.length })}</span>
+                      </div>
+                      {materialReviewLimit && (
+                        <p className="training-result-material-review-limit">{materialReviewLimit}</p>
+                      )}
+                      <div className="training-result-material-review-sections">
+                        <div>
+                          <strong>{tr('命中要点', 'Matched points')}</strong>
+                          {materialReview.matched_points.length > 0 ? (
+                            <ul>
+                              {materialReview.matched_points.map((point, index) => (
+                                <li key={materialReviewPointKey(point, index)}>
+                                  <span>{point.point}</span>
+                                  {point.evidence && <em>{point.evidence}</em>}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p>{tr('暂无明确命中。', 'No clear matches yet.')}</p>
+                          )}
+                        </div>
+                        <div>
+                          <strong>{tr('遗漏要点', 'Missed points')}</strong>
+                          {materialReview.missed_points.length > 0 ? (
+                            <ul>
+                              {materialReview.missed_points.map((point, index) => (
+                                <li key={materialReviewPointKey(point, index)}>
+                                  <span>{point.point}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p>{tr('本轮没有明显遗漏。', 'No obvious misses in this pass.')}</p>
+                          )}
+                        </div>
+                        <div className="wide">
+                          <strong>{tr('下一次可练', 'Next drill')}</strong>
+                          {materialReview.suggested_rewrites.length > 0 ? (
+                            <ol>
+                              {materialReview.suggested_rewrites.map((suggestion) => (
+                                <li key={suggestion}>{suggestion}</li>
+                              ))}
+                            </ol>
+                          ) : (
+                            <p>{tr('暂无改写建议。', 'No rewrite suggestions yet.')}</p>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

@@ -179,10 +179,64 @@ export interface TrainingMaterialAssetListDTO {
   limit: number
 }
 
+export interface MaterialReviewPointDTO {
+  material_id: number
+  material_title: string
+  point: string
+  evidence?: string | null
+}
+
+export interface MaterialReviewSourceStateDTO {
+  strategy: string
+  llm_used: boolean
+  report_used: boolean
+  replay_used: boolean
+  material_snippet_used: boolean
+  selected_material_ids: number[]
+}
+
+export interface MaterialReviewLimitsDTO {
+  max_materials: number
+  max_replay_turns: number
+  material_count: number
+  requested_material_count: number
+  material_selection_truncated: boolean
+  material_snippets_truncated: boolean
+  report_context_truncated: boolean
+  replay_transcript_truncated: boolean
+}
+
+export interface MaterialReviewDTO {
+  session_id: string
+  matched_points: MaterialReviewPointDTO[]
+  missed_points: MaterialReviewPointDTO[]
+  suggested_rewrites: string[]
+  referenced_materials: TrainingMaterialAssetSummaryDTO[]
+  source_state: MaterialReviewSourceStateDTO
+  limits: MaterialReviewLimitsDTO
+}
+
 export interface ListTrainingMaterialToolConsumerOptions {
   skip?: number
   limit?: number
   includeContentExcerpt?: boolean
+}
+
+export interface ReviewAssistantMaterialReviewRequest {
+  sessionId: TrainingSessionId
+  materialIds?: number[]
+  selectedMaterialIds?: number[]
+}
+
+export type ReviewAssistantMaterialReviewLoadState = 'idle' | 'loading' | 'ready' | 'error'
+export type ReviewAssistantMaterialReviewDisplayState = 'loading' | 'error' | 'empty' | 'result'
+
+export interface ReviewAssistantMaterialReviewDisplayInput {
+  materialsState: ReviewAssistantMaterialReviewLoadState
+  materialsCount: number
+  materialReviewState: ReviewAssistantMaterialReviewLoadState
+  materialReview?: MaterialReviewDTO | null
+  materialReviewError?: string | null
 }
 
 interface ApiResponse<T> {
@@ -193,6 +247,7 @@ interface ApiResponse<T> {
 
 const TRAINING_SESSION_API_BASE = '/api/v1/training-studio/sessions'
 const TRAINING_MATERIAL_TOOL_CONSUMER_API = '/api/v1/training-studio/tool-consumers/training-materials'
+const REVIEW_ASSISTANT_MATERIAL_REVIEW_API = '/api/v1/training-studio/tool-consumers/review-assistant/material-review'
 
 type TrainingSessionId = string | number
 
@@ -236,6 +291,21 @@ function trainingMaterialToolConsumerUrl(
   if (options.includeContentExcerpt) params.set('include_content_excerpt', 'true')
   const query = params.toString()
   return `${TRAINING_MATERIAL_TOOL_CONSUMER_API}${query ? `?${query}` : ''}`
+}
+
+function reviewAssistantMaterialReviewBody(
+  data: ReviewAssistantMaterialReviewRequest,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    session_id: String(data.sessionId),
+  }
+  if (data.materialIds !== undefined) {
+    body.material_ids = data.materialIds
+  }
+  if (data.selectedMaterialIds !== undefined) {
+    body.selected_material_ids = data.selectedMaterialIds
+  }
+  return body
 }
 
 async function readError(resp: Response, fallback: string): Promise<Error> {
@@ -653,6 +723,22 @@ export function buildTrainingCompletionBranchMetadata(
   }
 }
 
+export function getReviewAssistantMaterialReviewDisplayState(
+  input: ReviewAssistantMaterialReviewDisplayInput,
+): ReviewAssistantMaterialReviewDisplayState {
+  if (input.materialsState === 'loading' || input.materialsState === 'idle') return 'loading'
+  if (input.materialReviewError || input.materialReviewState === 'error') return 'error'
+  if (input.materialsCount <= 0) return 'empty'
+  if (input.materialReviewState === 'loading' || input.materialReviewState === 'idle') return 'loading'
+
+  const review = input.materialReview
+  if (!review) return 'empty'
+  const hasResult = review.matched_points.length > 0
+    || review.missed_points.length > 0
+    || review.suggested_rewrites.length > 0
+  return hasResult ? 'result' : 'empty'
+}
+
 function branchInfoFromCandidate(
   candidate: BranchMetadataCandidate,
 ): TrainingConversationBranchInfo | null {
@@ -819,5 +905,15 @@ export async function listTrainingMaterialToolConsumerMaterials(
     trainingMaterialToolConsumerUrl(options),
     undefined,
     'Failed to list training materials',
+  )
+}
+
+export async function requestReviewAssistantMaterialReview(
+  data: ReviewAssistantMaterialReviewRequest,
+): Promise<MaterialReviewDTO> {
+  return requestJson<MaterialReviewDTO>(
+    REVIEW_ASSISTANT_MATERIAL_REVIEW_API,
+    jsonRequest('POST', reviewAssistantMaterialReviewBody(data)),
+    'Failed to review training materials',
   )
 }

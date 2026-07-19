@@ -801,3 +801,111 @@ test('listTrainingMaterialToolConsumerMaterials fetches scoped material summarie
   assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
   assert.deepEqual(result, data)
 })
+
+test('requestReviewAssistantMaterialReview posts selected material payload', async () => {
+  const data = {
+    session_id: 'session-1',
+    matched_points: [],
+    missed_points: [
+      {
+        material_id: 7,
+        material_title: 'Renewal brief',
+        point: 'Ask about success criteria.',
+      },
+    ],
+    suggested_rewrites: ['Practice the success criteria ask.'],
+    referenced_materials: [],
+    source_state: {
+      strategy: 'deterministic_fallback',
+      llm_used: false,
+      report_used: true,
+      replay_used: true,
+      material_snippet_used: true,
+      selected_material_ids: [7],
+    },
+    limits: {
+      max_materials: 5,
+      max_replay_turns: 40,
+      material_count: 1,
+      requested_material_count: 1,
+      material_selection_truncated: false,
+      material_snippets_truncated: false,
+      report_context_truncated: false,
+      replay_transcript_truncated: false,
+    },
+  }
+  const calls = installFetchStub(data)
+
+  const result = await trainingSession.requestReviewAssistantMaterialReview({
+    sessionId: 'session-1',
+    selectedMaterialIds: [7],
+  })
+
+  assert.equal(
+    calls[0].url,
+    '/api/v1/training-studio/tool-consumers/review-assistant/material-review',
+  )
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(calls[0].init.headers, {
+    ...expectedAuthHeaders,
+    'Content-Type': 'application/json',
+  })
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    session_id: 'session-1',
+    selected_material_ids: [7],
+  })
+  assert.deepEqual(result, data)
+})
+
+test('getReviewAssistantMaterialReviewDisplayState covers page states', () => {
+  assert.equal(trainingSession.getReviewAssistantMaterialReviewDisplayState({
+    materialsState: 'loading',
+    materialsCount: 0,
+    materialReviewState: 'idle',
+  }), 'loading')
+
+  assert.equal(trainingSession.getReviewAssistantMaterialReviewDisplayState({
+    materialsState: 'ready',
+    materialsCount: 1,
+    materialReviewState: 'error',
+    materialReviewError: 'failed',
+  }), 'error')
+
+  assert.equal(trainingSession.getReviewAssistantMaterialReviewDisplayState({
+    materialsState: 'ready',
+    materialsCount: 0,
+    materialReviewState: 'ready',
+    materialReview: null,
+  }), 'empty')
+
+  assert.equal(trainingSession.getReviewAssistantMaterialReviewDisplayState({
+    materialsState: 'ready',
+    materialsCount: 1,
+    materialReviewState: 'ready',
+    materialReview: {
+      session_id: 'session-1',
+      matched_points: [],
+      missed_points: [],
+      suggested_rewrites: ['Practice a rewrite.'],
+      referenced_materials: [],
+      source_state: {
+        strategy: 'deterministic_fallback',
+        llm_used: false,
+        report_used: false,
+        replay_used: false,
+        material_snippet_used: false,
+        selected_material_ids: [7],
+      },
+      limits: {
+        max_materials: 5,
+        max_replay_turns: 40,
+        material_count: 1,
+        requested_material_count: 1,
+        material_selection_truncated: false,
+        material_snippets_truncated: false,
+        report_context_truncated: false,
+        replay_transcript_truncated: false,
+      },
+    },
+  }), 'result')
+})
