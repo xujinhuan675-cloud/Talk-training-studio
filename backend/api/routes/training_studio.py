@@ -134,6 +134,9 @@ from domain.training_studio.session import TrainingSessionStatus
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 from domain.training_studio.storybank import JsonFileStoryBankStore, StoryBankService
 from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
+from infrastructure.external.pipecat.realtime_pipeline import (
+    pipecat_realtime_capability_response as build_pipecat_realtime_capability_response,
+)
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
 router = APIRouter(prefix="/training-studio", tags=["Training Studio"])
@@ -1322,23 +1325,7 @@ def _pipecat_unavailable_capability_response(
 
 def _pipecat_realtime_capability_response() -> dict[str, object]:
     try:
-        pipecat_adapter = _load_pipecat_realtime_adapter()
-    except Exception as exc:
-        return _pipecat_unavailable_capability_response(
-            message=str(exc),
-            code="PIPECAT_MODULE_UNAVAILABLE",
-            modules=("infrastructure.external.pipecat",),
-        )
-
-    capability_response = getattr(pipecat_adapter, "pipecat_realtime_capability_response", None)
-    if not callable(capability_response):
-        return _pipecat_unavailable_capability_response(
-            message="Pipecat realtime capability helper is unavailable",
-            code="PIPECAT_CAPABILITY_ERROR",
-        )
-
-    try:
-        response = capability_response(
+        response = build_pipecat_realtime_capability_response(
             require_websocket=True,
             openai_api_key_available=bool(_openai_realtime_api_key()),
             include_source_snapshot=True,

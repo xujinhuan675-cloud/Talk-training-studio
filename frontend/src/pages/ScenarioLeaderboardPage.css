@@ -257,7 +257,7 @@
 
 .scenario-leaderboard-row.selected,
 .unfinished-row.selected {
-  background: rgba(45, 156, 111, 0.07);
+  background: var(--green-soft);
 }
 
 .scenario-leaderboard-row .rank {
@@ -485,7 +485,7 @@
   align-items: center;
   gap: 8px;
   margin: 0 16px 14px;
-  border: 1px solid rgba(200, 148, 74, 0.26);
+  border: 1px solid rgba(180, 83, 9, 0.26);
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--amber-soft);

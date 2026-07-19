@@ -41,7 +41,7 @@ import { PageHeader, PageSection, PageShell, PageStatGrid } from '../components/
 import { Surface } from '../components/ui/surface'
 import './HomePage.css'
 
-const AVATAR_COLORS = ['#8B5226', '#1E3A5F', '#3D2E5C', '#6B4226', '#2E4A3F', '#4A3060']
+const AVATAR_COLORS = ['#0F766E', '#334155', '#2563EB', '#475569', '#6366F1', '#0B5F59']
 
 function getAvatarColor(id: string | number): string {
   const hash = String(id).split('').reduce((a, c) => a + c.charCodeAt(0), 0)

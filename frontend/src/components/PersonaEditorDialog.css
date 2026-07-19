@@ -27,7 +27,7 @@
 
 .persona-editor-dialog .field-label textarea:focus {
   border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .persona-editor-dialog .color-field {
@@ -54,7 +54,7 @@
 
 .btn-delete {
   padding: 8px 18px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  border: 1px solid rgba(185, 28, 28, 0.3);
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--rose);
@@ -66,5 +66,5 @@
 
 .btn-delete:hover {
   background: var(--rose-soft);
-  border-color: rgba(239, 68, 68, 0.5);
+  border-color: rgba(185, 28, 28, 0.5);
 }

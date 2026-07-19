@@ -92,8 +92,8 @@
   position: fixed;
   inset: 0;
   z-index: 9998;
-  background: rgba(244, 249, 246, 0.75);
-  backdrop-filter: blur(4px);
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(8px);
   animation: ui-fade-in 0.15s ease;
 }
 
@@ -304,7 +304,7 @@
 
 .ui-surface--accent {
   border-color: var(--border-accent);
-  background: linear-gradient(180deg, rgba(45, 156, 111, 0.08), var(--bg-card) 58%);
+  background: linear-gradient(180deg, var(--green-soft), var(--bg-card) 58%);
 }
 
 .ui-surface--padding-none {

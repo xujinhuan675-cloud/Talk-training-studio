@@ -676,6 +676,38 @@ def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
     assert "apiKey" not in serialized
 
 
+def test_pipecat_realtime_capability_response_omits_snapshot_when_snapshot_fails(monkeypatch):
+    capability = pipecat_adapter.PipecatCapability(
+        available=True,
+        core_available=True,
+        websocket_available=True,
+        vad_available=True,
+        stt_available=True,
+        tts_available=True,
+        llm_available=True,
+        turn_detection_available=True,
+    )
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "get_pipecat_capability",
+        lambda require_websocket=False: capability,
+    )
+
+    def _raise_snapshot_failure():
+        raise RuntimeError("Pipecat source snapshot failed")
+
+    monkeypatch.setattr(pipecat_adapter, "pipecat_source_snapshot", _raise_snapshot_failure)
+
+    response = pipecat_adapter.pipecat_realtime_capability_response(
+        openai_api_key_available=True,
+    )
+
+    assert response["runtime"] == REALTIME_RUNTIME_PIPECAT
+    assert response["readyForCall"] is True
+    assert response["errors"] == []
+    assert "sourceSnapshot" not in response
+
+
 def test_pipecat_capability_preserves_core_when_websocket_symbol_import_fails(monkeypatch):
     def import_module(name):
         if name == pipecat_adapter.WEBSOCKET_PIPECAT_MODULE:

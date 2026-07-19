@@ -67,7 +67,7 @@
 .field-label input:focus,
 .field-label select:focus {
   border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .persona-select-list {
@@ -92,7 +92,7 @@
 }
 
 .persona-select-item.selected {
-  background: rgba(45, 156, 111, 0.08);
+  background: var(--green-soft);
 }
 
 .persona-color {

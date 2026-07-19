@@ -1278,7 +1278,7 @@ export default function MessageList({
               >
                 {msg.sender_type === 'persona' && (
                   <div className="message-row">
-                    <Avatar name={persona?.name || msg.sender_id} color={borderColor || '#2D9C6F'} size={28} />
+                    <Avatar name={persona?.name || msg.sender_id} color={borderColor || '#0F766E'} size={28} />
                     <div className="message-content">
                       <div className="sender-name" style={borderColor ? { color: borderColor } : undefined}>
                         {persona?.name || msg.sender_id}
@@ -1354,7 +1354,7 @@ export default function MessageList({
             return (
               <div key={`streaming-${personaId}`} className="message persona streaming" data-sender="persona">
                 <div className="message-row">
-                  <Avatar name={persona?.name || personaId} color={borderColor || '#2D9C6F'} size={28} />
+                  <Avatar name={persona?.name || personaId} color={borderColor || '#0F766E'} size={28} />
                   <div className="message-content">
                     <div className="sender-name" style={borderColor ? { color: borderColor } : undefined}>
                       {persona?.name || personaId}

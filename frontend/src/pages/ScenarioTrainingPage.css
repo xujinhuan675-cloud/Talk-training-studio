@@ -99,7 +99,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 14px;
-  border: 1px solid rgba(199, 91, 91, 0.28);
+  border: 1px solid var(--rose-soft);
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--rose-soft);
@@ -206,19 +206,19 @@
 }
 
 .scenario-training-status.completed {
-  border-color: rgba(45, 156, 111, 0.22);
+  border-color: var(--border-accent);
   background: var(--green-soft);
   color: var(--green);
 }
 
 .scenario-training-status.in_progress {
-  border-color: rgba(200, 148, 74, 0.28);
+  border-color: rgba(180, 83, 9, 0.28);
   background: var(--amber-soft);
   color: var(--amber);
 }
 
 .scenario-training-status.failed {
-  border-color: rgba(199, 91, 91, 0.28);
+  border-color: rgba(185, 28, 28, 0.28);
   background: var(--rose-soft);
   color: var(--rose);
 }

@@ -17,27 +17,27 @@
   align-items: center;
   justify-content: center;
   margin: 0 auto 14px;
-  background: var(--amber-soft, rgba(200, 148, 74, 0.12));
-  color: var(--amber, #C8944A);
+  background: var(--amber-soft, rgba(180, 83, 9, 0.12));
+  color: var(--amber, #B45309);
 }
 
 .confirm-icon.danger {
-  background: var(--rose-soft, rgba(199, 91, 91, 0.12));
-  color: var(--rose, #C75B5B);
+  background: var(--rose-soft, rgba(185, 28, 28, 0.12));
+  color: var(--rose, #B91C1C);
 }
 
 .confirm-title {
   margin: 0 0 8px;
   font-size: 16px;
   font-weight: 600;
-  color: var(--text-primary, #1A2E22);
+  color: var(--text-primary, #0F172A);
   letter-spacing: -0.2px;
 }
 
 .confirm-message {
   margin: 0 0 22px;
   font-size: 13px;
-  color: var(--text-secondary, #7A9A88);
+  color: var(--text-secondary, #5F6B7A);
   line-height: 1.6;
 }
 

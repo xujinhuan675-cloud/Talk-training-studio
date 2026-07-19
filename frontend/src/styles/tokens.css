@@ -1,27 +1,30 @@
 :root {
-  /* === New Mint Green Light Theme === */
-  --bg-base: #F4F9F6;
-  --bg-card: #FBFDFB;
+  /* === Neutral Light Theme === */
+  --bg-base: #F7F9FC;
+  --bg-card: #FFFFFF;
   --bg-elevated: #FFFFFF;
-  --border: #DAE8E0;
-  --border-accent: rgba(45,156,111,0.25);
-  --text-primary: #1A2E22;
-  --text-secondary: #7A9A88;
-  --text-muted: #4A6B56;
-  --green: #2D9C6F;
-  --green-hover: #258A60;
-  --green-soft: rgba(45,156,111,0.12);
-  --amber: #C8944A;
-  --amber-soft: rgba(200,148,74,0.12);
-  --violet: #8B7EC8;
-  --violet-soft: rgba(139,126,200,0.12);
-  --rose: #C75B5B;
-  --rose-soft: rgba(199,91,91,0.12);
+  --bg-soft: #EEF2F7;
+  --border: #D7E0EA;
+  --border-accent: rgba(15,118,110,0.18);
+  --text-primary: #0F172A;
+  --text-secondary: #5F6B7A;
+  --text-muted: #738091;
+  --green: #0F766E;
+  --green-hover: #0B5F59;
+  --green-soft: rgba(15,118,110,0.10);
+  --amber: #B45309;
+  --amber-soft: rgba(180,83,9,0.12);
+  --violet: #6366F1;
+  --violet-soft: rgba(99,102,241,0.12);
+  --rose: #B91C1C;
+  --rose-soft: rgba(185,28,28,0.12);
+  --blue: #2563EB;
+  --blue-soft: rgba(37,99,235,0.12);
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(26,46,34,0.06);
-  --shadow-md: 0 4px 12px rgba(26,46,34,0.08);
-  --shadow-lg: 0 8px 24px rgba(26,46,34,0.1);
+  --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+  --shadow-md: 0 4px 12px rgba(15,23,42,0.08);
+  --shadow-lg: 0 8px 24px rgba(15,23,42,0.12);
 
   /* Radius */
   --radius-sm: 8px;
@@ -39,10 +42,19 @@
   --page-gutter-mobile: 16px;
 
   /* Semantic aliases */
-  --primary-gradient: linear-gradient(135deg, #2D9C6F, #5B8C5A);
-  --border-light: #E8F0EB;
-  --success: #16A34A;
-  --success-bg: #DCFCE7;
-  --warning-bg: #FEF9C3;
-  --danger-bg: #FEE2E2;
+  --primary: var(--green);
+  --primary-hover: var(--green-hover);
+  --primary-light: var(--green-soft);
+  --surface-2: var(--bg-soft);
+  --bg-main: var(--bg-base);
+  --text-tertiary: var(--text-muted);
+  --primary-gradient: linear-gradient(135deg, #0F766E, #115E59);
+  --border-light: #E7EDF3;
+  --success: #15803D;
+  --success-bg: #ECFDF5;
+  --warning-bg: #FFFBEB;
+  --danger-bg: #FEF2F2;
+  --info-bg: #EFF6FF;
+  --focus-ring: rgba(15,118,110,0.18);
+  --surface-quiet: #F8FAFC;
 }

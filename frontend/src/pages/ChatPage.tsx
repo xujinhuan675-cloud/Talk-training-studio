@@ -1891,7 +1891,7 @@ function ChatArea() {
               <div className="video-workspace-context">
                 <div
                   className="video-workspace-avatar"
-                  style={{ background: primaryPersona?.avatar_color || '#2D9C6F' }}
+                  style={{ background: primaryPersona?.avatar_color || '#0F766E' }}
                 >
                   {displayInitial(counterpartName)}
                 </div>
@@ -1915,7 +1915,7 @@ function ChatArea() {
               <div className="training-voice-persona">
                 <div
                   className="training-voice-avatar"
-                  style={{ background: primaryPersona?.avatar_color || '#2D9C6F' }}
+                  style={{ background: primaryPersona?.avatar_color || '#0F766E' }}
                 >
                   {displayInitial(counterpartName)}
                 </div>

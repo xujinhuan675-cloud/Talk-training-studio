@@ -87,17 +87,17 @@
 .header-action-btn:hover {
   background: var(--bg-base);
   color: var(--text-primary);
-  border-color: #d1d5db;
+  border-color: var(--border);
 }
 
 .header-action-btn.coaching {
-  color: #5B8C5A;
-  border-color: rgba(139, 92, 246, 0.3);
+  color: var(--green);
+  border-color: var(--border-accent);
 }
 
 .header-action-btn.coaching:hover {
-  background: rgba(139, 92, 246, 0.08);
-  color: #2D9C6F;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .header-action-btn.active {
@@ -236,7 +236,7 @@
 }
 
 .emotion-tag.neutral {
-  background: #f3f4f6;
+  background: var(--bg-soft);
   color: var(--text-secondary);
 }
 
@@ -252,7 +252,7 @@
   background: var(--primary-gradient);
   color: #fff;
   border-bottom-right-radius: 4px;
-  box-shadow: 0 2px 8px rgba(45, 156, 111, 0.2);
+  box-shadow: 0 2px 8px rgba(15, 118, 110, 0.18);
 }
 
 .message.persona .message-bubble {
@@ -273,14 +273,15 @@
 .message.system {
   align-self: center;
   max-width: 80%;
+  color: var(--amber);
 }
 
 /* Dispatcher transparency: collapsible summary */
 .dispatch-summary {
   margin: 8px 0;
   padding: 10px 14px;
-  background: rgba(45, 156, 111, 0.06);
-  border: 1px solid rgba(45, 156, 111, 0.15);
+  background: var(--green-soft);
+  border: 1px solid var(--border-accent);
   border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 13px;
@@ -312,7 +313,7 @@
 .dispatch-summary-body {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px solid rgba(45, 156, 111, 0.15);
+  border-top: 1px solid var(--border-accent);
 }
 
 .dispatch-phase {
@@ -348,7 +349,7 @@
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  background: #faf8ff;
+  background: var(--surface-quiet);
   height: 100vh;
 }
 
@@ -358,7 +359,7 @@
   gap: 8px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(135deg, #2D9C6F, #5B8C5A);
+  background: var(--primary-gradient);
   color: #fff;
 }
 
@@ -404,7 +405,7 @@
 }
 
 .coaching-msg.coach .coaching-msg-role {
-  color: #2D9C6F;
+  color: var(--green);
 }
 
 .coaching-msg-bubble {
@@ -421,7 +422,7 @@
 }
 
 .coaching-msg.user .coaching-msg-bubble {
-  background: linear-gradient(135deg, #2D9C6F, #5B8C5A);
+  background: var(--primary-gradient);
   color: #fff;
   border-bottom-right-radius: 4px;
   display: inline-block;
@@ -468,13 +469,13 @@
 }
 
 .coaching-input-bar input:focus {
-  border-color: #2D9C6F;
+  border-color: var(--green);
   background: var(--bg-elevated);
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .coaching-send {
-  background: linear-gradient(135deg, #2D9C6F, #5B8C5A) !important;
+  background: var(--primary-gradient) !important;
   width: 36px !important;
   height: 36px !important;
 }
@@ -494,7 +495,7 @@
 
 .message-bubble hr {
   border: none;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--border-light);
   margin: 8px 0;
 }
 
@@ -509,14 +510,14 @@
 }
 
 .message-bubble code {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--bg-soft);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 13px;
 }
 
 .message-bubble pre {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--bg-soft);
   padding: 8px 12px;
   border-radius: 6px;
   overflow-x: auto;
@@ -529,10 +530,10 @@
 }
 
 .message-bubble blockquote {
-  border-left: 3px solid #ddd;
+  border-left: 3px solid var(--border-light);
   margin: 4px 0;
   padding-left: 12px;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 /* User bubble markdown overrides (white text) */
@@ -637,7 +638,7 @@
 .message-input-bar input:focus {
   border-color: var(--green);
   background: var(--bg-elevated);
-  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .send-btn {
@@ -762,7 +763,7 @@
 .mention-highlight {
   color: var(--green);
   font-weight: 600;
-  background: rgba(45, 156, 111, 0.1);
+  background: var(--green-soft);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -903,7 +904,7 @@
 
 .analysis-card.clickable:hover {
   border-color: var(--green);
-  background: rgba(45, 156, 111, 0.03);
+  background: var(--green-soft);
 }
 
 .analysis-card-header {
@@ -929,13 +930,13 @@
 }
 
 .analysis-card-score.positive {
-  color: #16a34a;
-  background: #f0fdf4;
+  color: var(--success);
+  background: var(--success-bg);
 }
 
 .analysis-card-score.negative {
-  color: #dc2626;
-  background: #fef2f2;
+  color: var(--rose);
+  background: var(--danger-bg);
 }
 
 .analysis-card-argument {
@@ -980,18 +981,18 @@
 }
 
 .suggestion-priority.high {
-  background: #fef2f2;
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--rose);
 }
 
 .suggestion-priority.medium {
-  background: #fffbeb;
-  color: #d97706;
+  background: var(--warning-bg);
+  color: var(--amber);
 }
 
 .suggestion-priority.low {
-  background: #f0fdf4;
-  color: #16a34a;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 /* Message highlight animation for scroll-to-message */
@@ -1000,7 +1001,7 @@
 }
 
 @keyframes message-highlight {
-  0% { background: rgba(45, 156, 111, 0.2); border-radius: 8px; }
-  70% { background: rgba(45, 156, 111, 0.1); }
+  0% { background: rgba(15, 118, 110, 0.18); border-radius: 8px; }
+  70% { background: var(--green-soft); }
   100% { background: transparent; }
 }

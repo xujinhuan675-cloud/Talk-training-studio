@@ -71,18 +71,18 @@
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: var(--amber);
+    background: var(--green);
     color: #fff;
     margin-top: -12px;
-    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+    box-shadow: 0 2px 8px rgba(15, 118, 110, 0.3);
   }
 
   .bottom-tab-item.elevated .bottom-tab-label {
-    color: var(--amber);
+    color: var(--green);
     margin-top: 1px;
   }
 
   .bottom-tab-item.elevated.active .bottom-tab-elevated-icon {
-    box-shadow: 0 2px 12px rgba(245, 158, 11, 0.45);
+    box-shadow: 0 2px 12px rgba(15, 118, 110, 0.45);
   }
 }

@@ -77,7 +77,7 @@ export default function ChatInput({
                 className="mention-item"
                 onClick={() => onInsertMention(p)}
               >
-                <Avatar name={p.name} color={p.avatar_color || '#2D9C6F'} size={24} />
+                <Avatar name={p.name} color={p.avatar_color || '#0F766E'} size={24} />
                 <span className="mention-name">{p.name}</span>
                 <span className="mention-role">{p.role}</span>
               </div>

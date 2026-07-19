@@ -104,7 +104,7 @@
   background: none;
   border: none;
   font-size: 11px;
-  color: var(--green, #2D9C6F);
+  color: var(--green);
   cursor: pointer;
   padding: 2px 0;
   font-weight: 500;
@@ -155,7 +155,7 @@
 .ctx-grade {
   font-size: 28px;
   font-weight: 800;
-  color: var(--green, #2D9C6F);
+  color: var(--green);
   line-height: 1;
   flex-shrink: 0;
 }
@@ -191,7 +191,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  background: rgba(45, 156, 111, 0.08);
+  background: var(--green-soft);
   border-radius: var(--radius-md, 8px);
   margin-top: auto;
 }
@@ -205,5 +205,5 @@
 .ctx-xp-value {
   font-size: 14px;
   font-weight: 700;
-  color: var(--green, #2D9C6F);
+  color: var(--green);
 }

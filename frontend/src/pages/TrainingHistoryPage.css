@@ -113,7 +113,7 @@
 .training-history-search:focus-within,
 .training-history-select:focus-within {
   border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .training-history-search input,
@@ -203,11 +203,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(200, 148, 74, 0.25);
+  border: 1px solid rgba(180, 83, 9, 0.25);
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--amber-soft);
-  color: #9a651d;
+  color: var(--amber);
   font-size: 13px;
   font-weight: 700;
 }
@@ -250,7 +250,7 @@
 }
 
 .training-history-row:hover {
-  background: rgba(45, 156, 111, 0.035);
+  background: var(--green-soft);
 }
 
 .training-history-time {

@@ -110,8 +110,8 @@
 }
 
 .settings-list-item.selected {
-  border-color: var(--green);
-  background: rgba(45, 156, 111, 0.04);
+  border-color: var(--border-accent);
+  background: var(--green-soft);
 }
 
 .settings-item-avatar {
@@ -172,7 +172,7 @@
 .settings-item-btn.danger:hover {
   background: var(--rose-soft);
   color: var(--rose);
-  border-color: rgba(199, 91, 91, 0.3);
+  border-color: rgba(185, 28, 28, 0.3);
 }
 
 /* Persona chips on scenario items */
@@ -238,7 +238,7 @@
 .settings-form-panel .field-label input:focus,
 .settings-form-panel .field-label select:focus {
   border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .settings-form-panel .field-label textarea {
@@ -261,7 +261,7 @@
 
 .settings-form-panel .field-label textarea:focus {
   border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .settings-form-panel .color-field {

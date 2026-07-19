@@ -192,8 +192,8 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
               <Radar
                 name={tr('最新评估', 'Latest Evaluation')}
                 dataKey="latest"
-                stroke="#2D9C6F"
-                fill="#2D9C6F"
+                stroke="#0F766E"
+                fill="#0F766E"
                 fillOpacity={0.25}
                 strokeWidth={2}
               />
@@ -201,7 +201,7 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
           </ResponsiveContainer>
           <div className="radar-legend">
             <span className="radar-legend-item">
-              <span className="radar-dot" style={{ background: '#2D9C6F' }} /> {tr('最新评估', 'Latest Evaluation')}
+              <span className="radar-dot" style={{ background: '#0F766E' }} /> {tr('最新评估', 'Latest Evaluation')}
             </span>
             {evaluations.length > 1 && (
               <span className="radar-legend-item">

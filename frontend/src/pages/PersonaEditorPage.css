@@ -28,7 +28,7 @@
   right: -160px;
   width: 480px;
   height: 480px;
-  background: radial-gradient(circle, rgba(45,156,111,0.18), transparent 70%);
+  background: radial-gradient(circle, rgba(15,118,110,0.18), transparent 70%);
 }
 
 .persona-editor::after {

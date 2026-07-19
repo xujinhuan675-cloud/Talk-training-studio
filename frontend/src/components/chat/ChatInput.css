@@ -43,7 +43,7 @@
 .message-input-bar .message-input-textarea:focus {
   border-color: var(--green);
   background: var(--bg-elevated);
-  box-shadow: 0 0 0 3px rgba(45, 156, 111, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .message-input-bar .message-input-textarea::placeholder {

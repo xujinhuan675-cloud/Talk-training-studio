@@ -20,11 +20,11 @@ const PLACEHOLDER_TAGS: Record<string, string[]> = {}
 /** Map a tag string to a soft color. Deterministic based on tag text. */
 function tagColor(tag: string): { bg: string; color: string } {
   const palette = [
-    { bg: 'rgba(45,156,111,0.12)', color: '#1a7a52' },
-    { bg: 'rgba(59,130,246,0.12)', color: '#2563eb' },
-    { bg: 'rgba(139,92,246,0.12)', color: '#7c3aed' },
-    { bg: 'rgba(245,158,11,0.12)', color: '#b45309' },
-    { bg: 'rgba(239,68,68,0.10)', color: '#dc2626' },
+    { bg: 'var(--green-soft)', color: 'var(--green)' },
+    { bg: 'var(--blue-soft)', color: 'var(--blue)' },
+    { bg: 'var(--violet-soft)', color: 'var(--violet)' },
+    { bg: 'var(--amber-soft)', color: 'var(--amber)' },
+    { bg: 'var(--rose-soft)', color: 'var(--rose)' },
   ]
   let hash = 0
   for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) | 0
@@ -44,7 +44,7 @@ function EmotionMiniChart() {
   const intensityColor = (v: number) => {
     if (v > 0.7) return 'var(--rose)'
     if (v > 0.5) return 'var(--amber)'
-    return 'var(--green, #2D9C6F)'
+    return 'var(--green)'
   }
   return (
     <div className="ctx-emotion-chart">
@@ -92,7 +92,7 @@ export default function ContextPanel({
             return (
               <div key={p.id} className="ctx-profile-card">
                 <div className="ctx-profile-header">
-                  <Avatar name={p.name} color={p.avatar_color || '#2D9C6F'} size={32} />
+                  <Avatar name={p.name} color={p.avatar_color || '#0F766E'} size={32} />
                   <span className="ctx-profile-name">{p.name}</span>
                 </div>
                 <div className="ctx-profile-tags">

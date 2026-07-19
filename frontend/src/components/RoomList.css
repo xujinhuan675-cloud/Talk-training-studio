@@ -82,7 +82,7 @@
 }
 
 .room-item.active .room-name {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .room-personas {
@@ -114,7 +114,7 @@
 }
 
 .room-delete-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
+  background: var(--rose-soft);
   color: var(--rose);
 }
 
@@ -127,11 +127,11 @@
 }
 
 .room-type-badge.private {
-  background: rgba(45, 156, 111, 0.15);
-  color: #818cf8;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .room-type-badge.group {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
+  background: var(--amber-soft);
+  color: var(--amber);
 }

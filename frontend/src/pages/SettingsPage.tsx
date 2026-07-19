@@ -204,7 +204,7 @@ function PersonasTab() {
             onClick={() => navigate(APP_ROUTES.configPersonaEdit(p.id))}
           >
             <div className="settings-item-avatar">
-              <Avatar name={p.name} color={p.avatar_color || '#2D9C6F'} size={40} />
+              <Avatar name={p.name} color={p.avatar_color || '#0F766E'} size={40} />
             </div>
             <div className="settings-item-info">
               <div className="settings-item-name">{p.name}</div>

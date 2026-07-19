@@ -280,7 +280,7 @@
 
 .home-entry-card.primary {
   border-color: var(--border-accent);
-  background: linear-gradient(180deg, rgba(45, 156, 111, 0.08), var(--bg-card) 72%);
+  background: linear-gradient(180deg, var(--green-soft), var(--bg-card) 72%);
 }
 
 .home-entry-icon {

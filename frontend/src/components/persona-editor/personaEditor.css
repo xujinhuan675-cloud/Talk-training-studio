@@ -563,12 +563,12 @@
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(45,156,111,0.32);
+  box-shadow: 0 6px 18px rgba(15,118,110,0.32);
   transition: all 0.15s ease;
   font-family: inherit;
 }
 
 .btn-go:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(45,156,111,0.4);
+  box-shadow: 0 8px 22px rgba(15,118,110,0.4);
 }
