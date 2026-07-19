@@ -29,7 +29,6 @@ from application.dto import (
     UpdateConversationDTO,
 )
 from domain.common.unit_of_work import AbstractUnitOfWork
-from domain.common.exceptions import BusinessException
 from domain.conversation.entity import (
     AgentConfig,
     Conversation,
@@ -43,7 +42,6 @@ from domain.conversation.exceptions import (
     MessageNotFoundException,
 )
 from domain.conversation.repository import OwnedMetadataScope
-from shared.codes import BusinessCode
 
 
 def _utcnow() -> datetime:
@@ -65,111 +63,15 @@ def _clean_statuses(values: Sequence[str] | None) -> list[str] | None:
     return cleaned or None
 
 
-def _as_mapping(value: object | None) -> dict:
-    return value if isinstance(value, dict) else {}
-
-
-def _metadata_text(metadata: dict, *keys: str) -> str | None:
-    for key in keys:
-        value = metadata.get(key)
-        if isinstance(value, str):
-            text = value.strip()
-            if text:
-                return text
-    return None
-
-
-def _owned_user_id(metadata: dict) -> str | None:
-    scope = _as_mapping(metadata.get("authScope"))
-    return _metadata_text(scope, "userId", "user_id") or _metadata_text(
-        metadata,
-        "ownerUserId",
-        "owner_user_id",
-        "createdByUserId",
-        "created_by_user_id",
-    )
-
-
-def _owned_team_id(metadata: dict) -> str | None:
-    scope = _as_mapping(metadata.get("authScope"))
-    return _metadata_text(scope, "teamId", "team_id") or _metadata_text(
-        metadata,
-        "teamId",
-        "team_id",
-        "ownerTeamId",
-        "owner_team_id",
-    )
-
-
-def _matches_metadata_scope(
-    metadata: dict | None,
-    scope: OwnedMetadataScope | None,
-) -> bool:
-    if scope is None:
-        return True
-
-    metadata = _as_mapping(metadata)
-    owner_user_id = _owned_user_id(metadata)
-    owner_team_id = _owned_team_id(metadata)
-    team_id = scope.team_id
-    if not owner_user_id and not owner_team_id:
-        return scope.allow_unscoped
-    if owner_user_id and owner_user_id == scope.user_id:
-        return True
-    if scope.include_team_scope and owner_team_id and owner_team_id == team_id:
-        return True
-    if not owner_user_id and owner_team_id and owner_team_id == team_id:
-        return True
-    return False
-
-
-def _require_metadata_scope(
-    metadata: dict | None,
-    scope: OwnedMetadataScope | None,
-    *,
-    resource_name: str,
-    details: dict,
-) -> None:
-    if not _matches_metadata_scope(metadata, scope):
-        raise BusinessException(
-            code=BusinessCode.FORBIDDEN,
-            message=f"{resource_name} is outside current user scope",
-            error_type=f"{resource_name.replace(' ', '')}ScopeForbidden",
-            details=details,
-        )
-
-
-async def _raise_conversation_not_found_or_scope_forbidden(
-    repository,
+async def _raise_conversation_not_found(
     conversation_id: int,
-    metadata_scope: OwnedMetadataScope | None,
 ) -> None:
-    if metadata_scope is not None:
-        existing = await repository.get_by_id(conversation_id)
-        if existing is not None:
-            _require_metadata_scope(
-                existing.metadata,
-                metadata_scope,
-                resource_name="Conversation",
-                details={"conversation_id": conversation_id},
-            )
     raise ConversationNotFoundException(conversation_id)
 
 
-async def _raise_agent_config_not_found_or_scope_forbidden(
-    repository,
+async def _raise_agent_config_not_found(
     config_id: int,
-    metadata_scope: OwnedMetadataScope | None,
 ) -> None:
-    if metadata_scope is not None:
-        existing = await repository.get_by_id(config_id)
-        if existing is not None:
-            _require_metadata_scope(
-                existing.metadata,
-                metadata_scope,
-                resource_name="Agent config",
-                details={"config_id": config_id},
-            )
     raise AgentConfigNotFoundException(config_id)
 
 
@@ -453,11 +355,7 @@ class ConversationApplicationService:
                 metadata_scope=metadata_scope,
             )
             if conv is None:
-                await _raise_conversation_not_found_or_scope_forbidden(
-                    uow.conversation_repository,
-                    conversation_id,
-                    metadata_scope,
-                )
+                await _raise_conversation_not_found(conversation_id)
             return ConversationDTO.model_validate(conv)
 
     async def list_conversations(
@@ -494,11 +392,7 @@ class ConversationApplicationService:
                 metadata_scope=metadata_scope,
             )
             if conv is None:
-                await _raise_conversation_not_found_or_scope_forbidden(
-                    uow.conversation_repository,
-                    conversation_id,
-                    metadata_scope,
-                )
+                await _raise_conversation_not_found(conversation_id)
             changed = False
             if dto.title is not None:
                 conv.update_title(dto.title)
@@ -529,11 +423,7 @@ class ConversationApplicationService:
                 metadata_scope=metadata_scope,
             )
             if conv is None:
-                await _raise_conversation_not_found_or_scope_forbidden(
-                    uow.conversation_repository,
-                    conversation_id,
-                    metadata_scope,
-                )
+                await _raise_conversation_not_found(conversation_id)
             conv.soft_delete()
             updated = await uow.conversation_repository.update(
                 conv,
@@ -1050,10 +940,18 @@ class ConversationApplicationService:
 
     # Agent Config CRUD
 
-    async def create_agent_config(self, dto: CreateAgentConfigDTO) -> AgentConfigDTO:
+    async def create_agent_config(
+        self,
+        dto: CreateAgentConfigDTO,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> AgentConfigDTO:
         now = _utcnow()
         async with self._uow_factory() as uow:
-            existing = await uow.agent_config_repository.get_by_name(dto.name)
+            existing = await uow.agent_config_repository.get_by_name(
+                dto.name,
+                metadata_scope=metadata_scope,
+            )
             if existing is not None:
                 raise AgentConfigNameExistsException(dto.name)
             config = AgentConfig(
@@ -1084,11 +982,7 @@ class ConversationApplicationService:
                 metadata_scope=metadata_scope,
             )
             if config is None:
-                await _raise_agent_config_not_found_or_scope_forbidden(
-                    uow.agent_config_repository,
-                    config_id,
-                    metadata_scope,
-                )
+                await _raise_agent_config_not_found(config_id)
             return AgentConfigDTO.model_validate(config)
 
     async def list_agent_configs(
@@ -1120,14 +1014,13 @@ class ConversationApplicationService:
                 metadata_scope=metadata_scope,
             )
             if config is None:
-                await _raise_agent_config_not_found_or_scope_forbidden(
-                    uow.agent_config_repository,
-                    config_id,
-                    metadata_scope,
-                )
+                await _raise_agent_config_not_found(config_id)
             if dto.name is not None:
                 # Check uniqueness
-                existing = await uow.agent_config_repository.get_by_name(dto.name)
+                existing = await uow.agent_config_repository.get_by_name(
+                    dto.name,
+                    metadata_scope=metadata_scope,
+                )
                 if existing is not None and existing.id != config_id:
                     raise AgentConfigNameExistsException(dto.name)
                 config.name = dto.name
@@ -1164,11 +1057,7 @@ class ConversationApplicationService:
                 metadata_scope=metadata_scope,
             )
             if config is None:
-                await _raise_agent_config_not_found_or_scope_forbidden(
-                    uow.agent_config_repository,
-                    config_id,
-                    metadata_scope,
-                )
+                await _raise_agent_config_not_found(config_id)
             await uow.agent_config_repository.delete(
                 config_id,
                 metadata_scope=metadata_scope,

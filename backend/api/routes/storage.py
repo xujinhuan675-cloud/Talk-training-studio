@@ -236,6 +236,7 @@ async def upload_file(
                 break
             yield chunk
 
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
     resp = await service.relay_upload_stream(
         user_id=None,  # No user tracking
         file_stream=_iter_chunks(file),
@@ -246,5 +247,6 @@ async def upload_file(
             current_user=current_user,
             kind=kind,
         ),
+        metadata_scope=metadata_scope,
     )
     return success_response(data=resp, message=t("file.upload.success"))

@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from api.dependencies import get_file_asset_service, get_idempotency_service
 from api.routes.storage import router as storage_router
-from application.dto import FileAssetSummaryDTO
+from application.dto import FileAssetSummaryDTO, StorageUploadResponseDTO
 from application.ports.storage import PresignedURL
 from application.services.idempotency_service import IdempotencyService
 from application.ports.idempotency import IdempotencyRecord, IdempotencyStore
@@ -62,6 +62,7 @@ class FakeFileAssetService:
         self.get_raw_calls = []
         self.get_by_key_raw_calls = []
         self.complete_calls = []
+        self.relay_stream_calls = []
         self.blocked_asset_ids = set()
 
     async def presign_upload(
@@ -133,6 +134,43 @@ class FakeFileAssetService:
             {"asset_id": asset_id, "key": key, "metadata_scope": metadata_scope}
         )
         return _file_asset(asset_id=asset_id or 17, key=key)
+
+    async def relay_upload_stream(
+        self,
+        *,
+        user_id,
+        file_stream,
+        filename: str,
+        kind: str,
+        content_type=None,
+        size_hint=None,
+        metadata=None,
+        metadata_scope=None,
+    ):
+        chunks = []
+        async for chunk in file_stream:
+            chunks.append(chunk)
+        self.relay_stream_calls.append(
+            {
+                "user_id": user_id,
+                "filename": filename,
+                "kind": kind,
+                "content_type": content_type,
+                "size_hint": size_hint,
+                "metadata": metadata,
+                "metadata_scope": metadata_scope,
+                "bytes": b"".join(chunks),
+            }
+        )
+        return StorageUploadResponseDTO(
+            key=f"uploads/{filename}",
+            etag="etag-upload",
+            size=sum(len(chunk) for chunk in chunks),
+            content_type=content_type,
+            url="https://provider.test/upload",
+            file_id=31,
+            file_status="active",
+        )
 
 
 def _file_asset(*, asset_id: int, key: str | None = None) -> FileAsset:
@@ -293,6 +331,29 @@ async def test_confirm_presigned_upload_uses_current_user_metadata_scope() -> No
 
 
 @pytest.mark.asyncio
+async def test_confirm_presigned_upload_by_key_uses_current_user_scope() -> None:
+    fake = FakeFileAssetService()
+    app = make_test_app(fake)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/storage/complete",
+            json={"key": "training_material/17.txt"},
+            headers={"X-Mock-User": "leader"},
+        )
+
+    assert response.status_code == 200
+    get_scope = fake.get_by_key_raw_calls[0]["metadata_scope"]
+    confirm_scope = fake.complete_calls[0]["metadata_scope"]
+    assert get_scope.user_id == "user-leader-001"
+    assert get_scope.team_id == "team-revenue"
+    assert get_scope.include_team_scope is True
+    assert get_scope.allow_unscoped is False
+    assert confirm_scope == get_scope
+    assert fake.complete_calls[0]["asset_id"] == 17
+
+
+@pytest.mark.asyncio
 async def test_confirm_presigned_upload_rejects_cross_user_asset_before_update() -> None:
     fake = FakeFileAssetService()
     fake.blocked_asset_ids.add(8)
@@ -307,3 +368,27 @@ async def test_confirm_presigned_upload_rejects_cross_user_asset_before_update()
 
     assert response.status_code == 404
     assert fake.complete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_upload_file_passes_current_user_scope_to_relay_upload_stream() -> None:
+    fake = FakeFileAssetService()
+    app = make_test_app(fake)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/storage/upload",
+            params={"kind": "training_material"},
+            files={"file": ("material.txt", b"hello", "text/plain")},
+            headers={"X-Mock-User": "sales"},
+        )
+
+    assert response.status_code == 200
+    call = fake.relay_stream_calls[0]
+    scope = call["metadata_scope"]
+    assert scope.user_id == "user-sales-001"
+    assert scope.team_id == "team-revenue"
+    assert scope.include_team_scope is False
+    assert scope.allow_unscoped is False
+    assert call["metadata"]["ownerUserId"] == "user-sales-001"
+    assert call["metadata"]["teamId"] == "team-revenue"

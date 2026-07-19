@@ -67,7 +67,7 @@ def _matches_metadata_scope(metadata: dict, scope) -> bool:
 
 def _require_scope_match(metadata: dict, scope) -> None:
     if scope is not None and not _matches_metadata_scope(metadata, scope):
-        raise HTTPException(status_code=403, detail="Resource is outside current user scope")
+        raise HTTPException(status_code=404, detail="Resource not found")
 
 
 def _conversation(
@@ -134,6 +134,7 @@ class _FakeConversationService:
         self.list_call = None
         self.search_call = None
         self.agent_config_create_call = None
+        self.agent_config_create_scope_calls = []
         self.agent_config_list_call = None
         self.agent_config_get_call = None
         self.agent_config_update_call = None
@@ -228,7 +229,8 @@ class _FakeConversationService:
         self.action_call = (conversation_id, message_public_id, payload)
         return None
 
-    async def create_agent_config(self, payload):
+    async def create_agent_config(self, payload, **kwargs):
+        self.agent_config_create_scope_calls.append(kwargs.get("metadata_scope"))
         self.agent_config_create_call = payload
         return _agent_config(
             31,
@@ -359,7 +361,7 @@ def test_cross_user_conversation_search_is_scoped_before_search_call() -> None:
         headers={"X-Mock-User": "sales"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert conversation_service.get_calls == [7]
     assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.search_call is None
@@ -410,7 +412,7 @@ def test_cross_user_conversation_get_uses_scoped_service_call() -> None:
 
     response = client.get("/api/v1/conversations/7", headers={"X-Mock-User": "sales"})
 
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert conversation_service.get_calls == [7]
     scope = conversation_service.get_scope_calls[0]
     assert scope.user_id == "user-sales-001"
@@ -486,8 +488,8 @@ def test_cross_user_conversation_mutations_are_blocked_by_scoped_service_call() 
     )
     delete_resp = client.delete("/api/v1/conversations/7", headers={"X-Mock-User": "sales"})
 
-    assert update_resp.status_code == 403
-    assert delete_resp.status_code == 403
+    assert update_resp.status_code == 404
+    assert delete_resp.status_code == 404
     assert conversation_service.get_calls == []
     assert conversation_service.update_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.delete_scope_calls[0].user_id == "user-sales-001"
@@ -591,7 +593,7 @@ def test_admin_single_resource_routes_reject_resources_outside_explicit_scope() 
         client.delete("/api/v1/agent-configs/8", headers=headers),
     ]
 
-    assert [response.status_code for response in responses] == [403, 403, 403, 403, 403, 403]
+    assert [response.status_code for response in responses] == [404, 404, 404, 404, 404, 404]
     assert conversation_service.update_call is None
     assert conversation_service.delete_call is None
     assert conversation_service.agent_config_update_call is None
@@ -612,8 +614,8 @@ def test_non_admin_cannot_update_or_delete_unscoped_conversation() -> None:
     )
     delete_resp = client.delete("/api/v1/conversations/7", headers=headers)
 
-    assert update_resp.status_code == 403
-    assert delete_resp.status_code == 403
+    assert update_resp.status_code == 404
+    assert delete_resp.status_code == 404
     assert conversation_service.update_scope_calls[0].allow_unscoped is False
     assert conversation_service.delete_scope_calls[0].allow_unscoped is False
     assert conversation_service.update_call is None
@@ -641,6 +643,12 @@ def test_non_admin_cannot_update_or_delete_unscoped_conversation() -> None:
             "retry_message_call",
             id="message-retry",
         ),
+        pytest.param(
+            "/api/v1/conversations/7/messages/msg_answer/fork",
+            {"json": {}},
+            "fork_conversation_call",
+            id="message-fork",
+        ),
     ],
 )
 def test_non_admin_cannot_mutate_unscoped_conversation_tree(
@@ -655,7 +663,7 @@ def test_non_admin_cannot_mutate_unscoped_conversation_tree(
 
     response = client.post(path, headers={"X-Mock-User": "sales"}, **request_kwargs)
 
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert conversation_service.get_calls == [7]
     assert conversation_service.get_scope_calls[0].allow_unscoped is False
     assert getattr(conversation_service, service_attr) is None
@@ -674,7 +682,7 @@ def test_non_admin_cannot_chat_against_unscoped_conversation() -> None:
         json={"message": "hello", "stream": False},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert conversation_service.get_calls == [7]
     assert conversation_service.get_scope_calls[0].allow_unscoped is False
     assert chat_service.sync_call is None
@@ -701,7 +709,7 @@ def test_cross_user_message_action_is_blocked_before_service_call() -> None:
         json={"action": "retry"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert conversation_service.get_calls == [7]
     assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert conversation_service.action_call is None
@@ -794,7 +802,7 @@ def test_cross_user_conversation_child_routes_are_scoped_before_service_call(
         **request_kwargs,
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert conversation_service.get_calls == [7]
     scope = conversation_service.get_scope_calls[0]
     assert scope.user_id == "user-sales-001"
@@ -824,7 +832,7 @@ def test_cross_user_chat_is_blocked_before_llm_service_call() -> None:
         json={"message": "hello", "stream": False},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 404
     assert conversation_service.get_calls == [7]
     assert conversation_service.get_scope_calls[0].user_id == "user-sales-001"
     assert chat_service.sync_call is None
@@ -883,6 +891,11 @@ def test_create_agent_config_stamps_current_mock_user_scope() -> None:
     )
     assert conversation_service.agent_config_create_call.tool_ids == ["crm.lookup"]
     assert conversation_service.agent_config_create_call.mcp_server_ids == ["crm"]
+    scope = conversation_service.agent_config_create_scope_calls[0]
+    assert scope.user_id == "user-sales-001"
+    assert scope.team_id == "team-revenue"
+    assert scope.include_team_scope is False
+    assert scope.allow_unscoped is False
 
 
 def test_agent_config_routes_enforce_owner_metadata_scope() -> None:
@@ -919,15 +932,37 @@ def test_agent_config_routes_enforce_owner_metadata_scope() -> None:
 
     assert list_resp.status_code == 200
     assert [item["id"] for item in list_resp.json()["data"]["items"]] == [8]
-    assert get_resp.status_code == 403
-    assert update_resp.status_code == 403
-    assert delete_resp.status_code == 403
+    assert get_resp.status_code == 404
+    assert update_resp.status_code == 404
+    assert delete_resp.status_code == 404
     assert conversation_service.agent_config_get_calls == [7, 7]
     assert [scope.user_id for scope in conversation_service.agent_config_get_scope_calls] == [
         "user-sales-001",
         "user-sales-001",
     ]
     assert conversation_service.agent_config_delete_scope_calls[0].user_id == "user-sales-001"
+    assert conversation_service.agent_config_update_call is None
+    assert conversation_service.agent_config_delete_call is None
+
+
+def test_non_admin_cannot_update_or_delete_unscoped_agent_config() -> None:
+    conversation_service = _FakeConversationService(
+        agent_configs={9: _agent_config(9, metadata={})}
+    )
+    client = _client(conversation_service)
+    headers = {"X-Mock-User": "sales"}
+
+    update_resp = client.patch(
+        "/api/v1/agent-configs/9",
+        headers=headers,
+        json={"name": "legacy-agent"},
+    )
+    delete_resp = client.delete("/api/v1/agent-configs/9", headers=headers)
+
+    assert update_resp.status_code == 404
+    assert delete_resp.status_code == 404
+    assert conversation_service.agent_config_get_scope_calls[0].allow_unscoped is False
+    assert conversation_service.agent_config_delete_scope_calls[0].allow_unscoped is False
     assert conversation_service.agent_config_update_call is None
     assert conversation_service.agent_config_delete_call is None
 

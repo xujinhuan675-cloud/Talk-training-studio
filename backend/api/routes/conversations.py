@@ -354,7 +354,7 @@ async def fork_conversation(
     service: ConversationApplicationService = Depends(get_conversation_service),
     current_user: CurrentUser = Depends(_conversation_user),
 ):
-    source = await _get_accessible_conversation(service, conversation_id, current_user)
+    source = await _get_mutable_conversation(service, conversation_id, current_user)
     payload = payload.model_copy(
         update={
             "metadata": conversation_metadata_for_current_user(
@@ -447,7 +447,13 @@ async def create_agent_config(
             "metadata": conversation_metadata_for_current_user(payload.metadata, current_user),
         },
     )
-    config = await service.create_agent_config(payload)
+    config = await service.create_agent_config(
+        payload,
+        metadata_scope=owned_metadata_scope_for_current_user(
+            current_user,
+            allow_unscoped=False,
+        ),
+    )
     return success_response(config, message=t("ok"))
 
 

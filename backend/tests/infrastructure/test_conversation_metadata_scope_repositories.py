@@ -164,6 +164,28 @@ async def test_conversation_repository_applies_metadata_scope_to_single_resource
 
 
 @pytest.mark.asyncio
+async def test_conversation_repository_rejects_unscoped_update_when_allow_unscoped_false(
+    session,
+) -> None:
+    repo = SQLAlchemyConversationRepository(session)
+    unscoped = await repo.create(_conversation("legacy-unscoped", 1, {}))
+    unscoped.update_title("should-not-update")
+    scope = OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+
+    with pytest.raises(ConversationNotFoundException):
+        await repo.update(unscoped, metadata_scope=scope)
+
+    persisted = await repo.get_by_id(unscoped.id or 0)
+    assert persisted is not None
+    assert persisted.title == "legacy-unscoped"
+
+
+@pytest.mark.asyncio
 async def test_agent_config_repository_filters_metadata_scope_before_pagination(session) -> None:
     repo = SQLAlchemyAgentConfigRepository(session)
     await repo.create(
@@ -262,6 +284,28 @@ async def test_agent_config_repository_applies_metadata_scope_to_single_resource
         await repo.delete(hidden.id, metadata_scope=scope)
     await repo.delete(visible.id, metadata_scope=scope)
     assert await repo.get_by_id(visible.id) is None
+
+
+@pytest.mark.asyncio
+async def test_agent_config_repository_get_by_name_applies_metadata_scope(session) -> None:
+    repo = SQLAlchemyAgentConfigRepository(session)
+    await repo.create(
+        _agent_config("hidden-name", 2, {"ownerUserId": "user-cs-001", "teamId": "team-service"})
+    )
+    await repo.create(
+        _agent_config("visible-name", 1, {"ownerUserId": "user-sales-001", "teamId": "team-revenue"})
+    )
+    scope = OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+
+    assert await repo.get_by_name("hidden-name", metadata_scope=scope) is None
+    visible = await repo.get_by_name("visible-name", metadata_scope=scope)
+    assert visible is not None
+    assert visible.name == "visible-name"
 
 
 @pytest.mark.asyncio

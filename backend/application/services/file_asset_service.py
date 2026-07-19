@@ -51,6 +51,48 @@ def _user_id_for_key(user_id: Optional[int]) -> Optional[str]:
     return str(user_id) if user_id is not None else None
 
 
+_ACL_METADATA_KEYS = {
+    "authScope",
+    "ownerUserId",
+    "owner_user_id",
+    "createdByUserId",
+    "created_by_user_id",
+    "teamId",
+    "team_id",
+    "ownerTeamId",
+    "owner_team_id",
+}
+
+
+def _require_metadata_scope(
+    scope: OwnedMetadataScope | None,
+    *,
+    operation: str,
+) -> OwnedMetadataScope:
+    if scope is None:
+        raise DomainValidationException(
+            "metadata_scope is required for file asset access",
+            field="metadata_scope",
+            details={"operation": operation},
+            message_key="file_asset.scope.required",
+        )
+    return scope
+
+
+def _merge_metadata_preserving_acl(
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(existing or {})
+    for key, value in dict(incoming or {}).items():
+        if key not in _ACL_METADATA_KEYS:
+            merged[key] = value
+    for key in _ACL_METADATA_KEYS:
+        if existing and key in existing:
+            merged[key] = existing[key]
+    return merged
+
+
 def _limit_stream(
     stream: AsyncIterator[bytes],
     *,
@@ -149,6 +191,7 @@ class FileAssetApplicationService:
         metadata: Optional[dict[str, Any]] = None,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
+        scope = _require_metadata_scope(metadata_scope, operation="mark_asset_active")
         if asset_id is None and not key:
             raise FileAssetNotFoundException()
 
@@ -156,9 +199,9 @@ class FileAssetApplicationService:
             repo = uow.file_asset_repository
             asset: Optional[FileAsset] = None
             if asset_id is not None:
-                asset = await repo.get_by_id(asset_id, metadata_scope=metadata_scope)
+                asset = await repo.get_by_id(asset_id, metadata_scope=scope)
             if asset is None and key:
-                asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
+                asset = await repo.get_by_key(key, metadata_scope=scope)
             if asset is None:
                 raise FileAssetNotFoundException(asset_id, key=key)
 
@@ -167,10 +210,14 @@ class FileAssetApplicationService:
                 etag=etag,
                 content_type=content_type,
                 url=url if url is not None else asset.url,
-                metadata=metadata if metadata is not None else asset.metadata,
+                metadata=(
+                    _merge_metadata_preserving_acl(asset.metadata, metadata)
+                    if metadata is not None
+                    else asset.metadata
+                ),
             )
             asset.mark_active()
-            updated = await repo.update(asset, metadata_scope=metadata_scope)
+            updated = await repo.update(asset, metadata_scope=scope)
             # 显式提交，确保在作用域内完成持久化
             await uow.commit()
             return self._to_dto(updated)
@@ -192,13 +239,14 @@ class FileAssetApplicationService:
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> None:
         """Physically delete remote object and DB record by id."""
+        scope = _require_metadata_scope(metadata_scope, operation="purge_asset_by_id")
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
 
         async with self._uow_factory() as uow:
             asset = await uow.file_asset_repository.get_by_id(
                 asset_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
@@ -209,7 +257,7 @@ class FileAssetApplicationService:
                 # Best effort deletion; continue to keep API idempotent
                 pass
 
-            await uow.file_asset_repository.delete(asset_id, metadata_scope=metadata_scope)
+            await uow.file_asset_repository.delete(asset_id, metadata_scope=scope)
 
     async def confirm_direct_upload(
         self,
@@ -219,6 +267,7 @@ class FileAssetApplicationService:
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
         """Confirm client direct upload by reconciling metadata from storage."""
+        scope = _require_metadata_scope(metadata_scope, operation="confirm_direct_upload")
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
 
@@ -226,9 +275,9 @@ class FileAssetApplicationService:
             repo = uow.file_asset_repository
             asset: Optional[FileAsset] = None
             if asset_id is not None:
-                asset = await repo.get_by_id(asset_id, metadata_scope=metadata_scope)
+                asset = await repo.get_by_id(asset_id, metadata_scope=scope)
             if asset is None and key:
-                asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
+                asset = await repo.get_by_key(key, metadata_scope=scope)
             if asset is None:
                 raise FileAssetNotFoundException(asset_id, key=key)
 
@@ -240,10 +289,13 @@ class FileAssetApplicationService:
                 etag=getattr(meta, "etag", None),
                 content_type=getattr(meta, "content_type", None) or asset.content_type,
                 url=public_url,
-                metadata=getattr(meta, "custom_metadata", None) or asset.metadata,
+                metadata=_merge_metadata_preserving_acl(
+                    asset.metadata,
+                    getattr(meta, "custom_metadata", None),
+                ),
             )
             asset.mark_active()
-            updated = await repo.update(asset, metadata_scope=metadata_scope)
+            updated = await repo.update(asset, metadata_scope=scope)
             return self._to_dto(updated)
 
     async def generate_access_url_by_info(
@@ -427,11 +479,13 @@ class FileAssetApplicationService:
         kind: str,
         content_type: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> StorageUploadResponseDTO:
         """Server-side relay upload and persistence to DB.
 
         Only persist stable public URL (if any); do not store presigned URL.
         """
+        scope = _require_metadata_scope(metadata_scope, operation="relay_upload")
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
 
@@ -473,6 +527,7 @@ class FileAssetApplicationService:
                 "upload_source": "relay",
                 "filename": filename or "",
             },
+            metadata_scope=scope,
         )
 
         return StorageUploadResponseDTO(
@@ -495,8 +550,10 @@ class FileAssetApplicationService:
         content_type: Optional[str] = None,
         size_hint: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> StorageUploadResponseDTO:
         """Server-side relay upload with streaming body to reduce peak memory usage."""
+        scope = _require_metadata_scope(metadata_scope, operation="relay_upload_stream")
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
 
@@ -540,6 +597,7 @@ class FileAssetApplicationService:
                 "upload_source": "relay",
                 "filename": filename or "",
             },
+            metadata_scope=scope,
         )
 
         return StorageUploadResponseDTO(
@@ -569,9 +627,10 @@ class FileAssetApplicationService:
         metadata: Optional[dict[str, Any]] = None,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
+        scope = _require_metadata_scope(metadata_scope, operation="upsert_active_asset")
         async with self._uow_factory() as uow:
             repo = uow.file_asset_repository
-            asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
+            asset = await repo.get_by_key(key, metadata_scope=scope)
             if asset is None:
                 now = _utcnow()
                 asset = FileAsset(
@@ -608,10 +667,14 @@ class FileAssetApplicationService:
                 etag=etag,
                 content_type=content_type,
                 url=url,
-                metadata=metadata if metadata is not None else asset.metadata,
+                metadata=(
+                    _merge_metadata_preserving_acl(asset.metadata, metadata)
+                    if metadata is not None
+                    else asset.metadata
+                ),
             )
             asset.mark_active()
-            updated = await repo.update(asset, metadata_scope=metadata_scope)
+            updated = await repo.update(asset, metadata_scope=scope)
             return self._to_dto(updated)
 
     async def get_asset(
@@ -620,10 +683,11 @@ class FileAssetApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
+        scope = _require_metadata_scope(metadata_scope, operation="get_asset")
         async with self._uow_factory(readonly=True) as uow:
             asset = await uow.file_asset_repository.get_by_id(
                 asset_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
@@ -637,6 +701,7 @@ class FileAssetApplicationService:
         max_bytes: int = 8192,
     ) -> tuple[bytes, bool]:
         """Read a bounded byte prefix after the asset passes metadata scope checks."""
+        scope = _require_metadata_scope(metadata_scope, operation="read_asset_bytes")
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
         if max_bytes < 1:
@@ -650,7 +715,7 @@ class FileAssetApplicationService:
         async with self._uow_factory(readonly=True) as uow:
             asset = await uow.file_asset_repository.get_by_id(
                 asset_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
@@ -681,10 +746,11 @@ class FileAssetApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAsset:
+        scope = _require_metadata_scope(metadata_scope, operation="get_asset_raw")
         async with self._uow_factory(readonly=True) as uow:
             asset = await uow.file_asset_repository.get_by_id(
                 asset_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
@@ -696,10 +762,11 @@ class FileAssetApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAsset:
+        scope = _require_metadata_scope(metadata_scope, operation="get_asset_by_key_raw")
         async with self._uow_factory(readonly=True) as uow:
             asset = await uow.file_asset_repository.get_by_key(
                 key,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if asset is None:
                 raise FileAssetNotFoundException(key=key)
@@ -715,6 +782,7 @@ class FileAssetApplicationService:
         limit: int,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> Tuple[list[FileAssetDTO], int]:
+        scope = _require_metadata_scope(metadata_scope, operation="list_assets")
         async with self._uow_factory(readonly=True) as uow:
             repo = uow.file_asset_repository
             items = await repo.list(
@@ -723,13 +791,13 @@ class FileAssetApplicationService:
                 status=status,
                 skip=skip,
                 limit=limit,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             total = await repo.count(
                 owner_id=owner_id,
                 kind=kind,
                 status=status,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             return [self._to_dto(item) for item in items], total
 
@@ -739,10 +807,11 @@ class FileAssetApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
+        scope = _require_metadata_scope(metadata_scope, operation="soft_delete")
         async with self._uow_factory() as uow:
             asset = await uow.file_asset_repository.get_by_id(
                 asset_id,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
@@ -751,7 +820,7 @@ class FileAssetApplicationService:
             asset.mark_deleted()
             updated = await uow.file_asset_repository.update(
                 asset,
-                metadata_scope=metadata_scope,
+                metadata_scope=scope,
             )
             return self._to_dto(updated)
 
@@ -761,8 +830,9 @@ class FileAssetApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> None:
+        scope = _require_metadata_scope(metadata_scope, operation="purge")
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete(asset_id, metadata_scope=metadata_scope)
+            await uow.file_asset_repository.delete(asset_id, metadata_scope=scope)
 
     async def purge_by_key(
         self,
@@ -770,8 +840,9 @@ class FileAssetApplicationService:
         *,
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> None:
+        scope = _require_metadata_scope(metadata_scope, operation="purge_by_key")
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete_by_key(key, metadata_scope=metadata_scope)
+            await uow.file_asset_repository.delete_by_key(key, metadata_scope=scope)
 
     # ---- Unified naming (wrappers) ----
     async def purge_asset_by_key(
@@ -781,18 +852,19 @@ class FileAssetApplicationService:
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> None:
         """Physically delete remote object and DB record by key (new)."""
+        scope = _require_metadata_scope(metadata_scope, operation="purge_asset_by_key")
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
         async with self._uow_factory() as uow:
             repo = uow.file_asset_repository
-            asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
+            asset = await repo.get_by_key(key, metadata_scope=scope)
             if asset is None:
                 raise FileAssetNotFoundException(key=key)
             try:
                 await self._storage.delete(asset.key)
             except Exception:
                 pass
-            await repo.delete(asset.id or 0, metadata_scope=metadata_scope)
+            await repo.delete(asset.id or 0, metadata_scope=scope)
             await uow.commit()
 
     async def delete_record_by_id(
@@ -802,8 +874,9 @@ class FileAssetApplicationService:
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> None:
         """Delete DB record only by id (soft API should be preferred)."""
+        scope = _require_metadata_scope(metadata_scope, operation="delete_record_by_id")
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete(asset_id, metadata_scope=metadata_scope)
+            await uow.file_asset_repository.delete(asset_id, metadata_scope=scope)
             await uow.commit()
 
     async def delete_record_by_key(
@@ -813,6 +886,7 @@ class FileAssetApplicationService:
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> None:
         """Delete DB record only by key (no remote object deletion)."""
+        scope = _require_metadata_scope(metadata_scope, operation="delete_record_by_key")
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete_by_key(key, metadata_scope=metadata_scope)
+            await uow.file_asset_repository.delete_by_key(key, metadata_scope=scope)
             await uow.commit()

@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from api.dependencies import get_file_asset_service
 from api.routes.files import router as files_router
 from application.dto import FileAssetDTO
+from core.exceptions import register_exception_handlers
+from domain.common.exceptions import FileAssetNotFoundException
 from domain.file_asset.entity import FileAsset
 
 
@@ -42,6 +44,8 @@ class FakeFileAssetService:
         self.list_scopes = []
         self.get_scopes = []
         self.delete_scopes = []
+        self.sign_calls = []
+        self.blocked_asset_ids = set()
 
     async def list_assets(self, **kwargs):
         self.list_scopes.append(kwargs.get("metadata_scope"))
@@ -49,6 +53,8 @@ class FakeFileAssetService:
 
     async def get_asset_raw(self, asset_id: int, *, metadata_scope=None):
         self.get_scopes.append(metadata_scope)
+        if asset_id in self.blocked_asset_ids:
+            raise FileAssetNotFoundException(asset_id)
         return _asset(asset_id)
 
     async def generate_access_url_by_info(self, **kwargs):
@@ -56,6 +62,7 @@ class FakeFileAssetService:
 
     async def generate_access_url_for_asset(self, **kwargs):
         asset = kwargs["asset"]
+        self.sign_calls.append(kwargs)
         return {"url": f"https://files.test/{asset.key}"}
 
     async def soft_delete(self, asset_id: int, *, metadata_scope=None):
@@ -67,6 +74,7 @@ class FakeFileAssetService:
 
 def _client(fake_service: FakeFileAssetService) -> TestClient:
     app = FastAPI()
+    register_exception_handlers(app)
     app.include_router(files_router, prefix="/api/v1")
     app.dependency_overrides[get_file_asset_service] = lambda: fake_service
     return TestClient(app)
@@ -106,3 +114,36 @@ def test_file_detail_and_delete_use_current_user_metadata_scope() -> None:
     assert get_scope.allow_unscoped is False
     assert delete_scope.user_id == "user-leader-001"
     assert delete_scope.include_team_scope is True
+
+
+def test_file_url_routes_use_scope_and_reject_before_signing() -> None:
+    fake = FakeFileAssetService()
+    fake.blocked_asset_ids.add(2)
+    client = _client(fake)
+
+    preview = client.post(
+        "/api/v1/files/1/preview-url",
+        headers={"X-Mock-User": "sales"},
+        json={},
+    )
+    download = client.post(
+        "/api/v1/files/1/download-url",
+        headers={"X-Mock-User": "sales"},
+        json={},
+    )
+    blocked = client.post(
+        "/api/v1/files/2/preview-url",
+        headers={"X-Mock-User": "sales"},
+        json={},
+    )
+
+    assert preview.status_code == 200
+    assert download.status_code == 200
+    assert blocked.status_code == 404
+    assert len(fake.sign_calls) == 2
+    assert [scope.user_id for scope in fake.get_scopes] == [
+        "user-sales-001",
+        "user-sales-001",
+        "user-sales-001",
+    ]
+    assert all(scope.allow_unscoped is False for scope in fake.get_scopes)

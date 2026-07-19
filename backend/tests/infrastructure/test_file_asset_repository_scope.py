@@ -187,3 +187,31 @@ async def test_file_asset_repository_applies_metadata_scope_to_update_and_delete
     assert await repo.get_by_id(hidden_for_update.id or 0) is not None
     assert await repo.get_by_id(hidden_for_delete.id or 0) is not None
     assert await repo.get_by_key(hidden_for_delete_by_key.key) is not None
+
+
+@pytest.mark.asyncio
+async def test_file_asset_repository_rejects_unscoped_update_delete_when_allow_unscoped_false(
+    session,
+) -> None:
+    repo = SQLAlchemyFileAssetRepository(session)
+    unscoped_for_update = await repo.create(_asset("legacy-update.txt", 2, {}))
+    unscoped_for_delete = await repo.create(_asset("legacy-delete.txt", 1, {}))
+    scope = OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+
+    unscoped_for_update.metadata = {"title": "Should not update"}
+    with pytest.raises(FileAssetNotFoundException):
+        await repo.update(unscoped_for_update, metadata_scope=scope)
+    with pytest.raises(FileAssetNotFoundException):
+        await repo.delete(unscoped_for_delete.id or 0, metadata_scope=scope)
+    with pytest.raises(FileAssetNotFoundException):
+        await repo.delete_by_key(unscoped_for_delete.key, metadata_scope=scope)
+
+    persisted = await repo.get_by_id(unscoped_for_update.id or 0)
+    assert persisted is not None
+    assert persisted.metadata == {}
+    assert await repo.get_by_id(unscoped_for_delete.id or 0) is not None
