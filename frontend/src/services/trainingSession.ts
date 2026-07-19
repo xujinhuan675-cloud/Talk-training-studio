@@ -162,6 +162,26 @@ export interface TrainingGuidanceStreamOptions {
   poll_interval_ms?: number
 }
 
+export interface TrainingMaterialAssetSummaryDTO {
+  id: number
+  key: string
+  name: string
+  content_type?: string | null
+  metadata_excerpt?: Record<string, unknown>
+}
+
+export interface TrainingMaterialAssetListDTO {
+  items: TrainingMaterialAssetSummaryDTO[]
+  total: number
+  skip: number
+  limit: number
+}
+
+export interface ListTrainingMaterialToolConsumerOptions {
+  skip?: number
+  limit?: number
+}
+
 interface ApiResponse<T> {
   code: number
   message: string
@@ -169,6 +189,7 @@ interface ApiResponse<T> {
 }
 
 const TRAINING_SESSION_API_BASE = '/api/v1/training-studio/sessions'
+const TRAINING_MATERIAL_TOOL_CONSUMER_API = '/api/v1/training-studio/tool-consumers/training-materials'
 
 type TrainingSessionId = string | number
 
@@ -201,6 +222,16 @@ function sessionsUrl(options: ListTrainingSessionsOptions = {}): string {
   if (options.scenarioTemplateId) params.set('scenario_template_id', options.scenarioTemplateId)
   const query = params.toString()
   return `${TRAINING_SESSION_API_BASE}${query ? `?${query}` : ''}`
+}
+
+function trainingMaterialToolConsumerUrl(
+  options: ListTrainingMaterialToolConsumerOptions = {},
+): string {
+  const params = new URLSearchParams()
+  if (options.skip !== undefined) params.set('skip', String(options.skip))
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  const query = params.toString()
+  return `${TRAINING_MATERIAL_TOOL_CONSUMER_API}${query ? `?${query}` : ''}`
 }
 
 async function readError(resp: Response, fallback: string): Promise<Error> {
@@ -774,5 +805,15 @@ export async function listTrainingSessions(
     sessionsUrl(options),
     undefined,
     'Failed to list training sessions',
+  )
+}
+
+export async function listTrainingMaterialToolConsumerMaterials(
+  options: ListTrainingMaterialToolConsumerOptions = {},
+): Promise<TrainingMaterialAssetListDTO> {
+  return requestJson<TrainingMaterialAssetListDTO>(
+    trainingMaterialToolConsumerUrl(options),
+    undefined,
+    'Failed to list training materials',
   )
 }

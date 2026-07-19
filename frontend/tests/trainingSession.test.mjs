@@ -764,3 +764,37 @@ test('listTrainingSessions appends optional filters', async () => {
   )
   assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
 })
+
+test('listTrainingMaterialToolConsumerMaterials fetches scoped material summaries', async () => {
+  const data = {
+    items: [
+      {
+        id: 7,
+        key: 'training_material/7.md',
+        name: 'Enterprise renewal brief',
+        content_type: 'text/markdown',
+        metadata_excerpt: {
+          title: 'Renewal brief',
+          summary: 'Known objections and proof points.',
+          tags: ['renewal', 'enterprise'],
+        },
+      },
+    ],
+    total: 1,
+    skip: 2,
+    limit: 4,
+  }
+  const calls = installFetchStub(data)
+
+  const result = await trainingSession.listTrainingMaterialToolConsumerMaterials({
+    skip: 2,
+    limit: 4,
+  })
+
+  assert.equal(
+    calls[0].url,
+    '/api/v1/training-studio/tool-consumers/training-materials?skip=2&limit=4',
+  )
+  assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
+  assert.deepEqual(result, data)
+})

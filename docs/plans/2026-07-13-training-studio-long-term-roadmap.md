@@ -209,10 +209,10 @@ Training Studio 的长期形态是：
 
 下一阶段优先顺序：
 
-1. 继续收紧 text runtime / message-tree 的真实 UI reload/fork 操作验收；后端 fork metadata remap 已补。
-2. 把训练素材窄 tool consumer 接入 Persona Builder 或复盘助手的局部工作流；当前后端 API 已只返回安全摘要。
-3. 继续补 auth / ACL 漏洞点，尤其是未来会被 tool/RAG 使用的 get/update/delete/list/count helper。
-4. Pipecat 下一步只做 metrics/tracing、provider error taxonomy、turn latency 统计；真实浏览器麦克风 E2E 单独排期。
+1. 先把训练素材窄 tool consumer 接入复盘助手前端，让复盘页能读取当前用户/团队有权限的素材安全摘要。
+2. 继续补 auth / ACL 漏洞点，尤其是未来会被 tool/RAG 使用的 get/update/delete/list/count helper。
+3. text runtime / message-tree 的真实 UI reload/fork 操作验收单独排期靠后；当前先保留服务契约和测试矩阵，不阻塞复盘助手接入。
+4. Pipecat 下一步只做 metrics/tracing、provider error taxonomy、turn latency 统计；真实浏览器麦克风 E2E 单独排期靠后。
 5. 视频模式先保持用户视频回答上传和后续分析，不进入会议式虚拟人实现。
 
 这样可以避免过早投入高成本视频虚拟人，同时持续增强真实训练价值。

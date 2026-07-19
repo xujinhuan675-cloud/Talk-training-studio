@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
+  BookOpen,
   Clock3,
   ExternalLink,
   GitBranch,
@@ -16,6 +17,8 @@ import {
   getTrainingConversationBranchInfo,
   getTrainingSession,
   getTrainingSessionReport,
+  listTrainingMaterialToolConsumerMaterials,
+  type TrainingMaterialAssetSummaryDTO,
   type TrainingConversationBranchInfo,
   type TrainingSessionDTO,
   type TrainingSessionReportDTO,
@@ -440,6 +443,46 @@ function coachSeverityLabel(severity: string, tr: TranslateInline): string {
   return tr('提示', 'Info')
 }
 
+function materialMetadata(material: TrainingMaterialAssetSummaryDTO): Record<string, unknown> {
+  return asRecord(material.metadata_excerpt) ?? {}
+}
+
+function materialTitle(material: TrainingMaterialAssetSummaryDTO): string {
+  const metadata = materialMetadata(material)
+  return asString(metadata.title) || asString(metadata.name) || material.name
+}
+
+function materialSummary(material: TrainingMaterialAssetSummaryDTO): string {
+  const metadata = materialMetadata(material)
+  return asString(metadata.summary)
+    || asString(metadata.description)
+    || asString(metadata.usageScope)
+    || material.key
+}
+
+function materialTags(material: TrainingMaterialAssetSummaryDTO): string[] {
+  const metadata = materialMetadata(material)
+  const tags = [
+    ...stringArray(metadata.tags),
+    ...stringArray(metadata.labels),
+    asString(metadata.materialType) || asString(metadata.material_type),
+    asString(metadata.scenarioId) || asString(metadata.scenario_id),
+  ].filter(Boolean)
+  return Array.from(new Set(tags)).slice(0, 4)
+}
+
+function materialReferenceMeta(
+  material: TrainingMaterialAssetSummaryDTO,
+  tr: TranslateInline,
+): string {
+  const metadata = materialMetadata(material)
+  return [
+    asString(metadata.sourceType) || asString(metadata.source),
+    asString(metadata.language),
+    material.content_type || '',
+  ].filter(Boolean).join(' · ') || tr('安全摘要', 'Safe excerpt')
+}
+
 export default function TrainingResultPage() {
   const navigate = useNavigate()
   const { locale, t, tr } = useI18n()
@@ -461,6 +504,11 @@ export default function TrainingResultPage() {
   const [reportError, setReportError] = useState<string | null>(null)
   const [roomDetail, setRoomDetail] = useState<ChatRoomDetail | null>(null)
   const [roomError, setRoomError] = useState<string | null>(null)
+  const [materialsState, setMaterialsState] = useState<LoadState>('idle')
+  const [materials, setMaterials] = useState<TrainingMaterialAssetSummaryDTO[]>([])
+  const [materialsTotal, setMaterialsTotal] = useState(0)
+  const [materialsError, setMaterialsError] = useState<string | null>(null)
+  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null)
   const [progress, setProgress] = useState<ScenarioTrainingProgress>(() => (
     getScenarioTrainingProgress(progressScope)
   ))
@@ -525,6 +573,40 @@ export default function TrainingResultPage() {
     }
   }, [sessionId, tr])
 
+  useEffect(() => {
+    let cancelled = false
+    setMaterialsState('loading')
+    setMaterialsError(null)
+
+    listTrainingMaterialToolConsumerMaterials({ limit: 5 })
+      .then((result) => {
+        if (cancelled) return
+        setMaterials(result.items)
+        setMaterialsTotal(result.total)
+        setMaterialsState('ready')
+      })
+      .catch((requestError: unknown) => {
+        if (cancelled) return
+        setMaterials([])
+        setMaterialsTotal(0)
+        setMaterialsError(getErrorMessage(requestError, tr('无法加载训练素材。', 'Could not load training materials.')))
+        setMaterialsState('error')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentUser?.teamId, currentUser?.userId, tr])
+
+  useEffect(() => {
+    setSelectedMaterialId((current) => {
+      if (current !== null && materials.some((material) => material.id === current)) {
+        return current
+      }
+      return materials[0]?.id ?? null
+    })
+  }, [materials])
+
   const scenarioId = session?.scenario_template_id || ''
   const scenarioProgress = scenarioId ? progress[scenarioId] : undefined
   const content = useMemo(() => asRecord(report?.content) ?? {}, [report])
@@ -567,6 +649,11 @@ export default function TrainingResultPage() {
     : ''
   const suggestions = useMemo(() => collectSuggestions(content, dimensions), [content, dimensions])
   const insights = useMemo(() => collectInsights(content, tr), [content, tr])
+  const selectedMaterial = useMemo(
+    () => materials.find((material) => material.id === selectedMaterialId) ?? materials[0] ?? null,
+    [materials, selectedMaterialId],
+  )
+  const selectedMaterialTags = selectedMaterial ? materialTags(selectedMaterial) : []
   const isLiveCoachSession = isLiveCoachTrainingSession(session)
   const liveCoachLanguages = getLiveCoachLanguages(session)
   const liveCoachLanguagePair = getLiveCoachLanguagePair(session, locale, tr)
@@ -866,6 +953,77 @@ export default function TrainingResultPage() {
             </div>
           )}
         </article>
+      </section>
+
+      <section className="training-result-card training-result-review-assistant">
+        <div className="training-result-card-head training-result-review-assistant-head">
+          <h2>
+            <BookOpen size={15} />
+            {tr('复盘助手', 'Review assistant')}
+          </h2>
+          <span>
+            {materialsState === 'loading'
+              ? tr('读取素材', 'Loading materials')
+              : tr('{count} 条素材', '{count} materials', { count: materialsTotal })}
+          </span>
+        </div>
+        {materialsState === 'loading' ? (
+          <div className="training-result-review-assistant-state">
+            <Loader2 className="training-result-spin" size={16} />
+            <span>{tr('正在读取可引用素材。', 'Loading reference materials.')}</span>
+          </div>
+        ) : materialsError ? (
+          <div className="training-result-notice compact">
+            <AlertCircle size={15} />
+            <span>{materialsError}</span>
+          </div>
+        ) : materials.length === 0 ? (
+          <div className="training-result-empty-inline">
+            {tr('当前账号暂无可引用训练素材。', 'No scoped training materials are available.')}
+          </div>
+        ) : (
+          <div className="training-result-review-assistant-grid">
+            <div className="training-result-material-list" aria-label={tr('训练素材', 'Training materials')}>
+              {materials.map((material) => {
+                const selected = selectedMaterial?.id === material.id
+                const tags = materialTags(material)
+                return (
+                  <button
+                    key={material.id}
+                    type="button"
+                    className={`training-result-material-option${selected ? ' selected' : ''}`}
+                    onClick={() => setSelectedMaterialId(material.id)}
+                    aria-pressed={selected}
+                  >
+                    <strong>{materialTitle(material)}</strong>
+                    <span>{materialSummary(material)}</span>
+                    {tags.length > 0 && (
+                      <em>
+                        {tags.map((tag) => (
+                          <i key={tag}>{tag}</i>
+                        ))}
+                      </em>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            {selectedMaterial && (
+              <div className="training-result-review-reference">
+                <span>{materialReferenceMeta(selectedMaterial, tr)}</span>
+                <strong>{materialTitle(selectedMaterial)}</strong>
+                <p>{materialSummary(selectedMaterial)}</p>
+                {selectedMaterialTags.length > 0 && (
+                  <div className="training-result-review-reference-tags">
+                    {selectedMaterialTags.map((tag) => (
+                      <span key={tag}>{tag}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {insights.length > 0 && (
