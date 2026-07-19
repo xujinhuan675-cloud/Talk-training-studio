@@ -865,6 +865,141 @@ async def test_conversation_service_message_action_fork_returns_forked_context(
 
 
 @pytest.mark.asyncio
+async def test_librechat_message_tree_acceptance_matrix_keeps_selected_paths(
+    session_factory,
+):
+    conversation, first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    llm = _FakeLLM()
+    chat_service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+    tree_service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    regenerate_result = await tree_service.apply_message_action(
+        conversation.id,
+        first_assistant.public_id,
+        MessageActionDTO(
+            action="retry",
+            content="Regenerated assistant answer.",
+            metadata={"acceptance_case": "regenerate"},
+        ),
+    )
+    regenerated = regenerate_result.message
+    assert regenerated is not None
+    assert regenerated.metadata["retry_of"] == first_assistant.public_id
+    assert [message.public_id for message in regenerate_result.path] == [
+        first_user.public_id,
+        regenerated.public_id,
+    ]
+    assert {message.public_id for message in regenerate_result.siblings} >= {
+        first_assistant.public_id,
+        regenerated.public_id,
+    }
+
+    first_continue = await chat_service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Continue from the regenerated answer.",
+            parent_message_id=regenerated.public_id,
+            branch_id=regenerated.branch_id,
+            stream=False,
+        ),
+    )
+    assert [message.content for message in llm.calls[-1]] == [
+        "Stay concise.",
+        "Root user turn.",
+        "Regenerated assistant answer.",
+        "Continue from the regenerated answer.",
+    ]
+    first_continue_tail = first_continue["message"]["public_id"]
+    reloaded_path = await tree_service.get_message_path(conversation.id, first_continue_tail)
+    assert [message.content for message in reloaded_path] == [
+        "Root user turn.",
+        "Regenerated assistant answer.",
+        "Continue from the regenerated answer.",
+        "Assistant reply.",
+    ]
+    assert "Root assistant turn." not in [message.content for message in reloaded_path]
+
+    edited_result = await tree_service.apply_message_action(
+        conversation.id,
+        first_user.public_id,
+        MessageActionDTO(action="edit", content="Edited root user turn."),
+    )
+    edited = edited_result.message
+    assert edited is not None
+    assert edited.metadata["edit_of"] == first_user.public_id
+    assert [message.public_id for message in edited_result.path] == [edited.public_id]
+
+    await chat_service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Follow the edited branch.",
+            parent_message_id=edited.public_id,
+            branch_id=edited.branch_id,
+            stream=False,
+        ),
+    )
+    assert [message.content for message in llm.calls[-1]] == [
+        "Stay concise.",
+        "Edited root user turn.",
+        "Follow the edited branch.",
+    ]
+
+    fork_result = await tree_service.apply_message_action(
+        conversation.id,
+        regenerated.public_id,
+        MessageActionDTO(
+            action="fork",
+            title="Fork regenerated path",
+            option="directPath",
+            metadata={"review_mode": "branch"},
+        ),
+    )
+    assert fork_result.conversation is not None
+    assert fork_result.conversation.id != conversation.id
+    assert fork_result.conversation.metadata["fork_option"] == "directPath"
+    assert fork_result.conversation.metadata["review_mode"] == "branch"
+    assert set(fork_result.source_to_forked_id) == {
+        first_user.public_id,
+        regenerated.public_id,
+    }
+    assert [message.public_id for message in fork_result.path] == [
+        fork_result.source_to_forked_id[first_user.public_id],
+        fork_result.source_to_forked_id[regenerated.public_id],
+    ]
+
+    await chat_service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Continue after reload.",
+            parent_message_id=reloaded_path[-1].public_id,
+            branch_id=reloaded_path[-1].branch_id,
+            stream=False,
+        ),
+    )
+    assert [message.content for message in llm.calls[-1]] == [
+        "Stay concise.",
+        "Root user turn.",
+        "Regenerated assistant answer.",
+        "Continue from the regenerated answer.",
+        "Assistant reply.",
+        "Continue after reload.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_conversation_service_fork_direct_path_excludes_siblings(session_factory):
     conversation, first_user, first_assistant, off_path_user = await _seed_conversation(
         session_factory

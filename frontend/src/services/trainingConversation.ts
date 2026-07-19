@@ -324,8 +324,17 @@ export function buildConversationTreeMessageActionContext(
   const provider = cleanText(
     input.provider
       ?? input.conversation?.provider
-      ?? metadataText(metadata, 'provider')
       ?? metadataRecordText(metadataConversation, 'provider'),
+  )
+    ?? cleanText(
+      metadataText(
+        metadata,
+        'conversationProvider',
+        'conversation_provider',
+        'trainingConversationProvider',
+        'training_conversation_provider',
+        'provider',
+      ),
   )
   if (!provider || !isConversationTreeProvider(provider)) return null
 

@@ -330,6 +330,27 @@ test('buildConversationTreeMessageActionContext reads nested training metadata r
   assert.equal(context.endpoints.path, '/api/v1/conversations/conv%209/messages/msg_tail/path')
 })
 
+test('buildConversationTreeMessageActionContext prefers conversation provider over LLM provider metadata', () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    metadata: {
+      provider: 'openai',
+      model: 'gpt-selected',
+      trainingConversationProvider: 'talkwise-conversation',
+      conversation: {
+        provider: 'message-tree',
+        conversationId: 'conv-branch',
+        branchTailMessageId: 'msg_tail',
+        branchId: 'branch-review',
+      },
+    },
+  })
+
+  assert.equal(context.provider, 'message-tree')
+  assert.equal(context.conversationId, 'conv-branch')
+  assert.equal(context.messagePublicId, 'msg_tail')
+  assert.equal(context.branchId, 'branch-review')
+})
+
 test('buildConversationTreeMessageActionContext ignores stakeholder room local message ids', () => {
   const context = trainingConversation.buildConversationTreeMessageActionContext({
     provider: 'talkwise-conversation',
