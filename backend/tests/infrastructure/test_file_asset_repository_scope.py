@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from domain.common.exceptions import FileAssetNotFoundException
 from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset.entity import FileAsset
 from infrastructure.models.base import Base
@@ -115,10 +116,74 @@ async def test_file_asset_repository_filters_metadata_scope_before_pagination(se
         "visible-user.txt",
         "visible-team.txt",
     ]
-    assert await repo.count(kind="training_material", status="active", metadata_scope=staff_scope) == 2
+    assert (
+        await repo.count(kind="training_material", status="active", metadata_scope=staff_scope) == 2
+    )
     assert [asset.original_filename for asset in leader_assets] == [
         "visible-user.txt",
         "visible-team.txt",
     ]
     assert await repo.get_by_id(visible.id or 0, metadata_scope=staff_scope) is not None
-    assert await repo.get_by_key("training_material/hidden-newest.txt", metadata_scope=staff_scope) is None
+    assert (
+        await repo.get_by_key("training_material/hidden-newest.txt", metadata_scope=staff_scope)
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_asset_repository_applies_metadata_scope_to_update_and_delete(session) -> None:
+    repo = SQLAlchemyFileAssetRepository(session)
+    visible = await repo.create(
+        _asset(
+            "visible-user.txt",
+            18,
+            {
+                "ownerUserId": "user-sales-001",
+                "teamId": "team-revenue",
+                "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            },
+        )
+    )
+    hidden_for_update = await repo.create(
+        _asset(
+            "hidden-update.txt",
+            17,
+            {"ownerUserId": "user-cs-001", "teamId": "team-service"},
+        )
+    )
+    hidden_for_delete = await repo.create(
+        _asset(
+            "hidden-delete.txt",
+            16,
+            {"ownerUserId": "user-cs-001", "teamId": "team-service"},
+        )
+    )
+    hidden_for_delete_by_key = await repo.create(
+        _asset(
+            "hidden-delete-key.txt",
+            15,
+            {"ownerUserId": "user-cs-001", "teamId": "team-service"},
+        )
+    )
+    scope = OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+
+    visible.metadata = {**visible.metadata, "title": "Updated by owner"}
+    updated = await repo.update(visible, metadata_scope=scope)
+    assert updated.metadata["title"] == "Updated by owner"
+
+    hidden_for_update.metadata = {**hidden_for_update.metadata, "title": "Should not update"}
+    with pytest.raises(FileAssetNotFoundException):
+        await repo.update(hidden_for_update, metadata_scope=scope)
+    with pytest.raises(FileAssetNotFoundException):
+        await repo.delete(hidden_for_delete.id or 0, metadata_scope=scope)
+    with pytest.raises(FileAssetNotFoundException):
+        await repo.delete_by_key(hidden_for_delete_by_key.key, metadata_scope=scope)
+
+    assert await repo.get_by_id(hidden_for_update.id or 0) is not None
+    assert await repo.get_by_id(hidden_for_delete.id or 0) is not None
+    assert await repo.get_by_key(hidden_for_delete_by_key.key) is not None

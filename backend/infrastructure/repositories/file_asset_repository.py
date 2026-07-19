@@ -92,10 +92,15 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def update(self, asset: FileAsset) -> FileAsset:
-        result = await self.session.execute(
-            select(FileAssetModel).where(FileAssetModel.id == asset.id)
-        )
+    async def update(
+        self,
+        asset: FileAsset,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> FileAsset:
+        query = select(FileAssetModel).where(FileAssetModel.id == asset.id)
+        query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         if model is None:
             raise FileAssetNotFoundException(asset.id)
@@ -123,18 +128,30 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def delete(self, asset_id: int) -> None:
-        result = await self.session.execute(
-            select(FileAssetModel).where(FileAssetModel.id == asset_id)
-        )
+    async def delete(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
+        query = select(FileAssetModel).where(FileAssetModel.id == asset_id)
+        query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         if model is None:
             raise FileAssetNotFoundException(asset_id)
         await self.session.delete(model)
         await self.session.flush()
 
-    async def delete_by_key(self, key: str) -> None:
-        result = await self.session.execute(select(FileAssetModel).where(FileAssetModel.key == key))
+    async def delete_by_key(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
+        query = select(FileAssetModel).where(FileAssetModel.key == key)
+        query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
+        result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         if model is None:
             raise FileAssetNotFoundException(key=key)

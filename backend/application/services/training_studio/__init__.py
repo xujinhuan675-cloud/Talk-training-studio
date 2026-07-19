@@ -25,6 +25,11 @@ from application.services.training_studio.training_core import (
     training_branch_metadata,
     training_core_metadata_for_session,
 )
+from application.services.training_studio.training_material_tool_service import (
+    TrainingMaterialAssetListDTO,
+    TrainingMaterialAssetSummaryDTO,
+    TrainingMaterialToolConsumerService,
+)
 
 __all__ = [
     "CatalogOptionDTO",
@@ -39,6 +44,9 @@ __all__ = [
     "TrainingCatalogDTO",
     "TrainingCatalogService",
     "TrainingCoreOrchestrator",
+    "TrainingMaterialAssetListDTO",
+    "TrainingMaterialAssetSummaryDTO",
+    "TrainingMaterialToolConsumerService",
     "TrainingScenarioConfigService",
     "TrainingTaskConfigDTO",
     "TrainingTurn",

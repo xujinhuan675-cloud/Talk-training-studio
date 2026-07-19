@@ -13,6 +13,7 @@ import importlib.util
 import json
 import logging
 import os
+import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -457,13 +458,9 @@ def pipecat_realtime_readiness(
         output_audio_format=output_audio_format,
     )
     missing_modules = tuple(str(module) for module in capability.missing_modules)
-    optional_missing_modules = tuple(
-        str(module) for module in capability.optional_missing_modules
-    )
+    optional_missing_modules = tuple(str(module) for module in capability.optional_missing_modules)
     blockers: list[RealtimeReadinessIssue] = []
-    error_message = (
-        redact_realtime_secret_text(capability.error) if capability.error else None
-    )
+    error_message = redact_realtime_secret_text(capability.error) if capability.error else None
 
     if not capability.core_available:
         if error_message and not missing_modules:
@@ -602,9 +599,7 @@ def _pipecat_capability_public_payload(capability: PipecatCapability) -> dict[st
         "llmAvailable": bool(capability.llm_available),
         "turnDetectionAvailable": bool(capability.turn_detection_available),
         "missingModules": [str(module) for module in capability.missing_modules],
-        "optionalMissingModules": [
-            str(module) for module in capability.optional_missing_modules
-        ],
+        "optionalMissingModules": [str(module) for module in capability.optional_missing_modules],
         "error": redact_realtime_secret_text(capability.error) if capability.error else None,
     }
 
@@ -631,7 +626,9 @@ def _pipecat_feature_missing_modules(
     )
     if missing:
         return missing
-    return tuple(str(module) for module in PIPECAT_REALTIME_FEATURE_REQUIREMENTS[feature]["modules"])
+    return tuple(
+        str(module) for module in PIPECAT_REALTIME_FEATURE_REQUIREMENTS[feature]["modules"]
+    )
 
 
 def _module_spec_exists(module: str) -> bool:
@@ -757,23 +754,35 @@ def _runtime_missing_optional_symbols(
             for symbol_name in symbol_names:
                 if getattr(runtime, symbol_name, None) is None:
                     missing.append(_entrypoint(module_name, symbol_name))
-    if runtime.OpenAIRealtimeSTTService is not None and getattr(
-        runtime.OpenAIRealtimeSTTService,
-        "Settings",
-        None,
-    ) is None:
+    if (
+        runtime.OpenAIRealtimeSTTService is not None
+        and getattr(
+            runtime.OpenAIRealtimeSTTService,
+            "Settings",
+            None,
+        )
+        is None
+    ):
         missing.append(_entrypoint(OPENAI_STT_PIPECAT_MODULE, "OpenAIRealtimeSTTService.Settings"))
-    if runtime.OpenAITTSService is not None and getattr(
-        runtime.OpenAITTSService,
-        "Settings",
-        None,
-    ) is None:
+    if (
+        runtime.OpenAITTSService is not None
+        and getattr(
+            runtime.OpenAITTSService,
+            "Settings",
+            None,
+        )
+        is None
+    ):
         missing.append(_entrypoint(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService.Settings"))
-    if runtime.OpenAILLMService is not None and getattr(
-        runtime.OpenAILLMService,
-        "Settings",
-        None,
-    ) is None:
+    if (
+        runtime.OpenAILLMService is not None
+        and getattr(
+            runtime.OpenAILLMService,
+            "Settings",
+            None,
+        )
+        is None
+    ):
         missing.append(_entrypoint(OPENAI_LLM_PIPECAT_MODULE, "OpenAILLMService.Settings"))
     return tuple(missing)
 
@@ -1048,9 +1057,7 @@ def _pipecat_dependency_probe(
             "turnDetection": bool(capability.turn_detection_available),
         },
         "missingModules": [str(module) for module in capability.missing_modules],
-        "optionalMissingModules": [
-            str(module) for module in capability.optional_missing_modules
-        ],
+        "optionalMissingModules": [str(module) for module in capability.optional_missing_modules],
         "error": redact_realtime_secret_text(capability.error) if capability.error else None,
     }
 
@@ -1522,19 +1529,14 @@ def build_pipecat_voice_processors(
             raise _missing_openai_api_key_error("tts")
         tts_settings_kwargs: dict[str, Any] = {}
         if tts_model := (
-            _metadata_text(tts_config, "model")
-            or _metadata_text(metadata, "ttsModel", "tts_model")
+            _metadata_text(tts_config, "model") or _metadata_text(metadata, "ttsModel", "tts_model")
         ):
             tts_settings_kwargs["model"] = tts_model
         if voice := (
-            config.voice
-            or _metadata_text(tts_config, "voice")
-            or _metadata_text(metadata, "voice")
+            config.voice or _metadata_text(tts_config, "voice") or _metadata_text(metadata, "voice")
         ):
             tts_settings_kwargs["voice"] = voice
-        if instructions := (
-            config.instructions or _metadata_text(tts_config, "instructions")
-        ):
+        if instructions := (config.instructions or _metadata_text(tts_config, "instructions")):
             tts_settings_kwargs["instructions"] = instructions
         if (speed := _metadata_float(tts_config, "speed")) is not None:
             tts_settings_kwargs["speed"] = speed
@@ -1752,9 +1754,7 @@ def _pipecat_pipeline_readiness(
             )
         )
 
-    optional_missing_modules = tuple(
-        str(module) for module in capability.optional_missing_modules
-    )
+    optional_missing_modules = tuple(str(module) for module in capability.optional_missing_modules)
     for feature in missing_features:
         feature_name, _, provider = feature.partition(":")
         requirement = PIPECAT_REALTIME_FEATURE_REQUIREMENTS.get(
@@ -1783,8 +1783,7 @@ def _pipecat_pipeline_readiness(
 
     metadata = dict(config.metadata)
     if any(
-        requested_features.get(feature) == "openai"
-        for feature in ("stt", "tts", "llm")
+        requested_features.get(feature) == "openai" for feature in ("stt", "tts", "llm")
     ) and not _openai_api_key(metadata):
         blockers.append(
             RealtimeReadinessIssue(
@@ -1859,9 +1858,15 @@ def create_talkwise_event_processor(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             self._audio_output_sequence = 0
+            self._turn_sequence = 0
+            self._user_turn_open = False
+            self._user_turn_started_at: float | None = None
+            self._pending_user_turn_metrics: dict[str, Any] | None = None
+            self._pending_user_turn_stopped_at: float | None = None
 
         async def process_frame(self, frame: Any, direction: Any) -> None:
             await super().process_frame(frame, direction)
+            observed_at = _monotonic_seconds()
             audio_sequence = None
             if isinstance(frame, runtime.TTSAudioRawFrame):
                 self._audio_output_sequence += 1
@@ -1873,8 +1878,60 @@ def create_talkwise_event_processor(
                 audio_sequence=audio_sequence,
             )
             if event is not None:
+                self._enrich_realtime_metrics(event, observed_at=observed_at)
                 await event_queue.put(event)
             await self.push_frame(frame, direction)
+
+        def _enrich_realtime_metrics(
+            self,
+            event: Mapping[str, Any],
+            *,
+            observed_at: float,
+        ) -> None:
+            event_type = str(event.get("type") or "")
+            if event_type == "user_turn.started":
+                if not self._user_turn_open:
+                    self._turn_sequence += 1
+                    self._user_turn_started_at = observed_at
+                self._user_turn_open = True
+                self._pending_user_turn_metrics = None
+                self._pending_user_turn_stopped_at = None
+                return
+
+            if event_type == "user_turn.stopped":
+                if not self._user_turn_open and self._turn_sequence == 0:
+                    self._turn_sequence += 1
+                user_speech_ms = _elapsed_ms(self._user_turn_started_at, observed_at)
+                self._user_turn_open = False
+                self._pending_user_turn_stopped_at = observed_at
+                metrics: dict[str, Any] = {
+                    "schemaVersion": 1,
+                    "source": "pipecat_frames",
+                    "turnSequence": self._turn_sequence,
+                    "latencyStartEvent": "user_turn.stopped",
+                }
+                if user_speech_ms is not None:
+                    metrics["userSpeechMs"] = user_speech_ms
+                silence_seconds = _event_payload_float(event, "silenceSeconds")
+                if silence_seconds is not None:
+                    metrics["silenceSeconds"] = silence_seconds
+                self._pending_user_turn_metrics = metrics
+                self._user_turn_started_at = None
+                return
+
+            if event_type not in {"assistant_speaking.started", "audio.output"}:
+                return
+            if not self._pending_user_turn_metrics:
+                return
+
+            metrics = dict(self._pending_user_turn_metrics)
+            metrics["latencyEndEvent"] = event_type
+            turn_latency_ms = _elapsed_ms(self._pending_user_turn_stopped_at, observed_at)
+            if turn_latency_ms is not None:
+                metrics["turnLatencyMs"] = turn_latency_ms
+            _attach_realtime_metrics(event, metrics)
+            self._pending_user_turn_metrics = None
+            self._pending_user_turn_stopped_at = None
 
     return TalkWiseEventProcessor(name="TalkWiseEventProcessor")
 
@@ -2078,6 +2135,49 @@ def _frame_float(frame: Any, attr_name: str) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _event_payload_float(event: Mapping[str, Any], key: str) -> float | None:
+    payload = event.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    value = payload.get(key)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _elapsed_ms(started_at: float | None, ended_at: float) -> int | None:
+    if started_at is None:
+        return None
+    return max(0, int(round((ended_at - started_at) * 1000)))
+
+
+def _monotonic_seconds() -> float:
+    return time.monotonic()
+
+
+def _attach_realtime_metrics(event: Mapping[str, Any], metrics: Mapping[str, Any]) -> None:
+    if not isinstance(event, dict):
+        return
+    safe_metrics = _json_safe_metadata(metrics)
+    if not isinstance(safe_metrics, Mapping):
+        return
+
+    metadata = event.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        event["metadata"] = metadata
+    metadata["realtimeMetrics"] = dict(safe_metrics)
+
+    payload = event.get("payload")
+    if isinstance(payload, dict):
+        payload_metadata = payload.get("metadata")
+        if isinstance(payload_metadata, dict):
+            payload_metadata["realtimeMetrics"] = dict(safe_metrics)
 
 
 def _tts_audio_event_from_pipecat_frame(
@@ -2876,9 +2976,7 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         "vadEntrypoint": ("pipecat.audio.vad.silero.SileroVADAnalyzer"),
         "vadProcessorEntrypoint": ("pipecat.processors.audio.vad_processor.VADProcessor"),
         "sttEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService"),
-        "sttSettingsEntrypoint": (
-            "pipecat.services.openai.stt.OpenAIRealtimeSTTService.Settings"
-        ),
+        "sttSettingsEntrypoint": ("pipecat.services.openai.stt.OpenAIRealtimeSTTService.Settings"),
         "ttsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService"),
         "ttsSettingsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService.Settings"),
         "llmEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService"),

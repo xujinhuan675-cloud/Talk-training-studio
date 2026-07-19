@@ -17,13 +17,28 @@ class FileAssetRepository(ABC):
     async def create(self, asset: FileAsset) -> FileAsset: ...
 
     @abstractmethod
-    async def update(self, asset: FileAsset) -> FileAsset: ...
+    async def update(
+        self,
+        asset: FileAsset,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> FileAsset: ...
 
     @abstractmethod
-    async def delete(self, asset_id: int) -> None: ...
+    async def delete(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None: ...
 
     @abstractmethod
-    async def delete_by_key(self, key: str) -> None: ...
+    async def delete_by_key(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None: ...
 
     @abstractmethod
     async def get_by_id(

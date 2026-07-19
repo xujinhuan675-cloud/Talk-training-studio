@@ -645,12 +645,8 @@ def test_pipecat_realtime_readiness_reports_structured_blockers_without_secrets(
         "MISSING_OPENAI_API_KEY",
     ]
     by_feature = {error.get("feature"): error for error in errors}
-    assert by_feature["stt:openai"]["modules"] == [
-        pipecat_adapter.OPENAI_STT_PIPECAT_MODULE
-    ]
-    assert by_feature["llm:openai"]["modules"] == [
-        pipecat_adapter.OPENAI_LLM_PIPECAT_MODULE
-    ]
+    assert by_feature["stt:openai"]["modules"] == [pipecat_adapter.OPENAI_STT_PIPECAT_MODULE]
+    assert by_feature["llm:openai"]["modules"] == [pipecat_adapter.OPENAI_LLM_PIPECAT_MODULE]
     assert by_feature["vad:silero"]["modules"] == [
         pipecat_adapter.SILERO_VAD_PIPECAT_MODULE,
         pipecat_adapter.VAD_PROCESSOR_PIPECAT_MODULE,
@@ -744,9 +740,7 @@ def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
     assert response["readyForCall"] is True
     assert response["readiness"]["status"] == "ready"
     assert response["errors"] == []
-    assert response["sourceSnapshot"]["coreEntrypoints"] == [
-        "pipecat.pipeline.pipeline.Pipeline"
-    ]
+    assert response["sourceSnapshot"]["coreEntrypoints"] == ["pipecat.pipeline.pipeline.Pipeline"]
     assert response["sourceSnapshot"]["nested"] == {"label": "safe"}
     serialized = json.dumps(response)
     assert "secret-should-not-appear" not in serialized
@@ -1674,6 +1668,45 @@ async def test_talkwise_event_processor_maps_turn_and_interruption_frames():
 
 
 @pytest.mark.asyncio
+async def test_talkwise_event_processor_attaches_turn_latency_to_assistant_start(monkeypatch):
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    times = iter([10.0, 11.25, 11.5])
+    monkeypatch.setattr(pipecat_adapter, "_monotonic_seconds", lambda: next(times))
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+    )
+
+    for frame in (
+        FakeUserStartedSpeakingFrame(),
+        FakeVADUserStoppedSpeakingFrame(stop_secs=0.8),
+        FakeBotStartedSpeakingFrame(),
+    ):
+        await processor.process_frame(frame, FakeFrameDirection.DOWNSTREAM)
+
+    events = [await queue.get() for _ in range(3)]
+    metrics = events[2]["metadata"]["realtimeMetrics"]
+    assert [event["type"] for event in events] == [
+        "user_turn.started",
+        "user_turn.stopped",
+        "assistant_speaking.started",
+    ]
+    assert metrics == {
+        "schemaVersion": 1,
+        "source": "pipecat_frames",
+        "turnSequence": 1,
+        "latencyStartEvent": "user_turn.stopped",
+        "userSpeechMs": 1250,
+        "silenceSeconds": 0.8,
+        "latencyEndEvent": "assistant_speaking.started",
+        "turnLatencyMs": 250,
+    }
+    assert "realtimeMetrics" not in events[1].get("metadata", {})
+
+
+@pytest.mark.asyncio
 async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_event():
     runtime = fake_runtime(websocket=False)
     queue = asyncio.Queue()
@@ -1732,6 +1765,38 @@ async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_eve
     }
     assert "unsafe" not in payload["metadata"]
     assert processor.pushed[0][0].audio == audio
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_attaches_turn_latency_to_first_audio_output(monkeypatch):
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    times = iter([20.0, 20.4, 20.55])
+    monkeypatch.setattr(pipecat_adapter, "_monotonic_seconds", lambda: next(times))
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+    )
+
+    for frame in (
+        FakeUserStartedSpeakingFrame(),
+        FakeUserStoppedSpeakingFrame(),
+        FakeTTSAudioRawFrame(audio=b"pcm", sample_rate=16000, num_channels=1),
+    ):
+        await processor.process_frame(frame, FakeFrameDirection.DOWNSTREAM)
+
+    events = [await queue.get() for _ in range(3)]
+    audio_event = events[2]
+    metrics = audio_event["metadata"]["realtimeMetrics"]
+    assert audio_event["type"] == "audio.output"
+    assert metrics["source"] == "pipecat_frames"
+    assert metrics["turnSequence"] == 1
+    assert metrics["latencyStartEvent"] == "user_turn.stopped"
+    assert metrics["latencyEndEvent"] == "audio.output"
+    assert metrics["userSpeechMs"] == 400
+    assert metrics["turnLatencyMs"] == 150
+    assert audio_event["payload"]["metadata"]["realtimeMetrics"] == metrics
 
 
 @pytest.mark.asyncio
@@ -1855,9 +1920,7 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
         "num_channels",
         "num_frames",
     )
-    assert snapshot["audioFrameFields"]["pipecat.frames.frames.TTSAudioRawFrame"] == (
-        "context_id",
-    )
+    assert snapshot["audioFrameFields"]["pipecat.frames.frames.TTSAudioRawFrame"] == ("context_id",)
     assert (
         "TTSAudioRawFrame to provider-neutral audio.output event mirroring"
         in snapshot["talkwiseResponsibilities"]
@@ -1877,13 +1940,11 @@ def test_source_snapshot_documents_pipecat_first_boundaries():
     )
     assert "pipecat.services.openai.tts.OpenAITTSService" == snapshot["ttsEntrypoint"]
     assert (
-        "pipecat.services.openai.tts.OpenAITTSService.Settings"
-        == snapshot["ttsSettingsEntrypoint"]
+        "pipecat.services.openai.tts.OpenAITTSService.Settings" == snapshot["ttsSettingsEntrypoint"]
     )
     assert "pipecat.services.openai.llm.OpenAILLMService" == snapshot["llmEntrypoint"]
     assert (
-        "pipecat.services.openai.llm.OpenAILLMService.Settings"
-        == snapshot["llmSettingsEntrypoint"]
+        "pipecat.services.openai.llm.OpenAILLMService.Settings" == snapshot["llmSettingsEntrypoint"]
     )
     assert (
         "pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair"

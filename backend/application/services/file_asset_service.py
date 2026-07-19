@@ -147,6 +147,7 @@ class FileAssetApplicationService:
         content_type: Optional[str] = None,
         url: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
         if asset_id is None and not key:
             raise FileAssetNotFoundException()
@@ -155,9 +156,9 @@ class FileAssetApplicationService:
             repo = uow.file_asset_repository
             asset: Optional[FileAsset] = None
             if asset_id is not None:
-                asset = await repo.get_by_id(asset_id)
+                asset = await repo.get_by_id(asset_id, metadata_scope=metadata_scope)
             if asset is None and key:
-                asset = await repo.get_by_key(key)
+                asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
             if asset is None:
                 raise FileAssetNotFoundException(asset_id, key=key)
 
@@ -169,7 +170,7 @@ class FileAssetApplicationService:
                 metadata=metadata if metadata is not None else asset.metadata,
             )
             asset.mark_active()
-            updated = await repo.update(asset)
+            updated = await repo.update(asset, metadata_scope=metadata_scope)
             # 显式提交，确保在作用域内完成持久化
             await uow.commit()
             return self._to_dto(updated)
@@ -198,6 +199,7 @@ class FileAssetApplicationService:
         *,
         asset_id: Optional[int] = None,
         key: Optional[str] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
         """Confirm client direct upload by reconciling metadata from storage."""
         if self._storage is None:
@@ -207,9 +209,9 @@ class FileAssetApplicationService:
             repo = uow.file_asset_repository
             asset: Optional[FileAsset] = None
             if asset_id is not None:
-                asset = await repo.get_by_id(asset_id)
+                asset = await repo.get_by_id(asset_id, metadata_scope=metadata_scope)
             if asset is None and key:
-                asset = await repo.get_by_key(key)
+                asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
             if asset is None:
                 raise FileAssetNotFoundException(asset_id, key=key)
 
@@ -224,7 +226,7 @@ class FileAssetApplicationService:
                 metadata=getattr(meta, "custom_metadata", None) or asset.metadata,
             )
             asset.mark_active()
-            updated = await repo.update(asset)
+            updated = await repo.update(asset, metadata_scope=metadata_scope)
             return self._to_dto(updated)
 
     async def generate_access_url_by_info(
@@ -683,16 +685,29 @@ class FileAssetApplicationService:
             if asset.is_deleted():
                 raise FileAssetAlreadyDeletedException(asset_id)
             asset.mark_deleted()
-            updated = await uow.file_asset_repository.update(asset)
+            updated = await uow.file_asset_repository.update(
+                asset,
+                metadata_scope=metadata_scope,
+            )
             return self._to_dto(updated)
 
-    async def purge(self, asset_id: int) -> None:
+    async def purge(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete(asset_id)
+            await uow.file_asset_repository.delete(asset_id, metadata_scope=metadata_scope)
 
-    async def purge_by_key(self, key: str) -> None:
+    async def purge_by_key(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete_by_key(key)
+            await uow.file_asset_repository.delete_by_key(key, metadata_scope=metadata_scope)
 
     # ---- Unified naming (wrappers) ----
     async def purge_asset_by_id(self, asset_id: int) -> None:
@@ -715,14 +730,24 @@ class FileAssetApplicationService:
             await repo.delete(asset.id or 0)
             await uow.commit()
 
-    async def delete_record_by_id(self, asset_id: int) -> None:
+    async def delete_record_by_id(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
         """Delete DB record only by id (soft API should be preferred)."""
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete(asset_id)
+            await uow.file_asset_repository.delete(asset_id, metadata_scope=metadata_scope)
             await uow.commit()
 
-    async def delete_record_by_key(self, key: str) -> None:
+    async def delete_record_by_key(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
         """Delete DB record only by key (no remote object deletion)."""
         async with self._uow_factory() as uow:
-            await uow.file_asset_repository.delete_by_key(key)
+            await uow.file_asset_repository.delete_by_key(key, metadata_scope=metadata_scope)
             await uow.commit()

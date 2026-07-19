@@ -209,7 +209,7 @@ async def confirm_presigned_upload(
     else:  # pragma: no cover - already guarded
         raise HTTPException(status_code=400, detail=t("file.identifier.missing"))
 
-    await service.confirm_direct_upload(asset_id=asset.id)
+    await service.confirm_direct_upload(asset_id=asset.id, metadata_scope=metadata_scope)
 
     return success_response(data={"ok": True}, message=t("file.activate.success"))
 
