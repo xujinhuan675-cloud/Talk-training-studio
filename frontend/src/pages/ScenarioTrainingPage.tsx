@@ -201,13 +201,33 @@ export default function ScenarioTrainingPage() {
       const interactionMode = getScenarioInteractionMode(mode)
       const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
       const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
+      const taskConfig = buildScenarioTrainingTaskConfig(scenario)
+      const scenarioTrainingMetadata = taskConfig.metadata?.scenario_training
+      const scenarioTrainingRecord = scenarioTrainingMetadata
+        && typeof scenarioTrainingMetadata === 'object'
+        && !Array.isArray(scenarioTrainingMetadata)
+        ? scenarioTrainingMetadata as Record<string, unknown>
+        : {}
       await launchTrainingSessionFlow({
         createTrainingSessionRequest: {
           mode: trainingMode,
           scenario_template_id: scenario.id,
           user_id: progressScope.userId,
           team_id: progressScope.teamId,
-          task_config: buildScenarioTrainingTaskConfig(scenario),
+          task_config: {
+            ...taskConfig,
+            metadata: {
+              ...taskConfig.metadata,
+              trainingMode,
+              interactionMode,
+              trainingProfile: 'practice',
+              scenario_training: {
+                ...scenarioTrainingRecord,
+                trainingMode,
+                interactionMode,
+              },
+            },
+          },
         },
         createTrainingSession,
         battlePayload: useConversationMessageTreeRuntime

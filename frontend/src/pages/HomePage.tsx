@@ -2,20 +2,29 @@ import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ChevronRight,
+  ClipboardList,
   History,
-  MessageSquare,
   Play,
   Settings,
   SlidersHorizontal,
   Target,
   TrendingUp,
 } from 'lucide-react'
-import { useAppContext } from '../contexts/AppContext'
 import { useAuthContext } from '../contexts/AuthContext'
-import { fetchRooms, type ChatRoom } from '../services/api'
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import { useI18n, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { getScenarioTrainingCardById } from '../data/trainingScenarios'
+import {
+  listTrainingSessions,
+  type TrainingSessionDTO,
+  type TrainingSessionStatus,
+} from '../services/trainingSession'
+import {
+  buildTrainingModeChatPath,
+  type InteractionMode,
+  type TrainingProfile,
+} from '../services/trainingMode'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageSection, PageShell } from '../components/ui/page'
@@ -48,29 +57,148 @@ function timeAgo(dateStr: string | null, tr: TranslateInline): string {
   return tr('{count} 个月前', '{count} months ago', { count: Math.floor(days / 30) })
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function cleanText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function sessionTimestamp(session: TrainingSessionDTO): number {
+  const raw = session.completed_at || session.started_at
+  if (!raw) return 0
+  const time = new Date(raw).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
+function sessionTime(session: TrainingSessionDTO): string | null {
+  return session.completed_at || session.started_at || null
+}
+
+function sessionTitle(session: TrainingSessionDTO, tr: TranslateInline): string {
+  const metadata = asRecord(session.task_config.metadata)
+  const scenarioTraining = asRecord(metadata?.scenario_training)
+  const card = getScenarioTrainingCardById(session.scenario_template_id || cleanText(scenarioTraining?.id))
+  return card?.title
+    || cleanText(scenarioTraining?.title)
+    || cleanText(session.task_config.tech_stack?.[0])
+    || cleanText(session.task_config.role)
+    || tr('训练会话', 'Training session')
+}
+
+function trainingModeLabel(session: TrainingSessionDTO, tr: TranslateInline): string {
+  if (session.mode === 'text') return tr('文字', 'Text')
+  if (session.mode === 'voice') return tr('语音', 'Voice')
+  if (session.mode === 'video') return tr('视频', 'Video')
+  return session.mode
+}
+
+function statusLabel(status: TrainingSessionStatus, tr: TranslateInline): string {
+  if (status === 'completed') return tr('已完成', 'Completed')
+  if (status === 'failed') return tr('失败', 'Failed')
+  if (status === 'created') return tr('待开始', 'Ready')
+  return tr('进行中', 'In progress')
+}
+
+function resolveInteractionMode(session: TrainingSessionDTO): InteractionMode {
+  const sessionMetadata = asRecord(session.metadata)
+  const taskMetadata = asRecord(session.task_config.metadata)
+  const scenarioTraining = asRecord(taskMetadata?.scenario_training)
+  const candidates = [
+    sessionMetadata?.interactionMode,
+    sessionMetadata?.interaction_mode,
+    taskMetadata?.interactionMode,
+    taskMetadata?.interaction_mode,
+    scenarioTraining?.interactionMode,
+    scenarioTraining?.interaction_mode,
+  ]
+  if (candidates.some((value) => value === 'realtime')) return 'realtime'
+  return 'turn_based'
+}
+
+function resolveTrainingProfile(session: TrainingSessionDTO): TrainingProfile | null {
+  const sessionMetadata = asRecord(session.metadata)
+  const taskMetadata = asRecord(session.task_config.metadata)
+  const candidates = [
+    sessionMetadata?.trainingProfile,
+    sessionMetadata?.training_profile,
+    taskMetadata?.trainingProfile,
+    taskMetadata?.training_profile,
+  ]
+  return candidates.some((value) => value === 'live_coach') ? 'live_coach' : null
+}
+
+function resolveLiveCoachLanguage(session: TrainingSessionDTO, key: 'sourceLanguage' | 'targetLanguage'): string | null {
+  const sessionMetadata = asRecord(session.metadata)
+  const taskMetadata = asRecord(session.task_config.metadata)
+  const liveCoach = asRecord(taskMetadata?.liveCoach)
+  const snakeKey = key === 'sourceLanguage' ? 'source_language' : 'target_language'
+  return cleanText(liveCoach?.[key])
+    || cleanText(liveCoach?.[snakeKey])
+    || cleanText(taskMetadata?.[key])
+    || cleanText(taskMetadata?.[snakeKey])
+    || cleanText(sessionMetadata?.[key])
+    || cleanText(sessionMetadata?.[snakeKey])
+    || null
+}
+
+function isContinuableSession(session: TrainingSessionDTO): boolean {
+  return session.status !== 'completed'
+    && session.status !== 'failed'
+    && Boolean(cleanText(session.room_id))
+}
+
+function sessionPath(session: TrainingSessionDTO): string {
+  if (isContinuableSession(session) && session.room_id) {
+    return buildTrainingModeChatPath(
+      session.room_id,
+      session.mode,
+      session.session_id,
+      resolveInteractionMode(session),
+      {
+        trainingProfile: resolveTrainingProfile(session),
+        sourceLanguage: resolveLiveCoachLanguage(session, 'sourceLanguage'),
+        targetLanguage: resolveLiveCoachLanguage(session, 'targetLanguage'),
+      },
+    )
+  }
+  return APP_ROUTES.reviewSession(session.session_id)
+}
+
 const HomePage: React.FC = () => {
-  const { personaMap } = useAppContext()
-  const { hasAnySystemRole } = useAuthContext()
+  const { currentUser, hasAnySystemRole } = useAuthContext()
   const { tr, t } = useI18n()
-  const [rooms, setRooms] = useState<ChatRoom[]>([])
+  const [sessions, setSessions] = useState<TrainingSessionDTO[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(true)
 
   useEffect(() => {
-    fetchRooms()
+    let cancelled = false
+    setSessionsLoading(true)
+    listTrainingSessions({
+      limit: 5,
+      userId: currentUser?.userId ?? null,
+      teamId: currentUser?.teamId ?? null,
+    })
       .then((data) => {
-        const sorted = data
-          .filter((room) => room.type !== 'battle_prep')
-          .sort((a, b) => {
-            const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0
-            const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0
-            return tb - ta
-          })
-        setRooms(sorted)
+        if (cancelled) return
+        setSessions([...data].sort((a, b) => sessionTimestamp(b) - sessionTimestamp(a)))
       })
-      .catch(() => {})
-  }, [])
+      .catch(() => {
+        if (!cancelled) setSessions([])
+      })
+      .finally(() => {
+        if (!cancelled) setSessionsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [currentUser?.teamId, currentUser?.userId])
 
-  const recentRooms = rooms.slice(0, 3)
-  const latestRoom = recentRooms[0]
+  const recentSessions = sessions.slice(0, 3)
+  const latestSession = recentSessions[0]
   const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
 
   const quickLinks = [
@@ -127,24 +255,28 @@ const HomePage: React.FC = () => {
             )}
           </div>
 
-          {latestRoom ? (
-            <Link to={APP_ROUTES.conversation(latestRoom.id)} className="home-continue-link">
+          {latestSession ? (
+            <Link to={sessionPath(latestSession)} className="home-continue-link">
               <span className="home-continue-icon" aria-hidden="true">
-                <MessageSquare size={15} />
+                <ClipboardList size={15} />
               </span>
               <span className="home-continue-copy">
-                <strong>{tr('继续最近对话', 'Continue latest conversation')}</strong>
-                <em>{latestRoom.name} · {timeAgo(latestRoom.last_message_at, tr) || tr('未记录时间', 'No time')}</em>
+                <strong>
+                  {isContinuableSession(latestSession)
+                    ? tr('继续最近训练', 'Continue latest training')
+                    : tr('查看最近训练结果', 'View latest training result')}
+                </strong>
+                <em>{sessionTitle(latestSession, tr)} · {timeAgo(sessionTime(latestSession), tr) || tr('未记录时间', 'No time')}</em>
               </span>
               <ChevronRight size={15} />
             </Link>
           ) : (
             <div className="home-continue-link is-empty">
               <span className="home-continue-icon" aria-hidden="true">
-                <MessageSquare size={15} />
+                <ClipboardList size={15} />
               </span>
               <span className="home-continue-copy">
-                <strong>{tr('暂无可继续对话', 'No conversation to continue')}</strong>
+                <strong>{sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}</strong>
                 <em>{tr('从训练目录开始', 'Start from the catalog')}</em>
               </span>
             </div>
@@ -177,38 +309,41 @@ const HomePage: React.FC = () => {
 
           <PageSection
             className="home-recent-section"
-            title={tr('最近对话', 'Recent conversations')}
+            title={tr('最近训练', 'Recent training')}
             actions={(
               <Button asChild variant="ghost" size="sm">
-                <Link to={APP_ROUTES.conversations}>
-                  {t('nav.conversations')}
+                <Link to={APP_ROUTES.reviewSessions}>
+                  {t('nav.review')}
                   <ChevronRight size={14} />
                 </Link>
               </Button>
             )}
           >
             <Surface className="home-recent-surface" padding="sm">
-              {recentRooms.length === 0 ? (
+              {recentSessions.length === 0 ? (
                 <div className="home-empty-block">
-                  <p>{tr('暂无会话记录', 'No conversation records')}</p>
+                  <p>{sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}</p>
                 </div>
               ) : (
                 <div className="home-recent-list">
-                  {recentRooms.map((room) => {
-                    const firstPersonaId = room.persona_ids?.[0]
-                    const persona = firstPersonaId ? personaMap[firstPersonaId] : null
-                    const initial = persona ? getInitial(persona.name) : getInitial(room.name)
-                    const color = persona
-                      ? (persona.avatar_color || getAvatarColor(firstPersonaId))
-                      : getAvatarColor(room.id)
+                  {recentSessions.map((session) => {
+                    const title = sessionTitle(session, tr)
+                    const initial = getInitial(title)
+                    const color = getAvatarColor(session.session_id)
                     return (
-                      <Link key={room.id} to={APP_ROUTES.conversation(room.id)} className="home-recent-item">
+                      <Link key={session.session_id} to={sessionPath(session)} className="home-recent-item">
                         <span className="home-recent-avatar" style={{ backgroundColor: color }}>
                           {initial}
                         </span>
                         <span className="home-recent-copy">
-                          <strong>{room.name}</strong>
-                          <em>{timeAgo(room.last_message_at, tr) || tr('未记录时间', 'No time')}</em>
+                          <strong>{title}</strong>
+                          <em>
+                            {statusLabel(session.status, tr)}
+                            {' · '}
+                            {trainingModeLabel(session, tr)}
+                            {' · '}
+                            {timeAgo(sessionTime(session), tr) || tr('未记录时间', 'No time')}
+                          </em>
                         </span>
                         <ChevronRight size={15} />
                       </Link>

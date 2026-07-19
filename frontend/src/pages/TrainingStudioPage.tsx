@@ -602,26 +602,30 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             framework: config.framework,
             difficulty: config.difficulty,
             category: config.scenario,
-            metadata: isLiveCoachMode
-              ? {
-                  source: 'live_coach_mvp',
-                  trainingProfile,
-                  liveCoach: {
-                    sourceLanguage: liveCoachSourceLanguage,
-                    targetLanguage: liveCoachTargetLanguage,
-                    captureStrategy: 'browser_microphone_mvp',
-                    transcriptStrategy: 'chat_room_messages',
-                    translationStrategy: 'text_first_mvp',
-                    extensionPoints: [
-                      'system_audio_tap',
-                      'virtual_microphone',
-                      'speech_to_speech_translation',
-                      'prosody_preservation',
-                      '70_plus_languages',
-                    ],
-                  },
-                }
-              : undefined,
+            metadata: {
+              source: isLiveCoachMode ? 'live_coach_mvp' : 'training_studio',
+              trainingMode,
+              interactionMode,
+              trainingProfile,
+              ...(isLiveCoachMode
+                ? {
+                    liveCoach: {
+                      sourceLanguage: liveCoachSourceLanguage,
+                      targetLanguage: liveCoachTargetLanguage,
+                      captureStrategy: 'browser_microphone_mvp',
+                      transcriptStrategy: 'chat_room_messages',
+                      translationStrategy: 'text_first_mvp',
+                      extensionPoints: [
+                        'system_audio_tap',
+                        'virtual_microphone',
+                        'speech_to_speech_translation',
+                        'prosody_preservation',
+                        '70_plus_languages',
+                      ],
+                    },
+                  }
+                : {}),
+            },
           },
         },
         createTrainingSession,
