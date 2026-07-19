@@ -11,12 +11,8 @@ from typing import Any, Protocol, runtime_checkable
 
 REALTIME_EVENT_SCHEMA_VERSION = 1
 REALTIME_RUNTIME_PIPECAT = "pipecat"
-REALTIME_RUNTIME_OPENAI = "openai_realtime"
 REALTIME_RUNTIME_TALKWISE_LOCAL = "talkwise_local"
 OPENAI_REALTIME_API_KEY_ENV_KEYS = ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY")
-OPENAI_REALTIME_MODEL_ENV_KEYS = ("REALTIME_OPENAI_MODEL",)
-OPENAI_REALTIME_VOICE_ENV_KEYS = ("REALTIME_OPENAI_VOICE",)
-OPENAI_REALTIME_INPUT_AUDIO_FORMAT_ENV_KEYS = ("REALTIME_OPENAI_INPUT_AUDIO_FORMAT",)
 _SENSITIVE_REALTIME_METADATA_KEYS = {
     "api_key",
     "apikey",
@@ -60,10 +56,8 @@ def realtime_runtime_for_provider(provider: object | None) -> str:
     """Return the public realtime runtime family for a provider alias."""
 
     normalized = _normalized_realtime_name(provider)
-    if normalized in {"pipecat", "pipecat_pipeline"}:
+    if normalized in {"pipecat", "pipecat_pipeline", "openai", "openai_realtime", "openai_webrtc"}:
         return REALTIME_RUNTIME_PIPECAT
-    if normalized in {"openai", "openai_realtime", "openai_webrtc"}:
-        return REALTIME_RUNTIME_OPENAI
     if normalized in {"", "local", "talkwise", "talkwise_local"}:
         return REALTIME_RUNTIME_TALKWISE_LOCAL
     return normalized
@@ -278,100 +272,6 @@ def build_realtime_readiness(
     )
 
 
-def build_openai_realtime_capability_response(
-    *,
-    configured: bool,
-    effective_key: bool,
-    model: str | None,
-    voice: str | None,
-    input_audio_format: str | None = None,
-) -> dict[str, object]:
-    """Build the public OpenAI Realtime capability/readiness response shape."""
-
-    resolved_model = _clean_realtime_text(model)
-    resolved_voice = _clean_realtime_text(voice)
-    resolved_input_audio_format = _clean_realtime_text(input_audio_format)
-
-    blockers: list[RealtimeReadinessIssue] = []
-    if not effective_key:
-        blockers.append(
-            RealtimeReadinessIssue(
-                code="MISSING_OPENAI_API_KEY",
-                message=(
-                    "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
-                    "before starting OpenAI realtime calls"
-                ),
-                phase="configuration",
-                provider="openaiRealtime",
-                missing_env=OPENAI_REALTIME_API_KEY_ENV_KEYS,
-            )
-        )
-    if not resolved_model:
-        blockers.append(
-            RealtimeReadinessIssue(
-                code="MISSING_OPENAI_REALTIME_MODEL",
-                message="Configure REALTIME_OPENAI_MODEL before starting OpenAI realtime calls",
-                phase="configuration",
-                provider="openaiRealtime",
-                feature="model",
-                missing_env=OPENAI_REALTIME_MODEL_ENV_KEYS,
-            )
-        )
-    if not resolved_voice:
-        blockers.append(
-            RealtimeReadinessIssue(
-                code="MISSING_OPENAI_REALTIME_VOICE",
-                message="Configure REALTIME_OPENAI_VOICE before starting OpenAI realtime calls",
-                phase="configuration",
-                provider="openaiRealtime",
-                feature="voice",
-                missing_env=OPENAI_REALTIME_VOICE_ENV_KEYS,
-            )
-        )
-    if not resolved_input_audio_format:
-        blockers.append(
-            RealtimeReadinessIssue(
-                code="MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
-                message=(
-                    "Configure REALTIME_OPENAI_INPUT_AUDIO_FORMAT before starting "
-                    "OpenAI realtime calls"
-                ),
-                phase="configuration",
-                provider="openaiRealtime",
-                feature="audioFormat",
-                missing_env=OPENAI_REALTIME_INPUT_AUDIO_FORMAT_ENV_KEYS,
-            )
-        )
-    readiness = build_realtime_readiness(
-        required={
-            "env": OPENAI_REALTIME_API_KEY_ENV_KEYS,
-            "model": resolved_model,
-            "voice": resolved_voice,
-            "inputAudioFormat": resolved_input_audio_format,
-        },
-        blocking_reasons=blockers,
-        runtime=REALTIME_RUNTIME_OPENAI,
-    ).to_dict()
-    return {
-        "runtime": REALTIME_RUNTIME_OPENAI,
-        "configured": bool(configured and resolved_input_audio_format),
-        "effectiveKey": effective_key,
-        "model": resolved_model,
-        "voice": resolved_voice,
-        "inputAudioFormat": resolved_input_audio_format,
-        "readyForCall": readiness["ready"],
-        "readiness": readiness,
-        "errors": readiness["blockingReasons"],
-    }
-
-
-def _clean_realtime_text(value: object | None) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
 def _readiness_issue_payload(
     issue: RealtimeReadinessIssue | Mapping[str, object],
 ) -> dict[str, object]:
@@ -539,9 +439,8 @@ class PersistedRealtimeTranscript:
 class RealtimeTransportAdapter(Protocol):
     """Low-level bidirectional media transport adapter.
 
-    Existing OpenAI Realtime websocket clients can satisfy this protocol
-    directly. Pipecat pipelines can sit above it or replace it behind the
-    RealtimePipelineAdapter protocol.
+    Pipecat pipelines are the callable realtime source of truth. This lower-level
+    transport shape remains for adapter tests and historical metadata tolerance.
     """
 
     async def connect(self) -> None:

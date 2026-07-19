@@ -9,20 +9,17 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.routes import training_studio as training_studio_routes
 from api.routes.training_studio import (
-    get_training_realtime_openai_factory,
     get_training_realtime_pipeline_factory,
     get_training_realtime_uow_factory,
     get_training_session_service,
     router,
 )
 from application.ports.realtime import (
-    REALTIME_RUNTIME_OPENAI,
     REALTIME_RUNTIME_PIPECAT,
     RealtimeAudioChunk,
     RealtimePipelineConfig,
@@ -122,38 +119,6 @@ class _FakeUoW:
         return None
 
 
-class _FakeOpenAIRealtimeClient:
-    def __init__(self) -> None:
-        self.connected = False
-        self.closed = False
-        self.audio_chunks: list[bytes] = []
-        self.commits = 0
-        self._events: asyncio.Queue[dict | None] = asyncio.Queue()
-
-    async def connect(self) -> None:
-        self.connected = True
-
-    async def append_audio(self, audio: bytes) -> None:
-        self.audio_chunks.append(audio)
-
-    async def commit_audio(self) -> None:
-        self.commits += 1
-        await self._events.put(
-            {
-                "type": "conversation.item.input_audio_transcription.completed",
-                "event_id": "evt_test",
-                "item_id": "item_test",
-                "transcript": "OpenAI realtime transcript.",
-            }
-        )
-
-    async def receive_event(self) -> dict | None:
-        return await self._events.get()
-
-    async def close(self) -> None:
-        self.closed = True
-
-
 class _FakeRealtimePipelineAdapter:
     def __init__(self) -> None:
         self.started_context: TrainingVoiceContext | None = None
@@ -189,53 +154,6 @@ class _FakeRealtimePipelineAdapter:
     async def close(self) -> None:
         self.closed = True
         await self._events.put(None)
-
-
-@dataclass
-class _CapturedSDPRequest:
-    url: str
-    data: dict | None
-    files: dict | None
-    headers: dict[str, str]
-
-
-class _FakeSDPAsyncClient:
-    captured_requests: list[_CapturedSDPRequest] = []
-
-    def __init__(self, **_kwargs) -> None:
-        pass
-
-    async def __aenter__(self) -> "_FakeSDPAsyncClient":
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    async def post(
-        self, url: str, *, data=None, files=None, headers=None, **_kwargs
-    ) -> httpx.Response:
-        self.captured_requests.append(
-            _CapturedSDPRequest(
-                url=url,
-                data=data,
-                files=files,
-                headers=dict(headers or {}),
-            )
-        )
-        return httpx.Response(
-            200,
-            text="v=0\r\ns=OpenAI realtime answer\r\n",
-            headers={"content-type": "application/sdp"},
-            request=httpx.Request("POST", url),
-        )
-
-
-def _response_error_message(response) -> str:
-    try:
-        body = response.json()
-    except ValueError:
-        return response.text
-    return str(body.get("message") or body.get("detail") or body)
 
 
 def _make_bound_app(
@@ -337,7 +255,7 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
     return adapter
 
 
-def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch) -> None:
+def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> None:
     capability = SimpleNamespace(
         available=True,
         core_available=True,
@@ -376,15 +294,7 @@ def test_realtime_capabilities_reports_openai_and_available_pipecat(monkeypatch)
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["openaiRealtime"]["configured"] is True
-    assert data["openaiRealtime"]["effectiveKey"] is True
-    assert data["openaiRealtime"]["runtime"] == REALTIME_RUNTIME_OPENAI
-    assert data["openaiRealtime"]["model"] == "gpt-realtime-test"
-    assert data["openaiRealtime"]["voice"] == "marin-test"
-    assert data["openaiRealtime"]["readyForCall"] is True
-    assert data["openaiRealtime"]["readiness"]["status"] == "ready"
-    assert data["openaiRealtime"]["readiness"]["blockingReasons"] == []
-    assert data["openaiRealtime"]["errors"] == []
+    assert "openaiRealtime" not in data
     assert "sk-realtime-capability" not in response.text
     assert data["pipecat"]["available"] is True
     assert data["pipecat"]["provider"] == "pipecat"
@@ -458,11 +368,7 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["openaiRealtime"]["configured"] is True
-    assert data["openaiRealtime"]["effectiveKey"] is True
-    assert data["openaiRealtime"]["runtime"] == REALTIME_RUNTIME_OPENAI
-    assert data["openaiRealtime"]["readyForCall"] is True
-    assert data["openaiRealtime"]["readiness"]["status"] == "ready"
+    assert "openaiRealtime" not in data
     assert "sk-llm-fallback" not in response.text
     assert data["pipecat"]["available"] is False
     assert data["pipecat"]["provider"] == "pipecat"
@@ -576,12 +482,8 @@ def test_realtime_capabilities_reports_missing_openai_key_for_pipecat_readiness(
 
     assert response.status_code == 200
     payload = response.json()["data"]
-    openai = payload["openaiRealtime"]
     data = payload["pipecat"]
-    assert openai["readyForCall"] is False
-    assert openai["readiness"]["status"] == "blocked"
-    assert openai["errors"][0]["code"] == "MISSING_OPENAI_API_KEY"
-    assert openai["errors"][0]["provider"] == "openaiRealtime"
+    assert "openaiRealtime" not in payload
     assert data["available"] is True
     assert data["readyForCall"] is False
     assert data["errors"] == [
@@ -598,163 +500,21 @@ def test_realtime_capabilities_reports_missing_openai_key_for_pipecat_readiness(
     ]
 
 
-def test_realtime_sdp_proxy_returns_sdp_answer_when_openai_call_succeeds(monkeypatch) -> None:
-    app, _ = _make_bound_app()
-    client = TestClient(app)
-    offer_sdp = "v=0\r\ns=Local browser offer\r\n"
-    _FakeSDPAsyncClient.captured_requests.clear()
-    monkeypatch.setattr(settings.llm, "api_key", "test-openai-key")
-    monkeypatch.setattr(httpx, "AsyncClient", _FakeSDPAsyncClient)
-
-    response = client.post(
-        "/api/v1/training-studio/realtime/sdp?session_id=session-1&room_id=42",
-        content=offer_sdp,
-        headers={"content-type": "application/sdp"},
-    )
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("application/sdp")
-    assert response.text == "v=0\r\ns=OpenAI realtime answer\r\n"
-    assert _FakeSDPAsyncClient.captured_requests
-    captured = _FakeSDPAsyncClient.captured_requests[0]
-    assert captured.files["sdp"] == ("offer.sdp", offer_sdp.strip(), "application/sdp")
-    assert captured.data and "session" in captured.data
-    assert '"type": "realtime"' in captured.data["session"]
-    assert "Bearer test-openai-key" in captured.headers.values()
-
-
-def test_realtime_sdp_proxy_requires_bound_training_session(monkeypatch) -> None:
-    app, _ = _make_bound_app()
-    client = TestClient(app)
-    monkeypatch.setattr(settings.llm, "api_key", "test-openai-key")
-    monkeypatch.setattr(httpx, "AsyncClient", _FakeSDPAsyncClient)
-
-    response = client.post(
-        "/api/v1/training-studio/realtime/sdp",
-        content="v=0\r\ns=Local browser offer\r\n",
-        headers={"content-type": "application/sdp"},
-    )
-
-    assert response.status_code == 400
-    assert "requires an active training session binding" in _response_error_message(response)
-
-
-def test_realtime_sdp_proxy_rejects_other_mock_user_binding(monkeypatch) -> None:
-    app, _ = _make_bound_app(
-        session_payload=_session_payload(
-            user_id="user-cs-001",
-            team_id="team-service",
-        )
-    )
-    client = TestClient(app)
-    monkeypatch.setattr(settings.llm, "api_key", "test-openai-key")
-    monkeypatch.setattr(httpx, "AsyncClient", _FakeSDPAsyncClient)
-
-    response = client.post(
-        "/api/v1/training-studio/realtime/sdp?session_id=session-1&room_id=42",
-        headers={"X-Mock-User": "sales", "content-type": "application/sdp"},
-        content="v=0\r\ns=Local browser offer\r\n",
-    )
-
-    assert response.status_code == 403
-    assert "current user scope" in _response_error_message(response)
-
-
-def test_realtime_sdp_proxy_missing_api_key_returns_clear_error(monkeypatch) -> None:
-    app, _ = _make_bound_app()
-    client = TestClient(app)
-    monkeypatch.setattr(settings.llm, "api_key", None)
-
-    response = client.post(
-        "/api/v1/training-studio/realtime/sdp",
-        content="v=0\r\ns=Local browser offer\r\n",
-        headers={"content-type": "application/sdp"},
-    )
-
-    assert response.status_code == 503
-    assert "OpenAI Realtime is not configured" in _response_error_message(response)
-
-
-def test_realtime_transcript_persistence_endpoint_stores_voice_realtime_messages() -> None:
+def test_realtime_sdp_proxy_route_is_removed() -> None:
     app, state = _make_bound_app()
     client = TestClient(app)
 
     response = client.post(
-        "/api/v1/training-studio/realtime/transcripts",
-        json={
-            "session_id": "session-1",
-            "room_id": 42,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Can we start with a low-risk pilot?",
-                    "event_id": "evt_user_1",
-                    "metadata": {
-                        "source": "live_coach_realtime_voice",
-                        "trainingProfile": "live_coach",
-                        "sourceLanguage": "zh-CN",
-                        "targetLanguage": "en-US",
-                        "translationStrategy": "text_first_mvp",
-                        "translation": {
-                            "mode": "text_first_mvp",
-                            "sourceLanguage": "zh-CN",
-                            "targetLanguage": "en-US",
-                            "preserveTone": True,
-                            "extensionPoints": ["virtual_microphone"],
-                        },
-                    },
-                },
-                {
-                    "role": "assistant",
-                    "content": "That could work if the success metric is clear.",
-                    "event_id": "evt_assistant_1",
-                },
-            ],
-        },
+        "/api/v1/training-studio/realtime/sdp?session_id=session-1&room_id=42",
+        content="v=0\r\ns=Local browser offer\r\n",
+        headers={"content-type": "application/sdp"},
     )
 
-    assert response.status_code == 201
-    data = response.json()["data"]
-    assert [item["content"] for item in data["messages"]] == [
-        "Can we start with a low-risk pilot?",
-        "That could work if the success metric is clear.",
-    ]
-
-    assert [message.content for message in state.messages] == [
-        "Can we start with a low-risk pilot?",
-        "That could work if the success metric is clear.",
-    ]
-    assert state.messages[0].sender_type == "user"
-    assert state.messages[0].sender_id == "user"
-    assert state.messages[1].sender_type == "persona"
-    assert state.messages[1].sender_id == "assistant"
-    for index, message in enumerate(state.messages):
-        assert message.metadata["source"] == (
-            "live_coach_realtime_voice" if index == 0 else "realtime_voice"
-        )
-        assert message.metadata["trainingMode"] == "voice"
-        assert message.metadata["interactionMode"] == "realtime"
-        assert message.metadata["realtime"]["trainingSessionId"] == "session-1"
-        assert message.metadata["realtime"]["roomId"] == 42
-    assert state.messages[0].metadata["trainingProfile"] == "live_coach"
-    assert state.messages[0].metadata["sourceLanguage"] == "zh-CN"
-    assert state.messages[0].metadata["targetLanguage"] == "en-US"
-    assert state.messages[0].metadata["translationStrategy"] == "text_first_mvp"
-    assert state.messages[0].metadata["translation"] == {
-        "mode": "text_first_mvp",
-        "sourceLanguage": "zh-CN",
-        "targetLanguage": "en-US",
-        "preserveTone": True,
-    }
-    assert state.messages[0].metadata["realtime"]["sourceLanguage"] == "zh-CN"
-    assert state.messages[0].metadata["realtime"]["targetLanguage"] == "en-US"
-    assert state.messages[0].metadata["realtime"]["translationIntent"] == "text_first_mvp"
-    session_response = client.get("/api/v1/training-studio/sessions/session-1")
-    assert session_response.status_code == 200
-    assert session_response.json()["data"]["message_count"] == 2
+    assert response.status_code == 404
+    assert state.messages == []
 
 
-def test_realtime_transcript_persistence_rejects_other_mock_user_binding() -> None:
+def test_realtime_transcript_persistence_endpoint_is_removed() -> None:
     app, state = _make_bound_app(
         session_payload=_session_payload(
             user_id="user-cs-001",
@@ -778,8 +538,7 @@ def test_realtime_transcript_persistence_rejects_other_mock_user_binding() -> No
         },
     )
 
-    assert response.status_code == 403
-    assert "current user scope" in _response_error_message(response)
+    assert response.status_code == 404
     assert state.messages == []
 
 
@@ -835,7 +594,7 @@ def test_guidance_event_persistence_endpoint_stores_system_coach_messages_withou
     assert session_response.json()["data"]["message_count"] == 0
 
 
-def test_realtime_websocket_accepts_audio_lifecycle() -> None:
+def test_realtime_websocket_defaults_to_pipecat_and_requires_binding_before_audio() -> None:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
@@ -844,31 +603,30 @@ def test_realtime_websocket_accepts_audio_lifecycle() -> None:
         started = ws.receive_json()
         listening = ws.receive_json()
         assert started["type"] == "session.started"
+        assert started["payload"]["provider"] == "pipecat"
+        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
         assert listening["status"] == "listening"
 
         ws.send_json({"type": "audio.input", "audio": "", "mimeType": "audio/webm"})
-        audio_event = ws.receive_json()
-        assert audio_event["type"] == "audio.input"
-
-        ws.send_json({"type": "audio.commit"})
-        committed = ws.receive_json()
-        transcript_delta = ws.receive_json()
-        transcript_done = ws.receive_json()
-        audio_output = ws.receive_json()
-        back_to_listening = ws.receive_json()
-        assert committed["status"] == "processing"
-        assert transcript_delta["type"] == "transcript.delta"
-        assert transcript_done["type"] == "transcript.done"
-        assert audio_output["type"] == "audio.output"
-        assert back_to_listening["status"] == "listening"
-
-        ws.send_json({"type": "session.close", "reason": "test"})
-        closed = ws.receive_json()
-        assert closed["type"] == "session.closed"
+        error = ws.receive_json()
+        assert error["type"] == "error"
+        assert error["payload"]["code"] == "BINDING_ERROR"
+        assert "must be bound before audio input" in error["payload"]["message"]
 
 
 def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
     app, state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": " We can start with a low-risk pilot. ",
+            "source": "pipecat",
+        }
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
     client = TestClient(app)
     queue = room_event_bus.subscribe(42)
     try:
@@ -881,14 +639,19 @@ def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
             assert started["payload"]["roomId"] == 42
             assert listening["status"] == "listening"
 
-            ws.send_json(
-                {
-                    "type": "conversation.item.input_audio_transcription.completed",
-                    "transcript": " We can start with a low-risk pilot. ",
-                }
+            ws.send_json({"type": "audio.commit"})
+            committed = ws.receive_json()
+            events = [ws.receive_json() for _ in range(4)]
+            transcript_done = next(event for event in events if event["type"] == "transcript.done")
+            persisted = next(event for event in events if event["type"] == "transcript.persisted")
+            guidance_trigger = next(
+                event for event in events if event["type"] == "training.live_guidance.triggered"
             )
-            persisted = ws.receive_json()
+            assert committed["status"] == "processing"
+            assert transcript_done["type"] == "transcript.done"
             assert persisted["type"] == "transcript.persisted"
+            assert guidance_trigger["payload"]["reason"] == "final_transcript"
+            assert any(event["status"] == "listening" for event in events if "status" in event)
             assert (
                 persisted["payload"]["message"]["content"] == "We can start with a low-risk pilot."
             )
@@ -896,7 +659,7 @@ def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
             assert len(state.messages) == 1
             assert state.messages[0].sender_type == "user"
             assert state.messages[0].sender_id == "user"
-            assert state.messages[0].metadata["source"] == "realtime_voice"
+            assert state.messages[0].metadata["source"] == "pipecat"
             assert state.messages[0].metadata["trainingMode"] == "voice"
             assert state.messages[0].metadata["interactionMode"] == "realtime"
             assert state.messages[0].metadata["realtime"]["trainingSessionId"] == "session-1"
@@ -904,15 +667,57 @@ def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
             event, data = queue.get_nowait()
             assert event == "message"
             assert data["content"] == "We can start with a low-risk pilot."
-            assert data["metadata"]["source"] == "realtime_voice"
+            assert data["metadata"]["source"] == "pipecat"
             assert data["metadata"]["trainingMode"] == "voice"
             assert data["metadata"]["interactionMode"] == "realtime"
     finally:
         room_event_bus.unsubscribe(42, queue)
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_rejects_client_transcript_events() -> None:
+    app, state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "transcript.done", "text": "Client should not persist this."})
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "UNSUPPORTED_EVENT"
+    assert "Pipecat realtime pipeline" in error["payload"]["message"]
+    assert state.messages == []
+    assert adapter.closed is True
 
 
 def test_realtime_websocket_configure_binding_persists_final_transcript() -> None:
     app, state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "transcript.done",
+            "text": "Configured binding path.",
+            "metadata": {
+                "trainingProfile": "live_coach",
+                "sourceLanguage": "ja",
+                "targetLanguage": "en-US",
+                "translationIntent": "text_first_mvp",
+                "source": "pipecat",
+            },
+        }
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
     client = TestClient(app)
 
     with client.websocket_connect("/api/v1/training-studio/realtime") as ws:
@@ -928,19 +733,13 @@ def test_realtime_websocket_configure_binding_persists_final_transcript() -> Non
             "roomId": 42,
         }
 
-        ws.send_json(
-            {
-                "type": "transcript.done",
-                "text": "Configured binding path.",
-                "metadata": {
-                    "trainingProfile": "live_coach",
-                    "sourceLanguage": "ja",
-                    "targetLanguage": "en-US",
-                    "translationIntent": "text_first_mvp",
-                },
-            }
-        )
-        persisted = ws.receive_json()
+        ws.send_json({"type": "audio.commit"})
+        committed = ws.receive_json()
+        events = [ws.receive_json() for _ in range(4)]
+        transcript_done = next(event for event in events if event["type"] == "transcript.done")
+        persisted = next(event for event in events if event["type"] == "transcript.persisted")
+        assert committed["status"] == "processing"
+        assert transcript_done["type"] == "transcript.done"
         assert persisted["type"] == "transcript.persisted"
         assert persisted["payload"]["message"]["content"] == "Configured binding path."
 
@@ -950,6 +749,7 @@ def test_realtime_websocket_configure_binding_persists_final_transcript() -> Non
     assert state.messages[0].metadata["sourceLanguage"] == "ja"
     assert state.messages[0].metadata["targetLanguage"] == "en-US"
     assert state.messages[0].metadata["realtime"]["translationIntent"] == "text_first_mvp"
+    assert adapter.closed is True
 
 
 def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline() -> None:
@@ -1122,50 +922,34 @@ def test_realtime_websocket_configure_binding_rejects_other_mock_user() -> None:
     assert state.messages == []
 
 
-def test_openai_realtime_provider_relays_audio_and_persists_metadata() -> None:
+def test_realtime_websocket_rejects_openai_provider() -> None:
     app, state = _make_bound_app()
-    fake_openai = _FakeOpenAIRealtimeClient()
-    app.dependency_overrides[get_training_realtime_openai_factory] = lambda: lambda: fake_openai
     client = TestClient(app)
 
     with client.websocket_connect(
         "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=openai"
     ) as ws:
-        started = ws.receive_json()
-        listening = ws.receive_json()
-        assert started["payload"]["provider"] == "openai"
-        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_OPENAI
-        assert listening["status"] == "listening"
+        error = ws.receive_json()
 
-        ws.send_bytes(b"\x01\x02\x03")
-        audio_event = ws.receive_json()
-        assert audio_event["type"] == "audio.input"
-
-        ws.send_json({"type": "audio.commit"})
-        committed = ws.receive_json()
-        transcript_done = ws.receive_json()
-        persisted = ws.receive_json()
-
-        assert committed["status"] == "processing"
-        assert transcript_done["type"] == "transcript.done"
-        assert persisted["type"] == "transcript.persisted"
-        assert persisted["payload"]["message"]["content"] == "OpenAI realtime transcript."
-
-    assert fake_openai.connected is True
-    assert fake_openai.audio_chunks == [b"\x01\x02\x03"]
-    assert fake_openai.commits == 1
-    assert fake_openai.closed is True
-    assert state.messages[0].metadata["trainingMode"] == "voice"
-    assert state.messages[0].metadata["interactionMode"] == "realtime"
-    assert state.messages[0].metadata["realtime"]["runtime"] == REALTIME_RUNTIME_OPENAI
-    assert state.messages[0].metadata["realtime"]["provider"] == "openai"
-    assert state.messages[0].metadata["realtime"]["eventId"] == "evt_test"
-    assert state.messages[0].metadata["realtime"]["itemId"] == "item_test"
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "UNSUPPORTED_REALTIME_PROVIDER"
+    assert error["payload"]["phase"] == "provider"
+    assert error["payload"]["provider"] == "openai"
+    assert "Pipecat only" in error["payload"]["message"]
+    assert state.messages == []
 
 
 def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant_turn() -> None:
     app, state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "response.audio_transcript.done",
+            "text": "That works if we define the pilot metric first.",
+            "response_id": "response_pipecat_1",
+            "source": "pipecat",
+        }
+    )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
         lambda: lambda _provider: adapter
     )
@@ -1179,17 +963,13 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
         assert started["payload"]["provider"] == "pipecat"
         assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
 
-        ws.send_json(
-            {
-                "type": "response.audio_transcript.done",
-                "text": "That works if we define the pilot metric first.",
-                "response_id": "response_pipecat_1",
-                "source": "pipecat",
-            }
-        )
-        transcript_done = ws.receive_json()
-        persisted = ws.receive_json()
+        ws.send_json({"type": "audio.commit"})
+        committed = ws.receive_json()
+        events = [ws.receive_json() for _ in range(4)]
+        transcript_done = next(event for event in events if event["type"] == "transcript.done")
+        persisted = next(event for event in events if event["type"] == "transcript.persisted")
 
+    assert committed["status"] == "processing"
     assert transcript_done["type"] == "transcript.done"
     assert transcript_done["payload"] == {
         "text": "That works if we define the pilot metric first.",
@@ -1607,6 +1387,17 @@ def test_realtime_demo_vertical_slice_creates_session_starts_room_and_persists_t
 
     app.dependency_overrides[get_training_session_service] = lambda: session_service
     app.dependency_overrides[get_training_realtime_uow_factory] = lambda: _uow_factory
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "The demo voice turn is now persisted.",
+            "source": "pipecat",
+        }
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
     client = TestClient(app)
     queue = room_event_bus.subscribe(42)
     try:
@@ -1626,13 +1417,13 @@ def test_realtime_demo_vertical_slice_creates_session_starts_room_and_persists_t
         ) as ws:
             ws.receive_json()
             ws.receive_json()
-            ws.send_json(
-                {
-                    "type": "conversation.item.input_audio_transcription.completed",
-                    "transcript": "The demo voice turn is now persisted.",
-                }
-            )
-            persisted = ws.receive_json()
+            ws.send_json({"type": "audio.commit"})
+            committed = ws.receive_json()
+            events = [ws.receive_json() for _ in range(4)]
+            transcript_done = next(event for event in events if event["type"] == "transcript.done")
+            persisted = next(event for event in events if event["type"] == "transcript.persisted")
+            assert committed["status"] == "processing"
+            assert transcript_done["type"] == "transcript.done"
             assert persisted["type"] == "transcript.persisted"
 
         assert [message.content for message in state.messages] == [
@@ -1641,8 +1432,9 @@ def test_realtime_demo_vertical_slice_creates_session_starts_room_and_persists_t
         event, data = queue.get_nowait()
         assert event == "message"
         assert data["content"] == "The demo voice turn is now persisted."
-        assert data["metadata"]["source"] == "realtime_voice"
+        assert data["metadata"]["source"] == "pipecat"
         assert data["metadata"]["trainingMode"] == "voice"
         assert data["metadata"]["interactionMode"] == "realtime"
+        assert adapter.closed is True
     finally:
         room_event_bus.unsubscribe(42, queue)

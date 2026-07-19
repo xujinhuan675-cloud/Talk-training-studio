@@ -312,7 +312,6 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         "REALTIME_OPENAI_MODEL",
         "REALTIME_OPENAI_VOICE",
         "REALTIME_OPENAI_TRANSCRIPTION_MODEL",
-        "REALTIME_OPENAI_CALL_URL",
     ]
     old_env = {key: os.environ.get(key) for key in voice_env_keys}
     original_llm = settings.llm.model_copy(deep=True)
@@ -322,7 +321,6 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         "REALTIME_OPENAI_MODEL": settings.REALTIME_OPENAI_MODEL,
         "REALTIME_OPENAI_VOICE": settings.REALTIME_OPENAI_VOICE,
         "REALTIME_OPENAI_TRANSCRIPTION_MODEL": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
-        "REALTIME_OPENAI_CALL_URL": settings.REALTIME_OPENAI_CALL_URL,
     }
     reloads: list[bool] = []
 
@@ -354,7 +352,6 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         settings.REALTIME_OPENAI_MODEL = "gpt-realtime"
         settings.REALTIME_OPENAI_VOICE = "marin"
         settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
-        settings.REALTIME_OPENAI_CALL_URL = "https://api.openai.com/v1/realtime/calls"
 
         resp = await client.put(
             "/api/v1/training-studio/voice-config",
@@ -376,7 +373,6 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
                 "realtime_model": "gpt-realtime",
                 "realtime_voice": "marin",
                 "realtime_transcription_model": "gpt-realtime-whisper",
-                "realtime_call_url": "https://api.openai.com/v1/realtime/calls",
             },
         )
 

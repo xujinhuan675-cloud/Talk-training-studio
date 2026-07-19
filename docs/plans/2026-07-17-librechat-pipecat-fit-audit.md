@@ -400,3 +400,33 @@ git diff --cached --check
 1. 先接一个训练相关的窄 tool consumer，例如素材检索或 persona builder，不做完整通用 tool runtime。
 2. 补 file / training material resource ownership，再让 tool consumer 只读取有权限的素材。
 3. Pipecat 侧继续推进 runtime source of truth，把 OpenAI realtime 独立路径降为 Pipecat service/fallback。
+
+## 2026-07-19 Pipecat-only realtime 收敛
+
+本轮按“可以直接删除，直接走 Pipecat”的决策落地：
+
+- 后端删除独立 OpenAI realtime adapter、`/training-studio/realtime/sdp` SDP 代理、`/training-studio/realtime/transcripts` 客户端转写持久化入口。
+- 后端 `/training-studio/realtime` 默认 provider 改为 `pipecat`，旧 `provider=openai` 直接返回 `UNSUPPORTED_REALTIME_PROVIDER`。
+- 后端 WebSocket 不再接受客户端直接发送 final transcript 事件；`transcript.done -> transcript.persisted -> training.live_guidance.triggered` 只从 Pipecat pipeline runner 事件流进入持久化。
+- `realtime_runtime_for_provider` 将 legacy OpenAI realtime alias 折叠为 Pipecat runtime，OpenAI 仅作为 Pipecat STT/TTS/LLM 服务配置保留。
+- 前端 `RealtimeVoiceRecorder` 从 WebRTC/SDP 改为 Pipecat WebSocket：浏览器采集麦克风，编码 PCM16，消费后端 `audio.output` 和 `transcript.persisted`。
+- `/realtime/capabilities` 和 Training Studio readiness 面板不再把 OpenAI Realtime 当作可发起通话的 peer runtime；OpenAI key/model/voice 只作为 Pipecat OpenAI STT/TTS/LLM 服务配置。
+- Settings 页移除已废弃的 Call URL，`REALTIME_OPENAI_CALL_URL` / `REALTIME_OPENAI_WS_URL` 只在配置层保留为 legacy `.env` 容忍字段。
+
+focused 验证：
+
+- `frontend: node --test tests\\realtimeSession.test.mjs`
+- `frontend: node --test tests\\realtimeSession.test.mjs tests\\trainingConversation.test.mjs tests\\trainingStudio.test.mjs`
+- `backend: ..\\.venv-backend\\Scripts\\python.exe -m pytest tests\\test_training_studio_realtime_api.py tests\\application\\test_training_studio_realtime_pipeline.py tests\\test_training_studio_api.py`
+
+当前判断：
+
+- Pipecat realtime: 65-70%。可见入口已切到 Pipecat，独立 OpenAI runtime 已移除；仍缺真实浏览器音频链路端到端验收、VAD/turn/interruption 更完整事件、metrics/tracing。
+- auth / ACL / resource scope: 60-70%。realtime binding 仍走现有 user/team scope，旧 REST 转写逃逸入口已删除。
+- MCP / Agent / Tool: 20-25%。本轮未继续推进，仍保持 readiness/inventory 阶段。
+
+下一步建议：
+
+1. 用连接浏览器或 FlowGuide 验证 Pipecat WebSocket 录音、音频输出和转写持久化的真实 UI 行为。
+2. 补 Pipecat turn/interruption/silence timeout 的 TalkWise 事件映射。
+3. 再进入训练相关窄 tool consumer 和 file/material resource ownership。

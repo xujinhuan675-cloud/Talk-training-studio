@@ -1,10 +1,8 @@
 import pytest
 
 from application.ports.realtime import (
-    REALTIME_RUNTIME_OPENAI,
     REALTIME_RUNTIME_PIPECAT,
     RealtimeSessionBinding,
-    build_openai_realtime_capability_response,
 )
 from application.services.training_studio.realtime_pipeline import (
     MemoryTrainingTranscriptSink,
@@ -70,7 +68,7 @@ class _TrainingSessionRecorder:
         return None
 
 
-def test_build_realtime_transcript_maps_openai_user_event_to_provider_neutral_dto():
+def test_build_realtime_transcript_maps_pipecat_openai_stt_event_to_provider_neutral_dto():
     binding = RealtimeSessionBinding(training_session_id="training-1", room_id=42)
 
     transcript = build_realtime_transcript(
@@ -94,7 +92,7 @@ def test_build_realtime_transcript_maps_openai_user_event_to_provider_neutral_dt
             },
         },
         binding=binding,
-        provider="openai",
+        provider="pipecat",
         realtime_session_id="rt-1",
     )
 
@@ -102,8 +100,8 @@ def test_build_realtime_transcript_maps_openai_user_event_to_provider_neutral_dt
     assert transcript.text == "We can start with a pilot."
     assert transcript.role == "user"
     assert transcript.binding == binding
-    assert transcript.provider == "openai"
-    assert transcript.runtime == REALTIME_RUNTIME_OPENAI
+    assert transcript.provider == "pipecat"
+    assert transcript.runtime == REALTIME_RUNTIME_PIPECAT
     assert transcript.event_id == "evt_1"
     assert transcript.item_id == "item_1"
     assert transcript.metadata["trainingProfile"] == "live_coach"
@@ -114,71 +112,6 @@ def test_build_realtime_transcript_maps_openai_user_event_to_provider_neutral_dt
         "preserveTone": True,
     }
     assert transcript.metadata["realtime"]["translationIntent"] == "text_first_mvp"
-
-
-def test_openai_realtime_capability_response_exposes_structured_readiness():
-    missing = build_openai_realtime_capability_response(
-        configured=False,
-        effective_key=False,
-        model="gpt-realtime",
-        voice="marin",
-        input_audio_format="pcm16",
-    )
-
-    assert missing["configured"] is False
-    assert missing["runtime"] == REALTIME_RUNTIME_OPENAI
-    assert missing["effectiveKey"] is False
-    assert missing["readyForCall"] is False
-    assert missing["readiness"]["ready"] is False
-    assert missing["readiness"]["status"] == "blocked"
-    assert missing["errors"] == missing["readiness"]["blockingReasons"]
-    assert missing["errors"][0]["code"] == "MISSING_OPENAI_API_KEY"
-    assert missing["errors"][0]["provider"] == "openaiRealtime"
-    assert missing["errors"][0]["missingEnv"] == [
-        "REALTIME_OPENAI_API_KEY",
-        "LLM__API_KEY",
-        "OPENAI_API_KEY",
-    ]
-
-    incomplete = build_openai_realtime_capability_response(
-        configured=False,
-        effective_key=True,
-        model=None,
-        voice=None,
-        input_audio_format="pcm16",
-    )
-
-    assert incomplete["readyForCall"] is False
-    assert [error["code"] for error in incomplete["errors"]] == [
-        "MISSING_OPENAI_REALTIME_MODEL",
-        "MISSING_OPENAI_REALTIME_VOICE",
-    ]
-
-    missing_audio_format = build_openai_realtime_capability_response(
-        configured=False,
-        effective_key=True,
-        model="gpt-realtime",
-        voice="marin",
-        input_audio_format=None,
-    )
-
-    assert missing_audio_format["readyForCall"] is False
-    assert missing_audio_format["errors"][0]["code"] == "MISSING_OPENAI_REALTIME_AUDIO_FORMAT"
-    assert missing_audio_format["errors"][0]["missingEnv"] == [
-        "REALTIME_OPENAI_INPUT_AUDIO_FORMAT"
-    ]
-
-    ready = build_openai_realtime_capability_response(
-        configured=True,
-        effective_key=True,
-        model="gpt-realtime",
-        voice="marin",
-        input_audio_format="pcm16",
-    )
-
-    assert ready["readyForCall"] is True
-    assert ready["readiness"]["status"] == "ready"
-    assert ready["errors"] == []
 
 
 def test_build_realtime_transcript_maps_response_events_to_assistant_role():

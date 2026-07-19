@@ -318,6 +318,8 @@ class Settings(BaseSettings):
         default="drop_oldest",
         validation_alias=AliasChoices("REALTIME_WS_SEND_OVERFLOW_POLICY"),
     )
+    # Legacy direct OpenAI realtime fields are retained so old `.env` files do not
+    # fail pydantic extra="forbid"; callable realtime runtime now goes through Pipecat.
     REALTIME_OPENAI_WS_URL: Optional[str] = Field(
         default=None, validation_alias=AliasChoices("REALTIME_OPENAI_WS_URL")
     )
