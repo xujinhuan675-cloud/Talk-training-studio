@@ -113,6 +113,8 @@ class _FakeStorage:
     def __init__(self) -> None:
         self.metadata_calls: list[str] = []
         self.delete_calls: list[str] = []
+        self.stream_calls: list[dict[str, Any]] = []
+        self.streams: dict[str, list[bytes]] = {}
 
     async def get_metadata(self, key: str):
         self.metadata_calls.append(key)
@@ -129,6 +131,11 @@ class _FakeStorage:
     async def delete(self, key: str) -> bool:
         self.delete_calls.append(key)
         return True
+
+    async def stream_download(self, key: str, chunk_size: int = 8192):
+        self.stream_calls.append({"key": key, "chunk_size": chunk_size})
+        for chunk in self.streams.get(key, []):
+            yield chunk
 
 
 def _service(repo: _FakeFileAssetRepository, storage=None) -> FileAssetApplicationService:
@@ -177,6 +184,37 @@ async def test_soft_delete_uses_metadata_scope_for_get_and_update() -> None:
     assert deleted.status == "deleted"
     assert repo.get_by_id_calls == [{"asset_id": 9, "metadata_scope": scope}]
     assert repo.update_calls[0]["metadata_scope"] == scope
+
+
+@pytest.mark.asyncio
+async def test_read_asset_bytes_uses_metadata_scope_and_limits_storage_read() -> None:
+    repo = _FakeFileAssetRepository({13: _asset(13, status="active")})
+    storage = _FakeStorage()
+    storage.streams["training_material/13.txt"] = [b"abcdef", b"ghijkl"]
+    service = _service(repo, storage=storage)
+    scope = _scope()
+
+    data, truncated = await service.read_asset_bytes(13, metadata_scope=scope, max_bytes=8)
+
+    assert data == b"abcdefgh"
+    assert truncated is True
+    assert repo.get_by_id_calls == [{"asset_id": 13, "metadata_scope": scope}]
+    assert storage.stream_calls == [{"key": "training_material/13.txt", "chunk_size": 8}]
+
+
+@pytest.mark.asyncio
+async def test_read_asset_bytes_marks_known_large_asset_truncated() -> None:
+    asset = _asset(14, status="active")
+    asset.size = 64
+    repo = _FakeFileAssetRepository({14: asset})
+    storage = _FakeStorage()
+    storage.streams["training_material/14.txt"] = [b"abcdefgh"]
+    service = _service(repo, storage=storage)
+
+    data, truncated = await service.read_asset_bytes(14, metadata_scope=_scope(), max_bytes=8)
+
+    assert data == b"abcdefgh"
+    assert truncated is True
 
 
 @pytest.mark.asyncio

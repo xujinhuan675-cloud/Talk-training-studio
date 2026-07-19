@@ -44,6 +44,10 @@ class StorageProviderPortAdapter(StoragePort):
             custom_metadata=dict(getattr(meta, "custom_metadata", {}) or {}),
         )
 
+    async def stream_download(self, key: str, chunk_size: int = 8192) -> AsyncIterator[bytes]:
+        async for chunk in self.provider.stream_download(key, chunk_size=chunk_size):
+            yield chunk
+
     async def generate_presigned_url(
         self,
         key: str,

@@ -629,6 +629,52 @@ class FileAssetApplicationService:
                 raise FileAssetNotFoundException(asset_id)
             return self._to_dto(asset)
 
+    async def read_asset_bytes(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+        max_bytes: int = 8192,
+    ) -> tuple[bytes, bool]:
+        """Read a bounded byte prefix after the asset passes metadata scope checks."""
+        if self._storage is None:
+            raise RuntimeError("Storage port not configured for FileAssetApplicationService")
+        if max_bytes < 1:
+            raise DomainValidationException(
+                "max_bytes must be greater than or equal to 1",
+                field="max_bytes",
+                details={"max_bytes": max_bytes},
+                message_key="file_asset.max_bytes.invalid",
+            )
+
+        async with self._uow_factory(readonly=True) as uow:
+            asset = await uow.file_asset_repository.get_by_id(
+                asset_id,
+                metadata_scope=metadata_scope,
+            )
+            if asset is None:
+                raise FileAssetNotFoundException(asset_id)
+            key = asset.key
+            expected_size = int(asset.size or 0)
+
+        chunks: list[bytes] = []
+        seen = 0
+        truncated = expected_size > max_bytes
+        async for chunk in self._storage.stream_download(key, chunk_size=min(max_bytes, 8192)):
+            if not chunk:
+                continue
+            remaining = max_bytes - seen
+            if len(chunk) > remaining:
+                chunks.append(chunk[:remaining])
+                truncated = True
+                break
+            chunks.append(chunk)
+            seen += len(chunk)
+            if seen >= max_bytes:
+                break
+
+        return b"".join(chunks), truncated
+
     async def get_asset_raw(
         self,
         asset_id: int,

@@ -460,6 +460,10 @@ function materialSummary(material: TrainingMaterialAssetSummaryDTO): string {
     || material.key
 }
 
+function materialContentExcerpt(material: TrainingMaterialAssetSummaryDTO): string {
+  return asString(material.content_excerpt)
+}
+
 function materialTags(material: TrainingMaterialAssetSummaryDTO): string[] {
   const metadata = materialMetadata(material)
   const tags = [
@@ -578,7 +582,7 @@ export default function TrainingResultPage() {
     setMaterialsState('loading')
     setMaterialsError(null)
 
-    listTrainingMaterialToolConsumerMaterials({ limit: 5 })
+    listTrainingMaterialToolConsumerMaterials({ limit: 5, includeContentExcerpt: true })
       .then((result) => {
         if (cancelled) return
         setMaterials(result.items)
@@ -654,6 +658,7 @@ export default function TrainingResultPage() {
     [materials, selectedMaterialId],
   )
   const selectedMaterialTags = selectedMaterial ? materialTags(selectedMaterial) : []
+  const selectedMaterialContentExcerpt = selectedMaterial ? materialContentExcerpt(selectedMaterial) : ''
   const isLiveCoachSession = isLiveCoachTrainingSession(session)
   const liveCoachLanguages = getLiveCoachLanguages(session)
   const liveCoachLanguagePair = getLiveCoachLanguagePair(session, locale, tr)
@@ -1013,6 +1018,19 @@ export default function TrainingResultPage() {
                 <span>{materialReferenceMeta(selectedMaterial, tr)}</span>
                 <strong>{materialTitle(selectedMaterial)}</strong>
                 <p>{materialSummary(selectedMaterial)}</p>
+                {selectedMaterialContentExcerpt ? (
+                  <div className="training-result-review-reference-content">
+                    <span>{tr('素材正文片段', 'Material snippet')}</span>
+                    <p>{selectedMaterialContentExcerpt}</p>
+                    {selectedMaterial.content_excerpt_truncated && (
+                      <em>{tr('已截断', 'Truncated')}</em>
+                    )}
+                  </div>
+                ) : (
+                  <div className="training-result-review-reference-content empty">
+                    {tr('暂无可展示正文片段。', 'No material snippet is available.')}
+                  </div>
+                )}
                 {selectedMaterialTags.length > 0 && (
                   <div className="training-result-review-reference-tags">
                     {selectedMaterialTags.map((tag) => (

@@ -51,6 +51,8 @@ class StoragePort(Protocol):
 
     async def get_metadata(self, key: str) -> ObjectMetadata: ...
 
+    async def stream_download(self, key: str, chunk_size: int = 8192) -> AsyncIterator[bytes]: ...
+
     async def upload(
         self,
         data: bytes,

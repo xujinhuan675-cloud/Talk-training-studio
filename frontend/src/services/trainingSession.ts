@@ -168,6 +168,8 @@ export interface TrainingMaterialAssetSummaryDTO {
   name: string
   content_type?: string | null
   metadata_excerpt?: Record<string, unknown>
+  content_excerpt?: string | null
+  content_excerpt_truncated?: boolean
 }
 
 export interface TrainingMaterialAssetListDTO {
@@ -180,6 +182,7 @@ export interface TrainingMaterialAssetListDTO {
 export interface ListTrainingMaterialToolConsumerOptions {
   skip?: number
   limit?: number
+  includeContentExcerpt?: boolean
 }
 
 interface ApiResponse<T> {
@@ -230,6 +233,7 @@ function trainingMaterialToolConsumerUrl(
   const params = new URLSearchParams()
   if (options.skip !== undefined) params.set('skip', String(options.skip))
   if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.includeContentExcerpt) params.set('include_content_excerpt', 'true')
   const query = params.toString()
   return `${TRAINING_MATERIAL_TOOL_CONSUMER_API}${query ? `?${query}` : ''}`
 }

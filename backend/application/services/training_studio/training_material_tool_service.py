@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 from typing import Any, Protocol
 
@@ -19,6 +20,24 @@ _MAX_LIMIT = 100
 _METADATA_STRING_LIMIT = 240
 _METADATA_LIST_LIMIT = 8
 _METADATA_DICT_LIMIT = 12
+_CONTENT_EXCERPT_MAX_BYTES = 8192
+_CONTENT_EXCERPT_TEXT_LIMIT = 1200
+_TEXT_LIKE_EXTENSIONS = frozenset(
+    {".csv", ".json", ".md", ".markdown", ".txt", ".tsv", ".xml", ".yaml", ".yml"}
+)
+_TEXT_LIKE_CONTENT_TYPES = frozenset(
+    {
+        "application/json",
+        "application/markdown",
+        "application/x-ndjson",
+        "application/xml",
+        "text/markdown",
+    }
+)
+_SENSITIVE_TEXT_LINE_RE = re.compile(
+    r"\b(api[_-]?key|authorization|bearer|password|secret|token)\b\s*[:=]",
+    re.IGNORECASE,
+)
 
 _SAFE_METADATA_KEYS = frozenset(
     {
@@ -79,6 +98,8 @@ class TrainingMaterialAssetSummaryDTO(BaseModel):
     name: str
     content_type: str | None = None
     metadata_excerpt: dict[str, Any] = Field(default_factory=dict)
+    content_excerpt: str | None = None
+    content_excerpt_truncated: bool = False
 
 
 class TrainingMaterialAssetListDTO(BaseModel):
@@ -118,12 +139,21 @@ class TrainingMaterialFileAssetReader(Protocol):
         metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAsset: ...
 
+    async def read_asset_bytes(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+        max_bytes: int = _CONTENT_EXCERPT_MAX_BYTES,
+    ) -> tuple[bytes, bool]: ...
+
 
 class TrainingMaterialToolConsumerService:
     """Permission-safe entry point for persona/material tool consumers.
 
-    The service never reads storage object contents. It only uses FileAsset
-    metadata methods that already enforce OwnedMetadataScope at repository level.
+    By default the service only reads metadata. Callers must explicitly opt in
+    to a bounded, text-only content excerpt, and the asset lookup still goes
+    through FileAsset metadata scope checks before storage is read.
     """
 
     def __init__(self, file_assets: TrainingMaterialFileAssetReader) -> None:
@@ -135,6 +165,7 @@ class TrainingMaterialToolConsumerService:
         metadata_scope: OwnedMetadataScope | None,
         skip: int = 0,
         limit: int = 20,
+        include_content_excerpt: bool = False,
     ) -> TrainingMaterialAssetListDTO:
         scope = _require_metadata_scope(metadata_scope)
         safe_skip, safe_limit = _normalize_pagination(skip=skip, limit=limit)
@@ -147,8 +178,16 @@ class TrainingMaterialToolConsumerService:
             limit=safe_limit,
             metadata_scope=scope,
         )
+        summaries = [
+            await self._to_training_material_summary(
+                item,
+                metadata_scope=scope,
+                include_content_excerpt=include_content_excerpt,
+            )
+            for item in items
+        ]
         return TrainingMaterialAssetListDTO(
-            items=[_to_training_material_summary(item) for item in items],
+            items=summaries,
             total=total,
             skip=safe_skip,
             limit=safe_limit,
@@ -159,22 +198,58 @@ class TrainingMaterialToolConsumerService:
         asset_id: int,
         *,
         metadata_scope: OwnedMetadataScope | None,
+        include_content_excerpt: bool = False,
     ) -> TrainingMaterialAssetSummaryDTO:
         scope = _require_metadata_scope(metadata_scope)
         asset = await self._file_assets.get_asset(asset_id, metadata_scope=scope)
         _require_training_material(asset, asset_id=asset_id)
-        return _to_training_material_summary(asset)
+        return await self._to_training_material_summary(
+            asset,
+            metadata_scope=scope,
+            include_content_excerpt=include_content_excerpt,
+        )
 
     async def get_material_by_key(
         self,
         key: str,
         *,
         metadata_scope: OwnedMetadataScope | None,
+        include_content_excerpt: bool = False,
     ) -> TrainingMaterialAssetSummaryDTO:
         scope = _require_metadata_scope(metadata_scope)
         asset = await self._file_assets.get_asset_by_key_raw(key, metadata_scope=scope)
         _require_training_material(asset, key=key)
-        return _to_training_material_summary(asset)
+        return await self._to_training_material_summary(
+            asset,
+            metadata_scope=scope,
+            include_content_excerpt=include_content_excerpt,
+        )
+
+    async def _to_training_material_summary(
+        self,
+        asset: FileAssetDTO | FileAsset,
+        *,
+        metadata_scope: OwnedMetadataScope,
+        include_content_excerpt: bool,
+    ) -> TrainingMaterialAssetSummaryDTO:
+        summary = _to_training_material_summary(asset)
+        if not include_content_excerpt:
+            return summary
+        if not _is_text_like_material(summary):
+            return summary
+        try:
+            data, truncated = await self._file_assets.read_asset_bytes(
+                summary.id,
+                metadata_scope=metadata_scope,
+                max_bytes=_CONTENT_EXCERPT_MAX_BYTES,
+            )
+        except Exception:
+            return summary
+        excerpt, text_truncated = _content_excerpt_from_bytes(data)
+        if excerpt:
+            summary.content_excerpt = excerpt
+            summary.content_excerpt_truncated = truncated or text_truncated
+        return summary
 
 
 def _require_metadata_scope(scope: OwnedMetadataScope | None) -> OwnedMetadataScope:
@@ -244,6 +319,46 @@ def _asset_name(asset: FileAssetDTO | FileAsset) -> str:
     key = str(getattr(asset, "key", "") or "")
     tail = PurePosixPath(key).name
     return tail or f"file-{int(getattr(asset, 'id') or 0)}"
+
+
+def _is_text_like_material(material: TrainingMaterialAssetSummaryDTO) -> bool:
+    content_type = (material.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type.startswith("text/") or content_type in _TEXT_LIKE_CONTENT_TYPES:
+        return True
+    suffixes = {
+        PurePosixPath(material.key).suffix.lower(),
+        PurePosixPath(material.name).suffix.lower(),
+    }
+    return any(suffix in _TEXT_LIKE_EXTENSIONS for suffix in suffixes)
+
+
+def _content_excerpt_from_bytes(data: bytes) -> tuple[str | None, bool]:
+    if not data:
+        return None, False
+    text = data.decode("utf-8", errors="replace")
+    text = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _redact_sensitive_text_lines(text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if not text:
+        return None, False
+    truncated = len(text) > _CONTENT_EXCERPT_TEXT_LIMIT
+    if truncated:
+        text = f"{text[:_CONTENT_EXCERPT_TEXT_LIMIT].rstrip()}..."
+    return text, truncated
+
+
+def _redact_sensitive_text_lines(text: str) -> str:
+    lines: list[str] = []
+    redacted_previous = False
+    for line in text.split("\n"):
+        if _SENSITIVE_TEXT_LINE_RE.search(line):
+            if not redacted_previous:
+                lines.append("[redacted]")
+            redacted_previous = True
+            continue
+        lines.append(line)
+        redacted_previous = False
+    return "\n".join(lines)
 
 
 def _metadata_excerpt(metadata: Any) -> dict[str, Any]:

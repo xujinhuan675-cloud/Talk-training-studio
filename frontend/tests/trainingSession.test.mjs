@@ -773,6 +773,8 @@ test('listTrainingMaterialToolConsumerMaterials fetches scoped material summarie
         key: 'training_material/7.md',
         name: 'Enterprise renewal brief',
         content_type: 'text/markdown',
+        content_excerpt: 'Handle renewal objections with ROI proof.',
+        content_excerpt_truncated: false,
         metadata_excerpt: {
           title: 'Renewal brief',
           summary: 'Known objections and proof points.',
@@ -789,11 +791,12 @@ test('listTrainingMaterialToolConsumerMaterials fetches scoped material summarie
   const result = await trainingSession.listTrainingMaterialToolConsumerMaterials({
     skip: 2,
     limit: 4,
+    includeContentExcerpt: true,
   })
 
   assert.equal(
     calls[0].url,
-    '/api/v1/training-studio/tool-consumers/training-materials?skip=2&limit=4',
+    '/api/v1/training-studio/tool-consumers/training-materials?skip=2&limit=4&include_content_excerpt=true',
   )
   assert.deepEqual(calls[0].init, { headers: expectedAuthHeaders })
   assert.deepEqual(result, data)

@@ -21,6 +21,7 @@ def _file_asset_dto(
     asset_id: int = 1,
     key: str = "training_material/1.txt",
     original_filename: str | None = "training-material.txt",
+    content_type: str | None = "text/plain",
     kind: str | None = TRAINING_MATERIAL_KIND,
     status: str = TRAINING_MATERIAL_STATUS,
     metadata: dict[str, Any] | None = None,
@@ -35,7 +36,7 @@ def _file_asset_dto(
         key=key,
         size=128,
         etag="etag-1",
-        content_type="text/plain",
+        content_type=content_type,
         original_filename=original_filename,
         kind=kind,
         is_public=False,
@@ -89,9 +90,11 @@ class _FakeFileAssetService:
         self.list_items = list_items or []
         self.assets_by_id = assets_by_id or {}
         self.assets_by_key = assets_by_key or {}
+        self.content_by_id: dict[int, tuple[bytes, bool]] = {}
         self.list_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
         self.get_by_key_calls: list[dict[str, Any]] = []
+        self.read_calls: list[dict[str, Any]] = []
 
     async def list_assets(self, **kwargs):
         self.list_calls.append(kwargs)
@@ -110,6 +113,18 @@ class _FakeFileAssetService:
         if asset is None:
             raise FileAssetNotFoundException(key=key)
         return asset
+
+    async def read_asset_bytes(self, asset_id: int, *, metadata_scope=None, max_bytes=8192):
+        self.read_calls.append(
+            {
+                "asset_id": asset_id,
+                "metadata_scope": metadata_scope,
+                "max_bytes": max_bytes,
+            }
+        )
+        if asset_id not in self.content_by_id:
+            raise FileAssetNotFoundException(asset_id)
+        return self.content_by_id[asset_id]
 
 
 def _scope() -> OwnedMetadataScope:
@@ -173,6 +188,68 @@ async def test_list_materials_uses_scoped_training_material_file_asset_query() -
     assert "teamId" not in material.metadata_excerpt
     assert "raw_text" not in material.metadata_excerpt
     assert "apiKey" not in material.metadata_excerpt
+    assert file_service.read_calls == []
+
+
+@pytest.mark.asyncio
+async def test_list_materials_can_include_bounded_text_content_excerpt() -> None:
+    file_service = _FakeFileAssetService(
+        list_items=[
+            _file_asset_dto(
+                metadata={
+                    "title": "Renewal playbook",
+                    "summary": "How to handle renewal objections.",
+                }
+            )
+        ]
+    )
+    file_service.content_by_id[1] = (
+        b"Discovery question: What changed since rollout?\napi_key: sk-hidden\nClose with a pilot.",
+        False,
+    )
+    scope = _scope()
+    service = TrainingMaterialToolConsumerService(file_service)
+
+    result = await service.list_materials(
+        metadata_scope=scope,
+        limit=5,
+        include_content_excerpt=True,
+    )
+
+    material = result.items[0]
+    assert file_service.read_calls == [
+        {"asset_id": 1, "metadata_scope": scope, "max_bytes": 8192}
+    ]
+    assert material.content_excerpt == (
+        "Discovery question: What changed since rollout?\n"
+        "[redacted]\n"
+        "Close with a pilot."
+    )
+    assert material.content_excerpt_truncated is False
+
+
+@pytest.mark.asyncio
+async def test_list_materials_skips_binary_content_excerpt_reads() -> None:
+    file_service = _FakeFileAssetService(
+        list_items=[
+            _file_asset_dto(
+                key="training_material/voice.mp3",
+                original_filename="voice.mp3",
+                content_type="audio/mpeg",
+            )
+        ]
+    )
+    scope = _scope()
+    service = TrainingMaterialToolConsumerService(file_service)
+
+    result = await service.list_materials(
+        metadata_scope=scope,
+        include_content_excerpt=True,
+    )
+
+    assert file_service.read_calls == []
+    assert result.items[0].content_excerpt is None
+    assert result.items[0].content_excerpt_truncated is False
 
 
 @pytest.mark.asyncio

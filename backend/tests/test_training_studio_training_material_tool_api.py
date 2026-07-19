@@ -53,8 +53,10 @@ def _material_asset(
 class _FakeFileAssetService:
     def __init__(self, *, assets: list[FileAssetDTO] | None = None) -> None:
         self.assets = {asset.id: asset for asset in assets or []}
+        self.content_by_id: dict[int, tuple[bytes, bool]] = {}
         self.list_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
+        self.read_calls: list[dict[str, Any]] = []
 
     async def list_assets(self, **kwargs):
         self.list_calls.append(kwargs)
@@ -68,6 +70,16 @@ class _FakeFileAssetService:
     async def get_asset(self, asset_id: int, *, metadata_scope=None):
         self.get_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
         return self.assets[asset_id]
+
+    async def read_asset_bytes(self, asset_id: int, *, metadata_scope=None, max_bytes=8192):
+        self.read_calls.append(
+            {
+                "asset_id": asset_id,
+                "metadata_scope": metadata_scope,
+                "max_bytes": max_bytes,
+            }
+        )
+        return self.content_by_id[asset_id]
 
 
 def _client(fake_service: _FakeFileAssetService) -> TestClient:
@@ -112,6 +124,33 @@ def test_training_material_tool_consumer_lists_scoped_safe_materials() -> None:
     assert "raw_text" not in response.text
     assert "ownerUserId" not in response.text
     assert "teamId" not in response.text
+    assert fake.read_calls == []
+
+
+def test_training_material_tool_consumer_lists_opt_in_content_excerpt() -> None:
+    fake = _FakeFileAssetService(assets=[_material_asset()])
+    fake.content_by_id[1] = (
+        b"Handle renewal objection with ROI proof.\npassword: hidden\nAsk for success criteria.",
+        False,
+    )
+    client = _client(fake)
+
+    response = client.get(
+        "/api/v1/training-studio/tool-consumers/training-materials?include_content_excerpt=true",
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 200
+    material = response.json()["data"]["items"][0]
+    assert material["content_excerpt"] == (
+        "Handle renewal objection with ROI proof.\n"
+        "[redacted]\n"
+        "Ask for success criteria."
+    )
+    assert material["content_excerpt_truncated"] is False
+    scope = fake.read_calls[0]["metadata_scope"]
+    assert scope.user_id == "user-sales-001"
+    assert scope.allow_unscoped is False
 
 
 def test_training_material_tool_consumer_admin_still_uses_explicit_scope() -> None:

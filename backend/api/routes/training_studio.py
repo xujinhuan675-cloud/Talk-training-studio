@@ -2275,6 +2275,7 @@ async def get_scenario_templates(
 async def list_training_material_tool_consumer_materials(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    include_content_excerpt: bool = Query(False),
     file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
     current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
@@ -2284,6 +2285,7 @@ async def list_training_material_tool_consumer_materials(
             metadata_scope=_training_material_tool_scope_for_current_user(current_user),
             skip=skip,
             limit=limit,
+            include_content_excerpt=include_content_excerpt,
         )
     except DomainValidationException as exc:
         raise HTTPException(status_code=422, detail=exc.message) from exc
@@ -2296,6 +2298,7 @@ async def list_training_material_tool_consumer_materials(
 )
 async def get_training_material_tool_consumer_material(
     asset_id: int,
+    include_content_excerpt: bool = Query(False),
     file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
     current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
@@ -2304,6 +2307,7 @@ async def get_training_material_tool_consumer_material(
         material = await service.get_material(
             asset_id,
             metadata_scope=_training_material_tool_scope_for_current_user(current_user),
+            include_content_excerpt=include_content_excerpt,
         )
     except FileAssetNotFoundException as exc:
         raise HTTPException(status_code=404, detail="Training material not found") from exc
