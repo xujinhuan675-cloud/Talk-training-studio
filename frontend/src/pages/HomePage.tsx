@@ -1,38 +1,20 @@
 import React, { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
-  Check,
   ChevronRight,
-  FileText,
   History,
-  Loader2,
-  Lock,
   MessageSquare,
-  Swords,
+  Play,
+  Settings,
+  SlidersHorizontal,
   Target,
   TrendingUp,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
 import { useAuthContext } from '../contexts/AuthContext'
-import { fetchRooms, startBattle, type ChatRoom } from '../services/api'
+import { fetchRooms, type ChatRoom } from '../services/api'
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
-import {
-  buildTrainingSessionStartRequest,
-  createTrainingSession,
-  startTrainingSession,
-} from '../services/trainingSession'
-import { buildTrainingModeChatPath } from '../services/trainingMode'
-import { launchTrainingSessionFlow } from '../services/trainingLaunch'
-import {
-  buildScenarioTrainingBattlePayload,
-  buildScenarioTrainingRouteState,
-  buildScenarioTrainingTaskConfig,
-  getScenarioTrainingCardById,
-  getScenarioTrainingProgress,
-  markScenarioTrainingStarted,
-  saveScenarioTrainingProgress,
-} from '../data/trainingScenarios'
-import { useI18n, type TranslateInline, type TranslationKey } from '../i18n'
+import { useI18n, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -48,20 +30,14 @@ function getAvatarColor(id: string | number): string {
 }
 
 function getInitial(name: string): string {
-  return name.charAt(0)
-}
-
-function formatXp(value: number, tr: TranslateInline): string {
-  return tr('+{count} 经验', '+{count} XP', { count: value })
+  return name.trim().charAt(0) || '?'
 }
 
 function timeAgo(dateStr: string | null, tr: TranslateInline): string {
   if (!dateStr) return ''
-  const now = Date.now()
   const then = new Date(dateStr).getTime()
   if (Number.isNaN(then)) return ''
-  const diffMs = now - then
-  const minutes = Math.floor(diffMs / 60000)
+  const minutes = Math.floor((Date.now() - then) / 60000)
   if (minutes < 1) return tr('刚刚', 'Just now')
   if (minutes < 60) return tr('{count} 分钟前', '{count} min ago', { count: minutes })
   const hours = Math.floor(minutes / 60)
@@ -72,35 +48,11 @@ function timeAgo(dateStr: string | null, tr: TranslateInline): string {
   return tr('{count} 个月前', '{count} months ago', { count: Math.floor(days / 30) })
 }
 
-const dailyChallenge = {
-  scenarioId: 'daily-upward-results-report',
-  titleZh: '向上今日成果汇报',
-  titleEn: 'Report Quarterly Results Upward',
-  progress: 0.35,
-  xp: 100,
-}
-
-interface SkillNode {
-  labelKey: TranslationKey
-  status: 'done' | 'current' | 'locked'
-}
-
-const skillNodes: SkillNode[] = [
-  { labelKey: 'growth.skill.persuasion.name', status: 'done' },
-  { labelKey: 'growth.skill.emotional_management.name', status: 'done' },
-  { labelKey: 'growth.skill.active_listening.name', status: 'current' },
-  { labelKey: 'growth.skill.structured_expression.name', status: 'locked' },
-  { labelKey: 'growth.skill.conflict_resolution.name', status: 'locked' },
-]
-
 const HomePage: React.FC = () => {
-  const navigate = useNavigate()
   const { personaMap } = useAppContext()
-  const { currentUser, hasAnySystemRole } = useAuthContext()
+  const { hasAnySystemRole } = useAuthContext()
   const { tr, t } = useI18n()
   const [rooms, setRooms] = useState<ChatRoom[]>([])
-  const [dailyStarting, setDailyStarting] = useState(false)
-  const [dailyError, setDailyError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchRooms()
@@ -117,81 +69,31 @@ const HomePage: React.FC = () => {
       .catch(() => {})
   }, [])
 
-  const recentRooms = rooms.slice(0, 4)
+  const recentRooms = rooms.slice(0, 3)
   const latestRoom = recentRooms[0]
   const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
-  const dailyProgressPercent = Math.round(dailyChallenge.progress * 100)
-  const dailyXpLabel = formatXp(dailyChallenge.xp, tr)
 
-  const startDailyChallenge = async () => {
-    const scenario = getScenarioTrainingCardById(dailyChallenge.scenarioId)
-    if (!scenario) {
-      setDailyError(tr('今日挑战场景暂不可用', 'Today\'s challenge is unavailable'))
-      return
-    }
-
-    const trainingMode = 'text'
-    const interactionMode = 'turn_based'
-    const progressScope = {
-      userId: currentUser?.userId ?? null,
-      teamId: currentUser?.teamId ?? null,
-    }
-
-    setDailyStarting(true)
-    setDailyError(null)
-    try {
-      const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
-      const progress = getScenarioTrainingProgress(progressScope)
-      const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
-      await launchTrainingSessionFlow({
-        createTrainingSessionRequest: {
-          mode: trainingMode,
-          scenario_template_id: scenario.id,
-          user_id: progressScope.userId,
-          team_id: progressScope.teamId,
-          task_config: buildScenarioTrainingTaskConfig(scenario),
-        },
-        createTrainingSession,
-        battlePayload: useConversationMessageTreeRuntime
-          ? null
-          : buildScenarioTrainingBattlePayload(scenario, trainingMode),
-        startBattle,
-        buildTrainingSessionStartRequest,
-        startTrainingSession,
-        trainingMode,
-        interactionMode,
-        buildChatPath: (roomId, nextTrainingMode, trainingSessionId, nextInteractionMode) => {
-          const chatPath = buildTrainingModeChatPath(
-            roomId,
-            nextTrainingMode,
-            trainingSessionId,
-            nextInteractionMode,
-          )
-          return `${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`
-        },
-        buildNavigationState: ({ startedSession }) => ({
-          ...buildScenarioTrainingRouteState(scenario),
-          trainingMode,
-          interactionMode,
-          trainingSessionId: startedSession.session_id,
-        }),
-        navigate,
-        afterStartSession: ({ startedSession }) => {
-          const nextProgress = markScenarioTrainingStarted(
-            progress,
-            scenario.id,
-            startedSession.session_id,
-            progressScope,
-          )
-          saveScenarioTrainingProgress(nextProgress, progressScope)
-        },
-      })
-    } catch (error) {
-      setDailyError(error instanceof Error ? error.message : tr('启动今日挑战失败', 'Failed to start today\'s challenge'))
-    } finally {
-      setDailyStarting(false)
-    }
-  }
+  const quickLinks = [
+    {
+      to: APP_ROUTES.reviewSessions,
+      icon: <History size={16} />,
+      label: tr('复盘记录', 'Review history'),
+    },
+    {
+      to: APP_ROUTES.growth,
+      icon: <TrendingUp size={16} />,
+      label: t('nav.growth'),
+    },
+    ...(canUseManagementActions
+      ? [
+          {
+            to: APP_ROUTES.config,
+            icon: <Settings size={16} />,
+            label: t('nav.config'),
+          },
+        ]
+      : []),
+  ]
 
   return (
     <PageShell className="home-page" width="wide">
@@ -201,205 +103,122 @@ const HomePage: React.FC = () => {
         title={tr('训练工作台', 'Training workbench')}
       />
 
-      <div className="home-workbench-grid">
-        <Surface className="home-primary-session" variant="accent" padding="lg">
-          <div className="home-primary-session-head">
-            <div>
-              <Badge tone="success">{tr('推荐', 'Recommended')}</Badge>
-              <h2>{tr(dailyChallenge.titleZh, dailyChallenge.titleEn)}</h2>
-            </div>
-            <Badge tone="warning">{dailyXpLabel}</Badge>
+      <div className="home-main-grid">
+        <Surface className="home-start-panel" variant="accent" padding="lg">
+          <div className="home-start-copy">
+            <Badge tone="success">{tr('主流程', 'Primary flow')}</Badge>
+            <h2>{t('common.startTraining')}</h2>
           </div>
 
-          <div className="home-progress-block" aria-label={tr('今日训练进度', 'Today training progress')}>
-            <div className="home-progress-copy">
-              <span>{tr('已完成 {percent}%', '{percent}% complete', { percent: dailyProgressPercent })}</span>
-              <strong>{dailyXpLabel}</strong>
-            </div>
-            <div className="home-progress-track" aria-hidden="true">
-              <span style={{ width: `${dailyProgressPercent}%` }} />
-            </div>
-          </div>
-
-          <div className="home-primary-actions">
-            <Button
-              className="home-primary-start"
-              variant="primary"
-              onClick={() => void startDailyChallenge()}
-              disabled={dailyStarting}
-            >
-              {dailyStarting ? <Loader2 size={15} className="home-spin" /> : <Target size={15} />}
-              {dailyStarting ? t('common.starting') : t('common.startTraining')}
-            </Button>
-            <Button asChild variant="secondary">
+          <div className="home-start-actions">
+            <Button asChild variant="primary" className="home-start-button">
               <Link to={APP_ROUTES.practiceScenarios}>
-                {tr('场景库', 'Scenario catalog')}
-                <ChevronRight size={15} />
+                <Play size={16} />
+                {t('nav.scenarioTraining')}
               </Link>
             </Button>
-          </div>
-
-          {dailyError && (
-            <p className="home-inline-error" role="alert">{dailyError}</p>
-          )}
-        </Surface>
-
-        <Surface className="home-task-panel" variant="raised" padding="lg">
-          <div className="home-task-head">
-            <Badge tone="neutral">{tr('继续', 'Continue')}</Badge>
-            <h2>{tr('下一步', 'Next steps')}</h2>
-          </div>
-          <div className="home-task-list">
-            {latestRoom ? (
-              <Link to={APP_ROUTES.conversation(latestRoom.id)} className="home-task-item">
-                <span className="home-task-icon success">
-                  <MessageSquare size={17} />
-                </span>
-                <div>
-                  <strong>{tr('最近会话', 'Recent session')}</strong>
-                  <em>{latestRoom.name}</em>
-                </div>
-                <ChevronRight size={15} />
-              </Link>
-            ) : (
-              <div className="home-task-item is-disabled" aria-disabled="true">
-                <span className="home-task-icon muted">
-                  <MessageSquare size={17} />
-                </span>
-                <div>
-                  <strong>{tr('最近会话', 'Recent session')}</strong>
-                  <em>{tr('暂无可继续会话', 'No session yet')}</em>
-                </div>
-              </div>
-            )}
-
-            <Link to={APP_ROUTES.reviewSessions} className="home-task-item">
-              <span className="home-task-icon warning">
-                <History size={17} />
-              </span>
-              <div>
-                <strong>{tr('训练复盘', 'Training reviews')}</strong>
-                <em>{tr('查看记录', 'Open records')}</em>
-              </div>
-              <ChevronRight size={15} />
-            </Link>
-
-            <Link to={APP_ROUTES.growth} className="home-task-item">
-              <span className="home-task-icon accent">
-                <TrendingUp size={17} />
-              </span>
-              <div>
-                <strong>{t('nav.growth')}</strong>
-                <em>{tr('能力趋势', 'Skill trends')}</em>
-              </div>
-              <ChevronRight size={15} />
-            </Link>
-
-            <Link to={APP_ROUTES.practiceDefense} className="home-task-item">
-              <span className="home-task-icon neutral">
-                <FileText size={17} />
-              </span>
-              <div>
-                <strong>{tr('答辩准备', 'Defense prep')}</strong>
-                <em>{tr('上传材料', 'Upload material')}</em>
-              </div>
-              <ChevronRight size={15} />
-            </Link>
-
             {canUseManagementActions && (
-              <Link to={APP_ROUTES.practiceBattle} className="home-task-item">
-                <span className="home-task-icon warning">
-                  <Swords size={17} />
-                </span>
-                <div>
-                  <strong>{t('nav.battlePrep')}</strong>
-                  <em>{tr('生成对手', 'Generate counterpart')}</em>
-                </div>
-                <ChevronRight size={15} />
-              </Link>
+              <Button asChild variant="secondary">
+                <Link to={APP_ROUTES.practiceCustom}>
+                  <SlidersHorizontal size={16} />
+                  {t('nav.trainingStudio')}
+                </Link>
+              </Button>
             )}
           </div>
-        </Surface>
-      </div>
 
-      <div className="home-review-grid">
-        <PageSection
-          className="home-recent-section"
-          title={tr('对话记录', 'Conversation log')}
-          actions={(
-            <Button asChild variant="ghost" size="sm">
-              <Link to={APP_ROUTES.conversations}>
-                {tr('全部会话', 'All sessions')}
-                <ChevronRight size={14} />
-              </Link>
-            </Button>
-          )}
-        >
-          <Surface className="home-recent-surface" padding="sm">
-            {recentRooms.length === 0 ? (
-              <div className="home-empty-block">
-                <p>{tr('暂无对话记录', 'No conversation records')}</p>
-                <Button asChild variant="secondary" size="sm">
-                  <Link to={APP_ROUTES.practiceScenarios}>{t('common.startPractice')}</Link>
-                </Button>
-              </div>
-            ) : (
-              <div className="home-recent-list">
-                {recentRooms.map((room) => {
-                  const firstPersonaId = room.persona_ids?.[0]
-                  const persona = firstPersonaId ? personaMap[firstPersonaId] : null
-                  const initial = persona ? getInitial(persona.name) : getInitial(room.name)
-                  const color = persona
-                    ? (persona.avatar_color || getAvatarColor(firstPersonaId))
-                    : getAvatarColor(room.id)
-                  return (
-                    <Link key={room.id} to={APP_ROUTES.conversation(room.id)} className="home-recent-item">
-                      <span className="home-recent-avatar" style={{ backgroundColor: color }}>
-                        {initial}
-                      </span>
-                      <span className="home-recent-copy">
-                        <strong>{room.name}</strong>
-                        <em>{timeAgo(room.last_message_at, tr) || tr('暂无时间', 'No time')}</em>
-                      </span>
-                      <ChevronRight size={15} />
-                    </Link>
-                  )
-                })}
-              </div>
-            )}
-          </Surface>
-        </PageSection>
-
-        <PageSection
-          className="home-skill-section"
-          title={tr('能力进度', 'Skill progress')}
-          actions={(
-            <Button asChild variant="ghost" size="sm">
-              <Link to={APP_ROUTES.growth}>
-                {t('nav.growth')}
-                <ChevronRight size={14} />
-              </Link>
-            </Button>
-          )}
-        >
-          <Surface className="home-skill-surface" padding="md">
-            <div className="home-skill-chain">
-              {skillNodes.map((node, idx) => (
-                <React.Fragment key={node.labelKey}>
-                  {idx > 0 && <span className="home-skill-line" />}
-                  <div className={`home-skill-node home-skill-node--${node.status}`}>
-                    <span className="home-skill-circle">
-                      {node.status === 'done' && <Check size={14} />}
-                      {node.status === 'locked' && <Lock size={12} />}
-                      {node.status === 'current' && <span className="home-skill-dot" />}
-                    </span>
-                    <span className="home-skill-label">{t(node.labelKey)}</span>
-                  </div>
-                </React.Fragment>
-              ))}
+          {latestRoom ? (
+            <Link to={APP_ROUTES.conversation(latestRoom.id)} className="home-continue-link">
+              <span className="home-continue-icon" aria-hidden="true">
+                <MessageSquare size={15} />
+              </span>
+              <span className="home-continue-copy">
+                <strong>{tr('继续最近会话', 'Continue latest session')}</strong>
+                <em>{latestRoom.name} · {timeAgo(latestRoom.last_message_at, tr) || tr('未记录时间', 'No time')}</em>
+              </span>
+              <ChevronRight size={15} />
+            </Link>
+          ) : (
+            <div className="home-continue-link is-empty">
+              <span className="home-continue-icon" aria-hidden="true">
+                <MessageSquare size={15} />
+              </span>
+              <span className="home-continue-copy">
+                <strong>{tr('暂无可继续会话', 'No session to continue')}</strong>
+                <em>{tr('从训练目录开始', 'Start from the catalog')}</em>
+              </span>
             </div>
-          </Surface>
-        </PageSection>
+          )}
+        </Surface>
+
+        <div className="home-side-stack">
+          <PageSection className="home-quick-section" title={tr('训练后', 'After training')}>
+            <Surface className="home-link-surface" padding="sm">
+              <div className="home-link-list">
+                {quickLinks.map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className="home-link-item"
+                    aria-label={item.label}
+                  >
+                    <span className="home-link-icon" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span className="home-link-copy">
+                      <strong>{item.label}</strong>
+                    </span>
+                    <ChevronRight size={15} />
+                  </Link>
+                ))}
+              </div>
+            </Surface>
+          </PageSection>
+
+          <PageSection
+            className="home-recent-section"
+            title={tr('最近会话', 'Recent sessions')}
+            actions={(
+              <Button asChild variant="ghost" size="sm">
+                <Link to={APP_ROUTES.conversations}>
+                  {tr('全部会话', 'All sessions')}
+                  <ChevronRight size={14} />
+                </Link>
+              </Button>
+            )}
+          >
+            <Surface className="home-recent-surface" padding="sm">
+              {recentRooms.length === 0 ? (
+                <div className="home-empty-block">
+                  <p>{tr('暂无会话记录', 'No conversation records')}</p>
+                </div>
+              ) : (
+                <div className="home-recent-list">
+                  {recentRooms.map((room) => {
+                    const firstPersonaId = room.persona_ids?.[0]
+                    const persona = firstPersonaId ? personaMap[firstPersonaId] : null
+                    const initial = persona ? getInitial(persona.name) : getInitial(room.name)
+                    const color = persona
+                      ? (persona.avatar_color || getAvatarColor(firstPersonaId))
+                      : getAvatarColor(room.id)
+                    return (
+                      <Link key={room.id} to={APP_ROUTES.conversation(room.id)} className="home-recent-item">
+                        <span className="home-recent-avatar" style={{ backgroundColor: color }}>
+                          {initial}
+                        </span>
+                        <span className="home-recent-copy">
+                          <strong>{room.name}</strong>
+                          <em>{timeAgo(room.last_message_at, tr) || tr('未记录时间', 'No time')}</em>
+                        </span>
+                        <ChevronRight size={15} />
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </Surface>
+          </PageSection>
+        </div>
       </div>
     </PageShell>
   )

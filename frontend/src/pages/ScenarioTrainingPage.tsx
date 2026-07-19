@@ -5,14 +5,11 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
-  FileText,
   Loader2,
   Play,
-  Radio,
   Search,
   ShieldCheck,
   SlidersHorizontal,
-  Swords,
   Trophy,
 } from 'lucide-react'
 import { startBattle } from '../services/api'
@@ -53,6 +50,7 @@ import {
   type ScenarioDifficultyFilter,
 } from '../utils/scenarioLabels'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from '../components/ui/button'
 import './ScenarioTrainingPage.css'
 
 type DifficultyFilter = ScenarioDifficultyFilter
@@ -255,32 +253,18 @@ export default function ScenarioTrainingPage() {
 
   return (
     <PageShell width="wide" className="scenario-training-page">
-      <PageHeader title={tr('训练目录', 'Training catalog')} />
-
-      <section className="scenario-training-entrybar" aria-label={tr('训练入口', 'Practice entry points')}>
-        {canUseManagementActions && (
-          <>
+      <PageHeader
+        title={tr('训练目录', 'Training catalog')}
+        description={tr('筛选场景，选择模式，然后进入训练。', 'Filter scenarios, choose a mode, and start training.')}
+        actions={canUseManagementActions ? (
+          <Button asChild variant="secondary" size="sm">
             <Link to={APP_ROUTES.practiceCustom}>
-              <SlidersHorizontal size={15} />
-              {t('nav.customPractice')}
+              <SlidersHorizontal size={14} />
+              {t('nav.trainingStudio')}
             </Link>
-            <Link to={APP_ROUTES.practiceLiveCoach}>
-              <Radio size={15} />
-              {t('nav.liveCoach')}
-            </Link>
-          </>
-        )}
-        <Link to={APP_ROUTES.practiceDefense}>
-          <FileText size={15} />
-          {t('nav.defensePrep')}
-        </Link>
-        {canUseManagementActions && (
-          <Link to={APP_ROUTES.practiceBattle}>
-            <Swords size={15} />
-            {t('nav.battlePrep')}
-          </Link>
-        )}
-      </section>
+          </Button>
+        ) : null}
+      />
 
       <section className="scenario-training-toolbar" aria-label={tr('筛选与模式', 'Filters and mode')}>
         <label className="scenario-training-search">

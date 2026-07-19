@@ -5,41 +5,12 @@
 }
 
 .scenario-training-toolbar,
-.scenario-training-entrybar,
 .scenario-training-error,
 .scenario-training-grid,
 .scenario-training-empty {
   max-width: var(--page-max-width);
   margin-left: auto;
   margin-right: auto;
-}
-
-.scenario-training-entrybar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.scenario-training-entrybar a {
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0 11px;
-  background: var(--bg-card);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.scenario-training-entrybar a:hover {
-  border-color: var(--green);
-  background: var(--green-soft);
-  color: var(--green);
 }
 
 .scenario-training-toolbar {

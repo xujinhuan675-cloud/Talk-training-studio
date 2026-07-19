@@ -27,13 +27,14 @@ const UserMenu: React.FC = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="user-menu-trigger">
+        <button
+          type="button"
+          className="user-menu-trigger"
+          aria-label={tr('用户菜单', 'User menu')}
+          title={currentUser ? `${userName} · ${roleName}` : tr('用户菜单', 'User menu')}
+        >
           <span className="user-menu-avatar" aria-hidden="true">
             {avatarInitial}
-          </span>
-          <span className="user-menu-summary">
-            <span className="user-menu-name">{userName}</span>
-            <span className="user-menu-role">{roleName}</span>
           </span>
           <ChevronDown className="user-menu-chevron" size={15} aria-hidden="true" />
         </button>

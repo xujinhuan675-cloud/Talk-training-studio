@@ -2,13 +2,10 @@ import type { ReactNode } from 'react'
 import {
   ClipboardList,
   Dumbbell,
-  FileText,
   History,
   Home,
   MessageSquare,
-  Radio,
   Settings,
-  Swords,
   Trophy,
   TrendingUp,
 } from 'lucide-react'
@@ -36,14 +33,10 @@ export interface AppNavSection {
 
 export const desktopNavSections: AppNavSection[] = [
   {
-    id: 'workspace',
+    id: 'start',
     labelKey: 'nav.section.workspace',
-    items: [{ to: APP_ROUTES.workbench, icon: <Home size={18} />, labelKey: 'nav.home', exact: true }],
-  },
-  {
-    id: 'practice',
-    labelKey: 'nav.section.practice',
     items: [
+      { to: APP_ROUTES.workbench, icon: <Home size={18} />, labelKey: 'nav.home', exact: true },
       {
         to: APP_ROUTES.practiceScenarios,
         icon: <ClipboardList size={18} />,
@@ -53,47 +46,27 @@ export const desktopNavSections: AppNavSection[] = [
       {
         to: APP_ROUTES.practiceCustom,
         icon: <Dumbbell size={18} />,
-        labelKey: 'nav.customPractice',
-        exact: true,
-        roles: MANAGEMENT_SYSTEM_ROLES,
-      },
-      {
-        to: APP_ROUTES.practiceLiveCoach,
-        icon: <Radio size={18} />,
-        labelKey: 'nav.liveCoach',
-        exact: true,
-        roles: MANAGEMENT_SYSTEM_ROLES,
-      },
-      {
-        to: APP_ROUTES.practiceDefense,
-        icon: <FileText size={18} />,
-        labelKey: 'nav.defensePrep',
-        exact: true,
-      },
-      {
-        to: APP_ROUTES.practiceBattle,
-        icon: <Swords size={18} />,
-        labelKey: 'nav.battlePrep',
+        labelKey: 'nav.trainingStudio',
         exact: true,
         roles: MANAGEMENT_SYSTEM_ROLES,
       },
     ],
   },
   {
-    id: 'records',
+    id: 'review',
     labelKey: 'nav.section.records',
     items: [
-      {
-        to: APP_ROUTES.conversations,
-        icon: <MessageSquare size={18} />,
-        labelKey: 'nav.conversations',
-        matchPrefix: APP_ROUTES.conversations,
-      },
       {
         to: APP_ROUTES.reviewSessions,
         icon: <History size={18} />,
         labelKey: 'nav.review',
         matchPrefix: APP_ROUTES.review,
+      },
+      {
+        to: APP_ROUTES.conversations,
+        icon: <MessageSquare size={18} />,
+        labelKey: 'nav.conversations',
+        matchPrefix: APP_ROUTES.conversations,
       },
     ],
   },
@@ -135,12 +108,6 @@ export const mobileNavItems: AppNavItem[] = [
     labelKey: 'nav.practice',
     elevated: true,
     matchPrefix: APP_ROUTES.practice,
-  },
-  {
-    to: APP_ROUTES.conversations,
-    icon: <MessageSquare size={20} />,
-    labelKey: 'nav.conversations',
-    matchPrefix: APP_ROUTES.conversations,
   },
   {
     to: APP_ROUTES.reviewSessions,
