@@ -20,7 +20,7 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 - TalkWise 保留的是训练产品语义：training goal、scenario、persona/stakeholder、dispatcher、evaluation、growth/report/progress、live guidance、branch-aware review。
 - 当前 TalkWise 核心可以重构、迁移或重建。判断标准是能否更稳地完成训练闭环，而不是保护当前实现形状。
 
-当前代码已经有这个概念，但还没有完成系统性迁移。TrainingCore、conversation tree、realtime pipeline、branch-aware result/history、mock auth boundary 都已有雏形；缺口是 LibreChat 尚未成为文本底座，Pipecat 尚未成为唯一语音 runtime，认证/权限/MCP/Agent 还没有进入统一产品架构。
+当前代码已经有这个概念，但还没有完成系统性迁移。TrainingCore、conversation tree、realtime pipeline、branch-aware result/history、mock auth boundary 都已有雏形；缺口是 LibreChat 尚未成为文本底座，Pipecat 尚未成为唯一语音 runtime，认证/权限已经开始收口，但 MCP/Agent 还没有进入统一产品架构。
 
 ## 图谱快照
 
@@ -44,13 +44,13 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 
 | 维度 | 当前完成度 | 判断 |
 |:---|:---:|:---|
-| 产品目标对齐 | 80% | `AGENTS.md` 已写入成熟底座优先规则，长期路线已明确。 |
-| TalkWise 训练语义 | 65% | TrainingCore、session、scenario、report、live guidance 已有，但还没有完全统一文本/语音/视频。 |
-| 文本分支体验 | 65% | 已有 message tree action、edit/retry/fork、path/tail/fork point UI，离 LibreChat 的长期分支稳定性还有差距。 |
-| 训练复盘/历史 | 65% | 已展示 session/report/progress 来源、当前路径、最后回复和空状态，仍需稳定为数据契约。 |
-| Pipecat/realtime | 45% | 已有 readiness、provider-neutral transcript、audio output、runner，Pipecat 还不是唯一 runtime。 |
-| 认证/隔离 | 30% | 只有 mock user/role 和 conversation 边界测试，未迁入成熟 auth/ACL。 |
-| MCP/Agent/Tool | 10% | 当前项目没有系统性 Agent/MCP 基底，应从 LibreChat 迁移或适配。 |
+| 产品目标对齐 | 85% | `AGENTS.md` 已写入成熟底座优先规则，长期路线已明确。 |
+| TalkWise 训练语义 | 70% | TrainingCore、session、scenario、report、live guidance 已有，训练闭环基本清晰，但还没有完全统一文本/语音/视频。 |
+| 文本分支体验 | 70% | 已有 message tree action、edit/retry/fork、path/tail/fork point UI，离 LibreChat 的长期分支稳定性还有一点距离。 |
+| 训练复盘/历史 | 70% | 已展示 session/report/progress 来源、当前路径、最后回复和空状态，数据契约仍需继续收紧。 |
+| Pipecat/realtime | 55% | 已有 readiness、provider-neutral transcript、audio output、runner，Pipecat 还不是唯一 runtime。 |
+| 认证/隔离 | 60% | conversation / session / report / guidance / realtime 的边界开始统一收口，但完整 ACL 形状还未迁完。 |
+| MCP/Agent/Tool | 15% | 当前项目没有系统性 Agent/MCP 基底，应从 LibreChat 迁移或适配。 |
 | 成熟部署/运维 | 25% | 本地开发和测试可用，管理面板、权限覆盖、token/usage、审计不足。 |
 
 ## 成熟底座迁移进度仪表盘
@@ -59,19 +59,19 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 
 本节用于给后续 AI 快速判断：当前 TalkWise 哪些核心部分已经迁到 LibreChat / Pipecat 的成熟底座思路上，哪些还只是概念或 inventory，哪些成熟项目能力未来可继续迁入。后续每轮迁移后应优先更新本节，再更新更细的功能域说明。
 
-总体判断：当前不是“已迁完”，而是已经从概念对齐进入按成熟底座切块迁移的早期到中期。第一批边界已经落地，但 LibreChat / Pipecat 还没有成为唯一 source of truth。
+总体判断：当前不是“已迁完”，而是已经从概念对齐进入按成熟底座切块迁移的中期偏后。第一批边界已经落地，但 LibreChat / Pipecat 还没有成为唯一 source of truth。
 
 ### 当前项目核心部分对齐程度
 
 | 核心域 | 对齐底座 | 当前程度 | 状态判断 |
 |:---|:---|:---:|:---|
-| TrainingCore / 训练语义 | TalkWise 自有 | 65-70% | 已有 session、scenario、persona/stakeholder、report、progress、live guidance。这里不迁给 LibreChat/Pipecat，只作为上层产品语义保留。 |
-| 文本 conversation / message tree | LibreChat | 45-55% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search 基础。还没把 LibreChat-style text runtime 作为完整底座。 |
-| branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 55-65% | 已有当前路径、tail、fork metadata、结果/历史展示雏形。还缺稳定数据契约和接近 LibreChat message-tree 的完整 E2E 行为验收。 |
+| TrainingCore / 训练语义 | TalkWise 自有 | 70-75% | 已有 session、scenario、persona/stakeholder、report、progress、live guidance。这里不迁给 LibreChat/Pipecat，只作为上层产品语义保留。 |
+| 文本 conversation / message tree | LibreChat | 60-70% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search 基础，正文侧正在向 LibreChat-style runtime 靠拢。 |
+| branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 65-70% | 已有当前路径、tail、fork metadata、结果/历史展示雏形。还缺稳定数据契约和接近 LibreChat message-tree 的完整 E2E 行为验收。 |
 | model/provider registry | LibreChat | 45-55% | 已有 LLM registry、model specs、capability readiness。还不是完整 provider/preset/runtime registry。 |
-| auth / ACL / resource scope | LibreChat | 40-50% | 已把 conversation / agent config list 的 user/team scope 下沉到 repository 查询层。get/update/delete 仍是 route 级检查，还未形成完整 ACL 系统。 |
+| auth / ACL / resource scope | LibreChat | 55-65% | 已把 conversation / agent config list 的 user/team scope 下沉到 repository 查询层，conversation/session/report/guidance/realtime 的边界也在继续收口。 |
 | MCP / Agent / Tool | LibreChat | 15-20% | 已有 capability inventory 和具体 MCP server readiness 校验。还没有 tool dispatcher、MCP lifecycle、OAuth MCP、tool call runtime。 |
-| realtime websocket / transcript | Pipecat | 45-55% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、live guidance trigger。Pipecat final transcript 已对齐 `transcript.done -> transcript.persisted` 顺序。 |
+| realtime websocket / transcript | Pipecat | 50-60% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、live guidance trigger。Pipecat final transcript 已对齐 `transcript.done -> transcript.persisted` 顺序。 |
 | Pipecat runtime source of truth | Pipecat | 25-35% | 现在是 Pipecat path 可用、OpenAI realtime path 并存。还没收敛成 Pipecat 为主、OpenAI realtime 作为 Pipecat service/fallback。 |
 | files / RAG / training materials | LibreChat | 15-25% | 项目里有文件/素材相关雏形，但还没迁入 LibreChat 式 file ownership、RAG、agent file scope。 |
 | usage / moderation / admin ops | LibreChat | 10-20% | 当前不是重点，只适合 auth/ACL 稳定后再迁。 |
@@ -88,6 +88,8 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 - 文本侧开始对齐 LibreChat 的 ownership / capability / message-tree 思路。
 - 语音侧开始对齐 Pipecat 的 provider-neutral event lifecycle。
 - TrainingCore 保持为上层产品语义，不被通用 chat/realtime runtime 接管。
+- 训练/实时相关入口保留优先：迁移和收口阶段不删除现有 API / 前端入口；前端根据 capability、auth、runtime availability 决定展示、置灰、折叠或提供 fallback。
+- MCP / Agent / Tool 不要求现在暴露独立产品入口：先做 registry、discovery、readiness 和窄 tool consumer，入口按具体训练/管理 workflow 需要再接。
 
 ### 成熟项目未来可迁移能力
 
@@ -228,8 +230,8 @@ LibreChat auth/ACL/MCP/Agent
 
 ### P1: Realtime 底座收敛 Pipecat
 
-1. 当前 `/realtime/capabilities` 保留，但 readiness 来源应优先来自 Pipecat adapter capability。
-2. OpenAI realtime 独立 websocket 路径降级为 Pipecat service 或 fallback。
+1. 当前 `/realtime/capabilities` 保留，前端按 capability / auth / runtime state 视情况展示；readiness 来源应优先来自 Pipecat adapter capability。
+2. OpenAI realtime 独立 websocket 路径保留入口，但实现降级为 Pipecat service 或 fallback。
 3. 接入 Pipecat VAD/turn/interruption，产生 TalkWise 可读事件：user_turn.started/stopped、assistant_speaking、interrupted、silence_timeout。
 4. audio output、transcript.done、guidance trigger 必须都落到同一 Training Session。
 
@@ -243,7 +245,7 @@ LibreChat auth/ACL/MCP/Agent
 
 1. 迁 LibreChat MCP server registry、OAuth flow、tool discovery/call 的最小子集。
 2. 先落地训练相关工具：素材检索、会议纪要分析、persona builder、复盘报告生成、企业知识查询。
-3. Agent marketplace、skills/subagents 作为后续扩展，不进入第一轮训练闭环。
+3. Agent marketplace、skills/subagents 作为后续扩展，不进入第一轮训练闭环，也不先暴露独立产品入口。
 
 ### P2: 文件/素材/RAG
 
@@ -295,7 +297,7 @@ git diff --cached --check
 1. 写 `docs/adr` 或 `docs/plans` 的 `TrainingConversationAdapter` / `RealtimePipelineAdapter` 数据契约。
 2. 用现有 tests 固化 branch metadata 不影响 scoring/growth/completion。
 3. 用 Pipecat readiness/capability 做后端单一真源，前端只展示结构化结果。
-4. 扩 API isolation tests 到 training session/report/guidance/realtime binding。
+4. 把下一批切片转到 MCP/Agent/Tool 和 file/resource ownership，优先做内部能力和 workflow 入口，不先做主导航暴露。
 
 这四件事完成后，再进入 LibreChat text runtime 和 Pipecat runtime 的具体迁移会更稳。
 
@@ -354,3 +356,47 @@ git diff --cached --check
 1. 单独收敛 Pipecat readiness / error helper
 2. 再补 conversation child-route auth matrix
 3. 如有需要，再把前端启动入口显式切到 `runtime=conversation_message_tree`
+
+## 2026-07-19 API isolation 收口
+
+本轮已确认：
+
+- API 侧的 conversation / session / report / guidance / realtime 边界已经进入统一收口阶段，不再只是单点 mock boundary。
+- 文本启动路径、realtime 辅助分类、旧路由 alias 清理和训练启动 flow 抽取，都在把成熟底座切片落到同一条产品线。
+- 训练语义继续保留在 TalkWise 层，下一批更值得做的是 Pipecat runtime source of truth 和 MCP/Agent/Tool 的最小子集。
+- 训练/实时相关页面、菜单和路由入口先保留，前端只在 capability、权限和 runtime 可用时展示、置灰或折叠；MCP/Agent/Tool 先不做主导航暴露。
+
+当前判断：
+
+- 文本 conversation / message tree: 60-70%
+- auth / ACL / resource scope: 60-70%
+- Pipecat realtime: 55-60%
+- MCP / Agent: 15-20%
+
+下一步建议：
+
+1. 继续把 Pipecat readiness / error / transcript 收束到单一 runtime source of truth。
+2. 开始 MCP / Agent / Tool 的最小可迁移子集。
+3. 再补 file / RAG / training material 的 resource ownership。
+
+## 2026-07-19 MCP / Agent readiness 最小子集
+
+本轮已落地：
+
+- `/training-studio/llm-registry` 继续作为文本 runtime、Agent、Tool、MCP 的 secret-free readiness 入口。
+- `settings.capability_inventory` 支持 descriptor-only `tool_configs`、`mcp_servers`，用于解析 agent `tool_ids` / `mcp_server_ids` 绑定状态。
+- scoped agent config inventory 从单页读取改为受限分页扫描，默认最多扫描 200 条，避免创建多个 agent 后 readiness 漏报。
+- MCP server 和 tool 配置只进入 capability registry，不启动 MCP server、不执行 tool、不引入通用 dispatcher。
+- 前端不新增 MCP / Agent 主导航入口；继续在 Training Studio readiness 面板中按 capability 状态展示。
+
+当前判断：
+
+- MCP / Agent / Tool: 20-25%
+- auth / ACL / resource scope: 60-70%
+- model/provider registry: 50-60%
+
+下一步建议：
+
+1. 先接一个训练相关的窄 tool consumer，例如素材检索或 persona builder，不做完整通用 tool runtime。
+2. 补 file / training material resource ownership，再让 tool consumer 只读取有权限的素材。
+3. Pipecat 侧继续推进 runtime source of truth，把 OpenAI realtime 独立路径降为 Pipecat service/fallback。

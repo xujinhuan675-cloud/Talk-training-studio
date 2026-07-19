@@ -35,56 +35,28 @@ import {
   saveScenarioTrainingProgress,
   scenarioTrainingCatalog,
   type ScenarioTrainingCard,
-  type ScenarioTrainingCategory,
-  type ScenarioTrainingDifficulty,
   type ScenarioTrainingProgress,
-  type ScenarioTrainingStatus,
 } from '../data/trainingScenarios'
+import {
+  getScenarioCategoryFilterLabel,
+  getScenarioCategoryLabel,
+  getScenarioDifficultyFilterLabel,
+  getScenarioDifficultyLabel,
+  getScenarioStatusLabel,
+  scenarioCategoryOptions,
+  scenarioDifficultyOptions,
+  type ScenarioCategoryFilter,
+  type ScenarioDifficultyFilter,
+} from '../utils/scenarioLabels'
 import './ScenarioTrainingPage.css'
 
-type DifficultyFilter = 'all' | ScenarioTrainingDifficulty
-type CategoryFilter = 'all' | ScenarioTrainingCategory
+type DifficultyFilter = ScenarioDifficultyFilter
+type CategoryFilter = ScenarioCategoryFilter
 type ScenarioLaunchMode = TrainingMode | 'realtime'
 
-const difficultyOptions: DifficultyFilter[] = ['all', 'easy', 'medium', 'hard', 'expert']
-const categoryOptions: CategoryFilter[] = ['all', 'sales', 'customer_service', 'negotiation', 'interview', 'workplace']
+const difficultyOptions: DifficultyFilter[] = ['all', ...scenarioDifficultyOptions]
+const categoryOptions: CategoryFilter[] = ['all', ...scenarioCategoryOptions]
 const modeOptions: ScenarioLaunchMode[] = ['text', 'voice', 'realtime']
-
-function getDifficultyLabel(value: ScenarioTrainingDifficulty, tr: TranslateInline): string {
-  switch (value) {
-    case 'easy':
-      return tr('轻量', 'Light')
-    case 'medium':
-      return tr('标准', 'Standard')
-    case 'hard':
-      return tr('高压', 'High pressure')
-    case 'expert':
-      return tr('专家', 'Expert')
-  }
-}
-
-function getDifficultyFilterLabel(value: DifficultyFilter, tr: TranslateInline): string {
-  return value === 'all' ? tr('全部难度', 'All difficulties') : getDifficultyLabel(value, tr)
-}
-
-function getCategoryLabel(value: ScenarioTrainingCategory, tr: TranslateInline): string {
-  switch (value) {
-    case 'sales':
-      return tr('销售', 'Sales')
-    case 'customer_service':
-      return tr('客服', 'Service')
-    case 'negotiation':
-      return tr('谈判', 'Negotiation')
-    case 'interview':
-      return tr('面试', 'Interview')
-    case 'workplace':
-      return tr('职场沟通', 'Workplace')
-  }
-}
-
-function getCategoryFilterLabel(value: CategoryFilter, tr: TranslateInline): string {
-  return value === 'all' ? tr('全部类型', 'All categories') : getCategoryLabel(value, tr)
-}
 
 function getModeLabel(value: ScenarioLaunchMode, tr: TranslateInline): string {
   switch (value) {
@@ -96,19 +68,6 @@ function getModeLabel(value: ScenarioLaunchMode, tr: TranslateInline): string {
       return tr('视频', 'Video')
     case 'realtime':
       return tr('实时', 'Realtime')
-  }
-}
-
-function getStatusLabel(status: ScenarioTrainingStatus, tr: TranslateInline): string {
-  switch (status) {
-    case 'not_started':
-      return tr('未开始', 'Not started')
-    case 'in_progress':
-      return tr('练习中', 'In progress')
-    case 'completed':
-      return tr('已完成', 'Completed')
-    case 'failed':
-      return tr('失败', 'Failed')
   }
 }
 
@@ -312,7 +271,7 @@ export default function ScenarioTrainingPage() {
           >
             {difficultyOptions.map((option) => (
               <option key={option} value={option}>
-                {getDifficultyFilterLabel(option, tr)}
+                {getScenarioDifficultyFilterLabel(option, tr)}
               </option>
             ))}
           </select>
@@ -327,7 +286,7 @@ export default function ScenarioTrainingPage() {
           >
             {categoryOptions.map((option) => (
               <option key={option} value={option}>
-                {getCategoryFilterLabel(option, tr)}
+                {getScenarioCategoryFilterLabel(option, tr)}
               </option>
             ))}
           </select>
@@ -365,9 +324,9 @@ export default function ScenarioTrainingPage() {
                 <div>
                   <div className="scenario-training-card-tags">
                     <span className={`difficulty ${scenario.difficulty}`}>
-                      {getDifficultyLabel(scenario.difficulty, tr)}
+                      {getScenarioDifficultyLabel(scenario.difficulty, tr)}
                     </span>
-                    <span>{getCategoryLabel(scenario.category, tr)}</span>
+                    <span>{getScenarioCategoryLabel(scenario.category, tr)}</span>
                     {scenario.required && <span className="required">{tr('必练', 'Required')}</span>}
                   </div>
                   <h2>{scenario.title}</h2>
@@ -377,7 +336,7 @@ export default function ScenarioTrainingPage() {
                   {scenario.status === 'in_progress' && <Clock3 size={14} />}
                   {scenario.status === 'not_started' && <ShieldCheck size={14} />}
                   {scenario.status === 'failed' && <AlertCircle size={14} />}
-                  {getStatusLabel(scenario.status, tr)}
+                  {getScenarioStatusLabel(scenario.status, tr)}
                 </span>
               </div>
 

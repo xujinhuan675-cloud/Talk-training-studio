@@ -138,6 +138,14 @@ class AgentSDKSettings(BaseModel):
     )
 
 
+class CapabilityInventorySettings(BaseModel):
+    """Descriptor-only Agent/Tool/MCP inventory exported to readiness APIs."""
+
+    tool_configs: list[dict[str, Any]] | dict[str, Any] = Field(default_factory=list)
+    mcp_servers: list[dict[str, Any]] | dict[str, Any] = Field(default_factory=list)
+    agent_config_scan_limit: int = Field(default=200, ge=1, le=1000)
+
+
 class StorageSettings(BaseModel):
     type: str = "local"  # local, s3, oss
     bucket: Optional[str] = None
@@ -285,6 +293,9 @@ class Settings(BaseSettings):
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
     agent_sdk: AgentSDKSettings = Field(default_factory=AgentSDKSettings)
+    capability_inventory: CapabilityInventorySettings = Field(
+        default_factory=CapabilityInventorySettings
+    )
     storage: StorageSettings = Field(default_factory=StorageSettings)
     metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     tracing: TracingSettings = Field(default_factory=TracingSettings)

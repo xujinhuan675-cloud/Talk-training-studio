@@ -9,7 +9,7 @@ from api.dependencies import get_conversation_service, get_stakeholder_llm_clien
 from api.routes.training_studio import router
 from application.dto import AgentConfigDTO
 from application.ports.llm import LLMEndpointMetadata, LLMModelMetadata, LLMProviderMetadata
-from core.config import LLMSettings, settings
+from core.config import CapabilityInventorySettings, LLMSettings, settings
 
 
 def _as_mapping(value: object | None) -> dict:
@@ -75,6 +75,37 @@ class _FakeLLM:
             is_default=True,
             context_window=200000,
             max_output_tokens=4096,
+        )
+        return LLMProviderMetadata(
+            provider="anthropic",
+            default_model="claude-sonnet-test",
+            endpoint="https://anthropic.example",
+            wire_api="messages",
+            models=[model],
+            endpoints=[
+                LLMEndpointMetadata(
+                    provider="anthropic",
+                    endpoint="https://anthropic.example",
+                    wire_api="messages",
+                    default_model="claude-sonnet-test",
+                    models=[model],
+                )
+            ],
+        )
+
+
+class _ToolCapableLLM:
+    @property
+    def provider_metadata(self) -> LLMProviderMetadata:
+        model = LLMModelMetadata(
+            name="claude-sonnet-test",
+            provider="anthropic",
+            endpoint="https://anthropic.example",
+            display_name="Claude Sonnet Test",
+            is_default=True,
+            context_window=200000,
+            max_output_tokens=4096,
+            extra={"capabilities": ["text", "streaming", "tool_calling", "mcp"]},
         )
         return LLMProviderMetadata(
             provider="anthropic",
@@ -311,6 +342,89 @@ def test_llm_registry_uses_active_client_provider_metadata(monkeypatch) -> None:
     assert capability_registry["by_kind"]["mcp_server"][0]["enabled"] is False
 
 
+def test_llm_registry_resolves_agent_bindings_from_settings_inventory(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "capability_inventory",
+        CapabilityInventorySettings(
+            tool_configs=[
+                {
+                    "id": "crm.lookup",
+                    "name": "CRM Lookup",
+                    "requires_mcp": True,
+                    "mcp_server": "crm",
+                    "metadata": {
+                        "owner": "training",
+                        "api_key": "sk-secret-should-not-appear",
+                    },
+                }
+            ],
+            mcp_servers=[
+                {
+                    "id": "crm",
+                    "name": "CRM MCP",
+                    "transport": "stdio",
+                    "command": "npx",
+                    "args": ["crm-mcp"],
+                    "env": {
+                        "CRM_TOKEN": "secret-should-not-appear",
+                        "MODE": "test",
+                    },
+                    "headers": {
+                        "Authorization": "Bearer secret-should-not-appear",
+                        "X-Safe": "kept",
+                    },
+                }
+            ],
+        ),
+    )
+
+    response = _client(
+        _ToolCapableLLM(),
+        agent_configs=[
+            _agent_config(
+                12,
+                tool_ids=["crm.lookup"],
+                mcp_server_ids=["crm"],
+                metadata={
+                    "ownerUserId": "user-admin-001",
+                    "teamId": "team-platform",
+                },
+            )
+        ],
+    ).get("/api/v1/training-studio/llm-registry")
+
+    assert response.status_code == 200
+    serialized = response.text.lower()
+    assert "secret-should-not-appear" not in serialized
+    assert "authorization" not in serialized
+
+    capability_registry = response.json()["data"]["capability_registry"]
+    assert capability_registry["readiness"]["status"] == "ready"
+    agent_capability = capability_registry["by_kind"]["agent"][0]
+    assert agent_capability["status"] == "ready"
+    assert agent_capability["ready"] is True
+    assert agent_capability["metadata"]["tool_ids"] == ["crm.lookup"]
+    assert agent_capability["metadata"]["mcp_server_ids"] == ["crm"]
+
+    tool_capabilities = {
+        capability["id"]: capability
+        for capability in capability_registry["by_kind"]["tool"]
+    }
+    assert tool_capabilities["tool:crm_lookup"]["status"] == "ready"
+    assert tool_capabilities["tool:crm_lookup"]["metadata"]["mcp_server"] == "crm"
+    assert tool_capabilities["tool:crm_lookup"]["metadata"]["config"]["metadata"] == {
+        "owner": "training"
+    }
+
+    mcp_capability = capability_registry["by_kind"]["mcp_server"][0]
+    assert mcp_capability["id"] == "mcp_server:crm"
+    assert mcp_capability["status"] == "ready"
+    assert mcp_capability["metadata"]["runtime_started"] is False
+    assert mcp_capability["metadata"]["config"]["env"] == {"MODE": "test"}
+    assert mcp_capability["metadata"]["config"]["headers"] == {"X-Safe": "kept"}
+
+
 def test_llm_registry_agent_configs_are_scoped_before_inventory_pagination(monkeypatch) -> None:
     monkeypatch.setattr(
         settings,
@@ -347,6 +461,53 @@ def test_llm_registry_agent_configs_are_scoped_before_inventory_pagination(monke
     assert response.status_code == 200
     agents = response.json()["data"]["capability_registry"]["by_kind"]["agent"]
     assert [agent["name"] for agent in agents] == ["agent-8"]
+
+
+def test_llm_registry_scans_scoped_agent_config_pages_with_limit(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "MAX_PAGE_SIZE", 1)
+    monkeypatch.setattr(
+        settings,
+        "capability_inventory",
+        CapabilityInventorySettings(agent_config_scan_limit=2),
+    )
+
+    response = _client(
+        _FakeLLM(),
+        agent_configs=[
+            _agent_config(
+                7,
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            ),
+            _agent_config(
+                8,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+            _agent_config(
+                9,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+            _agent_config(
+                10,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                },
+            ),
+        ],
+    ).get("/api/v1/training-studio/llm-registry", headers={"X-Mock-User": "sales"})
+
+    assert response.status_code == 200
+    agents = response.json()["data"]["capability_registry"]["by_kind"]["agent"]
+    assert [agent["name"] for agent in agents] == ["agent-8", "agent-9"]
 
 
 def test_llm_registry_response_strips_secrets_from_model_specs(monkeypatch) -> None:

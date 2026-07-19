@@ -17,10 +17,13 @@ import {
   getScenarioTrainingProgress,
   scenarioTrainingCatalog,
   type ScenarioLeaderboardProgressUser,
-  type ScenarioLeaderboardScenarioStat,
 } from '../data/trainingScenarios'
 import { getUserDisplayRoleName, type AuthUser } from '../services/auth'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import {
+  getScenarioDifficultyLabel,
+  getScenarioStatusLabel,
+} from '../utils/scenarioLabels'
 import { APP_ROUTES } from '../appRoutes'
 import './ScenarioLeaderboardPage.css'
 
@@ -62,26 +65,6 @@ function buildProgressUsers(users: AuthUser[], currentUser: AuthUser | null): Sc
     progress: getScenarioTrainingProgress({ userId: user.userId, teamId: user.teamId }),
     useCatalogFallback: user.userId === currentUser?.userId,
   }))
-}
-
-function getDifficultyLabel(
-  difficulty: ScenarioLeaderboardScenarioStat['difficulty'],
-  tr: TranslateInline,
-): string {
-  if (difficulty === 'easy') return tr('轻量', 'Light')
-  if (difficulty === 'medium') return tr('标准', 'Standard')
-  if (difficulty === 'hard') return tr('高压', 'Pressure')
-  return tr('专家', 'Expert')
-}
-
-function getStatusLabel(
-  status: ScenarioLeaderboardScenarioStat['status'],
-  tr: TranslateInline,
-): string {
-  if (status === 'not_started') return tr('未开始', 'Not started')
-  if (status === 'in_progress') return tr('练习中', 'In progress')
-  if (status === 'completed') return tr('已完成', 'Completed')
-  return tr('无记录', 'No record')
 }
 
 export default function ScenarioLeaderboardPage() {
@@ -268,7 +251,7 @@ export default function ScenarioLeaderboardPage() {
                         <small>
                           {tr('{count} 人', '{count} users', { count: scenario.participantCount })}
                           {' · '}
-                          {getDifficultyLabel(scenario.difficulty, tr)}
+                          {getScenarioDifficultyLabel(scenario.difficulty, tr)}
                         </small>
                       </div>
                     ))}
@@ -294,7 +277,7 @@ export default function ScenarioLeaderboardPage() {
                   <article className={`unfinished-row${row.isCurrentUser ? ' selected' : ''}`} key={row.userId}>
                     <div className="person">
                       <strong>{row.name}</strong>
-                      <small>{row.teamName} · {getStatusLabel(row.status, tr)}</small>
+                      <small>{row.teamName} · {getScenarioStatusLabel(row.status, tr)}</small>
                     </div>
                     <div className="unfinished-progress">
                       <span>{row.completedRequired}/{row.totalRequired}</span>
@@ -430,9 +413,9 @@ export default function ScenarioLeaderboardPage() {
                         <small>
                           {scenario.required ? tr('必练', 'Required') : tr('选练', 'Optional')}
                           {' · '}
-                          {getDifficultyLabel(scenario.difficulty, tr)}
+                          {getScenarioDifficultyLabel(scenario.difficulty, tr)}
                           {' · '}
-                          {getStatusLabel(scenario.status, tr)}
+                          {getScenarioStatusLabel(scenario.status, tr)}
                         </small>
                       </div>
                       <span>{formatScore(scenario.score)}</span>

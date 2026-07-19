@@ -94,6 +94,10 @@ import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { getErrorMessage } from '../utils/errors'
+import {
+  getScenarioCategoryLabel,
+  getScenarioDifficultyLabel,
+} from '../utils/scenarioLabels'
 import '../App.css'
 import './ChatPage.css'
 
@@ -400,30 +404,18 @@ function guidanceEventsSignature(events: GuideEventDTO[]): string {
   }))
 }
 
-const scenarioDifficultyLabels: Record<ScenarioTrainingDifficulty, string> = {
-  easy: '简单',
-  medium: '进阶',
-  hard: '困难',
-  expert: '专家',
+function getTrainingModeLabel(mode: string, tr: TranslateInline): string {
+  if (mode === 'text') return tr('文本', 'Text')
+  if (mode === 'voice') return tr('语音', 'Voice')
+  if (mode === 'video') return tr('视频', 'Video')
+  if (mode === 'live_coach') return tr('实时教练', 'Live coach')
+  return mode
 }
 
-const scenarioCategoryLabels: Record<ScenarioTrainingCategory, string> = {
-  sales: '销售',
-  customer_service: '服务',
-  negotiation: '谈判',
-  interview: '面试',
-  workplace: '职场',
-}
-
-const trainingModeLabels: Record<string, string> = {
-  text: '文字',
-  voice: '语音',
-  video: '视频',
-}
-
-const interactionModeLabels: Record<string, string> = {
-  turn_based: '轮次对练',
-  realtime: '实时对练',
+function getInteractionModeLabel(mode: string, tr: TranslateInline): string {
+  if (mode === 'turn_based') return tr('轮次对练', 'Turn-based')
+  if (mode === 'realtime') return tr('实时对练', 'Realtime')
+  return mode
 }
 
 type RefreshGuidanceOptions = {
@@ -1010,19 +1002,19 @@ function ChatArea() {
     ]).join(' · ')
     : compactStrings([
       counterpartName,
-      trainingMode ? trainingModeLabels[trainingMode] : null,
-      interactionModeLabels[interactionMode],
+      trainingMode ? getTrainingModeLabel(trainingMode, tr) : null,
+      getInteractionModeLabel(interactionMode, tr),
     ]).join(' · ')
   const trainingContextTags = compactTags([
-    scenarioCategory ? { label: scenarioCategoryLabels[scenarioCategory], tone: 'category' } : null,
-    scenarioDifficulty ? { label: scenarioDifficultyLabels[scenarioDifficulty], tone: 'difficulty' } : null,
+    scenarioCategory ? { label: getScenarioCategoryLabel(scenarioCategory, tr), tone: 'category' } : null,
+    scenarioDifficulty ? { label: getScenarioDifficultyLabel(scenarioDifficulty, tr), tone: 'difficulty' } : null,
     scenarioRequired === true
       ? { label: tr('必练', 'Required'), tone: 'required' }
       : scenarioRequired === false
         ? { label: tr('选练', 'Optional'), tone: 'optional' }
         : null,
-    trainingMode ? { label: trainingModeLabels[trainingMode], tone: 'mode' } : null,
-    { label: interactionModeLabels[interactionMode], tone: 'mode' },
+    trainingMode ? { label: getTrainingModeLabel(trainingMode, tr), tone: 'mode' } : null,
+    { label: getInteractionModeLabel(interactionMode, tr), tone: 'mode' },
   ])
   const trainingContextDescription = scenarioTrainingCard?.description
     || scenarioDescriptionFromState
@@ -1046,7 +1038,7 @@ function ChatArea() {
     ? compactStrings([
       tr('真实对话', 'Real conversation'),
       liveCoachLanguageSummary || null,
-      interactionModeLabels[interactionMode],
+      getInteractionModeLabel(interactionMode, tr),
     ]).join(' / ')
     : trainingContextSubtitle
   const resolvedTrainingContextTags = isLiveCoachSession
@@ -1054,7 +1046,7 @@ function ChatArea() {
       { label: tr('实时教练', 'Live coach'), tone: 'live' },
       sourceLanguageLabel ? { label: sourceLanguageLabel, tone: 'live' } : null,
       targetLanguageLabel ? { label: targetLanguageLabel, tone: 'live' } : null,
-      { label: interactionModeLabels[interactionMode], tone: 'mode' },
+      { label: getInteractionModeLabel(interactionMode, tr), tone: 'mode' },
     ])
     : trainingContextTags
   const resolvedTrainingContextDescription = isLiveCoachSession

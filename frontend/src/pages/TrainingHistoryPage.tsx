@@ -30,13 +30,26 @@ import {
   getScenarioTrainingProgress,
   mergeScenarioTrainingProgressRecords,
   saveScenarioTrainingProgress,
+  type ScenarioTrainingCategory,
+  type ScenarioTrainingDifficulty,
+  type ScenarioTrainingStatus,
   type ScenarioTrainingProgress,
   type ScenarioTrainingProgressItem,
 } from '../data/trainingScenarios'
+import {
+  getScenarioCategoryLabel,
+  getScenarioDifficultyLabel,
+  getScenarioStatusFilterLabel,
+  getScenarioStatusLabel,
+  scenarioCategoryOptions,
+  scenarioDifficultyOptions,
+  scenarioStatusOptions,
+  type ScenarioStatusFilter,
+} from '../utils/scenarioLabels'
 import './TrainingHistoryPage.css'
 
-type HistoryStatus = 'not_started' | 'in_progress' | 'completed' | 'failed'
-type StatusFilter = 'all' | HistoryStatus
+type HistoryStatus = ScenarioTrainingStatus
+type StatusFilter = ScenarioStatusFilter
 type LocalizedText = readonly [zh: string, en: string]
 
 interface HistoryEntry {
@@ -61,35 +74,7 @@ interface HistoryEntry {
   source: 'session' | 'progress'
 }
 
-const statusOptions: Array<{ value: StatusFilter; label: LocalizedText }> = [
-  { value: 'all', label: ['全部状态', 'All statuses'] },
-  { value: 'completed', label: ['已完成', 'Completed'] },
-  { value: 'in_progress', label: ['进行中', 'In progress'] },
-  { value: 'not_started', label: ['未开始', 'Not started'] },
-  { value: 'failed', label: ['失败', 'Failed'] },
-]
-
-const statusLabels: Record<HistoryStatus, LocalizedText> = {
-  not_started: ['未开始', 'Not started'],
-  in_progress: ['进行中', 'In progress'],
-  completed: ['已完成', 'Completed'],
-  failed: ['失败', 'Failed'],
-}
-
-const difficultyLabels: Record<string, LocalizedText> = {
-  easy: ['简单', 'Easy'],
-  medium: ['中等', 'Medium'],
-  hard: ['困难', 'Hard'],
-  expert: ['专家', 'Expert'],
-}
-
-const categoryLabels: Record<string, LocalizedText> = {
-  sales: ['销售', 'Sales'],
-  customer_service: ['客服', 'Service'],
-  negotiation: ['谈判', 'Negotiation'],
-  interview: ['面试', 'Interview'],
-  workplace: ['职场', 'Workplace'],
-}
+const statusOptions: StatusFilter[] = ['all', ...scenarioStatusOptions]
 
 const modeLabels: Record<string, LocalizedText> = {
   text: ['文本', 'Text'],
@@ -108,13 +93,27 @@ function translateLabel(label: LocalizedText, tr: TranslateInline): string {
   return tr(label[0], label[1])
 }
 
-function translatedRecordLabel(
-  labels: Record<string, LocalizedText>,
-  value: string | undefined,
-  tr: TranslateInline,
-): string {
+function searchLabel(zhText: string, enText: string): string {
+  return `${zhText} ${enText}`
+}
+
+function translatedDifficulty(value: string | undefined, tr: TranslateInline): string {
   if (!value) return ''
-  const label = labels[value]
+  return scenarioDifficultyOptions.includes(value as ScenarioTrainingDifficulty)
+    ? getScenarioDifficultyLabel(value as ScenarioTrainingDifficulty, tr)
+    : value
+}
+
+function translatedCategory(value: string | undefined, tr: TranslateInline): string {
+  if (!value) return ''
+  return scenarioCategoryOptions.includes(value as ScenarioTrainingCategory)
+    ? getScenarioCategoryLabel(value as ScenarioTrainingCategory, tr)
+    : value
+}
+
+function translatedMode(value: string | undefined, tr: TranslateInline): string {
+  if (!value) return ''
+  const label = modeLabels[value]
   return label ? translateLabel(label, tr) : value
 }
 
@@ -394,7 +393,7 @@ function matchesEntry(
     entry.branchInfo?.selectedTailMessageId,
     entry.branchInfo?.pathSummary,
     entry.branchInfo?.lastReplyPreview,
-    statusLabels[entry.status].join(' '),
+    getScenarioStatusLabel(entry.status, searchLabel),
   ].some((value) => String(value || '').toLowerCase().includes(needle))
 }
 
@@ -483,7 +482,7 @@ export default function TrainingHistoryPage() {
     : scenarioOptions.find((option) => option.value === scenarioFilter)?.label ?? scenarioFilter
   const selectedStatusLabel = statusFilter === 'all'
     ? tr('全部状态', 'All statuses')
-    : translateLabel(statusLabels[statusFilter], tr)
+    : getScenarioStatusFilterLabel(statusFilter, tr)
   const resetFilters = () => {
     setQuery('')
     setScenarioFilter('all')
@@ -530,8 +529,8 @@ export default function TrainingHistoryPage() {
             onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
           >
             {statusOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {translateLabel(option.label, tr)}
+              <option key={option} value={option}>
+                {getScenarioStatusFilterLabel(option, tr)}
               </option>
             ))}
           </select>
@@ -614,12 +613,12 @@ export default function TrainingHistoryPage() {
                 </div>
                 <div className="training-history-tags">
                   {entry.difficulty && (
-                    <span>{translatedRecordLabel(difficultyLabels, entry.difficulty, tr)}</span>
+                    <span>{translatedDifficulty(entry.difficulty, tr)}</span>
                   )}
                   {entry.category && (
-                    <span>{translatedRecordLabel(categoryLabels, entry.category, tr)}</span>
+                    <span>{translatedCategory(entry.category, tr)}</span>
                   )}
-                  {entry.mode && <span>{translatedRecordLabel(modeLabels, entry.mode, tr)}</span>}
+                  {entry.mode && <span>{translatedMode(entry.mode, tr)}</span>}
                   {entry.branchInfo && (
                     <span
                       className="training-history-branch-tag"
@@ -647,7 +646,7 @@ export default function TrainingHistoryPage() {
                   {entry.status === 'in_progress' && <Clock3 size={14} />}
                   {entry.status === 'not_started' && <FileText size={14} />}
                   {entry.status === 'failed' && <AlertCircle size={14} />}
-                  {translateLabel(statusLabels[entry.status], tr)}
+                  {getScenarioStatusLabel(entry.status, tr)}
                 </span>
               </div>
 

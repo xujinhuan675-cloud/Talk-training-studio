@@ -35,6 +35,12 @@ import {
 } from '../data/trainingScenarios'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
 import {
+  getScenarioCategoryLabel,
+  getScenarioDifficultyLabel,
+  scenarioCategoryOptions,
+  scenarioDifficultyOptions,
+} from '../utils/scenarioLabels'
+import {
   fetchScenarioConfig,
   saveScenarioConfig as saveRemoteScenarioConfig,
 } from '../services/scenarioConfig'
@@ -50,21 +56,6 @@ interface ScenarioConfigNotice {
   message: string
 }
 
-const categoryOptions: Array<{ value: ScenarioTrainingCategory; label: LocalizedText }> = [
-  { value: 'sales', label: ['销售', 'Sales'] },
-  { value: 'customer_service', label: ['客服', 'Customer service'] },
-  { value: 'negotiation', label: ['谈判', 'Negotiation'] },
-  { value: 'interview', label: ['面试', 'Interview'] },
-  { value: 'workplace', label: ['职场沟通', 'Workplace'] },
-]
-
-const difficultyOptions: Array<{ value: ScenarioTrainingDifficulty; label: LocalizedText }> = [
-  { value: 'easy', label: ['简单', 'Easy'] },
-  { value: 'medium', label: ['中等', 'Medium'] },
-  { value: 'hard', label: ['困难', 'Hard'] },
-  { value: 'expert', label: ['专家', 'Expert'] },
-]
-
 const frameworkOptions: Array<{ value: ScenarioConfigFramework; label: LocalizedText }> = [
   { value: 'prep', label: ['PREP', 'PREP'] },
   { value: 'star', label: ['STAR', 'STAR'] },
@@ -74,14 +65,6 @@ const frameworkOptions: Array<{ value: ScenarioConfigFramework; label: Localized
 
 function translateLabel(label: LocalizedText, tr: TranslateInline): string {
   return tr(label[0], label[1])
-}
-
-function getCategoryLabel(value: ScenarioTrainingCategory, tr: TranslateInline): string {
-  return translateLabel(categoryOptions.find((option) => option.value === value)?.label ?? [value, value], tr)
-}
-
-function getDifficultyLabel(value: ScenarioTrainingDifficulty, tr: TranslateInline): string {
-  return translateLabel(difficultyOptions.find((option) => option.value === value)?.label ?? [value, value], tr)
 }
 
 function getFrameworkLabel(value: ScenarioConfigFramework, tr: TranslateInline): string {
@@ -548,7 +531,7 @@ export default function ScenarioConfigPage() {
                   >
                     <span className="scenario-config-row-title">{scenario.title}</span>
                     <span className="scenario-config-row-meta">
-                      {getCategoryLabel(scenario.category, tr)} · {getDifficultyLabel(scenario.difficulty, tr)} · {validation.total}%
+                      {getScenarioCategoryLabel(scenario.category, tr)} · {getScenarioDifficultyLabel(scenario.difficulty, tr)} · {validation.total}%
                     </span>
                     {!validation.valid && <span className="scenario-config-row-alert">{tr('需为 100%', 'Needs 100%')}</span>}
                   </button>
@@ -580,8 +563,8 @@ export default function ScenarioConfigPage() {
                   value={draft.category}
                   onChange={(event) => patchDraft({ category: event.target.value as ScenarioTrainingCategory })}
                 >
-                  {categoryOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{translateLabel(option.label, tr)}</option>
+                  {scenarioCategoryOptions.map((option) => (
+                    <option key={option} value={option}>{getScenarioCategoryLabel(option, tr)}</option>
                   ))}
                 </select>
               </label>
@@ -591,8 +574,8 @@ export default function ScenarioConfigPage() {
                   value={draft.difficulty}
                   onChange={(event) => patchDraft({ difficulty: event.target.value as ScenarioTrainingDifficulty })}
                 >
-                  {difficultyOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{translateLabel(option.label, tr)}</option>
+                  {scenarioDifficultyOptions.map((option) => (
+                    <option key={option} value={option}>{getScenarioDifficultyLabel(option, tr)}</option>
                   ))}
                 </select>
               </label>

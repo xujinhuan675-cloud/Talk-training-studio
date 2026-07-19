@@ -452,6 +452,8 @@ def _llm_registry_response(
     llm: LLMPort | None,
     *,
     agent_configs: object | None = None,
+    tool_configs: object | None = None,
+    mcp_servers: object | None = None,
 ) -> dict[str, object]:
     source = "active_client" if llm is not None else "settings"
     provider_metadata = (
@@ -477,6 +479,8 @@ def _llm_registry_response(
         registry,
         model_specs=payload["model_specs"],
         agent_configs=agent_configs,
+        tool_configs=tool_configs,
+        mcp_servers=mcp_servers,
     ).to_dict()
     return payload
 
@@ -485,15 +489,28 @@ async def _agent_config_inventory_for_user(
     service: ConversationApplicationService,
     current_user: CurrentUser,
 ) -> list[object]:
+    scan_limit = max(1, int(settings.capability_inventory.agent_config_scan_limit))
+    page_size = max(1, min(int(settings.MAX_PAGE_SIZE), scan_limit))
+    metadata_scope = owned_metadata_scope_for_current_user(
+        current_user,
+        allow_unscoped=False,
+    )
+    items: list[object] = []
+    skip = 0
     try:
-        items, _total = await service.list_agent_configs(
-            skip=0,
-            limit=settings.MAX_PAGE_SIZE,
-            metadata_scope=owned_metadata_scope_for_current_user(
-                current_user,
-                allow_unscoped=False,
-            ),
-        )
+        while len(items) < scan_limit:
+            page_limit = min(page_size, scan_limit - len(items))
+            page_items, total = await service.list_agent_configs(
+                skip=skip,
+                limit=page_limit,
+                metadata_scope=metadata_scope,
+            )
+            if not page_items:
+                break
+            items.extend(page_items)
+            skip += len(page_items)
+            if skip >= total or len(page_items) < page_limit:
+                break
     except Exception as exc:
         logger.warning("Failed to load agent config inventory for capability registry: %s", exc)
         return []
@@ -2529,7 +2546,14 @@ async def get_llm_registry(
     current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
     agent_configs = await _agent_config_inventory_for_user(conversation_svc, current_user)
-    return success_response(data=_llm_registry_response(llm, agent_configs=agent_configs))
+    return success_response(
+        data=_llm_registry_response(
+            llm,
+            agent_configs=agent_configs,
+            tool_configs=settings.capability_inventory.tool_configs,
+            mcp_servers=settings.capability_inventory.mcp_servers,
+        )
+    )
 
 
 @router.get("/voice-config", summary="Get voice preference configuration")
