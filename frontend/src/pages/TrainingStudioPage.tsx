@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
+  KeyRound,
   Keyboard,
   Languages,
   Loader2,
@@ -222,25 +225,6 @@ function formatBooleanStatus(value: boolean, tr: TranslateInline): string {
   return value ? tr('是', 'Yes') : tr('否', 'No')
 }
 
-function getOpenAIRealtimeStatus(
-  capabilities: RealtimeCapabilities['openaiRealtime'],
-  tr: TranslateInline,
-): RealtimeDiagnosticStatus {
-  if (capabilities.readyForCall) {
-    return { label: tr('可发起通话', 'Ready for call'), tone: 'ready' }
-  }
-  if (capabilities.readiness?.status) {
-    return { label: sanitizeRealtimeDiagnosticText(capabilities.readiness.status), tone: 'blocked' }
-  }
-  if (!capabilities.effectiveKey) {
-    return { label: tr('缺少 Key', 'Missing key'), tone: 'blocked' }
-  }
-  if (!capabilities.configured) {
-    return { label: tr('配置不完整', 'Incomplete'), tone: 'warning' }
-  }
-  return { label: tr('已就绪', 'Ready'), tone: 'ready' }
-}
-
 function getPipecatRealtimeStatus(
   capabilities: RealtimeCapabilities['pipecat'],
   tr: TranslateInline,
@@ -272,10 +256,10 @@ function capabilityStatusIcon(status: TrainingStudioReadinessStatus, loading = f
 }
 
 function capabilityStatusLabel(status: TrainingStudioReadinessStatus, tr: TranslateInline): string {
-  if (status === 'ready') return tr('Ready', 'Ready')
-  if (status === 'warning') return tr('Needs attention', 'Needs attention')
-  if (status === 'blocked') return tr('Blocked', 'Blocked')
-  return tr('Not loaded', 'Not loaded')
+  if (status === 'ready') return tr('已就绪', 'Ready')
+  if (status === 'warning') return tr('需处理', 'Needs attention')
+  if (status === 'blocked') return tr('已阻塞', 'Blocked')
+  return tr('未读取', 'Not loaded')
 }
 
 function compactCapabilityTag(value: string): string {
@@ -323,9 +307,9 @@ function mergeRealtimeIssues(
 }
 
 function formatRealtimeIssueTitle(issue: RealtimeReadinessIssue, tr: TranslateInline): string {
-  if (issue.code === 'MISSING_OPENAI_API_KEY') return tr('缺少 OpenAI Realtime Key', 'Missing OpenAI Realtime key')
-  if (issue.code === 'MISSING_OPENAI_REALTIME_MODEL') return tr('缺少 OpenAI Realtime 模型', 'Missing OpenAI Realtime model')
-  if (issue.code === 'MISSING_OPENAI_REALTIME_VOICE') return tr('缺少 OpenAI Realtime 声音', 'Missing OpenAI Realtime voice')
+  if (issue.code === 'MISSING_OPENAI_API_KEY') return tr('缺少 Pipecat OpenAI 服务 Key', 'Missing Pipecat OpenAI service key')
+  if (issue.code === 'MISSING_OPENAI_REALTIME_MODEL') return tr('缺少 Pipecat OpenAI 实时模型', 'Missing Pipecat OpenAI realtime model')
+  if (issue.code === 'MISSING_OPENAI_REALTIME_VOICE') return tr('缺少 Pipecat OpenAI 声音', 'Missing Pipecat OpenAI voice')
   if (issue.code === 'PIPECAT_MODULE_UNAVAILABLE') return tr('Pipecat 模块缺失', 'Pipecat module unavailable')
   if (issue.code === 'PIPECAT_WEBSOCKET_UNAVAILABLE') return tr('Pipecat WebSocket 不可用', 'Pipecat WebSocket unavailable')
   if (issue.code === 'PIPECAT_FEATURE_UNAVAILABLE') {
@@ -357,26 +341,7 @@ function buildRealtimeReadinessHints(
   tr: TranslateInline,
 ): string[] {
   const hints: string[] = []
-  const openai = capabilities.openaiRealtime
   const pipecat = capabilities.pipecat
-
-  if (!openai.effectiveKey) {
-    addUniqueHint(
-      hints,
-      tr(
-        '缺少 OpenAI Realtime Key：配置 REALTIME_OPENAI_API_KEY、LLM__API_KEY 或 OPENAI_API_KEY 后重启后端。',
-        'Missing OpenAI Realtime key: set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY, then restart the backend.',
-      ),
-    )
-  } else if (!openai.configured) {
-    addUniqueHint(
-      hints,
-      tr(
-        'OpenAI Realtime 配置不完整：确认 realtime model 与 voice 都已配置。',
-        'OpenAI Realtime is incomplete: confirm both realtime model and voice are configured.',
-      ),
-    )
-  }
 
   if (!pipecat.coreAvailable) {
     addUniqueHint(
@@ -473,6 +438,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   const [llmRegistry, setLlmRegistry] = useState<LLMProviderMetadata | null>(null)
   const [llmRegistryLoading, setLlmRegistryLoading] = useState(false)
   const [llmRegistryError, setLlmRegistryError] = useState<string | null>(null)
+  const [capabilityDetailsOpen, setCapabilityDetailsOpen] = useState(false)
+  const [realtimeDetailsOpen, setRealtimeDetailsOpen] = useState(false)
 
   const realtimeDiagnosticsVisible = mode === 'realtime' || mode === 'live_coach'
 
@@ -500,7 +467,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       setLlmRegistry(null)
       setLlmRegistryError(getErrorMessage(
         requestError,
-        tr('Could not load provider/model registry.', 'Could not load provider/model registry.'),
+        tr('无法读取模型服务列表。', 'Could not load provider/model registry.'),
       ))
     } finally {
       setLlmRegistryLoading(false)
@@ -558,20 +525,19 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     realtimeCapabilitiesError,
     llmRegistryError,
   ].filter((message): message is string => Boolean(message))
+  const capabilityItems = [
+    ...capabilityReadiness.foundation,
+    capabilityReadiness.agentMcp,
+  ]
+  const capabilityReadyCount = capabilityItems.filter((item) => item.status === 'ready').length
+  const capabilityAttentionCount = capabilityItems.length - capabilityReadyCount
 
-  const openAIRealtimeStatus = realtimeCapabilities
-    ? getOpenAIRealtimeStatus(realtimeCapabilities.openaiRealtime, tr)
-    : { label: tr('读取中', 'Loading'), tone: 'loading' as const }
   const pipecatRealtimeStatus = realtimeCapabilities
     ? getPipecatRealtimeStatus(realtimeCapabilities.pipecat, tr)
     : { label: tr('读取中', 'Loading'), tone: 'loading' as const }
   const realtimeBlockingIssues = useMemo(
     () => realtimeCapabilities
       ? [
-        ...mergeRealtimeIssues(
-          realtimeCapabilities.openaiRealtime.readiness?.blockingReasons,
-          realtimeCapabilities.openaiRealtime.errors,
-        ),
         ...mergeRealtimeIssues(
           realtimeCapabilities.pipecat.readiness?.blockingReasons,
           realtimeCapabilities.pipecat.errors,
@@ -586,13 +552,13 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   )
   const pipecatFeatureStatuses = realtimeCapabilities
     ? [
-      { key: 'core', label: tr('Core', 'Core'), available: realtimeCapabilities.pipecat.coreAvailable },
+      { key: 'core', label: tr('核心', 'Core'), available: realtimeCapabilities.pipecat.coreAvailable },
       { key: 'websocket', label: tr('WebSocket', 'WebSocket'), available: realtimeCapabilities.pipecat.websocketAvailable },
       { key: 'vad', label: tr('VAD', 'VAD'), available: realtimeCapabilities.pipecat.vadAvailable },
       { key: 'stt', label: tr('STT', 'STT'), available: realtimeCapabilities.pipecat.sttAvailable },
       { key: 'tts', label: tr('TTS', 'TTS'), available: realtimeCapabilities.pipecat.ttsAvailable },
       { key: 'llm', label: tr('LLM', 'LLM'), available: realtimeCapabilities.pipecat.llmAvailable },
-      { key: 'turnDetection', label: tr('turnDetection', 'turnDetection'), available: realtimeCapabilities.pipecat.turnDetectionAvailable },
+      { key: 'turnDetection', label: tr('轮次检测', 'turnDetection'), available: realtimeCapabilities.pipecat.turnDetectionAvailable },
     ]
     : []
 
@@ -827,23 +793,38 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
 
         <section
           className="training-studio-capability-panel"
-          aria-label={tr('Backend capability readiness', 'Backend capability readiness')}
+          aria-label={tr('后端能力就绪状态', 'Backend capability readiness')}
           aria-live="polite"
         >
           <div className="training-studio-capability-header">
             <div>
               <span className="training-studio-capability-kicker">
                 <ShieldCheck size={14} />
-                {tr('Mature foundation alignment', 'Mature foundation alignment')}
+                {tr('系统检查', 'System checks')}
               </span>
-              <h2>{tr('Runtime and readiness', 'Runtime and readiness')}</h2>
-              <p>{tr('Model catalog, realtime checks, and agent signals stay visible without exposing secrets.', 'Model catalog, realtime checks, and agent signals stay visible without exposing secrets.')}</p>
+              <h2>{tr('运行状态', 'Runtime status')}</h2>
             </div>
             <div className="training-studio-capability-actions">
               <span className={`training-studio-capability-status ${capabilityReadiness.overallStatus}`}>
                 {capabilityStatusIcon(capabilityReadiness.overallStatus, capabilityLoading)}
                 {capabilityStatusLabel(capabilityReadiness.overallStatus, tr)}
               </span>
+              <button
+                type="button"
+                onClick={() => navigate(`${APP_ROUTES.config}?tab=config`)}
+              >
+                <KeyRound size={14} />
+                {tr('AI 服务', 'AI services')}
+              </button>
+              <button
+                type="button"
+                aria-expanded={capabilityDetailsOpen}
+                aria-controls="training-studio-capability-details"
+                onClick={() => setCapabilityDetailsOpen((open) => !open)}
+              >
+                {capabilityDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {capabilityDetailsOpen ? tr('收起', 'Hide') : tr('详情', 'Details')}
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -855,9 +836,20 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 {(realtimeCapabilitiesLoading || llmRegistryLoading)
                   ? <Loader2 size={14} className="training-studio-spin" />
                   : <RefreshCw size={14} />}
-                {tr('Refresh', 'Refresh')}
+                {tr('刷新', 'Refresh')}
               </button>
             </div>
+          </div>
+
+          <div className="training-studio-capability-summary">
+            <span>
+              <strong>{capabilityReadyCount}/{capabilityItems.length}</strong>
+              {tr('已就绪', 'ready')}
+            </span>
+            <span className={capabilityAttentionCount > 0 ? 'warning' : ''}>
+              <strong>{capabilityAttentionCount}</strong>
+              {tr('需处理', 'needs attention')}
+            </span>
           </div>
 
           {capabilityErrors.length > 0 && (
@@ -871,35 +863,37 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             </div>
           )}
 
-          <div className="training-studio-capability-grid">
-            {[...capabilityReadiness.foundation, capabilityReadiness.agentMcp].map((item: TrainingStudioCapabilityItem) => (
-              <article className={`training-studio-capability-card ${item.status}`} key={item.key}>
-                <div className="training-studio-capability-card-head">
-                  <h3>{item.label}</h3>
-                  <span className={`training-studio-capability-status ${item.status}`}>
-                    {capabilityStatusIcon(item.status, capabilityLoading)}
-                    {capabilityStatusLabel(item.status, tr)}
-                  </span>
-                </div>
-                <p>{item.detail}</p>
-                <dl>
-                  {item.metrics.map((metric) => (
-                    <div key={`${item.key}:${metric.label}`}>
-                      <dt>{metric.label}</dt>
-                      <dd>{metric.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {item.tags.length > 0 && (
-                  <div className="training-studio-capability-tags">
-                    {item.tags.slice(0, 5).map((tag) => (
-                      <span key={`${item.key}:${tag}`} title={tag}>{compactCapabilityTag(tag)}</span>
-                    ))}
+          {capabilityDetailsOpen && (
+            <div id="training-studio-capability-details" className="training-studio-capability-grid">
+              {capabilityItems.map((item: TrainingStudioCapabilityItem) => (
+                <article className={`training-studio-capability-card ${item.status}`} key={item.key}>
+                  <div className="training-studio-capability-card-head">
+                    <h3>{item.label}</h3>
+                    <span className={`training-studio-capability-status ${item.status}`}>
+                      {capabilityStatusIcon(item.status, capabilityLoading)}
+                      {capabilityStatusLabel(item.status, tr)}
+                    </span>
                   </div>
-                )}
-              </article>
-            ))}
-          </div>
+                  <p>{item.detail}</p>
+                  <dl>
+                    {item.metrics.map((metric) => (
+                      <div key={`${item.key}:${metric.label}`}>
+                        <dt>{metric.label}</dt>
+                        <dd>{metric.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {item.tags.length > 0 && (
+                    <div className="training-studio-capability-tags">
+                      {item.tags.slice(0, 5).map((tag) => (
+                        <span key={`${item.key}:${tag}`} title={tag}>{compactCapabilityTag(tag)}</span>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
@@ -973,18 +967,33 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                   <ShieldCheck size={14} />
                   {tr('通话前诊断', 'Pre-call diagnostics')}
                 </span>
-                <h2>{tr('Realtime / Pipecat readiness', 'Realtime / Pipecat readiness')}</h2>
-                <p>{tr('读取 /realtime/capabilities，仅显示配置、模块和错误元数据。', 'Reads /realtime/capabilities and shows config, module, and error metadata only.')}</p>
+                <h2>{tr('实时语音就绪状态', 'Realtime / Pipecat readiness')}</h2>
               </div>
-              <button
-                className="training-studio-realtime-refresh"
-                type="button"
-                onClick={() => void loadRealtimeCapabilities()}
-                disabled={realtimeCapabilitiesLoading}
-              >
-                {realtimeCapabilitiesLoading ? <Loader2 size={14} className="training-studio-spin" /> : <RefreshCw size={14} />}
-                {tr('刷新', 'Refresh')}
-              </button>
+              <div className="training-studio-realtime-actions">
+                <span className={`training-studio-realtime-status ${pipecatRealtimeStatus.tone}`}>
+                  {realtimeStatusIcon(pipecatRealtimeStatus.tone)}
+                  Pipecat: {pipecatRealtimeStatus.label}
+                </span>
+                <button
+                  className="training-studio-realtime-refresh"
+                  type="button"
+                  aria-expanded={realtimeDetailsOpen}
+                  aria-controls="training-studio-realtime-details"
+                  onClick={() => setRealtimeDetailsOpen((open) => !open)}
+                >
+                  {realtimeDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  {realtimeDetailsOpen ? tr('收起', 'Hide') : tr('详情', 'Details')}
+                </button>
+                <button
+                  className="training-studio-realtime-refresh"
+                  type="button"
+                  onClick={() => void loadRealtimeCapabilities()}
+                  disabled={realtimeCapabilitiesLoading}
+                >
+                  {realtimeCapabilitiesLoading ? <Loader2 size={14} className="training-studio-spin" /> : <RefreshCw size={14} />}
+                  {tr('刷新', 'Refresh')}
+                </button>
+              </div>
             </div>
 
             {realtimeCapabilitiesError && (
@@ -1001,54 +1010,22 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               </div>
             ) : realtimeCapabilities ? (
               <>
-                <div className="training-studio-realtime-provider-grid">
-                  <article className={`training-studio-realtime-provider ${openAIRealtimeStatus.tone}`}>
-                    <div className="training-studio-realtime-provider-head">
-                      <div>
-                        <h3>{tr('OpenAI Realtime', 'OpenAI Realtime')}</h3>
-                        <span>{tr('密钥、模型、声音配置', 'Key, model, and voice config')}</span>
-                      </div>
-                      <span className={`training-studio-realtime-status ${openAIRealtimeStatus.tone}`}>
-                        {realtimeStatusIcon(openAIRealtimeStatus.tone)}
-                        {openAIRealtimeStatus.label}
-                      </span>
-                    </div>
-                    <dl className="training-studio-realtime-metrics">
-                      <div>
-                        <dt>readyForCall</dt>
-                        <dd>{formatBooleanStatus(Boolean(realtimeCapabilities.openaiRealtime.readyForCall), tr)}</dd>
-                      </div>
-                      <div>
-                        <dt>readiness.status</dt>
-                        <dd>{cleanDiagnosticText(realtimeCapabilities.openaiRealtime.readiness?.status) || tr('未知', 'Unknown')}</dd>
-                      </div>
-                      <div>
-                        <dt>effectiveKey</dt>
-                        <dd>{formatBooleanStatus(realtimeCapabilities.openaiRealtime.effectiveKey, tr)}</dd>
-                      </div>
-                      <div>
-                        <dt>configured</dt>
-                        <dd>{formatBooleanStatus(realtimeCapabilities.openaiRealtime.configured, tr)}</dd>
-                      </div>
-                      <div>
-                        <dt>model</dt>
-                        <dd>{cleanDiagnosticText(realtimeCapabilities.openaiRealtime.model) || tr('未配置', 'Not configured')}</dd>
-                      </div>
-                      <div>
-                        <dt>voice</dt>
-                        <dd>{cleanDiagnosticText(realtimeCapabilities.openaiRealtime.voice) || tr('未配置', 'Not configured')}</dd>
-                      </div>
-                      <div>
-                        <dt>checkedAt</dt>
-                        <dd>{cleanDiagnosticText(realtimeCapabilities.openaiRealtime.readiness?.checkedAt) || tr('未返回', 'Not returned')}</dd>
-                      </div>
-                    </dl>
-                  </article>
+                {realtimeBlockingIssues.length > 0 && (
+                  <div className="training-studio-realtime-alert">
+                    <AlertTriangle size={15} />
+                    <span>
+                      {tr('{count} 个通话阻塞项', '{count} call blockers', { count: realtimeBlockingIssues.length })}
+                    </span>
+                  </div>
+                )}
 
+                {realtimeDetailsOpen && (
+                  <div id="training-studio-realtime-details" className="training-studio-realtime-details-stack">
+                    <div className="training-studio-realtime-provider-grid">
                   <article className={`training-studio-realtime-provider ${pipecatRealtimeStatus.tone}`}>
                     <div className="training-studio-realtime-provider-head">
                       <div>
-                        <h3>{tr('Pipecat pipeline', 'Pipecat pipeline')}</h3>
+                        <h3>{tr('Pipecat 管道', 'Pipecat pipeline')}</h3>
                         <span>{tr('模块、WebSocket、STT/TTS/LLM/VAD/turnDetection', 'Modules, WebSocket, STT/TTS/LLM/VAD/turnDetection')}</span>
                       </div>
                       <span className={`training-studio-realtime-status ${pipecatRealtimeStatus.tone}`}>
@@ -1091,7 +1068,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 <div className="training-studio-realtime-detail-grid">
                   <section className="training-studio-realtime-detail">
                     <div className="training-studio-realtime-detail-head">
-                      <h3>{tr('blockingReasons / errors', 'blockingReasons / errors')}</h3>
+                      <h3>{tr('阻塞项 / 错误', 'blockingReasons / errors')}</h3>
                       <span>{realtimeBlockingIssues.length}</span>
                     </div>
                     {realtimeBlockingIssues.length > 0 ? (
@@ -1140,6 +1117,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                     )}
                   </section>
                 </div>
+                  </div>
+                )}
               </>
             ) : null}
           </section>

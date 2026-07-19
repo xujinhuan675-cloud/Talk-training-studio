@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Zap, ArrowLeft } from 'lucide-react'
+import { Loader2, Zap, ArrowLeft, ArrowRight } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { generateBattlePrep, startBattle, type BattlePrepResult } from '../services/api'
 import {
@@ -15,7 +15,7 @@ import './BattlePrepPage.css'
 
 function initialState(t: Translate) {
   return {
-    step: 1 as 1 | 2 | 3,
+    step: 1 as 1 | 2,
     description: '',
     studioConfig: getDefaultTrainingStudioConfig(t) as TrainingStudioConfig,
     loading: false,
@@ -73,7 +73,7 @@ export default function BattlePrepPage() {
     }
   }
 
-  // ---- Step 2 -> Step 3: start battle and navigate ----
+  // ---- Step 2: start battle and navigate ----
   const handleStartBattle = async () => {
     if (selectedPoints.length === 0 || !prepResult) return
     setState((s) => ({ ...s, submitting: true, error: null }))
@@ -109,7 +109,7 @@ export default function BattlePrepPage() {
         {/* Back link */}
         <button className="bpp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
           <ArrowLeft size={16} />
-          <span>{tr('返回训练目录', 'Back to training')}</span>
+          <span>{t('common.backToTrainingCatalog')}</span>
         </button>
 
         {/* Title */}
@@ -120,7 +120,7 @@ export default function BattlePrepPage() {
 
         {/* Step indicator */}
         <div className="bpp-steps">
-          {[1, 2, 3].map((n) => (
+          {[1, 2].map((n) => (
             <div key={n} className="bpp-step-item">
               <div className={`bpp-step-dot ${step === n ? 'active' : step > n ? 'done' : ''}`}>
                 {n}
@@ -128,11 +128,9 @@ export default function BattlePrepPage() {
               <span className={`bpp-step-label ${step === n ? 'active' : ''}`}>
                 {n === 1
                   ? tr('描述会议', 'Describe Meeting')
-                  : n === 2
-                    ? tr('预览对手', 'Preview Opponent')
-                    : tr('开始练习', 'Start Practice')}
+                  : tr('确认对手', 'Confirm opponent')}
               </span>
-              {n < 3 && <div className={`bpp-step-line ${step > n ? 'done' : ''}`} />}
+              {n < 2 && <div className={`bpp-step-line ${step > n ? 'done' : ''}`} />}
             </div>
           ))}
         </div>
@@ -173,7 +171,10 @@ export default function BattlePrepPage() {
                     {tr('AI 正在分析...', 'AI is analyzing...')}
                   </span>
                 ) : (
-                  tr('生成对手 →', 'Generate Opponent →')
+                  <>
+                    {tr('生成对手', 'Generate opponent')}
+                    <ArrowRight size={14} />
+                  </>
                 )}
               </button>
             </div>
@@ -213,7 +214,7 @@ export default function BattlePrepPage() {
                 />
               </label>
               <label className="bpp-field">
-                <span className="bpp-field-label">{tr('谈判风格', 'Negotiation Style')}</span>
+                <span className="bpp-field-label">{tr('互动风格', 'Interaction style')}</span>
                 <textarea
                   className="bpp-textarea bpp-textarea--sm"
                   value={personaStyle}
@@ -246,7 +247,7 @@ export default function BattlePrepPage() {
                 onClick={() => setState((s) => ({ ...s, step: 1, error: null }))}
               >
                 <ArrowLeft size={14} />
-                {tr('上一步', 'Previous')}
+                {t('common.previous')}
               </button>
               <button
                 className="bpp-btn-primary"
@@ -261,10 +262,13 @@ export default function BattlePrepPage() {
                 {submitting ? (
                   <span className="bpp-loading-inline">
                     <Loader2 size={16} className="bpp-spinner" />
-                    {tr('启动中...', 'Starting...')}
+                    {t('common.starting')}
                   </span>
                 ) : (
-                  tr('开始练习 →', 'Start Practice →')
+                  <>
+                    {t('common.startPractice')}
+                    <ArrowRight size={14} />
+                  </>
                 )}
               </button>
             </div>

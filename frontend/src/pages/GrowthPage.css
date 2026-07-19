@@ -52,7 +52,7 @@
   align-items: center;
   gap: 6px;
   padding: 10px 24px;
-  background: var(--violet);
+  background: var(--green);
   color: #fff;
   border: none;
   border-radius: var(--radius-md);
@@ -78,16 +78,69 @@
 .gp-score-header-top {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+.gp-score-header-actions,
+.gp-section-heading,
+.gp-section-link {
+  display: flex;
+  align-items: center;
+}
+
+.gp-score-header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.gp-section-heading {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.gp-section-link {
+  flex-shrink: 0;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 9px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+}
+
+.gp-section-link:hover {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .gp-section-label {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--violet);
+  letter-spacing: 0;
+  color: var(--green);
+}
+
+.gp-section-count {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .gp-score-summary {
@@ -107,7 +160,7 @@
 .gp-big-score-value {
   font-size: 48px;
   font-weight: 800;
-  color: var(--violet);
+  color: var(--green);
   line-height: 1;
 }
 
@@ -313,6 +366,7 @@
   padding: 4px 10px;
   border-radius: var(--radius-sm, 4px);
   font-weight: 500;
+  text-decoration: none;
 }
 
 /* Locked */
@@ -372,7 +426,7 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 16px;
+  margin: 0;
 }
 
 .gp-eval-list {
@@ -396,8 +450,8 @@
 }
 
 .gp-eval-card:hover {
-  border-color: var(--violet);
-  box-shadow: 0 1px 4px rgba(139, 126, 200, 0.12);
+  border-color: var(--green);
+  box-shadow: 0 1px 4px rgba(15, 118, 110, 0.12);
 }
 
 .gp-eval-grade {
@@ -495,7 +549,7 @@
   padding: 8px 16px;
   border: none;
   border-radius: var(--radius-sm, 6px);
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: var(--green);
   color: white;
   font-size: 13px;
   font-weight: 500;
@@ -519,7 +573,7 @@
   padding: 10px 20px;
   border: none;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: var(--green);
   color: white;
   font-size: 14px;
   font-weight: 500;
@@ -547,51 +601,6 @@
   font-size: 13px;
 }
 
-/* ---------- Gamification Stats Row ---------- */
-
-.gp-gamification-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-
-.gp-gam-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  text-align: center;
-}
-
-.gp-gam-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--violet);
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.gp-gam-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.gp-level-bar {
-  margin-top: 6px;
-  height: 4px;
-  background: var(--border-light, #f3f4f6);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.gp-level-bar-fill {
-  height: 100%;
-  background: var(--violet);
-  border-radius: 2px;
-  transition: width 0.4s ease;
-}
-
 /* ---------- Spin animation ---------- */
 
 @keyframes gp-spin {
@@ -614,7 +623,4 @@
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .gp-gamification-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }

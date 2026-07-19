@@ -24,7 +24,7 @@ import {
 import { buildTrainingModeChatPath } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
-import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import { useI18n, type Locale, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { PageShell } from '../components/ui/page'
 import {
@@ -72,10 +72,12 @@ const reportDimensionLabels: Record<string, LocalizedText> = {
   camera_presence: ['镜头表现', 'Camera presence'],
 }
 
-const modeLabels: Record<string, LocalizedText> = {
-  text: ['文字', 'Text'],
-  voice: ['语音', 'Voice'],
-  video: ['视频', 'Video'],
+const modeLabelKeys: Record<string, TranslationKey> = {
+  text: 'training.mode.text.label',
+  voice: 'training.mode.voice.label',
+  video: 'training.mode.video.label',
+  realtime: 'training.mode.realtime.label',
+  live_coach: 'training.mode.liveCoach.label',
 }
 
 function translateLabel(label: LocalizedText, tr: TranslateInline): string {
@@ -214,10 +216,10 @@ function getLiveCoachLanguagePair(
   })
 }
 
-function modeLabel(mode: string | undefined, tr: TranslateInline): string {
+function modeLabel(mode: string | undefined, t: Translate, tr: TranslateInline): string {
   if (!mode) return tr('未知', 'unknown')
-  const label = modeLabels[mode]
-  return label ? translateLabel(label, tr) : mode
+  const labelKey = modeLabelKeys[mode]
+  return labelKey ? t(labelKey) : mode
 }
 
 function getDimension(
@@ -441,7 +443,7 @@ function coachSeverityLabel(severity: string, tr: TranslateInline): string {
 
 export default function TrainingResultPage() {
   const navigate = useNavigate()
-  const { locale, tr } = useI18n()
+  const { locale, t, tr } = useI18n()
   const { sessionId: routeSessionId } = useParams<{ sessionId: string }>()
   const [searchParams] = useSearchParams()
   const { currentUser } = useAuthContext()
@@ -681,7 +683,7 @@ export default function TrainingResultPage() {
             </span>
             <span>
               <strong>{tr('模式', 'Mode')}</strong>
-              {isLiveCoachSession ? tr('实时陪跑', 'Live coach') : modeLabel(session?.mode, tr)}
+              {isLiveCoachSession ? t('training.mode.liveCoach.label') : modeLabel(session?.mode, t, tr)}
             </span>
           </div>
         </article>

@@ -135,17 +135,6 @@ test('buildTrainingStudioCapabilityReadiness summarizes ready model and realtime
       },
     ],
     realtimeCapabilities: {
-      openaiRealtime: {
-        configured: true,
-        effectiveKey: true,
-        model: 'gpt-realtime',
-        voice: 'marin',
-        readyForCall: true,
-        readiness: {
-          ready: true,
-          status: 'ready',
-        },
-      },
       pipecat: {
         available: true,
         coreAvailable: true,
@@ -200,23 +189,6 @@ test('buildTrainingStudioCapabilityReadiness surfaces realtime blockers without 
   const readiness = trainingStudio.buildTrainingStudioCapabilityReadiness({
     modelChoices: [],
     realtimeCapabilities: {
-      openaiRealtime: {
-        configured: false,
-        effectiveKey: false,
-        model: null,
-        voice: null,
-        readyForCall: false,
-        readiness: {
-          ready: false,
-          status: 'missing key',
-          blockingReasons: [
-            {
-              code: 'MISSING_OPENAI_API_KEY',
-              message: 'Missing OpenAI key',
-            },
-          ],
-        },
-      },
       pipecat: {
         available: false,
         coreAvailable: false,
@@ -247,12 +219,12 @@ test('buildTrainingStudioCapabilityReadiness surfaces realtime blockers without 
   assert.equal(readiness.overallStatus, 'blocked')
   assert.equal(readiness.providerModel.status, 'unknown')
   assert.equal(readiness.realtime.status, 'blocked')
-  assert.equal(readiness.realtimeCounts.blockingIssues, 2)
+  assert.equal(readiness.realtimeCounts.blockingIssues, 1)
   assert.deepEqual(
     readiness.realtime.metrics.map((metric) => [metric.label, metric.value]),
     [
       ['pipecat features', '0/7'],
-      ['blockers', '2'],
+      ['blockers', '1'],
       ['missing modules', '1'],
     ],
   )

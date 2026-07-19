@@ -21,15 +21,11 @@ import {
   Minus,
   Download,
   Share2,
-  Flame,
-  Star,
-  Zap,
-  Trophy,
 } from 'lucide-react'
 import { useGrowth, type SkillPathNode, type DimensionKey } from '../hooks/useGrowth'
 import { generateProfileCard, type ProfileCard as ProfileCardData } from '../services/api'
 import ProfileCard from '../components/ProfileCard'
-import { useI18n, type TranslateInline } from '../i18n'
+import { useI18n, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { PageShell } from '../components/ui/page'
 import './GrowthPage.css'
@@ -38,97 +34,27 @@ import './GrowthPage.css'
 // Constants
 // ---------------------------------------------------------------------------
 
-const DIMENSION_LABELS_ZH: Record<string, string> = {
-  persuasion: '说服力',
-  emotional_management: '情绪管理',
-  active_listening: '倾听回应',
-  structured_expression: '结构化表达',
-  conflict_resolution: '冲突处理',
-  stakeholder_alignment: '利益对齐',
+const DIMENSIONS: DimensionKey[] = [
+  'persuasion',
+  'emotional_management',
+  'active_listening',
+  'structured_expression',
+  'conflict_resolution',
+  'stakeholder_alignment',
+]
+const DIMENSION_SET = new Set<string>(DIMENSIONS)
+const RECENT_EVALUATION_LIMIT = 5
+
+function isDimensionKey(value: string | undefined): value is DimensionKey {
+  return Boolean(value && DIMENSION_SET.has(value))
 }
 
-const DIMENSION_LABELS_EN: Record<string, string> = {
-  persuasion: 'Persuasion',
-  emotional_management: 'Emotion Management',
-  active_listening: 'Active Listening',
-  structured_expression: 'Structured Expression',
-  conflict_resolution: 'Conflict Resolution',
-  stakeholder_alignment: 'Stakeholder Alignment',
+function growthDimensionLabelKey(dim: DimensionKey): TranslationKey {
+  return `growth.dimension.${dim}.label` as TranslationKey
 }
 
-const DIMENSIONS = Object.keys(DIMENSION_LABELS_ZH)
-
-/** Map dimension keys to the 6 skill names from the task spec */
-const SKILL_NAMES: Record<DimensionKey, string> = {
-  persuasion: '入门对话',
-  emotional_management: '情绪管理',
-  active_listening: '向上管理',
-  structured_expression: '高层博弈',
-  conflict_resolution: '冲突处理',
-  stakeholder_alignment: '共识达成',
-}
-
-const SKILL_NAMES_EN: Record<DimensionKey, string> = {
-  persuasion: 'Opening Dialogue',
-  emotional_management: 'Emotion Management',
-  active_listening: 'Managing Up',
-  structured_expression: 'Executive Framing',
-  conflict_resolution: 'Conflict Resolution',
-  stakeholder_alignment: 'Consensus Building',
-}
-
-const SKILL_DESCRIPTIONS: Record<DimensionKey, string> = {
-  persuasion: '掌握基础沟通技巧，能够清晰表达观点并说服他人',
-  emotional_management: '在高压场景中保持冷静，有效管理自身与对方情绪',
-  active_listening: '与上级建立信任关系，高效汇报并争取资源支持',
-  structured_expression: '在复杂利益格局中找到突破口，达成战略目标',
-  conflict_resolution: '在分歧中寻找共识，化解冲突并维护关系',
-  stakeholder_alignment: '协调多方利益诉求，推动达成共识性决策',
-}
-
-const SKILL_DESCRIPTIONS_EN: Record<DimensionKey, string> = {
-  persuasion: 'Master basic communication skills and clearly express persuasive points.',
-  emotional_management: 'Stay calm under pressure and manage both your own and the other side’s emotions.',
-  active_listening: 'Build trust with leaders, report efficiently, and win resource support.',
-  structured_expression: 'Find leverage in complex stakeholder situations and move toward strategic goals.',
-  conflict_resolution: 'Find common ground in disagreement, resolve conflict, and protect the relationship.',
-  stakeholder_alignment: 'Coordinate multiple interests and drive consensus-based decisions.',
-}
-
-const SKILL_UNLOCK_CONDITIONS: Record<DimensionKey, string> = {
-  persuasion: '完成 3 次对话评估且平均分 >= 3.0',
-  emotional_management: '完成 3 次情绪管理评估且平均分 >= 3.0',
-  active_listening: '完成 3 次倾听回应评估且平均分 >= 3.0',
-  structured_expression: '完成 3 次结构化表达评估且平均分 >= 3.0',
-  conflict_resolution: '完成 3 次冲突处理评估且平均分 >= 3.0',
-  stakeholder_alignment: '完成 3 次利益对齐评估且平均分 >= 3.0',
-}
-
-const SKILL_UNLOCK_CONDITIONS_EN: Record<DimensionKey, string> = {
-  persuasion: 'Complete 3 dialogue evaluations with an average score >= 3.0',
-  emotional_management: 'Complete 3 emotion management evaluations with an average score >= 3.0',
-  active_listening: 'Complete 3 active listening evaluations with an average score >= 3.0',
-  structured_expression: 'Complete 3 structured expression evaluations with an average score >= 3.0',
-  conflict_resolution: 'Complete 3 conflict resolution evaluations with an average score >= 3.0',
-  stakeholder_alignment: 'Complete 3 stakeholder alignment evaluations with an average score >= 3.0',
-}
-
-const SKILL_SUGGESTIONS: Record<DimensionKey, string> = {
-  persuasion: '尝试一场需要说服对方的模拟对话',
-  emotional_management: '练习一场情绪波动较大的冲突场景',
-  active_listening: '在下一场对话中专注展示向上汇报能力',
-  structured_expression: '用金字塔原理结构化你的下一次发言',
-  conflict_resolution: '模拟一场需要调解各方分歧的会议',
-  stakeholder_alignment: '练习寻找多方利益交集的沟通策略',
-}
-
-const SKILL_SUGGESTIONS_EN: Record<DimensionKey, string> = {
-  persuasion: 'Try a simulation where you need to persuade the other side.',
-  emotional_management: 'Practice a conflict scenario with high emotional volatility.',
-  active_listening: 'Focus on upward reporting in your next conversation.',
-  structured_expression: 'Use the pyramid principle to structure your next response.',
-  conflict_resolution: 'Simulate a meeting where you must mediate disagreements.',
-  stakeholder_alignment: 'Practice finding overlap across multiple stakeholder interests.',
+function growthSkillKey(dim: DimensionKey, field: 'name' | 'desc' | 'unlock' | 'suggestion'): TranslationKey {
+  return `growth.skill.${dim}.${field}` as TranslationKey
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +69,7 @@ interface RadarDataPoint {
 
 function buildRadarData(
   evaluations: { scores: Record<string, { score: number }> }[],
-  tr: TranslateInline,
+  t: Translate,
 ): RadarDataPoint[] {
   return DIMENSIONS.map((dim) => {
     const latest = evaluations.length > 0 ? (evaluations[0].scores[dim]?.score ?? 0) : 0
@@ -152,12 +78,12 @@ function buildRadarData(
       allScores.length > 0
         ? Math.round((allScores.reduce((a, b) => a + b, 0) / allScores.length) * 10) / 10
         : 0
-    return { dimension: tr(DIMENSION_LABELS_ZH[dim], DIMENSION_LABELS_EN[dim]), latest, average }
+    return { dimension: t(growthDimensionLabelKey(dim)), latest, average }
   })
 }
 
-function getDimensionLabel(dim: string, tr: TranslateInline): string {
-  return tr(DIMENSION_LABELS_ZH[dim] || dim, DIMENSION_LABELS_EN[dim] || dim)
+function getDimensionLabel(dim: string | undefined, t: Translate): string {
+  return isDimensionKey(dim) ? t(growthDimensionLabelKey(dim)) : dim || ''
 }
 
 function scoreToGrade(score: number): string {
@@ -214,6 +140,7 @@ function getSkillStatus(
 /** Build a short feedback summary from the evaluation's dimension scores */
 function buildFeedbackSummary(
   scores: Record<string, { score: number; suggestion?: string }>,
+  t: Translate,
   tr: TranslateInline,
 ): string {
   const entries = Object.entries(scores)
@@ -224,8 +151,8 @@ function buildFeedbackSummary(
     if (entry[1].score > best[1].score) best = entry
     if (entry[1].score < worst[1].score) worst = entry
   }
-  const bestLabel = getDimensionLabel(best?.[0], tr)
-  const worstLabel = getDimensionLabel(worst?.[0], tr)
+  const bestLabel = getDimensionLabel(best?.[0], t)
+  const worstLabel = getDimensionLabel(worst?.[0], t)
   if (best && worst && best[0] !== worst[0]) {
     return tr(
       '{bestLabel} 表现最佳 ({bestScore})，{worstLabel} 有提升空间 ({worstScore})',
@@ -247,14 +174,11 @@ function buildFeedbackSummary(
 
 const GrowthPage: React.FC = () => {
   const navigate = useNavigate()
-  const { tr, locale } = useI18n()
+  const { t, tr, locale } = useI18n()
   const {
     dashboard,
     loading,
     error,
-    xp,
-    levelInfo,
-    streak,
     skillPath,
   } = useGrowth()
 
@@ -324,7 +248,7 @@ const GrowthPage: React.FC = () => {
           <h2>{tr('暂无评估数据', 'No evaluation data yet')}</h2>
           <p>{tr('完成一次练习并生成评估后，这里会显示总览和趋势。', 'Complete one practice and generate an evaluation to see the overview and trends.')}</p>
           <button className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
-            {tr('去练习', 'Start practice')}
+            {t('common.startPractice')}
           </button>
         </div>
       </PageShell>
@@ -332,49 +256,25 @@ const GrowthPage: React.FC = () => {
   }
 
   const { evaluations, overview } = dashboard
-  const radarData = buildRadarData(evaluations, tr)
+  const radarData = buildRadarData(evaluations, t)
   const dimChanges = computeDimensionChanges(evaluations)
+  const recentEvaluations = evaluations.slice(0, RECENT_EVALUATION_LIMIT)
 
   return (
     <PageShell width="wide" className="growth-page">
-      {/* Gamification stats row */}
-      <div className="gp-gamification-row">
-        <div className="gp-gam-card">
-          <div className="gp-gam-value">{xp}</div>
-          <div className="gp-gam-label">
-            <Zap size={11} /> {tr('总经验值', 'Total XP')}
-          </div>
-        </div>
-        <div className="gp-gam-card">
-          <div className="gp-gam-value">Lv.{levelInfo.level}</div>
-          <div className="gp-gam-label">
-            <Trophy size={11} /> {tr('等级', 'Level')}
-          </div>
-          <div className="gp-level-bar">
-            <div
-              className="gp-level-bar-fill"
-              style={{ width: `${levelInfo.progress * 100}%` }}
-            />
-          </div>
-        </div>
-        <div className="gp-gam-card">
-          <div className="gp-gam-value">{streak}</div>
-          <div className="gp-gam-label">
-            <Flame size={11} /> {tr('连续天数', 'Streak')}
-          </div>
-        </div>
-        <div className="gp-gam-card">
-          <div className="gp-gam-value">{overview.total_evaluations}</div>
-          <div className="gp-gam-label">
-            <Star size={11} /> {tr('评估次数', 'Evaluations')}
-          </div>
-        </div>
-      </div>
-
       {/* 1. Overall Score Header */}
       <section className="gp-score-header">
         <div className="gp-score-header-top">
           <span className="gp-section-label">{tr('能力总览', 'Ability Overview')}</span>
+          <div className="gp-score-header-actions">
+            <span className="gp-section-count">
+              {tr('{count} 次评估', '{count} evaluations', { count: overview.total_evaluations })}
+            </span>
+            <Link to={APP_ROUTES.growthLeaderboard} className="gp-section-link">
+              {t('common.teamBoard')}
+              <ChevronRight size={14} />
+            </Link>
+          </div>
         </div>
 
         <div className="gp-score-summary">
@@ -413,8 +313,8 @@ const GrowthPage: React.FC = () => {
                 <Radar
                   name={tr('最新评估', 'Latest Evaluation')}
                   dataKey="latest"
-                  stroke="var(--violet, #8B7EC8)"
-                  fill="var(--violet, #8B7EC8)"
+                  stroke="var(--green, #0F766E)"
+                  fill="var(--green, #0F766E)"
                   fillOpacity={0.25}
                   strokeWidth={2}
                 />
@@ -422,7 +322,7 @@ const GrowthPage: React.FC = () => {
             </ResponsiveContainer>
             <div className="gp-radar-legend">
               <span className="gp-radar-legend-item">
-                <span className="gp-radar-dot" style={{ background: 'var(--violet, #8B7EC8)' }} /> {tr('最新评估', 'Latest Evaluation')}
+                <span className="gp-radar-dot" style={{ background: 'var(--green, #0F766E)' }} /> {tr('最新评估', 'Latest Evaluation')}
               </span>
               {evaluations.length > 1 && (
                 <span className="gp-radar-legend-item">
@@ -443,7 +343,7 @@ const GrowthPage: React.FC = () => {
               return (
                 <div key={dim} className="gp-dim-change">
                   <span className="gp-dim-change-name">
-                    {getDimensionLabel(dim, tr)}
+                    {getDimensionLabel(dim, t)}
                   </span>
                   <span className={`gp-dim-change-arrow ${arrow}`}>
                     {arrow === 'up' && <><ArrowUp size={12} />+{change}</>}
@@ -459,15 +359,21 @@ const GrowthPage: React.FC = () => {
 
       {/* 2. Evaluation History */}
       <section className="gp-eval-history">
-        <h3 className="gp-eval-history-title">{tr('评估历史', 'Evaluation History')}</h3>
+        <div className="gp-section-heading">
+          <h3 className="gp-eval-history-title">{tr('近期复盘', 'Recent reviews')}</h3>
+          <Link to={APP_ROUTES.reviewSessions} className="gp-section-link">
+            {t('common.viewAllReviews')}
+            <ChevronRight size={14} />
+          </Link>
+        </div>
         <div className="gp-eval-list">
-          {evaluations.map((ev) => {
+          {recentEvaluations.map((ev) => {
             const grade = scoreToGrade(ev.overall_score)
             const cls = gradeClass(ev.overall_score)
             const date = ev.created_at
               ? new Date(ev.created_at).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US')
               : ''
-            const feedback = buildFeedbackSummary(ev.scores, tr)
+            const feedback = buildFeedbackSummary(ev.scores, t, tr)
             return (
               <Link
                 key={ev.id}
@@ -512,9 +418,9 @@ const GrowthPage: React.FC = () => {
                   {status === 'current' && <span className="gp-timeline-circle-dot" />}
                   {status === 'locked' && <Lock size={12} />}
                 </div>
-                <div className="gp-timeline-name">{tr(SKILL_NAMES[dim], SKILL_NAMES_EN[dim])}</div>
+                <div className="gp-timeline-name">{t(growthSkillKey(dim, 'name'))}</div>
                 <div className="gp-timeline-desc">
-                  {tr(SKILL_DESCRIPTIONS[dim], SKILL_DESCRIPTIONS_EN[dim])}
+                  {t(growthSkillKey(dim, 'desc'))}
                 </div>
                 {status === 'completed' && (
                   <div className="gp-timeline-status-badge completed">
@@ -522,15 +428,15 @@ const GrowthPage: React.FC = () => {
                   </div>
                 )}
                 {status === 'current' && (
-                  <div className="gp-timeline-suggestion">
+                  <Link to={APP_ROUTES.practiceScenarios} className="gp-timeline-suggestion">
                     <Sparkles size={12} /> {tr('推荐练习: {text}', 'Recommended practice: {text}', {
-                      text: tr(SKILL_SUGGESTIONS[dim], SKILL_SUGGESTIONS_EN[dim]),
+                      text: t(growthSkillKey(dim, 'suggestion')),
                     })}
-                  </div>
+                  </Link>
                 )}
                 {status === 'locked' && (
                   <div className="gp-timeline-status-badge locked">
-                    <Lock size={11} /> {tr(SKILL_UNLOCK_CONDITIONS[dim], SKILL_UNLOCK_CONDITIONS_EN[dim])}
+                    <Lock size={11} /> {t(growthSkillKey(dim, 'unlock'))}
                   </div>
                 )}
               </div>
@@ -554,7 +460,7 @@ const GrowthPage: React.FC = () => {
               ) : (
                 <Download size={14} />
               )}
-              {downloading ? tr('生成中...', 'Generating...') : tr('下载为图片', 'Download Image')}
+              {downloading ? t('common.generating') : tr('下载为图片', 'Download Image')}
             </button>
           )}
         </div>
@@ -578,7 +484,7 @@ const GrowthPage: React.FC = () => {
               ) : (
                 <Share2 size={14} />
               )}
-              {profileCardLoading ? tr('生成中...', 'Generating...') : tr('生成我的名片', 'Generate My Card')}
+              {profileCardLoading ? t('common.generating') : tr('生成我的名片', 'Generate My Card')}
             </button>
           </div>
         ) : (

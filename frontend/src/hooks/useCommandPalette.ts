@@ -84,6 +84,27 @@ export function useCommandPalette(
         },
       },
       {
+        id: 'action-live-coach',
+        type: 'action' as const,
+        label: t('command.action.liveCoach'),
+        icon: 'Radio',
+        roles: MANAGEMENT_SYSTEM_ROLES,
+        onSelect: () => {
+          close()
+          navigate(APP_ROUTES.practiceLiveCoach)
+        },
+      },
+      {
+        id: 'action-defense-prep',
+        type: 'action' as const,
+        label: t('command.action.defensePrep'),
+        icon: 'FileText',
+        onSelect: () => {
+          close()
+          navigate(APP_ROUTES.practiceDefense)
+        },
+      },
+      {
         id: 'action-battle-prep',
         type: 'action' as const,
         label: t('command.action.battlePrep'),

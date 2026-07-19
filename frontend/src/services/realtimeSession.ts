@@ -1,5 +1,3 @@
-import { getAuthRequestHeaders } from './auth'
-
 export type RealtimeSessionStatus =
   | 'idle'
   | 'connecting'
@@ -41,9 +39,6 @@ export type RealtimeClientEvent =
   | { type: 'session.configure'; sessionId?: string; roomId?: number | string }
   | { type: 'audio.input'; audio: ArrayBuffer | Blob; mimeType?: string; sequence?: number }
   | { type: 'audio.commit' }
-  | { type: 'transcript.done'; text: string; metadata?: Record<string, unknown> }
-  | { type: 'conversation.item.input_audio_transcription.completed'; transcript: string; metadata?: Record<string, unknown> }
-  | { type: 'input_audio_transcription.completed'; transcript: string; metadata?: Record<string, unknown> }
   | { type: 'response.cancel' }
   | { type: 'session.close'; reason?: string }
 
@@ -107,27 +102,6 @@ export interface RealtimeSessionOptions extends RealtimeSessionHandlers {
 }
 
 export type RealtimeTranscriptRole = 'user' | 'assistant'
-
-export interface PersistRealtimeTranscriptMessage {
-  role: RealtimeTranscriptRole
-  content: string
-  event_id?: string
-  item_id?: string
-  response_id?: string
-  sender_id?: string
-  metadata?: Record<string, unknown>
-}
-
-export interface PersistRealtimeTranscriptsResult {
-  messages: Array<{
-    id: number
-    room_id: number
-    sender_type: string
-    sender_id: string
-    content: string
-    metadata?: Record<string, unknown>
-  }>
-}
 
 function isRealtimeSessionStatus(value: unknown): value is RealtimeSessionStatus {
   return (
@@ -456,7 +430,6 @@ export function createRealtimeSession(options: RealtimeSessionOptions): Realtime
 export function getTrainingRealtimeWebSocketUrl({
   sessionId,
   roomId,
-  provider,
   audioFormat,
 }: {
   sessionId?: string | number | null
@@ -472,98 +445,10 @@ export function getTrainingRealtimeWebSocketUrl({
   if (roomId !== undefined && roomId !== null && String(roomId).trim()) {
     params.set('room_id', String(roomId).trim())
   }
-  if (provider !== undefined && provider !== null && String(provider).trim()) {
-    params.set('provider', String(provider).trim())
-  }
+  params.set('provider', 'pipecat')
   if (audioFormat !== undefined && audioFormat !== null && String(audioFormat).trim()) {
     params.set('audio_format', String(audioFormat).trim())
   }
   const query = params.toString()
   return `${base}/api/v1/training-studio/realtime${query ? `?${query}` : ''}`
-}
-
-function buildTrainingRealtimeQuery({
-  sessionId,
-  roomId,
-}: {
-  sessionId?: string | number | null
-  roomId?: string | number | null
-} = {}): string {
-  const params = new URLSearchParams()
-  if (sessionId !== undefined && sessionId !== null && String(sessionId).trim()) {
-    params.set('session_id', String(sessionId).trim())
-  }
-  if (roomId !== undefined && roomId !== null && String(roomId).trim()) {
-    params.set('room_id', String(roomId).trim())
-  }
-  const query = params.toString()
-  return query ? `?${query}` : ''
-}
-
-export function getTrainingRealtimeSdpPath({
-  sessionId,
-  roomId,
-}: {
-  sessionId?: string | number | null
-  roomId?: string | number | null
-} = {}): string {
-  return `/api/v1/training-studio/realtime/sdp${buildTrainingRealtimeQuery({ sessionId, roomId })}`
-}
-
-async function readRealtimeError(response: Response, fallback: string): Promise<string> {
-  const raw = await response.text().catch(() => '')
-  if (!raw) return fallback
-  try {
-    const body = JSON.parse(raw)
-    const detail = typeof body?.detail === 'string' ? body.detail : body?.detail?.message
-    return body?.error?.details || detail || body?.message || fallback
-  } catch {
-    return raw
-  }
-}
-
-export async function createTrainingRealtimeSdpAnswer({
-  offerSdp,
-  sessionId,
-  roomId,
-}: {
-  offerSdp: string
-  sessionId?: string | number | null
-  roomId?: string | number | null
-}): Promise<string> {
-  const response = await fetch(getTrainingRealtimeSdpPath({ sessionId, roomId }), {
-    method: 'POST',
-    headers: { ...getAuthRequestHeaders(), 'Content-Type': 'application/sdp' },
-    body: offerSdp,
-  })
-  if (!response.ok) {
-    const message = await readRealtimeError(response, `Realtime SDP request failed (${response.status})`)
-    throw new Error(message)
-  }
-  return response.text()
-}
-
-export async function persistTrainingRealtimeTranscripts({
-  sessionId,
-  roomId,
-  messages,
-}: {
-  sessionId: string | number
-  roomId: string | number
-  messages: PersistRealtimeTranscriptMessage[]
-}): Promise<PersistRealtimeTranscriptsResult> {
-  const response = await fetch('/api/v1/training-studio/realtime/transcripts', {
-    method: 'POST',
-    headers: { ...getAuthRequestHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: String(sessionId),
-      room_id: Number(roomId),
-      messages,
-    }),
-  })
-  const body = await response.json().catch(() => null)
-  if (!response.ok) {
-    throw new Error(body?.detail || body?.message || `Realtime transcript persistence failed (${response.status})`)
-  }
-  return body.data as PersistRealtimeTranscriptsResult
 }

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
-  Database,
   Library,
   Plus,
   RotateCcw,
@@ -135,7 +134,6 @@ export default function ScenarioConfigPage() {
   const [scenarioQuery, setScenarioQuery] = useState('')
   const [dimensionQuery, setDimensionQuery] = useState('')
   const [notice, setNotice] = useState<ScenarioConfigNotice | null>(null)
-  const [isRemoteLoading, setIsRemoteLoading] = useState(true)
   const [isRemoteSaving, setIsRemoteSaving] = useState(false)
 
   const selectedScenario = useMemo(
@@ -174,7 +172,6 @@ export default function ScenarioConfigPage() {
   useEffect(() => {
     let active = true
 
-    setIsRemoteLoading(true)
     setNotice({
       tone: 'info',
       message: trRef.current('正在从后端加载场景配置。', 'Loading scenario config from backend.'),
@@ -201,11 +198,6 @@ export default function ScenarioConfigPage() {
             { message: getErrorMessage(error) },
           ),
         })
-      })
-      .finally(() => {
-        if (active) {
-          setIsRemoteLoading(false)
-        }
       })
 
     return () => {
@@ -425,15 +417,10 @@ export default function ScenarioConfigPage() {
         <div>
           <div className="scenario-config-kicker">
             <SlidersHorizontal size={16} />
-            <span>{tr('场景管理配置', 'Scenario Admin Config')}</span>
+            <span>{tr('训练模板/评分', 'Templates / Rubrics')}</span>
           </div>
-          <h1>{tr('场景草稿与评分规则', 'Scenario drafts and scoring rubrics')}</h1>
-          <p>
-            {tr(
-              '优先同步后端场景配置，同时保留本地草稿兜底，管理可复用评分维度库和每个场景的评分权重。',
-              'Sync scenario config from the backend first while keeping local drafts as fallback, including reusable dimensions and per-scenario scoring weights.',
-            )}
-          </p>
+          <h1>{tr('训练场景与评分规则', 'Training scenarios and rubrics')}</h1>
+          <p>{tr('统一管理可练习场景、评分维度与权重。', 'Manage practice scenarios, scoring dimensions, and weights.')}</p>
         </div>
         <div className="scenario-config-header-actions">
           <button type="button" onClick={createDimensionDraft} disabled={isRemoteSaving}>
@@ -450,7 +437,7 @@ export default function ScenarioConfigPage() {
       <section className="scenario-config-stats" aria-label={tr('场景配置概览', 'Scenario configuration summary')}>
         <div>
           <strong>{state.scenarios.length}</strong>
-          <span>{tr('本地草稿', 'Local drafts')}</span>
+          <span>{tr('场景', 'Scenarios')}</span>
         </div>
         <div>
           <strong>{enabledDimensions.length}/{state.dimensions.length}</strong>
@@ -464,19 +451,6 @@ export default function ScenarioConfigPage() {
           <strong>{formatDate(state.updatedAt, locale, tr)}</strong>
           <span>{tr('最近配置修改', 'Last config change')}</span>
         </div>
-      </section>
-
-      <section className="scenario-config-api-note">
-        <Database size={16} />
-        <span>
-          {isRemoteLoading
-            ? tr('正在连接后端配置接口：', 'Connecting to backend config API: ')
-            : isRemoteSaving
-              ? tr('正在写入后端配置接口：', 'Writing backend config API: ')
-              : tr('后端优先同步接口：', 'Backend-first sync API: ')}
-          <code>GET/PUT /api/v1/training-studio/scenario-config</code>
-          {tr('；后端不可用时继续使用 localStorage 草稿。', '; localStorage drafts remain available when the backend is unavailable.')}
-        </span>
       </section>
 
       {notice && (

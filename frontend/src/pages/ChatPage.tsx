@@ -712,7 +712,7 @@ function ChatArea() {
           setGuidanceOpen(true)
         }
       } catch {
-        setGuidanceError(tr('Live guidance stream failed', 'Live guidance stream failed'))
+        setGuidanceError(tr('实时提示流失败', 'Live guidance stream failed'))
       }
     })
 
@@ -720,9 +720,9 @@ function ChatArea() {
       if (!isCurrentStream()) return
       try {
         const data = JSON.parse(event.data)
-        setGuidanceError(getErrorMessage(data, tr('Live guidance stream failed', 'Live guidance stream failed')))
+        setGuidanceError(getErrorMessage(data, tr('实时提示流失败', 'Live guidance stream failed')))
       } catch {
-        setGuidanceError(tr('Live guidance stream failed', 'Live guidance stream failed'))
+        setGuidanceError(tr('实时提示流失败', 'Live guidance stream failed'))
       }
       setGuidanceLoading(false)
       setGuidanceStreamConnected(false)
@@ -852,7 +852,7 @@ function ChatArea() {
       }
     } catch (e: unknown) {
       if (guidanceRequestSeqRef.current !== requestId) return
-      setGuidanceError(e instanceof Error ? e.message : tr('Live guidance failed', 'Live guidance failed'))
+      setGuidanceError(e instanceof Error ? e.message : tr('实时提示失败', 'Live guidance failed'))
     } finally {
       guidanceInFlightRef.current = false
       if (guidanceRequestSeqRef.current === requestId) {
@@ -1062,10 +1062,10 @@ function ChatArea() {
   const guidanceBarTitle = isLiveCoachSession ? tr('实时教练', 'Live coach') : tr('实时指导', 'Realtime guidance')
   const guidanceReadyText = isLiveCoachSession
     ? tr('已准备好为这场对话提供教练建议', 'Ready to coach this conversation')
-    : tr('Ready during this training session', 'Ready during this training session')
+    : tr('本次训练中可用', 'Ready during this training session')
   const guidanceStreamingText = isLiveCoachSession
     ? tr('正在观察实时转写', 'Watching the live transcript')
-    : tr('Streaming during this training session', 'Streaming during this training session')
+    : tr('本次训练中正在流式输出', 'Streaming during this training session')
   const guidanceActionText = isLiveCoachSession ? tr('问教练', 'Ask coach') : tr('给我指导', 'Guide me')
   const realtimeBarTitle = isLiveCoachSession
     ? tr('真实对话教练', 'Live conversation coach')
@@ -1341,7 +1341,7 @@ function ChatArea() {
       if (isVideoBattlePrep) {
         setVideoAnswerStatus('error')
         setVideoAnswerError(
-          tr('瑙嗛鍥炵瓟闇€瑕佸凡缁戝畾鐨勮缁冧細璇濆拰鎴?间俊鎭?', 'Video answers require a bound training session and room.'),
+          tr('视频回答需要已绑定的训练会话和房间信息。', 'Video answers require a bound training session and room.'),
         )
       }
       return
@@ -1384,7 +1384,7 @@ function ChatArea() {
       scheduleGuidanceRefresh({
         extraTurn: {
           speaker: 'user',
-          text: chat.inputValue.trim() || fallbackCaption || tr('I submitted a recorded video answer.', 'I submitted a recorded video answer.'),
+          text: chat.inputValue.trim() || fallbackCaption || tr('我提交了一段视频回答。', 'I submitted a recorded video answer.'),
           metadata: {
             source: 'video_answer',
             mimeType: result.mimeType,
@@ -1528,7 +1528,7 @@ function ChatArea() {
                 aria-controls="training-scene-details"
                 onClick={() => setTrainingSceneExpanded((v) => !v)}
               >
-                <span>{trainingSceneExpanded ? tr('Hide details', 'Hide details') : tr('Details', 'Details')}</span>
+                <span>{trainingSceneExpanded ? tr('收起', 'Hide details') : tr('详情', 'Details')}</span>
                 <ChevronDown size={14} />
               </button>
             </div>
@@ -1677,11 +1677,7 @@ function ChatArea() {
           <div className="live-coach-strip-main">
             <Languages size={15} />
             <strong>{liveCoachLanguageSummary || tr('双语辅助', 'Bilingual assist')}</strong>
-            <span>{tr('文本优先双语教练', 'Text-first bilingual coaching')}</span>
-          </div>
-          <div className="live-coach-strip-meta">
-            <span>{tr('支持 70+ 语言', '70+ languages')}</span>
-            <span>{tr('保留语气意图', 'Tone intent preserved')}</span>
+            <span>{tr('转写、下一句和复盘语言按本场配置。', 'Transcript, next-line guidance, and review language follow this session.')}</span>
           </div>
         </section>
       )}

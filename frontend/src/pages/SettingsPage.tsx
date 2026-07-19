@@ -50,7 +50,7 @@ import {
   type VoicePreferenceConfig,
 } from '../services/voiceConfig'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
-import { useI18n } from '../i18n'
+import { useI18n, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './SettingsPage.css'
 
@@ -83,12 +83,12 @@ function getErrorMessage(error: unknown): string {
 type TabKey = 'personas' | 'scenarios' | 'organizations' | 'config'
 type SettingsTabKey = TabKey | 'training'
 
-const TABS: { key: SettingsTabKey; labelZh: string; labelEn: string; icon: React.ReactNode }[] = [
-  { key: 'personas', labelZh: '角色', labelEn: 'Personas', icon: <Users size={14} /> },
-  { key: 'scenarios', labelZh: '场景', labelEn: 'Scenarios', icon: <Layers size={14} /> },
-  { key: 'organizations', labelZh: '组织', labelEn: 'Organizations', icon: <Building2 size={14} /> },
-  { key: 'training', labelZh: '训练模板', labelEn: 'Training Templates', icon: <ClipboardList size={14} /> },
-  { key: 'config', labelZh: 'AI 服务', labelEn: 'AI Services', icon: <KeyRound size={14} /> },
+const TABS: { key: SettingsTabKey; labelKey: TranslationKey; icon: React.ReactNode }[] = [
+  { key: 'personas', labelKey: 'settings.tabs.personas', icon: <Users size={14} /> },
+  { key: 'scenarios', labelKey: 'settings.tabs.scenarios', icon: <Layers size={14} /> },
+  { key: 'organizations', labelKey: 'settings.tabs.organizations', icon: <Building2 size={14} /> },
+  { key: 'training', labelKey: 'settings.tabs.training', icon: <ClipboardList size={14} /> },
+  { key: 'config', labelKey: 'settings.tabs.config', icon: <KeyRound size={14} /> },
 ]
 
 const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'config']
@@ -100,7 +100,7 @@ export function SettingsShell({
   activeTab: SettingsTabKey
   children: React.ReactNode
 }) {
-  const { tr } = useI18n()
+  const { t } = useI18n()
   const navigate = useNavigate()
 
   const selectTab = (tab: SettingsTabKey) => {
@@ -121,7 +121,7 @@ export function SettingsShell({
             onClick={() => selectTab(tab.key)}
           >
             {tab.icon}
-            {tr(tab.labelZh, tab.labelEn)}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>
@@ -139,7 +139,7 @@ export function SettingsShell({
 
 function PersonasTab() {
   const navigate = useNavigate()
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
   const { personaMap, currentOrg, reloadPersonas } = useAppContext()
   const personas = Object.values(personaMap)
   const dialog = useConfirmDialog()
@@ -235,7 +235,7 @@ function PersonasTab() {
                     },
                   )
                 }}
-                title={tr('删除', 'Delete')}
+                title={t('common.delete')}
               >
                 <Trash2 size={14} />
               </button>
@@ -251,7 +251,7 @@ function PersonasTab() {
         editingPersona={editing}
         currentOrg={currentOrg}
       />
-      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={tr('删除', 'Delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
+      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={t('common.delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
     </>
   )
 }
@@ -261,7 +261,7 @@ function PersonasTab() {
 // ---------------------------------------------------------------------------
 
 function ScenariosTab() {
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
   const { personaMap, reloadScenarios } = useAppContext()
   const dialog = useConfirmDialog()
 
@@ -362,8 +362,8 @@ function ScenariosTab() {
   const handleDelete = () => {
     if (!editing) return
     dialog.ask(
-      tr('删除场景', 'Delete Scenario'),
-      tr('确定删除场景「{name}」？此操作无法撤销。', 'Delete scenario “{name}”? This cannot be undone.', { name: editing.name }),
+      tr('删除对话场景', 'Delete room scenario'),
+      tr('确定删除对话场景「{name}」？此操作无法撤销。', 'Delete room scenario “{name}”? This cannot be undone.', { name: editing.name }),
       async () => {
       setSubmitting(true)
       try {
@@ -383,10 +383,10 @@ function ScenariosTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('场景', 'Scenarios')}</h3>
+        <h3 className="settings-section-title">{tr('对话场景', 'Room scenarios')}</h3>
         <button className="settings-create-btn" onClick={startCreate}>
           <Plus size={14} />
-          {tr('新建场景', 'New Scenario')}
+          {tr('新建对话场景', 'New room scenario')}
         </button>
       </div>
 
@@ -396,7 +396,7 @@ function ScenariosTab() {
             <div className="settings-empty-icon">
               <Layers size={36} />
             </div>
-            <p>{tr('暂无场景', 'No scenarios yet')}</p>
+            <p>{tr('暂无对话场景', 'No room scenarios yet')}</p>
           </div>
         )}
         {scenarios.map((s) => (
@@ -433,14 +433,14 @@ function ScenariosTab() {
                 onClick={(e) => {
                   e.stopPropagation()
                   dialog.ask(
-                    tr('删除场景', 'Delete Scenario'),
-                    tr('确定删除场景「{name}」？此操作无法撤销。', 'Delete scenario “{name}”? This cannot be undone.', { name: s.name }),
+                    tr('删除对话场景', 'Delete room scenario'),
+                    tr('确定删除对话场景「{name}」？此操作无法撤销。', 'Delete room scenario “{name}”? This cannot be undone.', { name: s.name }),
                     () => {
                     deleteScenario(s.id).then(() => { loadData(); reloadScenarios() })
                     },
                   )
                 }}
-                title={tr('删除', 'Delete')}
+                title={t('common.delete')}
               >
                 <Trash2 size={14} />
               </button>
@@ -451,7 +451,7 @@ function ScenariosTab() {
 
       {showForm && (
         <div className="settings-form-panel">
-          <h4>{isNew ? tr('新建场景', 'New Scenario') : tr('编辑场景', 'Edit Scenario')}</h4>
+          <h4>{isNew ? tr('新建对话场景', 'New room scenario') : tr('编辑对话场景', 'Edit room scenario')}</h4>
 
           <label className="field-label">
             {tr('名称', 'Name')}
@@ -459,7 +459,7 @@ function ScenariosTab() {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={tr('场景名称', 'Scenario name')}
+              placeholder={tr('对话场景名称', 'Room scenario name')}
               autoFocus
             />
           </label>
@@ -479,7 +479,7 @@ function ScenariosTab() {
             <textarea
               value={contextPrompt}
               onChange={(e) => setContextPrompt(e.target.value)}
-              placeholder={tr('场景背景和约束', 'Scenario context and constraints')}
+              placeholder={tr('对话背景和约束', 'Conversation context and constraints')}
             />
           </label>
 
@@ -506,7 +506,7 @@ function ScenariosTab() {
           <div className="settings-form-actions">
             {editing && (
               <button className="btn-delete" onClick={handleDelete} disabled={submitting}>
-                {tr('删除', 'Delete')}
+                {t('common.delete')}
               </button>
             )}
             <button className="btn-cancel" onClick={handleCancel}>{tr('取消', 'Cancel')}</button>
@@ -515,12 +515,12 @@ function ScenariosTab() {
               onClick={handleSave}
               disabled={submitting}
             >
-              {submitting ? tr('保存中...', 'Saving...') : tr('保存', 'Save')}
+              {submitting ? t('common.saving') : t('common.save')}
             </button>
           </div>
         </div>
       )}
-      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={tr('删除', 'Delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
+      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={t('common.delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
     </>
   )
 }
@@ -537,7 +537,7 @@ const REL_LABELS: Record<string, { zh: string; en: string }> = {
 }
 
 function OrganizationsTab() {
-  const { tr } = useI18n()
+  const { t: translate, tr } = useI18n()
   const { reloadOrganizations, reloadPersonas } = useAppContext()
   const dialog = useConfirmDialog()
   const [personas, setPersonas] = useState<PersonaSummary[]>([])
@@ -805,7 +805,7 @@ function OrganizationsTab() {
                   <button className="btn-delete" onClick={handleDeleteOrg}>{tr('删除组织', 'Delete Organization')}</button>
                 )}
                 <button className="btn-submit" onClick={handleSaveOrg} disabled={saving || !orgName.trim()}>
-                  {saving ? tr('保存中...', 'Saving...') : tr('保存', 'Save')}
+                  {saving ? translate('common.saving') : translate('common.save')}
                 </button>
               </div>
             </>
@@ -815,16 +815,16 @@ function OrganizationsTab() {
             <>
               {teams.length > 0 ? (
                 <div className="team-list">
-                  {teams.map((t) => {
-                    const members = personas.filter((p) => p.team_id === t.id)
+                  {teams.map((team) => {
+                    const members = personas.filter((p) => p.team_id === team.id)
                     return (
-                      <div key={t.id} className="team-item-block">
+                      <div key={team.id} className="team-item-block">
                         <div className="team-item">
                           <div className="team-item-info">
-                            <div className="team-item-name">{t.name}</div>
-                            {t.description && <div className="team-item-desc">{t.description}</div>}
+                            <div className="team-item-name">{team.name}</div>
+                            {team.description && <div className="team-item-desc">{team.description}</div>}
                           </div>
-                          <button className="team-delete-btn" onClick={() => handleDeleteTeam(t.id)}>{tr('删除', 'Delete')}</button>
+                          <button className="team-delete-btn" onClick={() => handleDeleteTeam(team.id)}>{translate('common.delete')}</button>
                         </div>
                         <div className="team-members">
                           {members.length > 0 ? (
@@ -845,7 +845,7 @@ function OrganizationsTab() {
                           <select
                             className="team-add-member-select"
                             value=""
-                            onChange={(e) => e.target.value && handleAssignToTeam(e.target.value, t.id)}
+                            onChange={(e) => e.target.value && handleAssignToTeam(e.target.value, team.id)}
                           >
                             <option value="">{tr('+ 添加角色', '+ Add Persona')}</option>
                             {unassignedPersonas.map((p) => (
@@ -898,7 +898,7 @@ function OrganizationsTab() {
                         <strong>{personaName(r.to_persona_id)}</strong>
                         {r.description && <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>-- {r.description}</span>}
                       </span>
-                      <button className="team-delete-btn" onClick={() => handleDeleteRelationship(r.id)}>{tr('删除', 'Delete')}</button>
+                      <button className="team-delete-btn" onClick={() => handleDeleteRelationship(r.id)}>{translate('common.delete')}</button>
                     </div>
                   ))}
                 </div>
@@ -929,7 +929,7 @@ function OrganizationsTab() {
           {error && <div className="settings-error">{error}</div>}
         </div>
       </div>
-      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={tr('删除', 'Delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
+      <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={translate('common.delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
     </>
   )
 }
@@ -956,7 +956,6 @@ interface VoicePreferenceForm {
   realtimeModel: string
   realtimeVoice: string
   realtimeTranscriptionModel: string
-  realtimeCallUrl: string
 }
 
 const DEFAULT_VOICE_FORM: VoicePreferenceForm = {
@@ -977,7 +976,6 @@ const DEFAULT_VOICE_FORM: VoicePreferenceForm = {
   realtimeModel: 'gpt-realtime',
   realtimeVoice: 'marin',
   realtimeTranscriptionModel: 'gpt-realtime-whisper',
-  realtimeCallUrl: 'https://api.openai.com/v1/realtime/calls',
 }
 
 function toVoiceForm(config: VoicePreferenceConfig): VoicePreferenceForm {
@@ -999,12 +997,11 @@ function toVoiceForm(config: VoicePreferenceConfig): VoicePreferenceForm {
     realtimeModel: config.realtime_model || DEFAULT_VOICE_FORM.realtimeModel,
     realtimeVoice: config.realtime_voice || DEFAULT_VOICE_FORM.realtimeVoice,
     realtimeTranscriptionModel: config.realtime_transcription_model || DEFAULT_VOICE_FORM.realtimeTranscriptionModel,
-    realtimeCallUrl: config.realtime_call_url || DEFAULT_VOICE_FORM.realtimeCallUrl,
   }
 }
 
 function ConfigTab() {
-  const { tr } = useI18n()
+  const { t, tr } = useI18n()
   const [config, setConfig] = useState<VoicePreferenceConfig | null>(null)
   const [form, setForm] = useState<VoicePreferenceForm>(DEFAULT_VOICE_FORM)
   const [loading, setLoading] = useState(true)
@@ -1036,15 +1033,15 @@ function ConfigTab() {
   const keyText = (configured: boolean, preview: string | null) => (
     configured
       ? tr('已配置 {preview}', 'Configured {preview}', { preview: preview || '' })
-      : tr('未配置', 'Not configured')
+      : t('common.notConfigured')
   )
 
   const sourceText = (source: string) => {
     if (source === 'tts') return tr('复用 TTS key', 'Reuses TTS key')
     if (source === 'llm') return tr('回退到 LLM key', 'Falls back to LLM key')
-    if (source === 'realtime') return tr('使用 Realtime 专用 key', 'Uses dedicated Realtime key')
+    if (source === 'realtime') return tr('使用 Pipecat 实时服务专用 key', 'Uses dedicated Pipecat realtime service key')
     if (source === 'stt') return tr('使用 STT 专用 key', 'Uses dedicated STT key')
-    return tr('未配置', 'Not configured')
+    return t('common.notConfigured')
   }
 
   const handleSave = async () => {
@@ -1068,7 +1065,6 @@ function ConfigTab() {
         realtime_model: form.realtimeModel,
         realtime_voice: form.realtimeVoice,
         realtime_transcription_model: form.realtimeTranscriptionModel,
-        realtime_call_url: form.realtimeCallUrl,
         ...(form.realtimeApiKey.trim() ? { realtime_api_key: form.realtimeApiKey.trim() } : {}),
       }
       const next = await saveVoiceConfig(payload)
@@ -1088,7 +1084,7 @@ function ConfigTab() {
         <h3 className="settings-section-title">{tr('AI 服务', 'AI Services')}</h3>
         <button className="settings-create-btn" onClick={loadConfig} disabled={loading || saving}>
           <RefreshCw size={14} />
-          {loading ? tr('加载中...', 'Loading...') : tr('刷新', 'Refresh')}
+          {loading ? t('common.loading') : t('common.refresh')}
         </button>
       </div>
 
@@ -1096,22 +1092,22 @@ function ConfigTab() {
         <div className="settings-voice-status-item">
           <KeyRound size={18} />
           <span>{tr('LLM', 'LLM')}</span>
-          <strong>{config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : tr('读取中', 'Reading')}</strong>
+          <strong>{config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : t('common.loading')}</strong>
         </div>
         <div className="settings-voice-status-item">
           <Volume2 size={18} />
           <span>{tr('TTS', 'TTS')}</span>
-          <strong>{config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : tr('读取中', 'Reading')}</strong>
+          <strong>{config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : t('common.loading')}</strong>
         </div>
         <div className="settings-voice-status-item">
           <Mic size={18} />
           <span>{tr('STT', 'STT')}</span>
-          <strong>{config ? sourceText(config.stt_api_key_source) : tr('读取中', 'Reading')}</strong>
+          <strong>{config ? sourceText(config.stt_api_key_source) : t('common.loading')}</strong>
         </div>
         <div className="settings-voice-status-item">
           <Radio size={18} />
-          <span>{tr('Realtime', 'Realtime')}</span>
-          <strong>{config ? sourceText(config.realtime_api_key_source) : tr('读取中', 'Reading')}</strong>
+          <span>{tr('实时语音', 'Realtime')}</span>
+          <strong>{config ? sourceText(config.realtime_api_key_source) : t('common.loading')}</strong>
         </div>
       </div>
 
@@ -1128,7 +1124,7 @@ function ConfigTab() {
             <h4>{tr('LLM', 'LLM')}</h4>
           </div>
           <label className="field-label">
-            {tr('Base URL', 'Base URL')}
+            {tr('基础 URL', 'Base URL')}
             <input value={form.llmBaseUrl} onChange={(e) => updateForm({ llmBaseUrl: e.target.value })} />
           </label>
           <label className="field-label">
@@ -1138,17 +1134,17 @@ function ConfigTab() {
           <label className="field-label">
             {tr('接口', 'API')}
             <select value={form.llmWireApi} onChange={(e) => updateForm({ llmWireApi: e.target.value })}>
-              <option value="responses">Responses</option>
-              <option value="chat_completions">Chat Completions</option>
+              <option value="responses">{tr('Responses 接口', 'Responses')}</option>
+              <option value="chat_completions">{tr('Chat Completions 接口', 'Chat Completions')}</option>
             </select>
           </label>
           <label className="field-label">
-            {tr('API Key', 'API Key')}
+            {tr('API 密钥', 'API Key')}
             <input
               type="password"
               value={form.llmApiKey}
               onChange={(e) => updateForm({ llmApiKey: e.target.value })}
-              placeholder={config?.llm_api_key_configured ? keyText(true, config.llm_api_key_preview) : tr('填写后保存', 'Enter a key to save')}
+              placeholder={config?.llm_api_key_configured ? keyText(true, config.llm_api_key_preview) : t('common.enterToSave')}
               autoComplete="off"
             />
           </label>
@@ -1168,7 +1164,7 @@ function ConfigTab() {
             </select>
           </label>
           <label className="field-label">
-            {tr('Base URL', 'Base URL')}
+            {tr('基础 URL', 'Base URL')}
             <input value={form.ttsBaseUrl} onChange={(e) => updateForm({ ttsBaseUrl: e.target.value })} />
           </label>
           <label className="field-label">
@@ -1176,12 +1172,12 @@ function ConfigTab() {
             <input value={form.ttsModel} onChange={(e) => updateForm({ ttsModel: e.target.value })} />
           </label>
           <label className="field-label">
-            {tr('API Key', 'API Key')}
+            {tr('API 密钥', 'API Key')}
             <input
               type="password"
               value={form.ttsApiKey}
               onChange={(e) => updateForm({ ttsApiKey: e.target.value })}
-              placeholder={config?.tts_api_key_configured ? keyText(true, config.tts_api_key_preview) : tr('填写后保存', 'Enter a key to save')}
+              placeholder={config?.tts_api_key_configured ? keyText(true, config.tts_api_key_preview) : t('common.enterToSave')}
               autoComplete="off"
             />
           </label>
@@ -1195,12 +1191,12 @@ function ConfigTab() {
           <label className="field-label">
             {tr('服务商', 'Provider')}
             <select value={form.sttProvider} onChange={(e) => updateForm({ sttProvider: e.target.value })}>
-              <option value="whisper">Whisper-compatible</option>
+              <option value="whisper">{tr('Whisper 兼容', 'Whisper-compatible')}</option>
               <option value="minimax">MiniMax</option>
             </select>
           </label>
           <label className="field-label">
-            {tr('Base URL', 'Base URL')}
+            {tr('基础 URL', 'Base URL')}
             <input value={form.sttBaseUrl} onChange={(e) => updateForm({ sttBaseUrl: e.target.value })} />
           </label>
           <label className="field-label">
@@ -1217,12 +1213,12 @@ function ConfigTab() {
           </label>
           {!form.sttUseTtsApiKey && (
             <label className="field-label">
-              {tr('STT API Key', 'STT API Key')}
+              {tr('STT API 密钥', 'STT API Key')}
               <input
                 type="password"
                 value={form.sttApiKey}
                 onChange={(e) => updateForm({ sttApiKey: e.target.value })}
-                placeholder={config?.stt_api_key_configured ? keyText(true, config.stt_api_key_preview) : tr('填写后保存', 'Enter a key to save')}
+                placeholder={config?.stt_api_key_configured ? keyText(true, config.stt_api_key_preview) : t('common.enterToSave')}
                 autoComplete="off"
               />
             </label>
@@ -1232,36 +1228,32 @@ function ConfigTab() {
         <section className="settings-form-panel settings-voice-panel">
           <div className="settings-voice-panel-title">
             <Radio size={18} />
-            <h4>{tr('Realtime', 'Realtime')}</h4>
+            <h4>{tr('实时语音', 'Realtime')}</h4>
           </div>
           <label className="field-label">
-            {tr('Realtime API Key', 'Realtime API Key')}
+            {tr('Pipecat OpenAI 服务密钥', 'Pipecat OpenAI service key')}
             <input
               type="password"
               value={form.realtimeApiKey}
               onChange={(e) => updateForm({ realtimeApiKey: e.target.value })}
-              placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('填写 OpenAI Realtime key', 'Enter an OpenAI Realtime key')}
+              placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('填写 Pipecat OpenAI 服务 key', 'Enter a Pipecat OpenAI service key')}
               autoComplete="off"
             />
           </label>
           <label className="field-label">
-            {tr('模型', 'Model')}
+            {tr('实时模型', 'Realtime model')}
             <input value={form.realtimeModel} onChange={(e) => updateForm({ realtimeModel: e.target.value })} />
           </label>
           <label className="field-label">
-            {tr('声音', 'Voice')}
+            {tr('实时声音', 'Realtime voice')}
             <input value={form.realtimeVoice} onChange={(e) => updateForm({ realtimeVoice: e.target.value })} />
           </label>
           <label className="field-label">
             {tr('转写模型', 'Transcription Model')}
             <input value={form.realtimeTranscriptionModel} onChange={(e) => updateForm({ realtimeTranscriptionModel: e.target.value })} />
           </label>
-          <label className="field-label">
-            {tr('Call URL', 'Call URL')}
-            <input value={form.realtimeCallUrl} onChange={(e) => updateForm({ realtimeCallUrl: e.target.value })} />
-          </label>
           <p className="settings-voice-note">
-            {tr('实时语音使用 Realtime；逐轮语音使用 STT/TTS。', 'Realtime voice uses Realtime; turn-based voice uses STT/TTS.')}
+            {tr('实时语音通过 Pipecat 管道运行；逐轮语音继续使用 STT/TTS。', 'Realtime voice runs through Pipecat; turn-based voice keeps using STT/TTS.')}
           </p>
         </section>
       </div>
@@ -1273,7 +1265,7 @@ function ConfigTab() {
         </button>
         <button className="btn-submit" onClick={handleSave} disabled={loading || saving}>
           <Save size={14} />
-          {saving ? tr('保存中...', 'Saving...') : tr('保存并应用', 'Save and Apply')}
+          {saving ? t('common.saving') : tr('保存并应用', 'Save and Apply')}
         </button>
       </div>
     </>

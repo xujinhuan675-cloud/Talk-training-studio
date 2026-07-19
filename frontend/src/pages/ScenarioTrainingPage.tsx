@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
   CheckCircle2,
   ClipboardList,
   Clock3,
+  FileText,
   Loader2,
   Play,
+  Radio,
   Search,
   ShieldCheck,
   SlidersHorizontal,
+  Swords,
   Trophy,
 } from 'lucide-react'
 import { startBattle } from '../services/api'
@@ -22,7 +25,8 @@ import {
 } from '../services/trainingMode'
 import { launchTrainingSessionFlow } from '../services/trainingLaunch'
 import { useAuthContext } from '../contexts/AuthContext'
-import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import { useI18n, type Locale, type Translate, type TranslateInline } from '../i18n'
+import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import { PageHeader, PageShell } from '../components/ui/page'
 import {
   buildScenarioTrainingBattlePayload,
@@ -48,6 +52,7 @@ import {
   type ScenarioCategoryFilter,
   type ScenarioDifficultyFilter,
 } from '../utils/scenarioLabels'
+import { APP_ROUTES } from '../appRoutes'
 import './ScenarioTrainingPage.css'
 
 type DifficultyFilter = ScenarioDifficultyFilter
@@ -58,16 +63,16 @@ const difficultyOptions: DifficultyFilter[] = ['all', ...scenarioDifficultyOptio
 const categoryOptions: CategoryFilter[] = ['all', ...scenarioCategoryOptions]
 const modeOptions: ScenarioLaunchMode[] = ['text', 'voice', 'realtime']
 
-function getModeLabel(value: ScenarioLaunchMode, tr: TranslateInline): string {
+function getModeLabel(value: ScenarioLaunchMode, t: Translate): string {
   switch (value) {
     case 'text':
-      return tr('文本', 'Text')
+      return t('training.mode.text.label')
     case 'voice':
-      return tr('语音', 'Voice')
+      return t('training.mode.voice.label')
     case 'video':
-      return tr('视频', 'Video')
+      return t('training.mode.video.label')
     case 'realtime':
-      return tr('实时', 'Realtime')
+      return t('training.mode.realtime.label')
   }
 }
 
@@ -116,8 +121,8 @@ function matchesScenario(
 
 export default function ScenarioTrainingPage() {
   const navigate = useNavigate()
-  const { locale, tr } = useI18n()
-  const { currentUser } = useAuthContext()
+  const { locale, t, tr } = useI18n()
+  const { currentUser, hasAnySystemRole } = useAuthContext()
   const [mode, setMode] = useState<ScenarioLaunchMode>('text')
   const [query, setQuery] = useState('')
   const [difficulty, setDifficulty] = useState<DifficultyFilter>('all')
@@ -132,6 +137,7 @@ export default function ScenarioTrainingPage() {
   ))
   const [startingScenarioId, setStartingScenarioId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
 
   useEffect(() => {
     setProgress(getScenarioTrainingProgress(progressScope))
@@ -251,6 +257,31 @@ export default function ScenarioTrainingPage() {
     <PageShell width="wide" className="scenario-training-page">
       <PageHeader title={tr('训练目录', 'Training catalog')} />
 
+      <section className="scenario-training-entrybar" aria-label={tr('训练入口', 'Practice entry points')}>
+        {canUseManagementActions && (
+          <>
+            <Link to={APP_ROUTES.practiceCustom}>
+              <SlidersHorizontal size={15} />
+              {t('nav.customPractice')}
+            </Link>
+            <Link to={APP_ROUTES.practiceLiveCoach}>
+              <Radio size={15} />
+              {t('nav.liveCoach')}
+            </Link>
+          </>
+        )}
+        <Link to={APP_ROUTES.practiceDefense}>
+          <FileText size={15} />
+          {t('nav.defensePrep')}
+        </Link>
+        {canUseManagementActions && (
+          <Link to={APP_ROUTES.practiceBattle}>
+            <Swords size={15} />
+            {t('nav.battlePrep')}
+          </Link>
+        )}
+      </section>
+
       <section className="scenario-training-toolbar" aria-label={tr('筛选与模式', 'Filters and mode')}>
         <label className="scenario-training-search">
           <Search size={16} />
@@ -302,7 +333,7 @@ export default function ScenarioTrainingPage() {
               className={mode === option ? 'selected' : ''}
               onClick={() => setMode(option)}
             >
-              {getModeLabel(option, tr)}
+              {getModeLabel(option, t)}
             </button>
           ))}
         </div>
@@ -330,6 +361,7 @@ export default function ScenarioTrainingPage() {
                     {scenario.required && <span className="required">{tr('必练', 'Required')}</span>}
                   </div>
                   <h2>{scenario.title}</h2>
+                  <p className="scenario-training-card-description">{scenario.description}</p>
                 </div>
                 <span className={`scenario-training-status ${scenario.status}`}>
                   {scenario.status === 'completed' && <CheckCircle2 size={14} />}
@@ -355,6 +387,14 @@ export default function ScenarioTrainingPage() {
                 </span>
               </div>
 
+              {scenario.trainingPoints.length > 0 && (
+                <div className="scenario-training-points" aria-label={tr('训练要点', 'Training points')}>
+                  {scenario.trainingPoints.slice(0, 2).map((point) => (
+                    <span key={point}>{point}</span>
+                  ))}
+                </div>
+              )}
+
               <div className="scenario-training-actions">
                 <button
                   type="button"
@@ -363,7 +403,7 @@ export default function ScenarioTrainingPage() {
                   disabled={startingScenarioId !== null}
                 >
                   {starting ? <Loader2 size={16} className="scenario-training-spin" /> : <Play size={16} />}
-                  {starting ? tr('启动中', 'Starting') : tr('开始练习', 'Start practice')}
+                  {starting ? t('common.starting') : t('common.startPractice')}
                 </button>
               </div>
             </article>

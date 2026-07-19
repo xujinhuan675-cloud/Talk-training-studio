@@ -6,8 +6,6 @@ export type TrainingRuntimeTransport =
   | 'message'
   | 'session'
   | 'realtime_websocket'
-  | 'realtime_sdp'
-  | 'realtime_transcripts'
 
 export interface ConversationRef {
   provider: string
@@ -233,7 +231,7 @@ const STAKEHOLDER_API_BASE = '/api/v1/stakeholder'
 const TRAINING_STUDIO_API_BASE = '/api/v1/training-studio'
 const CONVERSATION_API_BASE = '/api/v1/conversations'
 const STAKEHOLDER_ROOM_PROVIDER = 'talkwise-stakeholder-room'
-const LOCAL_REALTIME_PROVIDER = 'local'
+const PIPECAT_REALTIME_PROVIDER = 'pipecat'
 
 export function normalizeConversationRef(
   input: ConversationRefInput,
@@ -491,19 +489,11 @@ export async function applyConversationTreeMessageAction(
 export function resolveRuntimeEndpoint(options: ResolveRuntimeEndpointOptions): string {
   const mode = normalizeRuntimeMode(options.mode)
   const provider = normalizeProvider(options.provider ?? options.conversation?.provider, mode)
-  const transport = options.transport ?? defaultTransport(mode, provider)
+  const transport = options.transport ?? defaultTransport(mode)
 
   if (transport === 'session') {
     const sessionId = cleanText(options.sessionId)
     return `${TRAINING_STUDIO_API_BASE}/sessions/${sessionId ? encodeURIComponent(sessionId) : ':sessionId'}`
-  }
-
-  if (transport === 'realtime_transcripts') {
-    return `${TRAINING_STUDIO_API_BASE}/realtime/transcripts`
-  }
-
-  if (transport === 'realtime_sdp') {
-    return `${TRAINING_STUDIO_API_BASE}/realtime/sdp${trainingRealtimeQuery(options)}`
   }
 
   if (transport === 'realtime_websocket') {
@@ -755,18 +745,14 @@ function normalizeStatuses(statuses: string[] | null | undefined): string[] {
 }
 
 function normalizeProvider(provider: string | null | undefined, mode: TrainingRuntimeMode): string {
-  const fallback = mode === 'realtime' ? LOCAL_REALTIME_PROVIDER : STAKEHOLDER_ROOM_PROVIDER
+  const fallback = mode === 'realtime' ? PIPECAT_REALTIME_PROVIDER : STAKEHOLDER_ROOM_PROVIDER
+  if (mode === 'realtime') return PIPECAT_REALTIME_PROVIDER
   return cleanText(provider) ?? fallback
 }
 
-function defaultTransport(mode: TrainingRuntimeMode, provider: string): TrainingRuntimeTransport {
+function defaultTransport(mode: TrainingRuntimeMode): TrainingRuntimeTransport {
   if (mode !== 'realtime') return 'message'
-  return isOpenAIWebRtcProvider(provider) ? 'realtime_sdp' : 'realtime_websocket'
-}
-
-function isOpenAIWebRtcProvider(provider: string): boolean {
-  const normalized = normalizeToken(provider)
-  return normalized === 'openai_webrtc' || normalized === 'webrtc' || normalized === 'openai_sdp'
+  return 'realtime_websocket'
 }
 
 function trainingRealtimeQuery(options: ResolveRuntimeEndpointOptions, provider?: string): string {

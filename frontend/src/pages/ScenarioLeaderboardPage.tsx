@@ -122,6 +122,7 @@ export default function ScenarioLeaderboardPage() {
           <span className="scenario-leaderboard-kicker">
             <Trophy size={16} />
             {isManagementView ? tr('训练看板', 'Training board') : tr('我的训练', 'My training')}
+            <span className="scenario-leaderboard-kicker-scope">{teamLabel}</span>
           </span>
           <h1>{isManagementView ? tr('团队进度', 'Team progress') : tr('我的进度', 'My progress')}</h1>
         </div>
@@ -144,13 +145,6 @@ export default function ScenarioLeaderboardPage() {
             <ArrowRight size={15} />
           </Link>
         </div>
-      </section>
-
-      <section className="scenario-leaderboard-scope" aria-label={tr('训练范围', 'Training scope')}>
-        <span>
-          <Users size={15} />
-          {teamLabel}
-        </span>
       </section>
 
       {isManagementView ? (
@@ -339,7 +333,7 @@ export default function ScenarioLeaderboardPage() {
         <div className="scenario-leaderboard-panel-head">
           <h2>
             <Users size={17} />
-            {isManagementView ? tr('成员能力', 'Member ability') : tr('能力画像', 'Ability profile')}
+            {isManagementView ? tr('成员表现', 'Member performance') : tr('我的表现', 'My performance')}
           </h2>
           <span>{personal?.user.name ?? tr('暂无成员', 'No member')}</span>
         </div>
@@ -386,7 +380,7 @@ export default function ScenarioLeaderboardPage() {
 
             <div className="personal-grid">
               <section>
-                <h3>{tr('能力画像', 'Ability profile')}</h3>
+                <h3>{tr('维度评分', 'Dimension scores')}</h3>
                 {personal.abilityProfile.length ? (
                   <div className="ability-list">
                     {personal.abilityProfile.map((dimension) => (

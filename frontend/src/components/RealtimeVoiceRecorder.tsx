@@ -1,28 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Mic, Square } from 'lucide-react'
 import {
-  decodeRealtimeServerEvent,
-  createTrainingRealtimeSdpAnswer,
-  persistTrainingRealtimeTranscripts,
+  createRealtimeSession,
+  getTrainingRealtimeWebSocketUrl,
   RealtimeAudioOutputQueue,
+  type RealtimeServerEvent,
+  type RealtimeSession,
   type RealtimeAudioOutputEvent,
   type RealtimeSessionStatus,
   type RealtimeTranscriptRole,
 } from '../services/realtimeSession'
 import { useI18n } from '../i18n'
-
-type OpenAIRealtimeEvent = Record<string, unknown> & {
-  type?: string
-  event_id?: string
-  item_id?: string
-  response_id?: string
-  transcript?: string
-  text?: string
-  response?: {
-    id?: string
-    output?: Array<Record<string, unknown>>
-  }
-}
 
 export interface RealtimeVoiceRecorderProps {
   roomId: number | null
@@ -46,34 +34,6 @@ function statusLabel(
   if (status === 'error') return tr('实时语音教练出错', 'Realtime voice agent error')
   if (status === 'closed') return tr('实时语音教练已停止', 'Realtime voice agent stopped')
   return tr('实时语音教练已就绪', 'Realtime voice agent ready')
-}
-
-function eventText(event: OpenAIRealtimeEvent): string {
-  if (typeof event.transcript === 'string') return event.transcript.trim()
-  if (typeof event.text === 'string') return event.text.trim()
-  return ''
-}
-
-function responseDoneTranscript(event: OpenAIRealtimeEvent): string {
-  const output = event.response?.output
-  if (!Array.isArray(output)) return ''
-
-  const parts: string[] = []
-  for (const item of output) {
-    const content = item.content
-    if (!Array.isArray(content)) continue
-    for (const part of content) {
-      if (!part || typeof part !== 'object') continue
-      const transcript = (part as { transcript?: unknown }).transcript
-      const text = (part as { text?: unknown }).text
-      if (typeof transcript === 'string' && transcript.trim()) {
-        parts.push(transcript.trim())
-      } else if (typeof text === 'string' && text.trim()) {
-        parts.push(text.trim())
-      }
-    }
-  }
-  return parts.join(' ').trim()
 }
 
 function cleanMimeType(mimeType?: string): string {
@@ -113,6 +73,35 @@ function createPcm16AudioBuffer(context: AudioContext, event: RealtimeAudioOutpu
   return audioBuffer
 }
 
+function encodePcm16Mono(input: Float32Array, inputSampleRate: number, outputSampleRate = 16000): ArrayBuffer {
+  const sampleRate = Math.max(1, Math.floor(inputSampleRate || outputSampleRate))
+  const ratio = sampleRate / outputSampleRate
+  const frameCount = Math.max(1, Math.floor(input.length / ratio))
+  const buffer = new ArrayBuffer(frameCount * 2)
+  const view = new DataView(buffer)
+
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const start = Math.floor(frame * ratio)
+    const end = Math.min(input.length, Math.floor((frame + 1) * ratio))
+    let sum = 0
+    let samples = 0
+    for (let index = start; index < end; index += 1) {
+      sum += input[index]
+      samples += 1
+    }
+    const normalized = samples > 0 ? sum / samples : input[Math.min(start, input.length - 1)] || 0
+    const clamped = Math.max(-1, Math.min(1, normalized))
+    view.setInt16(frame * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+  }
+
+  return buffer
+}
+
+function realtimeRoleFromSender(senderType: unknown): RealtimeTranscriptRole {
+  const normalized = typeof senderType === 'string' ? senderType.trim().toLowerCase() : ''
+  return normalized === 'persona' || normalized === 'assistant' ? 'assistant' : 'user'
+}
+
 export default function RealtimeVoiceRecorder({
   roomId,
   trainingSessionId,
@@ -123,10 +112,12 @@ export default function RealtimeVoiceRecorder({
   onPersistedTranscript,
 }: RealtimeVoiceRecorderProps) {
   const { tr } = useI18n()
-  const peerRef = useRef<RTCPeerConnection | null>(null)
-  const dataChannelRef = useRef<RTCDataChannel | null>(null)
+  const realtimeSessionRef = useRef<RealtimeSession | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
+  const inputAudioContextRef = useRef<AudioContext | null>(null)
+  const inputAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const inputAudioProcessorRef = useRef<ScriptProcessorNode | null>(null)
+  const inputAudioSilenceRef = useRef<GainNode | null>(null)
   const outputAudioQueueRef = useRef<RealtimeAudioOutputQueue | null>(null)
   const outputAudioElementRef = useRef<HTMLAudioElement | null>(null)
   const outputAudioUrlRef = useRef<string | null>(null)
@@ -159,17 +150,32 @@ export default function RealtimeVoiceRecorder({
 
   const closeRealtime = useCallback((nextStatus: RealtimeSessionStatus = 'closed') => {
     stopOutputAudio()
-    dataChannelRef.current?.close()
-    dataChannelRef.current = null
-    peerRef.current?.close()
-    peerRef.current = null
+    inputAudioProcessorRef.current?.disconnect()
+    inputAudioProcessorRef.current = null
+    inputAudioSourceRef.current?.disconnect()
+    inputAudioSourceRef.current = null
+    inputAudioSilenceRef.current?.disconnect()
+    inputAudioSilenceRef.current = null
+    const realtimeSession = realtimeSessionRef.current
+    realtimeSessionRef.current = null
+    if (realtimeSession) {
+      try {
+        if (realtimeSession.isConnected) {
+          realtimeSession.send({ type: 'audio.commit' })
+        }
+      } catch {
+        // The pipeline may already have closed; close still tears down local state.
+      }
+      try {
+        realtimeSession.close(nextStatus)
+      } catch {
+        // Socket close can race with a backend close event.
+      }
+    }
     localStreamRef.current?.getTracks().forEach((track) => track.stop())
     localStreamRef.current = null
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.pause()
-      remoteAudioRef.current.srcObject = null
-    }
-    remoteAudioRef.current = null
+    void inputAudioContextRef.current?.close().catch(() => {})
+    inputAudioContextRef.current = null
     void outputAudioContextRef.current?.close().catch(() => {})
     outputAudioContextRef.current = null
     setStatus(nextStatus)
@@ -251,7 +257,7 @@ export default function RealtimeVoiceRecorder({
   const playRealtimeAudioOutput = useCallback(async (event: RealtimeAudioOutputEvent) => {
     setError(null)
     setStatus('speaking')
-    setPreview(tr('AI is speaking', 'AI is speaking'))
+    setPreview(tr('AI 正在说话', 'AI is speaking'))
     try {
       if (isPcmAudioOutput(event)) {
         await playPcmAudioOutput(event)
@@ -264,7 +270,7 @@ export default function RealtimeVoiceRecorder({
   }, [playBlobAudioOutput, playPcmAudioOutput, tr])
 
   const handleAudioOutputPlaybackError = useCallback(() => {
-    setError(tr('Realtime audio playback failed', 'Realtime audio playback failed'))
+    setError(tr('实时语音播放失败', 'Realtime audio playback failed'))
     setStatus('error')
   }, [tr])
 
@@ -282,97 +288,40 @@ export default function RealtimeVoiceRecorder({
     }
   }, [handleAudioOutputPlaybackError, playRealtimeAudioOutput])
 
-  const persistTranscript = useCallback(async (
-    role: RealtimeTranscriptRole,
-    text: string,
-    event: OpenAIRealtimeEvent,
-  ) => {
-    const content = text.trim()
-    if (!content || !roomId || !trainingSessionId) return
-    const key = `${role}:${content}`
-    if (transcriptKeysRef.current.has(key)) return
-    transcriptKeysRef.current.add(key)
-    try {
-      await persistTrainingRealtimeTranscripts({
-        sessionId: trainingSessionId,
-        roomId,
-        messages: [{
-          role,
-          content,
-          event_id: event.event_id,
-          item_id: event.item_id,
-          response_id: event.response_id || event.response?.id,
-          sender_id: role === 'assistant' ? personaId || 'assistant' : undefined,
-          metadata: {
-            ...(transcriptMetadata || {}),
-            eventType: event.type,
-          },
-        }],
-      })
-      setPreview(content)
-      onPersistedTranscript?.(content, role)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : tr('保存实时转写失败', 'Failed to save realtime transcript'))
-    }
-  }, [onPersistedTranscript, personaId, roomId, trainingSessionId, transcriptMetadata, tr])
-
-  const handleRealtimeEvent = useCallback((raw: string) => {
-    const decoded = decodeRealtimeServerEvent(raw)
-    if (decoded?.type === 'audio.output') {
-      outputAudioQueueRef.current?.enqueue(decoded)
+  const handleRealtimeEvent = useCallback((event: RealtimeServerEvent) => {
+    if (event.type === 'audio.output') {
+      outputAudioQueueRef.current?.enqueue(event)
       return
     }
-    if (decoded?.type === 'error') {
-      const message = typeof decoded.message === 'string' && decoded.message.trim()
-        ? decoded.message
-        : tr('OpenAI realtime error', 'OpenAI realtime error')
-      setError(message)
-      setStatus('error')
-      return
-    }
-
-    let event: OpenAIRealtimeEvent
-    try {
-      event = JSON.parse(raw) as OpenAIRealtimeEvent
-    } catch {
-      return
-    }
-
     if (event.type === 'error') {
-      const message = typeof event.message === 'string' ? event.message : tr('OpenAI 实时通道错误', 'OpenAI realtime error')
+      const message = typeof event.message === 'string' && event.message.trim()
+        ? event.message
+        : tr('Pipecat 实时通道错误', 'Pipecat realtime error')
       setError(message)
       setStatus('error')
       return
     }
-    if (event.type === 'input_audio_buffer.speech_started') {
-      setStatus('listening')
-      setPreview(tr('正在聆听...', 'Listening...'))
-    }
-    if (event.type === 'response.created') {
-      setStatus('speaking')
-    }
-    if (event.type === 'response.done') {
-      setStatus('listening')
-      const transcript = responseDoneTranscript(event)
-      if (transcript) void persistTranscript('assistant', transcript, event)
-    }
 
-    if (
-      event.type === 'conversation.item.input_audio_transcription.completed'
-      || event.type === 'input_audio_transcription.completed'
-    ) {
-      const transcript = eventText(event)
-      if (transcript) void persistTranscript('user', transcript, event)
+    if (event.type === 'transcript.delta' && event.text.trim()) {
+      setPreview(event.text.trim())
+      return
     }
-
-    if (
-      event.type === 'response.audio_transcript.done'
-      || event.type === 'response.output_audio_transcript.done'
-    ) {
-      const transcript = eventText(event)
-      if (transcript) void persistTranscript('assistant', transcript, event)
+    if (event.type === 'transcript.done' && event.text.trim()) {
+      setPreview(event.text.trim())
+      return
     }
-  }, [persistTranscript, tr])
+    if (event.type === 'transcript.persisted') {
+      const message = event.payload.message
+      const content = typeof message.content === 'string' ? message.content.trim() : ''
+      const role = realtimeRoleFromSender(message.sender_type)
+      const key = `${role}:${content}`
+      if (content && !transcriptKeysRef.current.has(key)) {
+        transcriptKeysRef.current.add(key)
+        setPreview(content)
+        onPersistedTranscript?.(content, role)
+      }
+    }
+  }, [onPersistedTranscript, tr])
 
   const startRealtime = useCallback(async () => {
     if (!roomId || !trainingSessionId || disabled) return
@@ -387,51 +336,91 @@ export default function RealtimeVoiceRecorder({
         throw new Error(tr('当前浏览器不可用麦克风录音', 'getUserMedia unavailable'))
       }
 
-      const peer = new RTCPeerConnection()
-      peerRef.current = peer
+      const session = createRealtimeSession({
+        url: getTrainingRealtimeWebSocketUrl({
+          sessionId: trainingSessionId,
+          roomId,
+          audioFormat: 'pcm16',
+        }),
+        onStatusChange: (nextStatus) => {
+          setStatus(nextStatus)
+          if (nextStatus === 'connected') {
+            try {
+              session.send({
+                type: 'session.start',
+                sessionId: trainingSessionId,
+                metadata: {
+                  ...(transcriptMetadata || {}),
+                  personaId: personaId || undefined,
+                },
+              })
+              session.send({
+                type: 'session.configure',
+                sessionId: trainingSessionId,
+                roomId,
+              })
+            } catch (sendError) {
+              setError(sendError instanceof Error ? sendError.message : tr('实时语音初始化失败', 'Realtime voice initialization failed'))
+              setStatus('error')
+            }
+          }
+          if (nextStatus === 'connected' || nextStatus === 'listening') {
+            setPreview(tr('实时语音教练已连接', 'Realtime voice agent connected'))
+          }
+        },
+        onEvent: handleRealtimeEvent,
+        onError: (socketError) => {
+          setError(socketError.message || tr('Pipecat 实时通道错误', 'Pipecat realtime channel error'))
+          setStatus('error')
+        },
+      })
+      realtimeSessionRef.current = session
 
-      const remoteAudio = new Audio()
-      remoteAudio.autoplay = true
-      remoteAudioRef.current = remoteAudio
-      peer.ontrack = (event) => {
-        remoteAudio.srcObject = event.streams[0]
-        void remoteAudio.play().catch(() => {})
-      }
-
-      const localStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const localStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
       localStreamRef.current = localStream
-      localStream.getAudioTracks().forEach((track) => peer.addTrack(track, localStream))
 
-      const dataChannel = peer.createDataChannel('oai-events')
-      dataChannelRef.current = dataChannel
-      dataChannel.onopen = () => {
-        setStatus('listening')
-        setPreview(tr('实时语音教练已连接', 'Realtime voice agent connected'))
+      const audioContext = createAudioContext()
+      inputAudioContextRef.current = audioContext
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume()
       }
-      dataChannel.onmessage = (message) => {
-        if (typeof message.data === 'string') {
-          handleRealtimeEvent(message.data)
+      const source = audioContext.createMediaStreamSource(localStream)
+      const processor = audioContext.createScriptProcessor(4096, 1, 1)
+      const silence = audioContext.createGain()
+      silence.gain.value = 0
+      source.connect(processor)
+      processor.connect(silence)
+      silence.connect(audioContext.destination)
+      inputAudioSourceRef.current = source
+      inputAudioProcessorRef.current = processor
+      inputAudioSilenceRef.current = silence
+
+      processor.onaudioprocess = (event) => {
+        const activeSession = realtimeSessionRef.current
+        if (activeSession !== session || !activeSession.isConnected) return
+        const input = event.inputBuffer.getChannelData(0)
+        const audio = encodePcm16Mono(input, audioContext.sampleRate)
+        try {
+          activeSession.send({ type: 'audio.input', audio, mimeType: 'audio/pcm' })
+        } catch (sendError) {
+          setError(sendError instanceof Error ? sendError.message : tr('发送实时音频失败', 'Failed to send realtime audio'))
+          setStatus('error')
         }
       }
-      dataChannel.onerror = () => {
-        setError(tr('实时数据通道错误', 'Realtime data channel error'))
-        setStatus('error')
-      }
 
-      const offer = await peer.createOffer()
-      await peer.setLocalDescription(offer)
-      const answerSdp = await createTrainingRealtimeSdpAnswer({
-        offerSdp: offer.sdp || '',
-        sessionId: trainingSessionId,
-        roomId,
-      })
-      await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp })
-      setStatus('connected')
+      session.connect()
     } catch (err) {
       closeRealtime('error')
       setError(err instanceof Error ? err.message : tr('启动实时语音教练失败', 'Failed to start realtime voice agent'))
     }
-  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, roomId, trainingSessionId, tr])
+  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, personaId, roomId, trainingSessionId, transcriptMetadata, tr])
 
   const active = status === 'connecting' || status === 'connected' || status === 'listening' || status === 'speaking'
   const label = statusLabel(status, error, tr)

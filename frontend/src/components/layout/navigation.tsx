@@ -1,9 +1,12 @@
 import type { ReactNode } from 'react'
 import {
   ClipboardList,
+  Dumbbell,
+  FileText,
   History,
   Home,
   MessageSquare,
+  Radio,
   Settings,
   Swords,
   Trophy,
@@ -45,6 +48,26 @@ export const desktopNavSections: AppNavSection[] = [
         to: APP_ROUTES.practiceScenarios,
         icon: <ClipboardList size={18} />,
         labelKey: 'nav.scenarioTraining',
+        exact: true,
+      },
+      {
+        to: APP_ROUTES.practiceCustom,
+        icon: <Dumbbell size={18} />,
+        labelKey: 'nav.customPractice',
+        exact: true,
+        roles: MANAGEMENT_SYSTEM_ROLES,
+      },
+      {
+        to: APP_ROUTES.practiceLiveCoach,
+        icon: <Radio size={18} />,
+        labelKey: 'nav.liveCoach',
+        exact: true,
+        roles: MANAGEMENT_SYSTEM_ROLES,
+      },
+      {
+        to: APP_ROUTES.practiceDefense,
+        icon: <FileText size={18} />,
+        labelKey: 'nav.defensePrep',
         exact: true,
       },
       {

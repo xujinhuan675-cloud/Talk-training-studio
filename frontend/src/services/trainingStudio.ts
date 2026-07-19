@@ -71,16 +71,6 @@ interface ApiResponse<T> {
 const TRAINING_STUDIO_API_BASE = '/api/v1/training-studio'
 const REALTIME_CAPABILITIES_API = `${TRAINING_STUDIO_API_BASE}/realtime/capabilities`
 
-export interface OpenAIRealtimeCapability {
-  configured: boolean
-  effectiveKey: boolean
-  model: string | null
-  voice: string | null
-  readyForCall?: boolean
-  readiness?: PipecatRealtimeReadiness
-  errors?: RealtimeReadinessIssue[]
-}
-
 export interface RealtimeReadinessIssue {
   code?: string
   message?: string
@@ -123,7 +113,6 @@ export interface PipecatRealtimeCapability {
 }
 
 export interface RealtimeCapabilities {
-  openaiRealtime: OpenAIRealtimeCapability
   pipecat: PipecatRealtimeCapability
 }
 
@@ -831,8 +820,6 @@ function combineReadinessStatus(items: TrainingStudioCapabilityItem[]): Training
 function countRealtimeBlockingIssues(capabilities: RealtimeCapabilities | null | undefined): number {
   if (!capabilities) return 0
   return [
-    ...(capabilities.openaiRealtime.readiness?.blockingReasons ?? []),
-    ...(capabilities.openaiRealtime.errors ?? []),
     ...(capabilities.pipecat.readiness?.blockingReasons ?? []),
     ...(capabilities.pipecat.errors ?? []),
   ].length
@@ -956,7 +943,7 @@ function buildRealtimeReadinessItem(
       label: 'Realtime runtime',
       status: 'unknown',
       detail: 'Realtime capabilities have not been loaded from the backend yet.',
-      tags: ['OpenAI Realtime', 'Pipecat'],
+      tags: ['Pipecat'],
       metrics: [
         { label: 'pipecat', value: 'not loaded' },
         { label: 'blockers', value: 'unknown' },
@@ -964,31 +951,23 @@ function buildRealtimeReadinessItem(
     }
   }
 
-  const openaiReady = Boolean(capabilities.openaiRealtime.readyForCall)
   const pipecatReady = Boolean(capabilities.pipecat.readyForCall)
-  const partialReady = openaiReady
-    || pipecatReady
-    || capabilities.openaiRealtime.configured
+  const partialReady = pipecatReady
     || capabilities.pipecat.available
     || readyFeatureCount > 0
-  const status: TrainingStudioReadinessStatus = openaiReady && pipecatReady
+  const status: TrainingStudioReadinessStatus = pipecatReady
     ? 'ready'
     : partialReady
       ? 'warning'
       : 'blocked'
-  const model = cleanCapabilityText(capabilities.openaiRealtime.model) ?? 'model not configured'
-  const voice = cleanCapabilityText(capabilities.openaiRealtime.voice) ?? 'voice not configured'
 
   return {
     key: 'realtime-runtime',
     label: 'Realtime runtime',
     status,
-    detail: `OpenAI Realtime ${openaiReady ? 'can start calls' : 'is not fully ready'}; Pipecat has ${readyFeatureCount}/${totalFeatureCount} pipeline features available.`,
+    detail: `Pipecat ${pipecatReady ? 'can start calls' : 'is not fully ready'} with ${readyFeatureCount}/${totalFeatureCount} pipeline features available.`,
     tags: [
-      openaiReady ? 'OpenAI call-ready' : 'OpenAI needs setup',
       pipecatReady ? 'Pipecat call-ready' : 'Pipecat checked',
-      model,
-      voice,
     ],
     metrics: [
       { label: 'pipecat features', value: `${readyFeatureCount}/${totalFeatureCount}` },

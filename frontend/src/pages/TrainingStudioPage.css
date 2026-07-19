@@ -86,7 +86,7 @@
   flex-direction: column;
   gap: 12px;
   border: 1.5px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 14px;
   background: var(--bg-card);
   color: var(--text-primary);
@@ -195,13 +195,13 @@
 }
 
 .training-studio-capability-panel {
-  order: 2;
+  order: 3;
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-bottom: 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 16px;
   background: var(--bg-card);
 }
@@ -243,6 +243,37 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.training-studio-capability-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.training-studio-capability-summary span {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.training-studio-capability-summary span.warning {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.training-studio-capability-summary strong {
+  color: var(--text-primary);
+  font-size: 13px;
 }
 
 .training-studio-capability-actions button {
@@ -432,13 +463,13 @@
 }
 
 .training-studio-realtime-diagnostics {
-  order: 3;
+  order: 4;
   display: flex;
   flex-direction: column;
   gap: 14px;
   margin-bottom: 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 16px;
   background: var(--bg-card);
 }
@@ -448,6 +479,15 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.training-studio-realtime-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .training-studio-realtime-kicker {
@@ -537,6 +577,11 @@
 .training-studio-realtime-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.training-studio-realtime-details-stack {
+  display: grid;
   gap: 12px;
 }
 
@@ -768,7 +813,7 @@
 }
 
 .training-studio-grid {
-  order: 4;
+  order: 2;
   display: block;
 }
 
@@ -783,7 +828,7 @@
   flex-direction: column;
   gap: 8px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 16px;
   background: var(--bg-card);
 }
@@ -822,7 +867,7 @@
   gap: 10px;
   align-items: end;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 14px;
   background: var(--bg-card);
 }
@@ -953,8 +998,10 @@
   }
 
   .training-studio-realtime-diagnostics-header,
+  .training-studio-realtime-actions,
   .training-studio-realtime-provider-head {
     flex-direction: column;
+    align-items: stretch;
   }
 
   .training-studio-realtime-refresh,

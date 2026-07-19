@@ -790,7 +790,7 @@ test('fetchConversationTreeBranchSnapshot loads focused node children and search
   )
 })
 
-test('resolveRuntimeEndpoint keeps OpenAI WebRTC on SDP endpoint', () => {
+test('resolveRuntimeEndpoint maps legacy OpenAI WebRTC aliases to Pipecat websocket endpoint', () => {
   const endpoint = trainingConversation.resolveRuntimeEndpoint({
     mode: 'realtime',
     provider: 'openai_webrtc',
@@ -800,7 +800,7 @@ test('resolveRuntimeEndpoint keeps OpenAI WebRTC on SDP endpoint', () => {
 
   assert.equal(
     endpoint,
-    '/api/v1/training-studio/realtime/sdp?session_id=training-2&room_id=7',
+    '/api/v1/training-studio/realtime?session_id=training-2&room_id=7&provider=pipecat',
   )
 })
 

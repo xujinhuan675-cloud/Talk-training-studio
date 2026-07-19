@@ -6,7 +6,6 @@
 }
 
 .scenario-leaderboard-head,
-.scenario-leaderboard-scope,
 .scenario-leaderboard-metrics,
 .scenario-leaderboard-grid,
 .scenario-leaderboard-personal {
@@ -25,7 +24,6 @@
 
 .scenario-leaderboard-kicker,
 .scenario-leaderboard-link,
-.scenario-leaderboard-scope span,
 .scenario-leaderboard-panel h2,
 .scenario-leaderboard-personal h2,
 .scenario-leaderboard-personal h3 {
@@ -38,6 +36,12 @@
   color: var(--green);
   font-size: 12px;
   font-weight: 800;
+}
+
+.scenario-leaderboard-kicker-scope {
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+  color: var(--text-secondary);
 }
 
 .scenario-leaderboard-head h1 {
@@ -100,24 +104,6 @@
 .scenario-leaderboard-link:hover {
   border-color: var(--green);
   color: var(--green);
-}
-
-.scenario-leaderboard-scope {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.scenario-leaderboard-scope span {
-  min-height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 10px;
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .scenario-leaderboard-metrics {

@@ -114,42 +114,6 @@
   cursor: pointer;
 }
 
-.topbar-stat {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-decoration: none;
-  transition: color var(--transition-fast);
-}
-
-.topbar-stat svg {
-  color: var(--green);
-}
-
-.topbar-stat:hover {
-  color: var(--green);
-}
-
-.topbar-level-pill {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--green);
-  border: 1.5px solid var(--border-accent);
-  border-radius: 20px;
-  padding: 2px 10px;
-  white-space: nowrap;
-  text-decoration: none;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.topbar-level-pill:hover {
-  background: var(--green-soft);
-  border-color: var(--green);
-}
-
 @media (max-width: 767px) {
   .topbar {
     display: flex;
@@ -164,11 +128,6 @@
   .topbar-search {
     min-width: 0;
     flex: 1;
-  }
-
-  .topbar-stat,
-  .topbar-level-pill {
-    display: none;
   }
 
   .topbar-right {

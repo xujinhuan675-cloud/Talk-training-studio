@@ -31,7 +31,6 @@ export interface VoicePreferenceConfig {
   realtime_model: string
   realtime_voice: string
   realtime_transcription_model: string | null
-  realtime_call_url: string
   updated_at: string
 }
 
@@ -57,7 +56,6 @@ export interface VoicePreferenceUpdate {
   realtime_model?: string
   realtime_voice?: string
   realtime_transcription_model?: string | null
-  realtime_call_url?: string
 }
 
 const VOICE_CONFIG_API = '/api/v1/training-studio/voice-config'

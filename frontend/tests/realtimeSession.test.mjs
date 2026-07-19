@@ -81,12 +81,6 @@ globalThis.WebSocket = FakeWebSocket
 globalThis.atob ??= (value) => Buffer.from(value, 'base64').toString('binary')
 
 const realtimeSession = await loadRealtimeSessionModule()
-const expectedAuthHeaders = {
-  'X-Mock-User': 'admin',
-  'X-User-Id': 'user-admin-001',
-  'X-System-Role': 'admin',
-  'X-Team-Id': 'team-ops',
-}
 
 test('getTrainingRealtimeWebSocketUrl builds a bound training realtime endpoint', () => {
   const url = realtimeSession.getTrainingRealtimeWebSocketUrl({
@@ -98,96 +92,11 @@ test('getTrainingRealtimeWebSocketUrl builds a bound training realtime endpoint'
 
   assert.equal(
     url,
-    'wss://demo.example/api/v1/training-studio/realtime?session_id=session+1&room_id=42&provider=openai&audio_format=pcm16',
+    'wss://demo.example/api/v1/training-studio/realtime?session_id=session+1&room_id=42&provider=pipecat&audio_format=pcm16',
   )
 })
 
-test('getTrainingRealtimeSdpPath builds a bound SDP proxy path', () => {
-  const path = realtimeSession.getTrainingRealtimeSdpPath({
-    sessionId: 'session 1',
-    roomId: 42,
-  })
-
-  assert.equal(
-    path,
-    '/api/v1/training-studio/realtime/sdp?session_id=session+1&room_id=42',
-  )
-})
-
-test('createTrainingRealtimeSdpAnswer surfaces JSON error messages', async () => {
-  const calls = []
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url, init })
-    return {
-    ok: false,
-    status: 502,
-    text: async () => JSON.stringify({ code: 30001, message: 'Realtime provider unavailable' }),
-    }
-  }
-
-  await assert.rejects(
-    realtimeSession.createTrainingRealtimeSdpAnswer({
-      offerSdp: 'v=0',
-      sessionId: 'session-1',
-      roomId: 42,
-    }),
-    /Realtime provider unavailable/,
-  )
-  assert.equal(calls[0].url, '/api/v1/training-studio/realtime/sdp?session_id=session-1&room_id=42')
-  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/sdp' })
-})
-
-test('persistTrainingRealtimeTranscripts posts normalized payload', async () => {
-  const calls = []
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url, init })
-    return {
-      ok: true,
-      json: async () => ({ data: { messages: [] } }),
-    }
-  }
-
-  await realtimeSession.persistTrainingRealtimeTranscripts({
-    sessionId: 'session-1',
-    roomId: 42,
-    messages: [
-      {
-        role: 'assistant',
-        content: 'That is a useful next step.',
-        event_id: 'evt-1',
-        metadata: {
-          trainingProfile: 'live_coach',
-          sourceLanguage: 'zh-CN',
-          targetLanguage: 'en-US',
-          translationStrategy: 'text_first_mvp',
-        },
-      },
-    ],
-  })
-
-  assert.equal(calls[0].url, '/api/v1/training-studio/realtime/transcripts')
-  assert.equal(calls[0].init.method, 'POST')
-  assert.deepEqual(calls[0].init.headers, { ...expectedAuthHeaders, 'Content-Type': 'application/json' })
-  assert.deepEqual(JSON.parse(calls[0].init.body), {
-    session_id: 'session-1',
-    room_id: 42,
-    messages: [
-      {
-        role: 'assistant',
-        content: 'That is a useful next step.',
-        event_id: 'evt-1',
-        metadata: {
-          trainingProfile: 'live_coach',
-          sourceLanguage: 'zh-CN',
-          targetLanguage: 'en-US',
-          translationStrategy: 'text_first_mvp',
-        },
-      },
-    ],
-  })
-})
-
-test('RealtimeSession sends final transcript events as JSON frames', () => {
+test('RealtimeSession sends session control events as JSON frames', () => {
   let socket
   const statuses = []
   const client = realtimeSession.createRealtimeSession({
@@ -202,15 +111,17 @@ test('RealtimeSession sends final transcript events as JSON frames', () => {
   client.connect()
   socket.open()
   client.send({
-    type: 'conversation.item.input_audio_transcription.completed',
-    transcript: 'We can start with a pilot.',
+    type: 'session.configure',
+    sessionId: 'session-1',
+    roomId: 42,
   })
 
   assert.deepEqual(statuses, ['connecting', 'connected'])
   assert.equal(socket.url, 'ws://local/realtime')
   assert.deepEqual(JSON.parse(socket.sent[0]), {
-    type: 'conversation.item.input_audio_transcription.completed',
-    transcript: 'We can start with a pilot.',
+    type: 'session.configure',
+    sessionId: 'session-1',
+    roomId: 42,
   })
 })
 

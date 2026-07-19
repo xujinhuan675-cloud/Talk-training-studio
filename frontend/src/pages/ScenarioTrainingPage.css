@@ -5,12 +5,41 @@
 }
 
 .scenario-training-toolbar,
+.scenario-training-entrybar,
 .scenario-training-error,
 .scenario-training-grid,
 .scenario-training-empty {
   max-width: var(--page-max-width);
   margin-left: auto;
   margin-right: auto;
+}
+
+.scenario-training-entrybar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.scenario-training-entrybar a {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 11px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.scenario-training-entrybar a:hover {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .scenario-training-toolbar {
@@ -198,6 +227,17 @@
   letter-spacing: 0;
 }
 
+.scenario-training-card-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .scenario-training-status {
   flex: 0 0 auto;
   border: 1px solid var(--border);
@@ -236,6 +276,26 @@
 
 .scenario-training-card-status span:first-child {
   color: var(--amber);
+}
+
+.scenario-training-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scenario-training-points span {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 7px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scenario-training-actions {

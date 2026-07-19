@@ -6,7 +6,6 @@
 
 .scenario-config-header,
 .scenario-config-stats,
-.scenario-config-api-note,
 .scenario-config-notice,
 .scenario-config-tabbar,
 .scenario-config-workspace {
@@ -152,7 +151,6 @@
   color: var(--rose);
 }
 
-.scenario-config-api-note,
 .scenario-config-notice {
   display: flex;
   align-items: flex-start;
@@ -164,25 +162,6 @@
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
-}
-
-.scenario-config-api-note {
-  margin-bottom: 12px;
-}
-
-.scenario-config-api-note svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--violet);
-}
-
-.scenario-config-api-note code {
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  padding: 1px 5px;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-size: 12px;
 }
 
 .scenario-config-notice {

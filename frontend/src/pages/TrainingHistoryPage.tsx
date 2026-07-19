@@ -22,7 +22,7 @@ import {
 } from '../services/trainingSession'
 import { buildTrainingModeChatPath } from '../services/trainingMode'
 import { useAuthContext } from '../contexts/AuthContext'
-import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import { useI18n, type Locale, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import { PageHeader, PageShell } from '../components/ui/page'
 import { APP_ROUTES } from '../appRoutes'
 import {
@@ -76,12 +76,12 @@ interface HistoryEntry {
 
 const statusOptions: StatusFilter[] = ['all', ...scenarioStatusOptions]
 
-const modeLabels: Record<string, LocalizedText> = {
-  text: ['文本', 'Text'],
-  voice: ['语音', 'Voice'],
-  video: ['视频', 'Video'],
-  realtime: ['实时语音', 'Realtime'],
-  live_coach: ['实时教练', 'Live coach'],
+const modeLabelKeys: Record<string, TranslationKey> = {
+  text: 'training.mode.text.label',
+  voice: 'training.mode.voice.label',
+  video: 'training.mode.video.label',
+  realtime: 'training.mode.realtime.label',
+  live_coach: 'training.mode.liveCoach.label',
 }
 
 const sourceLabels: Record<HistoryEntry['source'], LocalizedText> = {
@@ -111,10 +111,10 @@ function translatedCategory(value: string | undefined, tr: TranslateInline): str
     : value
 }
 
-function translatedMode(value: string | undefined, tr: TranslateInline): string {
+function translatedMode(value: string | undefined, t: Translate): string {
   if (!value) return ''
-  const label = modeLabels[value]
-  return label ? translateLabel(label, tr) : value
+  const labelKey = modeLabelKeys[value]
+  return labelKey ? t(labelKey) : value
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -398,7 +398,7 @@ function matchesEntry(
 }
 
 export default function TrainingHistoryPage() {
-  const { locale, tr } = useI18n()
+  const { locale, t, tr } = useI18n()
   const { currentUser } = useAuthContext()
   const progressScope = useMemo(() => ({
     userId: currentUser?.userId ?? null,
@@ -618,7 +618,7 @@ export default function TrainingHistoryPage() {
                   {entry.category && (
                     <span>{translatedCategory(entry.category, tr)}</span>
                   )}
-                  {entry.mode && <span>{translatedMode(entry.mode, tr)}</span>}
+                  {entry.mode && <span>{translatedMode(entry.mode, t)}</span>}
                   {entry.branchInfo && (
                     <span
                       className="training-history-branch-tag"

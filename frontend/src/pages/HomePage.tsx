@@ -32,7 +32,7 @@ import {
   markScenarioTrainingStarted,
   saveScenarioTrainingProgress,
 } from '../data/trainingScenarios'
-import { useI18n, type TranslateInline } from '../i18n'
+import { useI18n, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -81,17 +81,16 @@ const dailyChallenge = {
 }
 
 interface SkillNode {
-  labelZh: string
-  labelEn: string
+  labelKey: TranslationKey
   status: 'done' | 'current' | 'locked'
 }
 
 const skillNodes: SkillNode[] = [
-  { labelZh: '入门对话', labelEn: 'Conversation Basics', status: 'done' },
-  { labelZh: '情绪管理', labelEn: 'Emotion Management', status: 'done' },
-  { labelZh: '向上管理', labelEn: 'Managing Up', status: 'current' },
-  { labelZh: '高层博弈', labelEn: 'Executive Influence', status: 'locked' },
-  { labelZh: '危机处理', labelEn: 'Crisis Handling', status: 'locked' },
+  { labelKey: 'growth.skill.persuasion.name', status: 'done' },
+  { labelKey: 'growth.skill.emotional_management.name', status: 'done' },
+  { labelKey: 'growth.skill.active_listening.name', status: 'current' },
+  { labelKey: 'growth.skill.structured_expression.name', status: 'locked' },
+  { labelKey: 'growth.skill.conflict_resolution.name', status: 'locked' },
 ]
 
 const HomePage: React.FC = () => {
@@ -236,7 +235,7 @@ const HomePage: React.FC = () => {
               disabled={dailyStarting}
             >
               {dailyStarting ? <Loader2 size={15} className="home-spin" /> : <Target size={15} />}
-              {dailyStarting ? tr('启动中', 'Starting') : tr('开始训练', 'Start practice')}
+              {dailyStarting ? t('common.starting') : t('common.startTraining')}
             </Button>
             <Button asChild variant="secondary">
               <Link to={APP_ROUTES.practiceScenarios}>
@@ -347,7 +346,7 @@ const HomePage: React.FC = () => {
               <div className="home-empty-block">
                 <p>{tr('暂无对话记录', 'No conversation records')}</p>
                 <Button asChild variant="secondary" size="sm">
-                  <Link to={APP_ROUTES.practiceScenarios}>{tr('开始练习', 'Start practice')}</Link>
+                  <Link to={APP_ROUTES.practiceScenarios}>{t('common.startPractice')}</Link>
                 </Button>
               </div>
             ) : (
@@ -392,7 +391,7 @@ const HomePage: React.FC = () => {
           <Surface className="home-skill-surface" padding="md">
             <div className="home-skill-chain">
               {skillNodes.map((node, idx) => (
-                <React.Fragment key={node.labelZh}>
+                <React.Fragment key={node.labelKey}>
                   {idx > 0 && <span className="home-skill-line" />}
                   <div className={`home-skill-node home-skill-node--${node.status}`}>
                     <span className="home-skill-circle">
@@ -400,7 +399,7 @@ const HomePage: React.FC = () => {
                       {node.status === 'locked' && <Lock size={12} />}
                       {node.status === 'current' && <span className="home-skill-dot" />}
                     </span>
-                    <span className="home-skill-label">{tr(node.labelZh, node.labelEn)}</span>
+                    <span className="home-skill-label">{t(node.labelKey)}</span>
                   </div>
                 </React.Fragment>
               ))}
