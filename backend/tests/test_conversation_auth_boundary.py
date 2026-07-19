@@ -92,6 +92,8 @@ def _agent_config(
     config_id: int,
     *,
     metadata: dict | None = None,
+    tool_ids: list[str] | None = None,
+    mcp_server_ids: list[str] | None = None,
 ) -> AgentConfigDTO:
     now = datetime.now(timezone.utc)
     return AgentConfigDTO(
@@ -101,6 +103,8 @@ def _agent_config(
         model="gpt-test",
         temperature=None,
         max_tokens=None,
+        tool_ids=tool_ids or [],
+        mcp_server_ids=mcp_server_ids or [],
         metadata=metadata or {},
         created_at=now,
         updated_at=now,
@@ -226,7 +230,12 @@ class _FakeConversationService:
 
     async def create_agent_config(self, payload):
         self.agent_config_create_call = payload
-        return _agent_config(31, metadata=payload.metadata)
+        return _agent_config(
+            31,
+            metadata=payload.metadata,
+            tool_ids=payload.tool_ids,
+            mcp_server_ids=payload.mcp_server_ids,
+        )
 
     async def list_agent_configs(self, **kwargs):
         self.agent_config_list_call = kwargs
@@ -255,7 +264,17 @@ class _FakeConversationService:
         _require_scope_match(source.metadata, metadata_scope)
         self.agent_config_update_call = (config_id, payload)
         metadata = payload.metadata if payload.metadata is not None else source.metadata
-        return source.model_copy(update={"metadata": metadata})
+        return source.model_copy(
+            update={
+                "metadata": metadata,
+                "tool_ids": payload.tool_ids if payload.tool_ids is not None else source.tool_ids,
+                "mcp_server_ids": (
+                    payload.mcp_server_ids
+                    if payload.mcp_server_ids is not None
+                    else source.mcp_server_ids
+                ),
+            }
+        )
 
     async def delete_agent_config(self, config_id: int, **kwargs):
         metadata_scope = kwargs.get("metadata_scope")
@@ -713,6 +732,8 @@ def test_create_agent_config_stamps_current_mock_user_scope() -> None:
         headers={"X-Mock-User": "sales"},
         json={
             "name": "sales-agent",
+            "tool_ids": ["crm.lookup"],
+            "mcp_server_ids": ["crm"],
             "metadata": {
                 "ownerUserId": "user-cs-001",
                 "teamId": "team-service",
@@ -728,10 +749,14 @@ def test_create_agent_config_stamps_current_mock_user_scope() -> None:
     assert metadata["authScope"]["userId"] == "user-sales-001"
     assert metadata["authScope"]["teamId"] == "team-revenue"
     assert metadata["source"] == "test"
+    assert response.json()["data"]["tool_ids"] == ["crm.lookup"]
+    assert response.json()["data"]["mcp_server_ids"] == ["crm"]
     assert (
         conversation_service.agent_config_create_call.metadata["ownerUserId"]
         == "user-sales-001"
     )
+    assert conversation_service.agent_config_create_call.tool_ids == ["crm.lookup"]
+    assert conversation_service.agent_config_create_call.mcp_server_ids == ["crm"]
 
 
 def test_agent_config_routes_enforce_owner_metadata_scope() -> None:

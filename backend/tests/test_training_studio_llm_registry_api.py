@@ -140,7 +140,13 @@ class _SecretBearingLLM:
         )
 
 
-def _agent_config(config_id: int, *, metadata: dict | None = None) -> AgentConfigDTO:
+def _agent_config(
+    config_id: int,
+    *,
+    metadata: dict | None = None,
+    tool_ids: list[str] | None = None,
+    mcp_server_ids: list[str] | None = None,
+) -> AgentConfigDTO:
     now = datetime.now(timezone.utc)
     return AgentConfigDTO(
         id=config_id,
@@ -149,6 +155,8 @@ def _agent_config(config_id: int, *, metadata: dict | None = None) -> AgentConfi
         model="claude-sonnet-test",
         temperature=None,
         max_tokens=None,
+        tool_ids=tool_ids or [],
+        mcp_server_ids=mcp_server_ids or [],
         metadata=metadata or {},
         created_at=now,
         updated_at=now,
@@ -196,6 +204,8 @@ def test_llm_registry_uses_active_client_provider_metadata(monkeypatch) -> None:
         agent_configs=[
             _agent_config(
                 12,
+                tool_ids=["crm.lookup"],
+                mcp_server_ids=["crm"],
                 metadata={
                     "ownerUserId": "user-admin-001",
                     "teamId": "team-platform",
@@ -293,7 +303,10 @@ def test_llm_registry_uses_active_client_provider_metadata(monkeypatch) -> None:
     assert capability_registry["by_kind"]["agent"][0]["enabled"] is True
     assert capability_registry["by_kind"]["agent"][0]["source"] == "agent_config"
     assert capability_registry["by_kind"]["agent"][0]["name"] == "agent-12"
-    assert capability_registry["by_kind"]["agent"][0]["ready"] is True
+    assert capability_registry["by_kind"]["agent"][0]["status"] == "missingDependency"
+    assert capability_registry["by_kind"]["agent"][0]["ready"] is False
+    assert capability_registry["by_kind"]["agent"][0]["metadata"]["tool_ids"] == ["crm.lookup"]
+    assert capability_registry["by_kind"]["agent"][0]["metadata"]["mcp_server_ids"] == ["crm"]
     assert capability_registry["by_kind"]["tool"][0]["enabled"] is False
     assert capability_registry["by_kind"]["mcp_server"][0]["enabled"] is False
 

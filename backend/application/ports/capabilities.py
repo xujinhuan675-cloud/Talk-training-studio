@@ -126,6 +126,10 @@ _DESCRIPTOR_KEYS = {
     "tags",
     "tool",
     "tools",
+    "tool_ids",
+    "toolIds",
+    "mcp_server_ids",
+    "mcpServerIds",
     "transport",
     "type",
     "url",
@@ -294,6 +298,8 @@ def build_text_runtime_capability_registry(
         agent_caps = _agent_capabilities(
             agent_configs,
             model_summary=model_summary,
+            tool_capabilities=tool_caps,
+            mcp_capabilities=mcp_caps,
         )
         capabilities.extend(agent_caps)
         capabilities.extend(tool_caps)
@@ -481,10 +487,18 @@ def _agent_capabilities(
     agent_configs: object | None,
     *,
     model_summary: Mapping[str, object],
+    tool_capabilities: Sequence[RuntimeCapability],
+    mcp_capabilities: Sequence[RuntimeCapability],
 ) -> list[RuntimeCapability]:
     descriptors = _descriptor_items(agent_configs, _AGENT_CONFIG_COLLECTION_KEYS)
     ready_model_count = int(model_summary.get("ready_model_count") or 0)
     available_model_keys = set(_string_list(model_summary.get("available_model_keys")))
+    ready_tool_capabilities = [
+        capability
+        for capability in tool_capabilities
+        if capability.ready and capability.id != "tool:llm_tool_calling"
+    ]
+    ready_mcp_capabilities = [capability for capability in mcp_capabilities if capability.ready]
     if not descriptors:
         status = "ready" if ready_model_count else "blocked"
         reasons: list[dict[str, object]] = []
@@ -514,8 +528,12 @@ def _agent_capabilities(
                     "model_dependency": "llm_registry",
                     "migration_boundary": "future external chat-runtime agent adapter",
                     "ready_model_count": ready_model_count,
-                    "tool_capable_model_count": model_summary.get("tool_capable_model_count", 0),
-                    "mcp_capable_model_count": model_summary.get("mcp_capable_model_count", 0),
+                    "tool_capable_model_count": model_summary.get(
+                        "tool_capable_model_count", 0
+                    ),
+                    "mcp_capable_model_count": model_summary.get(
+                        "mcp_capable_model_count", 0
+                    ),
                 },
                 blocking_reasons=tuple(reasons),
             )
@@ -526,6 +544,11 @@ def _agent_capabilities(
         name = _descriptor_text(descriptor, ("name", "label", "id")) or "Agent Config"
         agent_id = _descriptor_text(descriptor, ("id", "name", "label")) or name
         model = _descriptor_text(descriptor, ("model", "model_spec_id", "modelSpecId"))
+        tool_ids = _descriptor_binding_ids(descriptor, ("tool_ids", "toolIds"))
+        mcp_server_ids = _descriptor_binding_ids(
+            descriptor,
+            ("mcp_server_ids", "mcpServerIds"),
+        )
         enabled = _enabled_from(descriptor, default=True)
         status = "ready"
         reasons: list[dict[str, object]] = []
@@ -553,6 +576,44 @@ def _agent_capabilities(
                     metadata={"agent": name, "model": model},
                 )
             )
+        else:
+            missing_tool_ids = _missing_tool_ids(tool_ids, ready_tool_capabilities)
+            missing_mcp_server_ids = _missing_mcp_server_ids(
+                mcp_server_ids,
+                ready_mcp_capabilities,
+            )
+            if missing_tool_ids:
+                status = "missingDependency"
+                reasons.append(
+                    _reason(
+                        "AGENT_BOUND_TOOL_NOT_READY",
+                        "Agent tool_ids reference tools that are not registered or not ready.",
+                        phase="configuration",
+                        feature="tool",
+                        dependency=", ".join(missing_tool_ids),
+                        modules=missing_tool_ids,
+                        severity="warning",
+                        metadata={"agent": name, "tool_ids": missing_tool_ids},
+                    )
+                )
+            if missing_mcp_server_ids:
+                status = "missingDependency"
+                reasons.append(
+                    _reason(
+                        "AGENT_BOUND_MCP_SERVER_NOT_READY",
+                        "Agent mcp_server_ids reference MCP servers that are not "
+                        "registered or not ready.",
+                        phase="configuration",
+                        feature="mcp_server",
+                        dependency=", ".join(missing_mcp_server_ids),
+                        modules=missing_mcp_server_ids,
+                        severity="warning",
+                        metadata={
+                            "agent": name,
+                            "mcp_server_ids": missing_mcp_server_ids,
+                        },
+                    )
+                )
         capabilities.append(
             RuntimeCapability(
                 id=f"agent:{_slug(agent_id)}",
@@ -562,14 +623,24 @@ def _agent_capabilities(
                 status=status,
                 enabled=enabled,
                 configured=enabled and status == "ready",
-                scopes=tuple(_string_list(_descriptor_value(descriptor, ("scopes",))) or ("chat", "training")),
+                scopes=tuple(
+                    _string_list(_descriptor_value(descriptor, ("scopes",)))
+                    or ("chat", "training")
+                ),
                 required_roles=tuple(
-                    _string_list(_descriptor_value(descriptor, ("required_roles", "requiredRoles")))
+                    _string_list(
+                        _descriptor_value(descriptor, ("required_roles", "requiredRoles"))
+                    )
                     or _DEFAULT_AGENT_ROLES
                 ),
-                tags=tuple(_string_list(_descriptor_value(descriptor, ("tags",))) or ("agent", "config")),
+                tags=tuple(
+                    _string_list(_descriptor_value(descriptor, ("tags",)))
+                    or ("agent", "config")
+                ),
                 metadata={
                     "model": model,
+                    "tool_ids": tool_ids,
+                    "mcp_server_ids": mcp_server_ids,
                     "ready_model_count": ready_model_count,
                     "config": _public_descriptor_metadata(descriptor),
                 },
@@ -703,6 +774,40 @@ def _mcp_server_matches(capability: RuntimeCapability, requested_server: str) ->
     return bool(requested_aliases & capability_aliases)
 
 
+def _tool_matches(capability: RuntimeCapability, requested_tool: str) -> bool:
+    requested_aliases = _tool_aliases(requested_tool)
+    if not requested_aliases:
+        return False
+
+    capability_aliases = _tool_aliases(
+        capability.id,
+        capability.id.removeprefix("tool:"),
+        capability.name,
+        capability.source,
+    )
+    metadata = capability.metadata if isinstance(capability.metadata, Mapping) else {}
+    capability_aliases.update(
+        _tool_aliases(
+            metadata.get("tool"),
+            metadata.get("id"),
+            metadata.get("name"),
+            metadata.get("label"),
+        )
+    )
+    config = metadata.get("config")
+    if isinstance(config, Mapping):
+        capability_aliases.update(
+            _tool_aliases(
+                config.get("id"),
+                config.get("name"),
+                config.get("label"),
+                config.get("tool"),
+            )
+        )
+
+    return bool(requested_aliases & capability_aliases)
+
+
 def _mcp_server_aliases(*values: object) -> set[str]:
     aliases: set[str] = set()
     for value in values:
@@ -718,6 +823,51 @@ def _mcp_server_aliases(*values: object) -> set[str]:
                 aliases.add(suffix.lower())
                 aliases.add(_slug(suffix))
     return aliases
+
+
+def _tool_aliases(*values: object) -> set[str]:
+    aliases: set[str] = set()
+    for value in values:
+        text = _optional_text(value)
+        if not text:
+            continue
+        lowered = text.lower()
+        aliases.add(lowered)
+        aliases.add(_slug(text))
+        if lowered.startswith("tool:"):
+            suffix = text.split(":", 1)[1].strip()
+            if suffix:
+                aliases.add(suffix.lower())
+                aliases.add(_slug(suffix))
+    return aliases
+
+
+def _missing_tool_ids(
+    tool_ids: Sequence[str],
+    ready_tool_capabilities: Sequence[RuntimeCapability],
+) -> list[str]:
+    missing: list[str] = []
+    for tool_id in tool_ids:
+        if not any(
+            _tool_matches(capability, tool_id)
+            for capability in ready_tool_capabilities
+        ):
+            missing.append(tool_id)
+    return missing
+
+
+def _missing_mcp_server_ids(
+    mcp_server_ids: Sequence[str],
+    ready_mcp_capabilities: Sequence[RuntimeCapability],
+) -> list[str]:
+    missing: list[str] = []
+    for server_id in mcp_server_ids:
+        if not any(
+            _mcp_server_matches(capability, server_id)
+            for capability in ready_mcp_capabilities
+        ):
+            missing.append(server_id)
+    return missing
 
 
 def _model_tool_capability(
@@ -1073,6 +1223,18 @@ def _descriptor_value(descriptor: Mapping[str, object], keys: Sequence[str]) -> 
             if key in nested:
                 return nested[key]
     return None
+
+
+def _descriptor_binding_ids(descriptor: Mapping[str, object], keys: Sequence[str]) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        if key in descriptor:
+            values.extend(_string_list(descriptor[key]))
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
 
 
 def _descriptor_text(descriptor: Mapping[str, object], keys: Sequence[str]) -> str | None:

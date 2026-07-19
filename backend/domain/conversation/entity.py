@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -33,6 +34,18 @@ def _utcnow() -> datetime:
 
 def _new_public_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
+
+
+def normalize_agent_resource_ids(values: Sequence[str] | None) -> tuple[str, ...]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values or ():
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return tuple(normalized)
 
 
 @dataclass
@@ -279,6 +292,8 @@ class AgentConfig:
     model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    tool_ids: tuple[str, ...] = field(default_factory=tuple)
+    mcp_server_ids: tuple[str, ...] = field(default_factory=tuple)
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -291,6 +306,8 @@ class AgentConfig:
             )
         self.created_at = _ensure_utc(self.created_at)
         self.updated_at = _ensure_utc(self.updated_at)
+        self.tool_ids = normalize_agent_resource_ids(self.tool_ids)
+        self.mcp_server_ids = normalize_agent_resource_ids(self.mcp_server_ids)
         if self.metadata is None:
             self.metadata = {}
 

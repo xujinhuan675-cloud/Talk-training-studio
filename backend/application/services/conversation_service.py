@@ -29,7 +29,12 @@ from application.dto import (
 )
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.common.exceptions import BusinessException
-from domain.conversation.entity import AgentConfig, Conversation, Message
+from domain.conversation.entity import (
+    AgentConfig,
+    Conversation,
+    Message,
+    normalize_agent_resource_ids,
+)
 from domain.conversation.exceptions import (
     AgentConfigNameExistsException,
     AgentConfigNotFoundException,
@@ -957,6 +962,8 @@ class ConversationApplicationService:
                 model=dto.model,
                 temperature=dto.temperature,
                 max_tokens=dto.max_tokens,
+                tool_ids=tuple(normalize_agent_resource_ids(dto.tool_ids)),
+                mcp_server_ids=tuple(normalize_agent_resource_ids(dto.mcp_server_ids)),
                 metadata=dto.metadata or {},
                 created_at=now,
                 updated_at=now,
@@ -1031,6 +1038,10 @@ class ConversationApplicationService:
                 config.temperature = dto.temperature
             if dto.max_tokens is not None:
                 config.max_tokens = dto.max_tokens
+            if dto.tool_ids is not None:
+                config.tool_ids = normalize_agent_resource_ids(dto.tool_ids)
+            if dto.mcp_server_ids is not None:
+                config.mcp_server_ids = normalize_agent_resource_ids(dto.mcp_server_ids)
             if dto.metadata is not None:
                 config.metadata = dto.metadata
             config._touch()

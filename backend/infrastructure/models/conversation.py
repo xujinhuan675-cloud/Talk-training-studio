@@ -261,6 +261,20 @@ class AgentConfigModel(Base):
     model = Column(String(100), nullable=True, comment="使用的模型")
     temperature = Column(Float, nullable=True, comment="温度参数")
     max_tokens = Column(Integer, nullable=True, comment="最大 token 数")
+    tool_ids = Column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default="[]",
+        comment="绑定的工具 ID 列表",
+    )
+    mcp_server_ids = Column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default="[]",
+        comment="绑定的 MCP server ID 列表",
+    )
     extra_metadata = Column(
         "metadata",
         JSON,

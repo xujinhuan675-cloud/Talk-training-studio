@@ -429,6 +429,8 @@ class CreateAgentConfigDTO(DTOBase):
     model: Optional[str] = None
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)
+    tool_ids: list[str] = Field(default_factory=list)
+    mcp_server_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -440,6 +442,8 @@ class UpdateAgentConfigDTO(DTOBase):
     model: Optional[str] = None
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)
+    tool_ids: Optional[list[str]] = None
+    mcp_server_ids: Optional[list[str]] = None
     metadata: Optional[dict[str, Any]] = None
 
 
@@ -452,6 +456,8 @@ class AgentConfigDTO(DTOBase):
     model: Optional[str]
     temperature: Optional[float]
     max_tokens: Optional[int]
+    tool_ids: list[str] = Field(default_factory=list)
+    mcp_server_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime

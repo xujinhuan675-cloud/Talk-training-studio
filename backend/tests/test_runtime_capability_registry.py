@@ -111,6 +111,8 @@ def test_text_runtime_capability_registry_projects_real_agent_tool_and_mcp_inven
                 "id": "coach",
                 "name": "Training Coach",
                 "model": "gpt-registry",
+                "tool_ids": ["crm.lookup"],
+                "mcp_server_ids": ["crm"],
                 "system_prompt": "not public inventory",
                 "metadata": {
                     "scenario": "sales",
@@ -177,6 +179,8 @@ def test_text_runtime_capability_registry_projects_real_agent_tool_and_mcp_inven
     assert agent_capability["ready"] is True
     assert agent_capability["required_roles"] == ["admin", "leader", "staff"]
     assert agent_capability["metadata"]["model"] == "gpt-registry"
+    assert agent_capability["metadata"]["tool_ids"] == ["crm.lookup"]
+    assert agent_capability["metadata"]["mcp_server_ids"] == ["crm"]
     assert agent_capability["metadata"]["config"]["metadata"] == {"scenario": "sales"}
 
     tool_capabilities = capability_registry["by_kind"]["tool"]
@@ -323,6 +327,128 @@ def test_text_runtime_capability_registry_requires_specific_mcp_server_match_for
     assert [capability["status"] for capability in payload["by_kind"]["mcp_server"]] == [
         "ready",
         "disabled",
+    ]
+
+
+def test_text_runtime_capability_registry_marks_agent_bound_dependencies_not_ready() -> None:
+    model = LLMModelMetadata(
+        name="gpt-tooling",
+        provider="openai",
+        endpoint="https://openai.example/v1",
+        extra={"capabilities": ["text", "tool_calling"]},
+    )
+    llm_registry = build_llm_provider_registry(
+        [
+            LLMProviderMetadata(
+                provider="openai",
+                default_model="gpt-tooling",
+                endpoint="https://openai.example/v1",
+                wire_api="responses",
+                models=[model],
+                endpoints=[
+                    LLMEndpointMetadata(
+                        provider="openai",
+                        endpoint="https://openai.example/v1",
+                        wire_api="responses",
+                        default_model="gpt-tooling",
+                        models=[model],
+                    )
+                ],
+            )
+        ],
+        provider="talkwise",
+        extra={"configured": True},
+    )
+    artifacts = build_llm_registry_artifacts(llm_registry)
+
+    payload = build_text_runtime_capability_registry(
+        llm_registry,
+        model_specs=artifacts["model_specs"],
+        agent_configs=[
+            {
+                "id": "coach",
+                "name": "Training Coach",
+                "model": "gpt-tooling",
+                "tool_ids": ["crm.lookup"],
+                "mcp_server_ids": ["crm"],
+            }
+        ],
+        tool_configs=[
+            {
+                "id": "crm.lookup",
+                "name": "CRM Lookup",
+                "requires_mcp": True,
+                "mcp_server": "crm",
+            }
+        ],
+        mcp_servers=[
+            {"id": "crm", "name": "CRM MCP", "transport": "stdio", "enabled": False},
+        ],
+    ).to_dict()
+
+    agent_capability = payload["by_kind"]["agent"][0]
+    assert agent_capability["status"] == "missingDependency"
+    assert agent_capability["ready"] is False
+    assert [reason["code"] for reason in agent_capability["readiness"]["blockingReasons"]] == [
+        "AGENT_BOUND_TOOL_NOT_READY",
+        "AGENT_BOUND_MCP_SERVER_NOT_READY",
+    ]
+
+
+def test_text_runtime_capability_registry_ignores_agent_binding_metadata_for_readiness() -> None:
+    model = LLMModelMetadata(
+        name="gpt-text",
+        provider="openai",
+        endpoint="https://openai.example/v1",
+        extra={"capabilities": ["text"]},
+    )
+    llm_registry = build_llm_provider_registry(
+        [
+            LLMProviderMetadata(
+                provider="openai",
+                default_model="gpt-text",
+                endpoint="https://openai.example/v1",
+                wire_api="responses",
+                models=[model],
+                endpoints=[
+                    LLMEndpointMetadata(
+                        provider="openai",
+                        endpoint="https://openai.example/v1",
+                        wire_api="responses",
+                        default_model="gpt-text",
+                        models=[model],
+                    )
+                ],
+            )
+        ],
+        provider="talkwise",
+        extra={"configured": True},
+    )
+    artifacts = build_llm_registry_artifacts(llm_registry)
+
+    payload = build_text_runtime_capability_registry(
+        llm_registry,
+        model_specs=artifacts["model_specs"],
+        agent_configs=[
+            {
+                "id": "coach",
+                "name": "Training Coach",
+                "model": "gpt-text",
+                "metadata": {
+                    "tool_ids": ["legacy.crm.lookup"],
+                    "mcp_server_ids": ["legacy-crm"],
+                },
+            }
+        ],
+    ).to_dict()
+
+    agent_capability = payload["by_kind"]["agent"][0]
+    assert agent_capability["status"] == "ready"
+    assert agent_capability["ready"] is True
+    assert agent_capability["metadata"]["tool_ids"] == []
+    assert agent_capability["metadata"]["mcp_server_ids"] == []
+    assert agent_capability["metadata"]["config"]["metadata"]["tool_ids"] == [
+        "legacy.crm.lookup"
     ]
 
 

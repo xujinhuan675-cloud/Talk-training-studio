@@ -11,7 +11,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.conversation.entity import AgentConfig
+from domain.conversation.entity import AgentConfig, normalize_agent_resource_ids
 from domain.conversation.exceptions import AgentConfigNotFoundException
 from domain.conversation.repository import AgentConfigRepository, OwnedMetadataScope
 from infrastructure.models.conversation import AgentConfigModel
@@ -32,6 +32,8 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
             model=model.model,
             temperature=model.temperature,
             max_tokens=model.max_tokens,
+            tool_ids=tuple(model.tool_ids or ()),
+            mcp_server_ids=tuple(model.mcp_server_ids or ()),
             metadata=dict(model.extra_metadata or {}),
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -44,6 +46,8 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
             model=config.model,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
+            tool_ids=list(normalize_agent_resource_ids(config.tool_ids)),
+            mcp_server_ids=list(normalize_agent_resource_ids(config.mcp_server_ids)),
             extra_metadata=config.metadata or {},
             created_at=config.created_at,
             updated_at=config.updated_at,
@@ -75,6 +79,8 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         model.model = config.model
         model.temperature = config.temperature
         model.max_tokens = config.max_tokens
+        model.tool_ids = list(normalize_agent_resource_ids(config.tool_ids))
+        model.mcp_server_ids = list(normalize_agent_resource_ids(config.mcp_server_ids))
         model.extra_metadata = config.metadata or {}
         model.updated_at = config.updated_at
 

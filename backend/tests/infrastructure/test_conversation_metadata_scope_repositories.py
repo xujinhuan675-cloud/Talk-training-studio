@@ -262,3 +262,35 @@ async def test_agent_config_repository_applies_metadata_scope_to_single_resource
         await repo.delete(hidden.id, metadata_scope=scope)
     await repo.delete(visible.id, metadata_scope=scope)
     assert await repo.get_by_id(visible.id) is None
+
+
+@pytest.mark.asyncio
+async def test_agent_config_repository_round_trips_resource_bindings(session) -> None:
+    repo = SQLAlchemyAgentConfigRepository(session)
+    created = await repo.create(
+        AgentConfig(
+            id=None,
+            name="bound-agent",
+            system_prompt=None,
+            model="gpt-test",
+            tool_ids=(" crm.lookup ", "", "crm.lookup", "report.generate"),
+            mcp_server_ids=(" crm ", "crm", "calendar"),
+            metadata={"ownerUserId": "user-sales-001", "teamId": "team-revenue"},
+            created_at=_at(1),
+            updated_at=_at(1),
+        )
+    )
+    assert created.id is not None
+
+    loaded = await repo.get_by_id(created.id)
+
+    assert loaded is not None
+    assert loaded.tool_ids == ("crm.lookup", "report.generate")
+    assert loaded.mcp_server_ids == ("crm", "calendar")
+
+    loaded.tool_ids = ("calendar.lookup", "calendar.lookup")
+    loaded.mcp_server_ids = (" calendar ",)
+    updated = await repo.update(loaded)
+
+    assert updated.tool_ids == ("calendar.lookup",)
+    assert updated.mcp_server_ids == ("calendar",)
