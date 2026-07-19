@@ -114,9 +114,9 @@ export default function DefensePrepPage() {
     <div className="dp-page">
       <div className="dp-container">
         {/* Back link */}
-        <button className="dp-back" onClick={() => navigate('/')}>
+        <button className="dp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
           <ArrowLeft size={16} />
-          <span>{tr('返回首页', 'Back Home')}</span>
+          <span>{tr('返回训练目录', 'Back to training')}</span>
         </button>
 
         {/* Title */}

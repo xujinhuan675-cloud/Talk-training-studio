@@ -323,7 +323,7 @@ const GrowthPage: React.FC = () => {
           </div>
           <h2>{tr('暂无评估数据', 'No evaluation data yet')}</h2>
           <p>{tr('完成一次练习并生成评估后，这里会显示总览和趋势。', 'Complete one practice and generate an evaluation to see the overview and trends.')}</p>
-          <button className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.conversations)}>
+          <button className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
             {tr('去练习', 'Start practice')}
           </button>
         </div>

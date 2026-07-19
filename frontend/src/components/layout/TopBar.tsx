@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Flame, Languages, Star } from 'lucide-react'
 import { SUPPORTED_LOCALES, useI18n, type Locale } from '../../i18n'
 import { useGrowth } from '../../hooks/useGrowth'
+import { APP_ROUTES } from '../../appRoutes'
 import UserMenu from './UserMenu'
 import './TopBar.css'
 
@@ -85,7 +86,7 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
           </select>
         </label>
         <Link
-          to="/growth"
+          to={APP_ROUTES.growth}
           className="topbar-stat"
           aria-label={streakLabel}
           title={tr('连续练习天数', 'Practice streak')}
@@ -94,7 +95,7 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
           <span>{streakText}</span>
         </Link>
         <Link
-          to="/growth"
+          to={APP_ROUTES.growth}
           className="topbar-stat"
           aria-label={xpLabel}
           title={tr('总经验值', 'Total XP')}
@@ -103,7 +104,7 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
           <span>{xpText}</span>
         </Link>
         <Link
-          to="/growth"
+          to={APP_ROUTES.growth}
           className="topbar-level-pill"
           aria-label={levelLabel}
           title={tr('查看成长统计', 'View growth stats')}

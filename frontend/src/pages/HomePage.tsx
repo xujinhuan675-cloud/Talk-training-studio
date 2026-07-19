@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Check,
   ChevronRight,
-  ClipboardList,
   FileText,
   History,
   Loader2,
@@ -255,7 +254,7 @@ const HomePage: React.FC = () => {
         <Surface className="home-task-panel" variant="raised" padding="lg">
           <div className="home-task-head">
             <Badge tone="neutral">{tr('继续', 'Continue')}</Badge>
-            <h2>{tr('任务', 'Tasks')}</h2>
+            <h2>{tr('下一步', 'Next steps')}</h2>
           </div>
           <div className="home-task-list">
             {latestRoom ? (
@@ -286,8 +285,8 @@ const HomePage: React.FC = () => {
                 <History size={17} />
               </span>
               <div>
-                <strong>{t('nav.review')}</strong>
-                <em>{tr('训练复盘', 'Training reviews')}</em>
+                <strong>{tr('训练复盘', 'Training reviews')}</strong>
+                <em>{tr('查看记录', 'Open records')}</em>
               </div>
               <ChevronRight size={15} />
             </Link>
@@ -298,65 +297,37 @@ const HomePage: React.FC = () => {
               </span>
               <div>
                 <strong>{t('nav.growth')}</strong>
-                <em>{tr('能力进度', 'Skill progress')}</em>
+                <em>{tr('能力趋势', 'Skill trends')}</em>
               </div>
               <ChevronRight size={15} />
             </Link>
+
+            <Link to={APP_ROUTES.practiceDefense} className="home-task-item">
+              <span className="home-task-icon neutral">
+                <FileText size={17} />
+              </span>
+              <div>
+                <strong>{tr('答辩准备', 'Defense prep')}</strong>
+                <em>{tr('上传材料', 'Upload material')}</em>
+              </div>
+              <ChevronRight size={15} />
+            </Link>
+
+            {canUseManagementActions && (
+              <Link to={APP_ROUTES.practiceBattle} className="home-task-item">
+                <span className="home-task-icon warning">
+                  <Swords size={17} />
+                </span>
+                <div>
+                  <strong>{t('nav.battlePrep')}</strong>
+                  <em>{tr('生成对手', 'Generate counterpart')}</em>
+                </div>
+                <ChevronRight size={15} />
+              </Link>
+            )}
           </div>
         </Surface>
       </div>
-
-      <PageSection
-        title={tr('入口', 'Entry points')}
-      >
-        <div className="home-entry-grid">
-          <Link to={APP_ROUTES.practiceScenarios} className="home-entry-card primary">
-            <span className="home-entry-icon success">
-              <ClipboardList size={19} />
-            </span>
-            <div>
-              <Badge tone="success">{t('nav.practice')}</Badge>
-              <strong>{t('nav.scenarioTraining')}</strong>
-            </div>
-            <ChevronRight size={16} />
-          </Link>
-
-          <Link to={APP_ROUTES.conversations} className="home-entry-card">
-            <span className="home-entry-icon neutral">
-              <MessageSquare size={19} />
-            </span>
-            <div>
-              <Badge>{tr('模拟', 'Simulation')}</Badge>
-              <strong>{t('nav.conversations')}</strong>
-            </div>
-            <ChevronRight size={16} />
-          </Link>
-
-          <Link to={APP_ROUTES.practiceDefense} className="home-entry-card">
-            <span className="home-entry-icon accent">
-              <FileText size={19} />
-            </span>
-            <div>
-              <Badge tone="violet">{t('nav.practice')}</Badge>
-              <strong>{tr('答辩准备', 'Defense prep')}</strong>
-            </div>
-            <ChevronRight size={16} />
-          </Link>
-
-          {canUseManagementActions && (
-            <Link to={APP_ROUTES.practiceBattle} className="home-entry-card">
-              <span className="home-entry-icon warning">
-                <Swords size={19} />
-              </span>
-              <div>
-                <Badge tone="warning">{tr('备战', 'Prep')}</Badge>
-                <strong>{t('nav.battlePrep')}</strong>
-              </div>
-              <ChevronRight size={16} />
-            </Link>
-          )}
-        </div>
-      </PageSection>
 
       <div className="home-review-grid">
         <PageSection

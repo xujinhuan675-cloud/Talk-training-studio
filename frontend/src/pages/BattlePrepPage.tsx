@@ -107,9 +107,9 @@ export default function BattlePrepPage() {
     <div className="bpp-page">
       <div className="bpp-container">
         {/* Back link */}
-        <button className="bpp-back" onClick={() => navigate('/')}>
+        <button className="bpp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
           <ArrowLeft size={16} />
-          <span>{tr('返回首页', 'Back Home')}</span>
+          <span>{tr('返回训练目录', 'Back to training')}</span>
         </button>
 
         {/* Title */}

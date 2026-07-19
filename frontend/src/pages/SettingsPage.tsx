@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Save,
   KeyRound,
-  SlidersHorizontal,
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppContext } from '../contexts/AppContext'
@@ -81,19 +80,18 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-type TabKey = 'personas' | 'scenarios' | 'organizations' | 'config' | 'preferences'
+type TabKey = 'personas' | 'scenarios' | 'organizations' | 'config'
 type SettingsTabKey = TabKey | 'training'
 
 const TABS: { key: SettingsTabKey; labelZh: string; labelEn: string; icon: React.ReactNode }[] = [
-  { key: 'personas', labelZh: '角色对象', labelEn: 'Persona Objects', icon: <Users size={14} /> },
-  { key: 'scenarios', labelZh: '场景对象', labelEn: 'Scenario Objects', icon: <Layers size={14} /> },
-  { key: 'organizations', labelZh: '组织对象', labelEn: 'Organization Objects', icon: <Building2 size={14} /> },
+  { key: 'personas', labelZh: '角色', labelEn: 'Personas', icon: <Users size={14} /> },
+  { key: 'scenarios', labelZh: '场景', labelEn: 'Scenarios', icon: <Layers size={14} /> },
+  { key: 'organizations', labelZh: '组织', labelEn: 'Organizations', icon: <Building2 size={14} /> },
   { key: 'training', labelZh: '训练模板', labelEn: 'Training Templates', icon: <ClipboardList size={14} /> },
-  { key: 'config', labelZh: '服务配置', labelEn: 'Service Config', icon: <KeyRound size={14} /> },
-  { key: 'preferences', labelZh: '用户偏好', labelEn: 'User Preferences', icon: <Volume2 size={14} /> },
+  { key: 'config', labelZh: 'AI 服务', labelEn: 'AI Services', icon: <KeyRound size={14} /> },
 ]
 
-const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'config', 'preferences']
+const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'config']
 
 export function SettingsShell({
   activeTab,
@@ -171,12 +169,12 @@ function PersonasTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('角色对象', 'Persona Objects')}</h3>
+        <h3 className="settings-section-title">{tr('角色', 'Personas')}</h3>
         <div className="settings-header-actions">
           <button
             className="persona-build-btn"
             onClick={() => navigate(APP_ROUTES.configPersonaNew)}
-            title={tr('从素材生成角色对象', 'Generate persona objects from source material')}
+            title={tr('从素材生成角色', 'Generate personas from source material')}
           >
             <Sparkles size={14} />
             {tr('导入素材', 'Import Material')}
@@ -385,7 +383,7 @@ function ScenariosTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('场景对象', 'Scenario Objects')}</h3>
+        <h3 className="settings-section-title">{tr('场景', 'Scenarios')}</h3>
         <button className="settings-create-btn" onClick={startCreate}>
           <Plus size={14} />
           {tr('新建场景', 'New Scenario')}
@@ -453,7 +451,7 @@ function ScenariosTab() {
 
       {showForm && (
         <div className="settings-form-panel">
-          <h4>{isNew ? tr('场景 Schema', 'Scenario Schema') : tr('编辑 Schema', 'Edit Schema')}</h4>
+          <h4>{isNew ? tr('新建场景', 'New Scenario') : tr('编辑场景', 'Edit Scenario')}</h4>
 
           <label className="field-label">
             {tr('名称', 'Name')}
@@ -461,7 +459,7 @@ function ScenariosTab() {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={tr('对象名称', 'Object name')}
+              placeholder={tr('场景名称', 'Scenario name')}
               autoFocus
             />
           </label>
@@ -740,7 +738,7 @@ function OrganizationsTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('组织对象', 'Organization Objects')}</h3>
+        <h3 className="settings-section-title">{tr('组织', 'Organizations')}</h3>
         <button className="settings-create-btn" onClick={handleNewOrg}>
           <Plus size={14} />
           {tr('新建组织', 'New Organization')}
@@ -764,14 +762,14 @@ function OrganizationsTab() {
         {/* Org sub-tabs */}
         <div className="settings-org-tabs">
           <button className={`settings-org-tab${orgTab === 'info' ? ' active' : ''}`} onClick={() => setOrgTab('info')}>
-            {tr('字段', 'Fields')}
+            {tr('基础', 'Basics')}
           </button>
           <button
             className={`settings-org-tab${orgTab === 'teams' ? ' active' : ''}`}
             onClick={() => setOrgTab('teams')}
             disabled={!selectedOrg}
           >
-            {tr('团队对象', 'Team Objects')}
+            {tr('团队', 'Teams')}
           </button>
           <button
             className={`settings-org-tab${orgTab === 'relationships' ? ' active' : ''}`}
@@ -1087,7 +1085,7 @@ function ConfigTab() {
   return (
     <>
       <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('服务 Schema', 'Service Schema')}</h3>
+        <h3 className="settings-section-title">{tr('AI 服务', 'AI Services')}</h3>
         <button className="settings-create-btn" onClick={loadConfig} disabled={loading || saving}>
           <RefreshCw size={14} />
           {loading ? tr('加载中...', 'Loading...') : tr('刷新', 'Refresh')}
@@ -1282,20 +1280,6 @@ function ConfigTab() {
   )
 }
 
-function PreferencesTab() {
-  const { tr } = useI18n()
-
-  return (
-    <div className="settings-placeholder">
-      <div className="settings-placeholder-icon">
-        <SlidersHorizontal size={28} />
-      </div>
-      <h3>{tr('暂无偏好 Schema', 'No Preference Schema')}</h3>
-      <p>{tr('可配置对象在服务配置中。', 'Configurable objects are in Service Config.')}</p>
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // SettingsPage
 // ---------------------------------------------------------------------------
@@ -1313,7 +1297,6 @@ const SettingsPage: React.FC = () => {
       {activeTab === 'scenarios' && <ScenariosTab />}
       {activeTab === 'organizations' && <OrganizationsTab />}
       {activeTab === 'config' && <ConfigTab />}
-      {activeTab === 'preferences' && <PreferencesTab />}
     </SettingsShell>
   )
 }
