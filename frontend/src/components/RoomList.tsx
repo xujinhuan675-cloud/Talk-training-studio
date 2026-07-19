@@ -10,12 +10,11 @@ import './RoomList.css'
 interface RoomListProps {
   selectedRoomId: number | null
   onSelectRoom: (room: ChatRoom) => void
-  onCreateRoom: () => void
   onRoomDeleted: (roomId: number) => void
   refreshKey: number
 }
 
-export default function RoomList({ selectedRoomId, onSelectRoom, onCreateRoom, onRoomDeleted, refreshKey }: RoomListProps) {
+export default function RoomList({ selectedRoomId, onSelectRoom, onRoomDeleted, refreshKey }: RoomListProps) {
   const { tr } = useI18n()
   const [loadedRefreshKey, setLoadedRefreshKey] = useState<number | null>(null)
   const [rooms, setRooms] = useState<ChatRoom[]>([])
@@ -94,30 +93,20 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onCreateRoom, o
 
   return (
     <div className="room-list">
-      <div className="sidebar-section-header">
-        <span className="sidebar-section-title">{tr('对话房间', 'Conversation rooms')}</span>
-        <button className="create-room-btn" onClick={onCreateRoom} title={tr('创建对话房间', 'Create conversation room')}>
-          <Plus size={15} />
-        </button>
+      {regularRooms.map(renderRoom)}
+      <div className={`sidebar-section-header room-battle-header${regularRooms.length === 0 ? ' is-first' : ''}`}>
+        <span className="sidebar-section-title room-battle-title">{tr('备战', 'Battle prep')}</span>
+        <Link
+          to={APP_ROUTES.practiceBattle}
+          className="room-battle-create"
+          title={tr('新建备战', 'New battle prep')}
+          aria-label={tr('新建备战', 'New battle prep')}
+        >
+          <span>{tr('新建', 'New')}</span>
+          <Plus size={13} />
+        </Link>
       </div>
-      {regularRooms.length === 0 ? (
-        <div className="room-empty">
-          <p>{tr('还没有对话', 'No conversations yet')}</p>
-          <button className="create-room-btn" onClick={onCreateRoom} style={{ margin: '8px auto 0', width: 'auto', padding: '6px 14px', height: 'auto', borderRadius: '6px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Plus size={12} /> {tr('新建对话房间', 'New conversation room')}
-          </button>
-        </div>
-      ) : (
-        regularRooms.map(renderRoom)
-      )}
-      {battleRooms.length > 0 && (
-        <>
-          <div className="sidebar-section-header" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-            <span className="sidebar-section-title" style={{ color: 'var(--amber)' }}>{tr('备战', 'Battle prep')}</span>
-          </div>
-          {battleRooms.map(renderRoom)}
-        </>
-      )}
+      {battleRooms.map(renderRoom)}
       <ConfirmDialog
         open={deleteTarget !== null}
         title={tr('删除对话', 'Delete Conversation')}

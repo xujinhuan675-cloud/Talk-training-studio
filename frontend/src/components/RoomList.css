@@ -12,31 +12,6 @@
   font-size: 13px;
 }
 
-.room-empty {
-  text-align: center;
-  padding: 20px 18px;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.create-room-btn {
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--primary-gradient);
-  color: #fff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity var(--transition-fast);
-}
-
-.create-room-btn:hover {
-  opacity: 0.85;
-}
-
 .room-item {
   display: flex;
   align-items: center;
@@ -116,6 +91,49 @@
 .room-delete-btn:hover {
   background: var(--rose-soft);
   color: var(--rose);
+}
+
+.room-battle-header {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.room-battle-header.is-first {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.room-battle-title {
+  color: var(--amber);
+}
+
+.room-battle-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-sm);
+  background: var(--amber);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.room-battle-create:hover {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber);
 }
 
 /* Hide old type badge in sidebar — not needed with icons */

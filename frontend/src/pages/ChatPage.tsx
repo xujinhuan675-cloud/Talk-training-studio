@@ -2126,7 +2126,6 @@ export default function ChatPage() {
           onSelectRoom={(room: ChatRoom) => {
             navigate(APP_ROUTES.conversation(room.id))
           }}
-          onCreateRoom={() => setShowCreateDialog(true)}
           onRoomDeleted={(id) => {
             if (roomId === id) {
               navigate(APP_ROUTES.conversations)
