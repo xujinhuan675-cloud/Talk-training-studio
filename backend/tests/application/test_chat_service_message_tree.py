@@ -932,6 +932,40 @@ async def test_librechat_message_tree_acceptance_matrix_keeps_selected_paths(
     ]
     assert "Root assistant turn." not in [message.content for message in reloaded_path]
 
+    branch_search_results = await tree_service.search_messages(
+        conversation.id,
+        "Regenerated assistant",
+        branch_id=regenerated.branch_id,
+        include_path=True,
+        context_before=1,
+        context_after=2,
+    )
+    assert [result.message.public_id for result in branch_search_results] == [
+        regenerated.public_id
+    ]
+    branch_search_result = branch_search_results[0]
+    assert [message.public_id for message in branch_search_result.path] == [
+        first_user.public_id,
+        regenerated.public_id,
+    ]
+    assert [message.branch_id for message in branch_search_result.path] == [
+        first_user.branch_id,
+        regenerated.branch_id,
+    ]
+    assert [message.content for message in branch_search_result.context] == [
+        "Root user turn.",
+        "Regenerated assistant answer.",
+        "Continue from the regenerated answer.",
+        "Assistant reply.",
+    ]
+    assert {message.branch_id for message in branch_search_result.context[1:]} == {
+        regenerated.branch_id
+    }
+    assert first_assistant.public_id not in {
+        message.public_id
+        for message in branch_search_result.path + branch_search_result.context
+    }
+
     edited_result = await tree_service.apply_message_action(
         conversation.id,
         first_user.public_id,
@@ -997,6 +1031,113 @@ async def test_librechat_message_tree_acceptance_matrix_keeps_selected_paths(
         "Assistant reply.",
         "Continue after reload.",
     ]
+
+
+@pytest.mark.asyncio
+async def test_search_locations_preserve_edited_branch_replay_metadata_context(
+    session_factory,
+):
+    conversation, first_user, first_assistant, off_path_user = await _seed_conversation(
+        session_factory
+    )
+    replay_metadata = {
+        "branchPolicy": {
+            "owner": "training_core",
+            "selectedPathPurpose": "training_replay_context",
+        },
+        "selectedPath": {
+            "branchId": "metadata-shadow-branch",
+            "tailMessageId": "metadata-shadow-tail",
+            "messageIds": ["metadata-shadow-root", "metadata-shadow-tail"],
+            "purpose": "training_replay_context",
+            "replayContextOnly": True,
+            "affectsScoring": False,
+            "affectsCompletion": False,
+        },
+        "currentBranchTail": {
+            "branchId": "metadata-shadow-branch",
+            "messageId": "metadata-shadow-tail",
+        },
+    }
+    llm = _FakeLLM()
+    chat_service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=llm,
+    )
+    tree_service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    edited_result = await tree_service.apply_message_action(
+        conversation.id,
+        first_user.public_id,
+        MessageActionDTO(
+            action="edit",
+            content="Edited root user turn with needle-edited-search.",
+            metadata=replay_metadata,
+        ),
+    )
+    edited = edited_result.message
+    assert edited is not None
+    assert edited.branch_id != "metadata-shadow-branch"
+    assert edited.metadata["selectedPath"]["affectsScoring"] is False
+    assert edited.metadata["selectedPath"]["affectsCompletion"] is False
+
+    edited_continue = await chat_service.send_message_sync(
+        conversation.id,
+        ChatRequestDTO(
+            message="Follow the edited search branch.",
+            parent_message_id=edited.public_id,
+            branch_id=edited.branch_id,
+            model="runtime-edited-model",
+            metadata=replay_metadata,
+            stream=False,
+        ),
+    )
+    edited_tail = edited_continue["message"]["public_id"]
+    edited_path = await tree_service.get_message_path(conversation.id, edited_tail)
+    edited_user = edited_path[-2]
+
+    edited_results = await tree_service.search_messages(
+        conversation.id,
+        "needle-edited-search",
+        branch_id=edited.branch_id,
+        include_path=True,
+        context_before=1,
+        context_after=1,
+    )
+    assert [result.message.public_id for result in edited_results] == [edited.public_id]
+    assert [message.public_id for message in edited_results[0].path] == [edited.public_id]
+    assert [message.branch_id for message in edited_results[0].path] == [edited.branch_id]
+    assert [message.public_id for message in edited_results[0].context] == [
+        edited.public_id,
+        edited_user.public_id,
+    ]
+    assert [message.branch_id for message in edited_results[0].context] == [
+        edited.branch_id,
+        edited.branch_id,
+    ]
+    edited_excluded_ids = {
+        first_user.public_id,
+        first_assistant.public_id,
+        off_path_user.public_id,
+    }
+    edited_location_ids = {
+        message.public_id for message in edited_results[0].path + edited_results[0].context
+    }
+    assert edited_excluded_ids.isdisjoint(edited_location_ids)
+    assert llm.generate_kwargs[-1]["model"] == "runtime-edited-model"
+    assert edited_continue["run"]["completion_tokens"] == 4
+    assert (
+        edited_continue["run"]["metadata"]["selectedPath"]["purpose"]
+        == "training_replay_context"
+    )
 
 
 @pytest.mark.asyncio

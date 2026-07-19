@@ -780,10 +780,84 @@ test('fetchConversationTreeBranchSnapshot loads focused node children and search
               parent_message_id: 'msg_child_main',
               branch_id: 'main',
               status: 'active',
+              metadata: { rank: 1, source: 'message_search' },
               created_at: '2026-07-17T00:04:00Z',
             },
-            path: [],
-            context: [],
+            path: [
+              {
+                id: 1,
+                conversation_id: 7,
+                role: 'user',
+                content: 'Root question',
+                public_id: 'msg_root',
+                branch_id: 'main',
+                status: 'active',
+                metadata: { pathIndex: 0 },
+                created_at: '2026-07-17T00:00:00Z',
+              },
+              {
+                id: 2,
+                conversation_id: 7,
+                role: 'assistant',
+                content: 'Selected answer',
+                public_id: 'msg_selected',
+                parent_message_id: 'msg_root',
+                branch_id: 'main',
+                status: 'active',
+                metadata: { pathIndex: 1 },
+                created_at: '2026-07-17T00:01:00Z',
+              },
+              {
+                id: 3,
+                conversation_id: 7,
+                role: 'user',
+                content: 'Main follow-up',
+                public_id: 'msg_child_main',
+                parent_message_id: 'msg_selected',
+                branch_id: 'main',
+                status: 'active',
+                metadata: { pathIndex: 2 },
+                created_at: '2026-07-17T00:02:00Z',
+              },
+              {
+                id: 5,
+                conversation_id: 7,
+                role: 'assistant',
+                content: 'Pilot discussion',
+                public_id: 'msg_search',
+                parent_message_id: 'msg_child_main',
+                branch_id: 'main',
+                status: 'active',
+                metadata: { pathIndex: 3, rank: 1, source: 'message_search' },
+                created_at: '2026-07-17T00:04:00Z',
+              },
+            ],
+            context: [
+              {
+                id: 3,
+                conversation_id: 7,
+                role: 'user',
+                content: 'Main follow-up',
+                public_id: 'msg_child_main',
+                parent_message_id: 'msg_selected',
+                branch_id: 'main',
+                status: 'active',
+                metadata: { window: 'before' },
+                created_at: '2026-07-17T00:02:00Z',
+              },
+              {
+                id: 5,
+                conversation_id: 7,
+                role: 'assistant',
+                content: 'Pilot discussion',
+                public_id: 'msg_search',
+                parent_message_id: 'msg_child_main',
+                branch_id: 'main',
+                status: 'active',
+                metadata: { rank: 1, source: 'message_search', window: 'match' },
+                created_at: '2026-07-17T00:04:00Z',
+              },
+            ],
           },
         ]
       }
@@ -806,7 +880,48 @@ test('fetchConversationTreeBranchSnapshot loads focused node children and search
       assert.equal(snapshot.message.publicId, 'msg_selected')
       assert.deepEqual(snapshot.path.map((item) => item.publicId), ['msg_root', 'msg_selected'])
       assert.deepEqual(snapshot.children.map((item) => item.branchId), ['main', 'branch_alt'])
-      assert.equal(snapshot.searchResults[0].message.publicId, 'msg_search')
+      const searchResult = snapshot.searchResults[0]
+      assert.equal(searchResult.message.publicId, 'msg_search')
+      assert.equal(searchResult.message.parentMessageId, 'msg_child_main')
+      assert.equal(searchResult.message.branchId, 'main')
+      assert.deepEqual(searchResult.message.metadata, {
+        rank: 1,
+        source: 'message_search',
+      })
+      assert.deepEqual(
+        searchResult.path.map((item) => ({
+          publicId: item.publicId,
+          parentMessageId: item.parentMessageId,
+          branchId: item.branchId,
+        })),
+        [
+          { publicId: 'msg_root', parentMessageId: null, branchId: 'main' },
+          { publicId: 'msg_selected', parentMessageId: 'msg_root', branchId: 'main' },
+          { publicId: 'msg_child_main', parentMessageId: 'msg_selected', branchId: 'main' },
+          { publicId: 'msg_search', parentMessageId: 'msg_child_main', branchId: 'main' },
+        ],
+      )
+      assert.deepEqual(searchResult.path.map((item) => item.metadata), [
+        { pathIndex: 0 },
+        { pathIndex: 1 },
+        { pathIndex: 2 },
+        { pathIndex: 3, rank: 1, source: 'message_search' },
+      ])
+      assert.deepEqual(
+        searchResult.context.map((item) => ({
+          publicId: item.publicId,
+          parentMessageId: item.parentMessageId,
+          branchId: item.branchId,
+        })),
+        [
+          { publicId: 'msg_child_main', parentMessageId: 'msg_selected', branchId: 'main' },
+          { publicId: 'msg_search', parentMessageId: 'msg_child_main', branchId: 'main' },
+        ],
+      )
+      assert.deepEqual(searchResult.context.map((item) => item.metadata), [
+        { window: 'before' },
+        { rank: 1, source: 'message_search', window: 'match' },
+      ])
     },
   )
 })

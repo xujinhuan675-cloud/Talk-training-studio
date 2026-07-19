@@ -153,14 +153,14 @@ test('completeTrainingSession posts an empty JSON body by default', async () => 
   assert.deepEqual(JSON.parse(calls[0].init.body), {})
 })
 
-test('completeTrainingSession can persist message tree branch metadata', async () => {
+test('completeTrainingSession persists a search-selected message tree path as replay-only metadata', async () => {
   const calls = installFetchStub()
   const metadata = trainingSession.buildTrainingCompletionBranchMetadata({
     provider: 'talkwise-conversation',
     conversationId: '7',
-    selectedMessageId: 'msg-tail',
+    selectedMessageId: 'msg-search-hit',
     branchId: 'branch-review',
-    sourceMessageId: 99,
+    sourceMessageId: 'msg-search-hit',
     path: [
       {
         publicId: 'msg-root',
@@ -170,11 +170,18 @@ test('completeTrainingSession can persist message tree branch metadata', async (
         parentMessageId: null,
       },
       {
-        publicId: 'msg-tail',
+        publicId: 'msg-objection',
+        role: 'assistant',
+        content: 'The buyer objected to the annual commitment.',
+        branchId: 'main',
+        parentMessageId: 'msg-root',
+      },
+      {
+        publicId: 'msg-search-hit',
         role: 'assistant',
         content: 'Use a pilot with a measurable success bar.',
         branchId: 'branch-review',
-        parentMessageId: 'msg-root',
+        parentMessageId: 'msg-objection',
       },
     ],
   })
@@ -185,13 +192,38 @@ test('completeTrainingSession can persist message tree branch metadata', async (
   })
 
   const body = JSON.parse(calls[0].init.body)
+  const selection = body.metadata.messageTreeSelection
+  const selectedPath = body.metadata.selectedPath
   assert.equal(body.generate_report, false)
-  assert.equal(body.metadata.messageTreeSelection.provider, 'talkwise-conversation')
-  assert.equal(body.metadata.messageTreeSelection.selectedMessageId, 'msg-tail')
-  assert.equal(body.metadata.messageTreeSelection.forkPointMessageId, 'msg-root')
-  assert.equal(body.metadata.messageTreeSelection.affectsScoring, false)
-  assert.equal(body.metadata.selectedPath.affectsCompletion, false)
-  assert.deepEqual(body.metadata.selectedPath.messageIds, ['msg-root', 'msg-tail'])
+  assert.equal(selection.provider, 'talkwise-conversation')
+  assert.equal(selection.selectedMessageId, 'msg-search-hit')
+  assert.equal(selection.sourceMessageId, 'msg-search-hit')
+  assert.equal(selection.forkPointMessageId, 'msg-objection')
+  assert.equal(selection.purpose, 'training_replay_context')
+  assert.equal(selection.replayContextOnly, true)
+  assert.equal(selection.affectsScoring, false)
+  assert.equal(selection.affectsCompletion, false)
+  assert.equal(selectedPath.replayContextOnly, true)
+  assert.equal(selectedPath.affectsScoring, false)
+  assert.equal(selectedPath.affectsCompletion, false)
+  assert.deepEqual(selectedPath.messageIds, ['msg-root', 'msg-objection', 'msg-search-hit'])
+  assert.deepEqual(
+    selection.path.map((item) => ({
+      publicId: item.publicId,
+      parentMessageId: item.parentMessageId,
+      branchId: item.branchId,
+    })),
+    [
+      { publicId: 'msg-root', parentMessageId: null, branchId: 'main' },
+      { publicId: 'msg-objection', parentMessageId: 'msg-root', branchId: 'main' },
+      { publicId: 'msg-search-hit', parentMessageId: 'msg-objection', branchId: 'branch-review' },
+    ],
+  )
+  assert.equal('score_id' in body, false)
+  assert.equal('report_id' in body, false)
+  assert.equal('growthReport' in body.metadata, false)
+  assert.equal('growth_report' in body.metadata, false)
+  assert.equal('growth' in body.metadata, false)
 })
 
 test('training session requests surface FastAPI detail string errors', async () => {
@@ -357,6 +389,74 @@ test('buildTrainingCompletionBranchMetadata serializes selected path as replay-o
   assert.equal(info.selectedTailMessageId, 'msg-leaf')
   assert.equal(info.forkPointMessageId, 'msg-root')
   assert.equal(info.lastReplyPreview, 'Frame it as a pilot.')
+})
+
+test('buildTrainingCompletionBranchMetadata keeps search-selected path replay-only', () => {
+  const metadata = trainingSession.buildTrainingCompletionBranchMetadata({
+    provider: 'talkwise-conversation',
+    conversationId: '7',
+    selectedMessageId: 'msg-search',
+    branchId: 'main',
+    path: [
+      {
+        publicId: 'msg-root',
+        role: 'user',
+        content: 'Can we revisit pricing?',
+        parentMessageId: null,
+        branchId: 'main',
+      },
+      {
+        publicId: 'msg-selected',
+        role: 'assistant',
+        content: 'We can start with value.',
+        parentMessageId: 'msg-root',
+        branchId: 'main',
+      },
+      {
+        publicId: 'msg-child-main',
+        role: 'user',
+        content: 'What would success look like?',
+        parentMessageId: 'msg-selected',
+        branchId: 'main',
+      },
+      {
+        publicId: 'msg-search',
+        role: 'assistant',
+        content: 'A pilot with a measurable success bar.',
+        parentMessageId: 'msg-child-main',
+        branchId: 'main',
+      },
+    ],
+  })
+
+  assert.equal(metadata.messageTreeSelection.purpose, 'training_replay_context')
+  assert.equal(metadata.messageTreeSelection.replayContextOnly, true)
+  assert.equal(metadata.messageTreeSelection.affectsScoring, false)
+  assert.equal(metadata.messageTreeSelection.affectsCompletion, false)
+  assert.equal(metadata.selectedPath.purpose, 'training_replay_context')
+  assert.equal(metadata.selectedPath.replayContextOnly, true)
+  assert.equal(metadata.selectedPath.affectsScoring, false)
+  assert.equal(metadata.selectedPath.affectsCompletion, false)
+  assert.deepEqual(metadata.selectedPath.messageIds, [
+    'msg-root',
+    'msg-selected',
+    'msg-child-main',
+    'msg-search',
+  ])
+  assert.deepEqual(metadata.messageTreeSelection.path.map((item) => item.branchId), [
+    'main',
+    'main',
+    'main',
+    'main',
+  ])
+  assert.equal(metadata.messageTreeSelection.lastReplyPreview, 'A pilot with a measurable success bar.')
+  assert.equal(
+    metadata.messageTreeSelection.pathSummary,
+    'We can start with value. / What would success look like? / A pilot with a measurable success bar.',
+  )
+  assert.equal('score' in metadata.messageTreeSelection, false)
+  assert.equal('growthReport' in metadata.messageTreeSelection, false)
+  assert.equal('completion' in metadata.messageTreeSelection, false)
 })
 
 test('getTrainingConversationBranchInfo extracts id-only selected path state without inventing text', () => {
