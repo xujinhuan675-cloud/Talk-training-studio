@@ -86,8 +86,8 @@ const modeLabelKeys: Record<string, TranslationKey> = {
 }
 
 const sourceLabels: Record<HistoryEntry['source'], LocalizedText> = {
-  session: ['训练会话', 'Session'],
-  progress: ['本地进度', 'Local progress'],
+  session: ['训练会话', 'Training session'],
+  progress: ['场景进度', 'Scenario progress'],
 }
 
 function translateLabel(label: LocalizedText, tr: TranslateInline): string {
@@ -517,7 +517,7 @@ export default function TrainingHistoryPage() {
       <PageHeader
         eyebrow={tr('训练记录', 'Training history')}
         icon={<History size={16} />}
-        title={tr('训练历史', 'History')}
+        title={tr('训练记录', 'Training records')}
       />
 
       <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>

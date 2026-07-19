@@ -85,7 +85,7 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onCreateRoom, o
       <button
         className="room-delete-btn"
         onClick={(e) => handleDeleteClick(e, room)}
-        title={tr('删除聊天室', 'Delete chat room')}
+        title={tr('删除对话房间', 'Delete conversation room')}
       >
         <Trash2 size={13} />
       </button>
@@ -95,8 +95,8 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onCreateRoom, o
   return (
     <div className="room-list">
       <div className="sidebar-section-header">
-        <span className="sidebar-section-title">{tr('聊天室', 'Chat Rooms')}</span>
-        <button className="create-room-btn" onClick={onCreateRoom} title={tr('创建聊天室', 'Create chat room')}>
+        <span className="sidebar-section-title">{tr('对话房间', 'Conversation rooms')}</span>
+        <button className="create-room-btn" onClick={onCreateRoom} title={tr('创建对话房间', 'Create conversation room')}>
           <Plus size={15} />
         </button>
       </div>
@@ -104,7 +104,7 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onCreateRoom, o
         <div className="room-empty">
           <p>{tr('还没有对话', 'No conversations yet')}</p>
           <button className="create-room-btn" onClick={onCreateRoom} style={{ margin: '8px auto 0', width: 'auto', padding: '6px 14px', height: 'auto', borderRadius: '6px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Plus size={12} /> {tr('新建聊天室', 'New Chat Room')}
+            <Plus size={12} /> {tr('新建对话房间', 'New conversation room')}
           </button>
         </div>
       ) : (

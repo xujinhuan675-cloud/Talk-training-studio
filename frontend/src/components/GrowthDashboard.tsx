@@ -110,7 +110,7 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
             <Sparkles size={48} strokeWidth={1.5} />
           </div>
           <h2>{tr('还没有能力评估数据', 'No competency evaluation data yet')}</h2>
-          <p>{tr('在聊天室中与 AI 角色对话，然后点击"分析"按钮生成能力评估。', 'Chat with AI personas, then click “Analyze” to generate a competency evaluation.')}<br />{tr('完成 2 次以上评估后，就能看到成长趋势。', 'After 2 or more evaluations, growth trends will appear here.')}</p>
+          <p>{tr('在对话房间中与 AI 角色对话，然后点击"分析"按钮生成能力评估。', 'Chat with AI personas in a conversation room, then click “Analyze” to generate a competency evaluation.')}<br />{tr('完成 2 次以上评估后，就能看到成长趋势。', 'After 2 or more evaluations, growth trends will appear here.')}</p>
           <button className="growth-cta" onClick={onCreateRoom}>
             {tr('开始一场练习', 'Start a practice session')}
           </button>

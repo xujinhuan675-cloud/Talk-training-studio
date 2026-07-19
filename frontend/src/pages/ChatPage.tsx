@@ -1411,7 +1411,7 @@ function ChatArea() {
           <button
             className="chat-page-back-btn"
             onClick={() => navigate(APP_ROUTES.conversations)}
-            title={tr('返回对话列表', 'Back to conversation list')}
+            title={tr('返回对话库', 'Back to conversation library')}
           >
             <ArrowLeft size={18} />
           </button>
@@ -2149,14 +2149,14 @@ export default function ChatPage() {
           <div className="chat-page-empty-icon">
             <MessageCircle size={32} strokeWidth={1.5} />
           </div>
-          <h2>{tr('选择一个对话开始练习', 'Choose a conversation to start practicing')}</h2>
-          <p>{tr('从左侧选择聊天室，或创建一个新的对话', 'Select a chat room from the left, or create a new conversation')}</p>
+          <h2>{tr('选择一个对话房间', 'Choose a conversation room')}</h2>
+          <p>{tr('从左侧打开已有房间，或新建一个普通对话。', 'Open an existing room, or create a regular conversation.')}</p>
           <button
             className="chat-page-empty-cta"
             onClick={() => setShowCreateDialog(true)}
           >
             <Plus size={16} />
-            {tr('新建聊天室', 'New Chat Room')}
+            {tr('新建对话房间', 'New conversation room')}
           </button>
         </div>
       )}

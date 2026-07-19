@@ -135,7 +135,7 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>{tr('创建聊天室', 'Create Chat Room')}</h3>
+        <h3>{tr('创建对话房间', 'Create conversation room')}</h3>
         <div className="dialog-body">
           <label className="field-label">
             {tr('名称', 'Name')}
@@ -144,7 +144,7 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={tr('输入聊天室名称', 'Enter chat room name')}
+              placeholder={tr('输入对话房间名称', 'Enter conversation room name')}
               autoFocus
             />
           </label>

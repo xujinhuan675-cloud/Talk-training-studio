@@ -626,7 +626,7 @@ export default function TrainingResultPage() {
           <strong>{tr('训练结果不可用', 'Training result unavailable')}</strong>
           <span>{error}</span>
           <Link to={APP_ROUTES.reviewSessions} className="training-result-primary-link">
-            {tr('返回训练记录', 'Back to history')}
+            {tr('返回训练记录', 'Back to training records')}
           </Link>
         </section>
       </PageShell>
@@ -660,7 +660,7 @@ export default function TrainingResultPage() {
             {tr('回到训练', 'Back to training')}
           </Link>
           <Link to={APP_ROUTES.reviewSessions} className="training-result-secondary-link">
-            {tr('训练记录', 'History')}
+            {tr('训练记录', 'Training records')}
           </Link>
           {chatPath && (
             <Link to={chatPath} className="training-result-primary-link">

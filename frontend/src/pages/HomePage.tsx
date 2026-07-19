@@ -77,7 +77,7 @@ const HomePage: React.FC = () => {
     {
       to: APP_ROUTES.reviewSessions,
       icon: <History size={16} />,
-      label: tr('复盘记录', 'Review history'),
+      label: t('nav.review'),
     },
     {
       to: APP_ROUTES.growth,
@@ -133,7 +133,7 @@ const HomePage: React.FC = () => {
                 <MessageSquare size={15} />
               </span>
               <span className="home-continue-copy">
-                <strong>{tr('继续最近会话', 'Continue latest session')}</strong>
+                <strong>{tr('继续最近对话', 'Continue latest conversation')}</strong>
                 <em>{latestRoom.name} · {timeAgo(latestRoom.last_message_at, tr) || tr('未记录时间', 'No time')}</em>
               </span>
               <ChevronRight size={15} />
@@ -144,7 +144,7 @@ const HomePage: React.FC = () => {
                 <MessageSquare size={15} />
               </span>
               <span className="home-continue-copy">
-                <strong>{tr('暂无可继续会话', 'No session to continue')}</strong>
+                <strong>{tr('暂无可继续对话', 'No conversation to continue')}</strong>
                 <em>{tr('从训练目录开始', 'Start from the catalog')}</em>
               </span>
             </div>
@@ -177,11 +177,11 @@ const HomePage: React.FC = () => {
 
           <PageSection
             className="home-recent-section"
-            title={tr('最近会话', 'Recent sessions')}
+            title={tr('最近对话', 'Recent conversations')}
             actions={(
               <Button asChild variant="ghost" size="sm">
                 <Link to={APP_ROUTES.conversations}>
-                  {tr('全部会话', 'All sessions')}
+                  {t('nav.conversations')}
                   <ChevronRight size={14} />
                 </Link>
               </Button>

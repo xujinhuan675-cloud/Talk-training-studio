@@ -50,6 +50,12 @@ export const desktopNavSections: AppNavSection[] = [
         exact: true,
         roles: MANAGEMENT_SYSTEM_ROLES,
       },
+      {
+        to: APP_ROUTES.conversations,
+        icon: <MessageSquare size={18} />,
+        labelKey: 'nav.conversations',
+        matchPrefix: APP_ROUTES.conversations,
+      },
     ],
   },
   {
@@ -61,12 +67,6 @@ export const desktopNavSections: AppNavSection[] = [
         icon: <History size={18} />,
         labelKey: 'nav.review',
         matchPrefix: APP_ROUTES.review,
-      },
-      {
-        to: APP_ROUTES.conversations,
-        icon: <MessageSquare size={18} />,
-        labelKey: 'nav.conversations',
-        matchPrefix: APP_ROUTES.conversations,
       },
     ],
   },

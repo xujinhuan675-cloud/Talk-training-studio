@@ -129,7 +129,7 @@ export default function DefensePrepPage() {
       if (updated.room_id) {
         navigate(APP_ROUTES.conversation(updated.room_id))
       } else {
-        setState((s) => ({ ...s, submitting: false, error: tr('未能创建聊天房间，请重试', 'Could not create a chat room. Please try again.') }))
+        setState((s) => ({ ...s, submitting: false, error: tr('未能创建对话房间，请重试', 'Could not create a conversation room. Please try again.') }))
       }
     } catch (e: unknown) {
       setState((s) => ({ ...s, submitting: false, error: getErrorMessage(e, tr('启动失败，请重试', 'Start failed. Please try again.')) }))
