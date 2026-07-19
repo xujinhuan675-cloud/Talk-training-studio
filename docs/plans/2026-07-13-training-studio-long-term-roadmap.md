@@ -177,12 +177,42 @@ Training Studio 的长期形态是：
 - 改进可执行性：复盘是否能给出下一次可练的动作。
 - 能力沉淀：系统是否能长期追踪用户表达能力变化。
 
+## 未来可迁移能力池
+
+这些能力来自 LibreChat / Pipecat 的成熟底座，但不进入当前交付切片。只有当它们直接支撑训练闭环、企业权限或可观测性时，才从本节提升到近期计划。
+
+### LibreChat 方向
+
+- 完整 OAuth、LDAP、2FA、真实 session 管理。
+- roles/groups/ACL/admin panel 的完整产品化 UI。
+- MCP lifecycle、OAuth MCP、通用 tool dispatcher、Agent marketplace。
+- files/RAG/uploads 的完整外部 picker、file search、agent file scope。
+- import/export/share、shared links、团队复盘分发。
+- artifacts、code interpreter、image generation/editing。
+- web search、scraper、reranker。
+- usage、billing、moderation、token balance。
+
+### Pipecat 方向
+
+- WebRTC、LiveKit、Daily 等会议式 transport。
+- Deepgram、ElevenLabs、Azure、Google、MiniMax、Ollama、OpenRouter 等多 provider STT/TTS/LLM 扩展。
+- RTVI 全量客户端协议和前端 SDK。
+- 高级 audio processing：降噪、mixing、word timestamp、语速/停顿/重叠说话指标。
+- 完整 observability 平台：latency observer、turn tracking、startup timing、OpenTelemetry、Sentry。
+- 电话链路：Twilio、Vonage、Telnyx、Plivo、WhatsApp、Genesys。
+- 视频 avatar / 虚拟人：HeyGen、Tavus、Simli、LemonSlice。
+- worker/bus/distributed runtime。
+
+当前阶段只实现 [[2026-07-17-librechat-pipecat-fit-audit]] 中列出的当下缺口；本节能力池暂不作为直接开发范围。
+
 ## 近期建议
 
 下一阶段优先顺序：
 
-1. 先把文字训练的追问策略、难度控制和复盘质量做扎实。
-2. 再把语音模式升级为实时双向语音沟通。
-3. 视频模式先做用户侧视频回答分析，再做 AI 可视化对话对象。
+1. 继续收紧 text runtime / message-tree 的真实 UI reload/fork 操作验收；后端 fork metadata remap 已补。
+2. 把训练素材窄 tool consumer 接入 Persona Builder 或复盘助手的局部工作流；当前后端 API 已只返回安全摘要。
+3. 继续补 auth / ACL 漏洞点，尤其是未来会被 tool/RAG 使用的 get/update/delete/list/count helper。
+4. Pipecat 下一步只做 metrics/tracing、provider error taxonomy、turn latency 统计；真实浏览器麦克风 E2E 单独排期。
+5. 视频模式先保持用户视频回答上传和后续分析，不进入会议式虚拟人实现。
 
 这样可以避免过早投入高成本视频虚拟人，同时持续增强真实训练价值。

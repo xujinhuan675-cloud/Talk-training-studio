@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence as SequenceABC
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Literal, Optional, Sequence, Tuple
+from typing import Any, Callable, Literal, Optional, Sequence, Tuple
 
 from application.dto import (
     AgentConfigDTO,
@@ -303,6 +304,99 @@ def _forked_created_at_after_parent(
     if source_created_at > parent_created_at:
         return source_created_at
     return parent_created_at + timedelta(microseconds=1)
+
+
+def _remap_fork_conversation_metadata(
+    metadata: dict[str, Any],
+    source_to_forked_id: Mapping[str, str],
+) -> dict[str, Any]:
+    remapped = dict(metadata)
+    for key, remap in {
+        "selectedPath": _remap_selected_path_metadata,
+        "currentBranchTail": _remap_branch_tail_metadata,
+        "messageTreeSelection": _remap_message_tree_selection_metadata,
+    }.items():
+        value = remapped.get(key)
+        if isinstance(value, Mapping):
+            remapped[key] = remap(value, source_to_forked_id)
+    return remapped
+
+
+def _remap_selected_path_metadata(
+    metadata: Mapping[str, Any],
+    source_to_forked_id: Mapping[str, str],
+) -> dict[str, Any]:
+    remapped = dict(metadata)
+    if isinstance(remapped.get("messageIds"), SequenceABC) and not isinstance(
+        remapped.get("messageIds"), str | bytes | bytearray
+    ):
+        remapped["messageIds"] = [
+            mapped_id
+            for raw_id in remapped["messageIds"]
+            if (mapped_id := _forked_message_id(raw_id, source_to_forked_id)) is not None
+        ]
+    for key in ("tailMessageId", "selectedMessageId", "messageId"):
+        if key in remapped:
+            remapped[key] = _forked_message_id(remapped[key], source_to_forked_id)
+    return remapped
+
+
+def _remap_branch_tail_metadata(
+    metadata: Mapping[str, Any],
+    source_to_forked_id: Mapping[str, str],
+) -> dict[str, Any]:
+    remapped = dict(metadata)
+    for key in ("messageId", "publicId", "tailMessageId", "selectedMessageId"):
+        if key in remapped:
+            remapped[key] = _forked_message_id(remapped[key], source_to_forked_id)
+    return remapped
+
+
+def _remap_message_tree_selection_metadata(
+    metadata: Mapping[str, Any],
+    source_to_forked_id: Mapping[str, str],
+) -> dict[str, Any]:
+    remapped = _remap_branch_tail_metadata(metadata, source_to_forked_id)
+    path = remapped.get("path")
+    if isinstance(path, SequenceABC) and not isinstance(path, str | bytes | bytearray):
+        remapped["path"] = [
+            remapped_item
+            for item in path
+            if (remapped_item := _remap_message_tree_path_item(item, source_to_forked_id))
+            is not None
+        ]
+    return remapped
+
+
+def _remap_message_tree_path_item(
+    item: object,
+    source_to_forked_id: Mapping[str, str],
+) -> dict[str, Any] | None:
+    if not isinstance(item, Mapping):
+        return None
+    remapped = dict(item)
+    has_required_public_id = False
+    for key in ("publicId", "public_id", "messageId", "message_id"):
+        if key not in remapped:
+            continue
+        mapped_id = _forked_message_id(remapped[key], source_to_forked_id)
+        if mapped_id is None:
+            return None
+        remapped[key] = mapped_id
+        has_required_public_id = True
+    for key in ("parentMessageId", "parent_message_id"):
+        if key in remapped:
+            remapped[key] = _forked_message_id(remapped[key], source_to_forked_id)
+    return remapped if has_required_public_id else dict(item)
+
+
+def _forked_message_id(
+    value: object,
+    source_to_forked_id: Mapping[str, str],
+) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return source_to_forked_id.get(value)
 
 
 def _message_action_metadata(
@@ -753,6 +847,13 @@ class ConversationApplicationService:
                 id_map[source.public_id] = created.public_id
                 created_at_by_source_id[source.public_id] = created.created_at
                 created_messages.append(created)
+
+            forked_conversation.metadata = _remap_fork_conversation_metadata(
+                forked_conversation.metadata,
+                id_map,
+            )
+            forked_conversation.updated_at = _utcnow()
+            forked_conversation = await uow.conversation_repository.update(forked_conversation)
 
             return ForkConversationResultDTO(
                 conversation=ConversationDTO.model_validate(forked_conversation),

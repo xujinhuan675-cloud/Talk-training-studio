@@ -70,6 +70,21 @@ PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "vad": "silero",
     "turnDetection": "pipecat",
 }
+PIPECAT_REALTIME_SMOKE_CONTRACT_EVENTS = (
+    "session.started",
+    "audio.input",
+    "audio.output",
+    "transcript.delta",
+    "transcript.done",
+    "transcript.persisted",
+    "training.live_guidance.triggered",
+    "user_turn.started",
+    "user_turn.stopped",
+    "assistant_speaking.started",
+    "assistant_speaking.stopped",
+    "interrupted",
+    "silence_timeout",
+)
 PIPECAT_REALTIME_FEATURE_REQUIREMENTS = {
     "stt": {
         "code": "PIPECAT_FEATURE_UNAVAILABLE",
@@ -430,12 +445,40 @@ def pipecat_realtime_capability_response(
     data["readyForCall"] = readiness["ready"]
     data["readiness"] = readiness
     data["errors"] = readiness["blockingReasons"]
+    data["smoke"] = pipecat_realtime_smoke_contract(
+        ready_for_call=bool(readiness["ready"]),
+        require_websocket=require_websocket,
+        input_audio_format=openai_requirements["inputAudioFormat"],
+        output_audio_format=openai_requirements["outputAudioFormat"],
+    )
     if include_source_snapshot:
         with suppress(Exception):
             source_snapshot = sanitize_realtime_public_value(dict(pipecat_source_snapshot()))
             if isinstance(source_snapshot, Mapping):
                 data["sourceSnapshot"] = dict(source_snapshot)
     return data
+
+
+def pipecat_realtime_smoke_contract(
+    *,
+    ready_for_call: bool,
+    require_websocket: bool = True,
+    input_audio_format: str | None = None,
+    output_audio_format: str | None = None,
+) -> dict[str, object]:
+    """Return the deterministic local smoke contract for Pipecat realtime calls."""
+
+    return {
+        "verificationLevel": "dependency_and_event_contract",
+        "localRuntimeReady": bool(ready_for_call),
+        "browserE2EVerified": False,
+        "requiresExplicitMediaPermission": True,
+        "transport": "websocket" if require_websocket else "audio_chunks",
+        "inputAudioFormat": input_audio_format or "pcm16",
+        "outputAudioFormat": output_audio_format or input_audio_format or "pcm16",
+        "defaultInputSampleRate": 16000,
+        "contractEvents": list(PIPECAT_REALTIME_SMOKE_CONTRACT_EVENTS),
+    }
 
 
 def pipecat_realtime_readiness(
@@ -3025,6 +3068,7 @@ __all__ = [
     "pipecat_pipeline_capability",
     "pipecat_realtime_capability_response",
     "pipecat_realtime_readiness",
+    "pipecat_realtime_smoke_contract",
     "pipecat_source_snapshot",
     "validate_pipecat_voice_config",
 ]

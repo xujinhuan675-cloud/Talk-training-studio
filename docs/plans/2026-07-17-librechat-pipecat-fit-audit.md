@@ -61,19 +61,51 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 
 总体判断：当前不是“已迁完”，而是已经从概念对齐进入按成熟底座切块迁移的中期偏后。第一批边界已经落地；LibreChat 尚未成为文本唯一 source of truth，Pipecat 已成为 realtime voice 的当前 runtime source of truth。
 
+### 2026-07-19 缺口分层更正
+
+当下不再继续扩大“未来可迁移能力”的实现范围。后续工作分成两层：
+
+- **当前要做**：只处理已经进入 TalkWise 训练闭环、会直接影响可用性/可信度/隔离性的缺口。
+- **未来路线图**：LibreChat / Pipecat 中高价值但尚未进入当前闭环的能力，统一沉淀到长期路线图，不在当前切片里实现。
+
+当前要做的缺口收敛为：
+
+| 当前缺口 | 为什么现在做 | 交付边界 |
+|:---|:---|:---|
+| Pipecat realtime 本机链路验收 | `readyForCall=true` 只能证明依赖和配置具备，还需要可重复 smoke/事件契约，才能判断真实语音链路是否值得进入浏览器 E2E。 | 先补后端 Pipecat smoke/readiness 断言和事件契约；真实浏览器麦克风权限验证单独执行，不混入普通自动化。 |
+| Text runtime / message-tree UI 验收 | 文字训练复盘依赖 selected path；edit/retry/fork/reload/search 不能污染评分和成长。 | 保持测试矩阵，继续补最小 UI/服务契约，不重写聊天前端。 |
+| Auth / ACL / resource scope 遗漏点 | 训练 session、report、guidance、file/material、agent config 不能跨用户/团队泄漏。 | 继续把 `OwnedMetadataScope` 扩到 get/update/delete/list/count 漏洞点，先做 guard 和测试。 |
+| Files / training material ownership | 素材进入 persona builder、复盘或 tool consumer 前必须先有权限边界。 | 先做素材读写/list/search 的 owner/team scope，不先做通用 RAG。 |
+| 训练相关窄 tool consumer | MCP/Agent 只有 inventory 还不能产生训练价值，但不能先做完整 marketplace/dispatcher。 | 只允许接一个训练工作流中的窄 consumer，例如素材检索或 persona builder 辅助。 |
+
+当前暂不做、只放路线图的能力：
+
+- LibreChat 完整 OAuth/LDAP/2FA、admin panel、marketplace、通用分享、artifact/code interpreter。
+- LibreChat 完整 MCP lifecycle、OAuth MCP、通用 tool dispatcher、Agent marketplace。
+- LibreChat 完整 RAG、外部文件 picker、web search、usage/billing/moderation。
+- Pipecat WebRTC/LiveKit/Daily、电话运营商、视频 avatar、多 provider 全量扩展、分布式 workers。
+- Pipecat RTVI 全量客户端协议和完整 observability 平台。
+
+2026-07-19 本轮已落地：
+
+- Pipecat capabilities 增加本机 smoke contract：区分 `localRuntimeReady` 与 `browserE2EVerified=false`，并固化 WebSocket、PCM16、TalkWise realtime 事件契约。
+- File asset 服务层把 `metadata_scope` 继续下沉到 `upsert_active_asset`、物理 purge by id/key，降低未来 tool/RAG 误用 legacy helper 的跨作用域风险。
+- Training Studio 增加局部训练素材 tool consumer API，只返回当前用户/团队 scope 内 `training_material` 的安全 metadata excerpt，不读文件正文，不暴露 MCP/Agent 主导航。
+- Conversation fork 完成后会 remap `selectedPath`、`currentBranchTail`、`messageTreeSelection` 中的 source message id，避免 fork 后 replay/reload 指向源会话分支。
+
 ### 当前项目核心部分对齐程度
 
 | 核心域 | 对齐底座 | 当前程度 | 状态判断 |
 |:---|:---|:---:|:---|
 | TrainingCore / 训练语义 | TalkWise 自有 | 70-75% | 已有 session、scenario、persona/stakeholder、report、progress、live guidance。这里不迁给 LibreChat/Pipecat，只作为上层产品语义保留。 |
-| 文本 conversation / message tree | LibreChat | 60-70% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search 基础，正文侧正在向 LibreChat-style runtime 靠拢。 |
-| branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 65-70% | 已有当前路径、tail、fork metadata、结果/历史展示雏形。还缺稳定数据契约和接近 LibreChat message-tree 的完整 E2E 行为验收。 |
+| 文本 conversation / message tree | LibreChat | 75% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search/search path context 验收，fork metadata remap 已补；正文侧正在向 LibreChat-style runtime 靠拢。 |
+| branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 75% | 已有当前路径、tail、fork metadata remap、结果/历史展示和 replay-only metadata 验收；还缺真实 UI reload/fork 操作 E2E。 |
 | model/provider registry | LibreChat | 45-55% | 已有 LLM registry、model specs、capability readiness。还不是完整 provider/preset/runtime registry。 |
-| auth / ACL / resource scope | LibreChat | 55-65% | 已把 conversation / agent config list 的 user/team scope 下沉到 repository 查询层，conversation/session/report/guidance/realtime 的边界也在继续收口。 |
-| MCP / Agent / Tool | LibreChat | 15-20% | 已有 capability inventory 和具体 MCP server readiness 校验。还没有 tool dispatcher、MCP lifecycle、OAuth MCP、tool call runtime。 |
-| realtime websocket / transcript | Pipecat | 65-70% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、live guidance trigger；独立 OpenAI realtime 和客户端转写持久化入口已删除。 |
-| Pipecat runtime source of truth | Pipecat | 65-70% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；OpenAI 只作为 Pipecat STT/TTS/LLM 服务配置或 legacy `.env` 容忍字段。 |
-| files / RAG / training materials | LibreChat | 15-25% | 项目里有文件/素材相关雏形，但还没迁入 LibreChat 式 file ownership、RAG、agent file scope。 |
+| auth / ACL / resource scope | LibreChat | 65-70% | 已把 conversation / file asset / agent config 相关 user/team scope 下沉到 repository 查询层，file asset legacy helper 的 scope pass-through 已补；conversation/session/report/guidance/realtime 的边界也在继续收口。 |
+| MCP / Agent / Tool | LibreChat | 25-30% | 已有 capability inventory、Agent config 绑定扫描、具体 MCP server readiness 校验，以及训练素材窄 tool consumer API。仍不做通用 dispatcher/marketplace。 |
+| realtime websocket / transcript | Pipecat | 70-75% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、turn/interruption/silence 事件、live guidance trigger，并公开 smoke event contract；独立 OpenAI realtime 和客户端转写持久化入口已删除。 |
+| Pipecat runtime source of truth | Pipecat | 70-75% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；本机 capability 可返回 `readyForCall=true` 和 smoke contract。仍缺真实浏览器麦克风 E2E。 |
+| files / RAG / training materials | LibreChat | 35-40% | file asset ownership 与服务层 scope 已补强；training material 已有安全摘要 consumer API。素材正文/RAG/persona builder 自动接入仍不进入当前切片。 |
 | usage / moderation / admin ops | LibreChat | 10-20% | 当前不是重点，只适合 auth/ACL 稳定后再迁。 |
 
 第一部分结论：

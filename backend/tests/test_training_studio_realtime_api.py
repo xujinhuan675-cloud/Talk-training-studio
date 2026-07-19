@@ -241,6 +241,10 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
         data["readyForCall"] = readiness["ready"]
         data["readiness"] = readiness
         data["errors"] = readiness["blockingReasons"]
+        data["smoke"] = pipecat_adapter.pipecat_realtime_smoke_contract(
+            ready_for_call=readiness["ready"],
+            require_websocket=require_websocket,
+        )
         if include_source_snapshot:
             try:
                 data["sourceSnapshot"] = dict(adapter.pipecat_source_snapshot())
@@ -310,6 +314,27 @@ def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> No
     assert data["pipecat"]["optionalMissingModules"] == []
     assert data["pipecat"]["error"] is None
     assert data["pipecat"]["readyForCall"] is True
+    assert data["pipecat"]["smoke"]["verificationLevel"] == "dependency_and_event_contract"
+    assert data["pipecat"]["smoke"]["localRuntimeReady"] is True
+    assert data["pipecat"]["smoke"]["browserE2EVerified"] is False
+    assert data["pipecat"]["smoke"]["requiresExplicitMediaPermission"] is True
+    assert data["pipecat"]["smoke"]["transport"] == "websocket"
+    assert data["pipecat"]["smoke"]["inputAudioFormat"] == "pcm16"
+    assert data["pipecat"]["smoke"]["defaultInputSampleRate"] == 16000
+    assert {
+        "session.started",
+        "audio.input",
+        "audio.output",
+        "transcript.done",
+        "transcript.persisted",
+        "training.live_guidance.triggered",
+        "user_turn.started",
+        "user_turn.stopped",
+        "assistant_speaking.started",
+        "assistant_speaking.stopped",
+        "interrupted",
+        "silence_timeout",
+    }.issubset(set(data["pipecat"]["smoke"]["contractEvents"]))
     assert data["pipecat"]["readiness"]["ready"] is True
     assert data["pipecat"]["readiness"]["status"] == "ready"
     assert data["pipecat"]["readiness"]["blockingReasons"] == []
@@ -384,6 +409,8 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
     assert data["pipecat"]["optionalMissingModules"] == ["onnxruntime"]
     assert data["pipecat"]["error"] == "Missing optional Pipecat module(s)"
     assert data["pipecat"]["readyForCall"] is False
+    assert data["pipecat"]["smoke"]["localRuntimeReady"] is False
+    assert data["pipecat"]["smoke"]["browserE2EVerified"] is False
     assert data["pipecat"]["readiness"]["ready"] is False
     assert data["pipecat"]["readiness"]["status"] == "blocked"
     assert data["pipecat"]["errors"][0]["code"] == "PIPECAT_MODULE_UNAVAILABLE"
@@ -418,6 +445,9 @@ def test_realtime_capabilities_reports_pipecat_helper_failure(monkeypatch) -> No
     assert data["missingModules"] == []
     assert data["error"] == "Pipecat capability check failed: Pipecat capability crashed"
     assert data["readyForCall"] is False
+    assert data["smoke"]["localRuntimeReady"] is False
+    assert data["smoke"]["browserE2EVerified"] is False
+    assert data["smoke"]["contractEvents"]
     assert data["errors"][0]["code"] == "PIPECAT_CAPABILITY_ERROR"
     assert data["errors"][0]["phase"] == "capability_check"
 
@@ -447,6 +477,8 @@ def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch)
     assert data["missingModules"] == []
     assert data["error"] == "Pipecat capability check failed: Pipecat capability crashed"
     assert data["readyForCall"] is False
+    assert data["smoke"]["localRuntimeReady"] is False
+    assert data["smoke"]["browserE2EVerified"] is False
     assert data["errors"][0]["code"] == "PIPECAT_CAPABILITY_ERROR"
     assert data["errors"][0]["phase"] == "capability_check"
 

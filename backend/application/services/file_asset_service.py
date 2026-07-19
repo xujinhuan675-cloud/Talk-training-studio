@@ -176,13 +176,30 @@ class FileAssetApplicationService:
             return self._to_dto(updated)
 
     # ---------------------- Orchestration with Storage ----------------------
-    async def purge_asset(self, asset_id: int) -> None:
+    async def purge_asset(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
         """Physically delete remote object then remove DB record (idempotent)."""
+        await self.purge_asset_by_id(asset_id, metadata_scope=metadata_scope)
+
+    async def purge_asset_by_id(
+        self,
+        asset_id: int,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
+        """Physically delete remote object and DB record by id."""
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
 
         async with self._uow_factory() as uow:
-            asset = await uow.file_asset_repository.get_by_id(asset_id)
+            asset = await uow.file_asset_repository.get_by_id(
+                asset_id,
+                metadata_scope=metadata_scope,
+            )
             if asset is None:
                 raise FileAssetNotFoundException(asset_id)
 
@@ -192,7 +209,7 @@ class FileAssetApplicationService:
                 # Best effort deletion; continue to keep API idempotent
                 pass
 
-            await uow.file_asset_repository.delete(asset_id)
+            await uow.file_asset_repository.delete(asset_id, metadata_scope=metadata_scope)
 
     async def confirm_direct_upload(
         self,
@@ -550,10 +567,11 @@ class FileAssetApplicationService:
         etag: Optional[str],
         url: Optional[str],
         metadata: Optional[dict[str, Any]] = None,
+        metadata_scope: OwnedMetadataScope | None = None,
     ) -> FileAssetDTO:
         async with self._uow_factory() as uow:
             repo = uow.file_asset_repository
-            asset = await repo.get_by_key(key)
+            asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
             if asset is None:
                 now = _utcnow()
                 asset = FileAsset(
@@ -593,7 +611,7 @@ class FileAssetApplicationService:
                 metadata=metadata if metadata is not None else asset.metadata,
             )
             asset.mark_active()
-            updated = await repo.update(asset)
+            updated = await repo.update(asset, metadata_scope=metadata_scope)
             return self._to_dto(updated)
 
     async def get_asset(
@@ -710,24 +728,25 @@ class FileAssetApplicationService:
             await uow.file_asset_repository.delete_by_key(key, metadata_scope=metadata_scope)
 
     # ---- Unified naming (wrappers) ----
-    async def purge_asset_by_id(self, asset_id: int) -> None:
-        """Physically delete remote object and DB record by id (wrapper)."""
-        await self.purge_asset(asset_id)
-
-    async def purge_asset_by_key(self, key: str) -> None:
+    async def purge_asset_by_key(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope | None = None,
+    ) -> None:
         """Physically delete remote object and DB record by key (new)."""
         if self._storage is None:
             raise RuntimeError("Storage port not configured for FileAssetApplicationService")
         async with self._uow_factory() as uow:
             repo = uow.file_asset_repository
-            asset = await repo.get_by_key(key)
+            asset = await repo.get_by_key(key, metadata_scope=metadata_scope)
             if asset is None:
                 raise FileAssetNotFoundException(key=key)
             try:
                 await self._storage.delete(asset.key)
             except Exception:
                 pass
-            await repo.delete(asset.id or 0)
+            await repo.delete(asset.id or 0, metadata_scope=metadata_scope)
             await uow.commit()
 
     async def delete_record_by_id(

@@ -40,6 +40,7 @@ from api.dependencies import (
     get_chatroom_service,
     get_conversation_service,
     get_current_user,
+    get_file_asset_service,
     get_growth_service,
     get_stakeholder_llm_client,
     require_system_roles,
@@ -107,15 +108,20 @@ from application.services.training_studio.session_service import (
     TrainingSessionDTO,
     TrainingSessionService,
 )
+from application.services.training_studio.training_material_tool_service import (
+    TrainingMaterialToolConsumerService,
+)
 from application.services.training_studio.training_core import (
     ConversationRef,
     StartedTrainingSession,
     TrainingCoreOrchestrator,
     training_core_metadata_for_session,
 )
+from application.services.file_asset_service import FileAssetApplicationService
 from core.config import LLMSettings, VoiceSettings, settings
 from core.response import success_response
-from domain.common.exceptions import DomainValidationException
+from domain.common.exceptions import DomainValidationException, FileAssetNotFoundException
+from domain.conversation.repository import OwnedMetadataScope
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
 from domain.training_studio.catalog import ScenarioCategory
@@ -125,6 +131,7 @@ from domain.training_studio.storybank import JsonFileStoryBankStore, StoryBankSe
 from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
 from infrastructure.external.pipecat.realtime_pipeline import (
     pipecat_realtime_capability_response as build_pipecat_realtime_capability_response,
+    pipecat_realtime_smoke_contract,
 )
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
@@ -1254,6 +1261,10 @@ def _pipecat_unavailable_capability_response(
         "readyForCall": readiness["ready"],
         "readiness": readiness,
         "errors": readiness["blockingReasons"],
+        "smoke": pipecat_realtime_smoke_contract(
+            ready_for_call=False,
+            require_websocket=True,
+        ),
     }
 
 
@@ -1744,6 +1755,24 @@ def _build_video_answer_url(
     if current_user.team_id:
         params["auth_team_id"] = current_user.team_id
     return f"/api/v1/training-studio/video-answers/{filename}?{urlencode(params)}"
+
+
+def _training_material_tool_scope_for_current_user(current_user: CurrentUser) -> OwnedMetadataScope:
+    scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    if scope is not None:
+        return scope
+    return OwnedMetadataScope(
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
+        include_team_scope=bool(current_user.team_id),
+        allow_unscoped=False,
+    )
+
+
+def _training_material_tool_consumer(
+    file_assets: FileAssetApplicationService,
+) -> TrainingMaterialToolConsumerService:
+    return TrainingMaterialToolConsumerService(file_assets)
 
 
 @router.post("/sessions", status_code=201, summary="Create a Training Studio session")
@@ -2237,6 +2266,50 @@ async def get_scenario_templates(
 ):
     templates = svc.get_scenario_templates()
     return success_response(data=[template.model_dump(mode="json") for template in templates])
+
+
+@router.get(
+    "/tool-consumers/training-materials",
+    summary="List scoped training materials for narrow tool consumers",
+)
+async def list_training_material_tool_consumer_materials(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+):
+    service = _training_material_tool_consumer(file_assets)
+    try:
+        materials = await service.list_materials(
+            metadata_scope=_training_material_tool_scope_for_current_user(current_user),
+            skip=skip,
+            limit=limit,
+        )
+    except DomainValidationException as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+    return success_response(data=materials.model_dump(mode="json"))
+
+
+@router.get(
+    "/tool-consumers/training-materials/{asset_id}",
+    summary="Get a scoped training material summary for narrow tool consumers",
+)
+async def get_training_material_tool_consumer_material(
+    asset_id: int,
+    file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+):
+    service = _training_material_tool_consumer(file_assets)
+    try:
+        material = await service.get_material(
+            asset_id,
+            metadata_scope=_training_material_tool_scope_for_current_user(current_user),
+        )
+    except FileAssetNotFoundException as exc:
+        raise HTTPException(status_code=404, detail="Training material not found") from exc
+    except DomainValidationException as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+    return success_response(data=material.model_dump(mode="json"))
 
 
 @router.get("/llm-registry", summary="Get text LLM provider and model registry")

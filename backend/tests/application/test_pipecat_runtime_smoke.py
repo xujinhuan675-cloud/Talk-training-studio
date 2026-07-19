@@ -14,6 +14,8 @@ def test_real_pipecat_runtime_imports_declared_voice_symbols():
         create_pipecat_realtime_pipeline,
         get_pipecat_capability,
         import_pipecat_runtime,
+        pipecat_realtime_capability_response,
+        pipecat_realtime_smoke_contract,
     )
 
     capability = get_pipecat_capability(require_websocket=True)
@@ -39,6 +41,40 @@ def test_real_pipecat_runtime_imports_declared_voice_symbols():
     assert runtime.UserTurnProcessor is not None
 
     assert create_pipecat_realtime_pipeline() is not None
+
+    capabilities = pipecat_realtime_capability_response(
+        require_websocket=True,
+        openai_api_key_available=True,
+        include_source_snapshot=False,
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+    )
+    assert capabilities["runtime"] == "pipecat"
+    assert capabilities["provider"] == "pipecat"
+    assert capabilities["readyForCall"] is True
+    assert capabilities["readiness"]["status"] == "ready"
+    assert capabilities["smoke"] == pipecat_realtime_smoke_contract(
+        ready_for_call=True,
+        require_websocket=True,
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+    )
+    assert capabilities["smoke"]["browserE2EVerified"] is False
+    assert {
+        "session.started",
+        "audio.input",
+        "audio.output",
+        "transcript.delta",
+        "transcript.done",
+        "transcript.persisted",
+        "training.live_guidance.triggered",
+        "user_turn.started",
+        "user_turn.stopped",
+        "assistant_speaking.started",
+        "assistant_speaking.stopped",
+        "interrupted",
+        "silence_timeout",
+    } == set(capabilities["smoke"]["contractEvents"])
 
 
 def test_real_pipecat_runtime_constructs_native_voice_processors():

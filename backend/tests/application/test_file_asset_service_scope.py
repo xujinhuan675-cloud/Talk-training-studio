@@ -53,16 +53,37 @@ class _FakeFileAssetRepository:
     def __init__(self, assets: dict[int, FileAsset]) -> None:
         self.assets = assets
         self.get_by_id_calls: list[dict[str, Any]] = []
+        self.get_by_key_calls: list[dict[str, Any]] = []
         self.update_calls: list[dict[str, Any]] = []
+        self.delete_calls: list[dict[str, Any]] = []
+        self.create_calls: list[FileAsset] = []
 
     async def get_by_id(self, asset_id: int, *, metadata_scope=None):
         self.get_by_id_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
         return self.assets.get(asset_id)
 
+    async def get_by_key(self, key: str, *, metadata_scope=None):
+        self.get_by_key_calls.append({"key": key, "metadata_scope": metadata_scope})
+        for asset in self.assets.values():
+            if asset.key == key:
+                return asset
+        return None
+
+    async def create(self, asset: FileAsset):
+        self.create_calls.append(asset)
+        next_id = max(self.assets) + 1 if self.assets else 1
+        asset.id = next_id
+        self.assets[next_id] = asset
+        return asset
+
     async def update(self, asset: FileAsset, *, metadata_scope=None):
         self.update_calls.append({"asset": asset, "metadata_scope": metadata_scope})
         self.assets[asset.id or 0] = asset
         return asset
+
+    async def delete(self, asset_id: int, *, metadata_scope=None):
+        self.delete_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
+        self.assets.pop(asset_id, None)
 
 
 class _FakeUnitOfWork:
@@ -91,6 +112,7 @@ class _FakeUnitOfWork:
 class _FakeStorage:
     def __init__(self) -> None:
         self.metadata_calls: list[str] = []
+        self.delete_calls: list[str] = []
 
     async def get_metadata(self, key: str):
         self.metadata_calls.append(key)
@@ -103,6 +125,10 @@ class _FakeStorage:
 
     def public_url(self, key: str) -> str:
         return f"https://files.test/{key}"
+
+    async def delete(self, key: str) -> bool:
+        self.delete_calls.append(key)
+        return True
 
 
 def _service(repo: _FakeFileAssetRepository, storage=None) -> FileAssetApplicationService:
@@ -151,3 +177,64 @@ async def test_soft_delete_uses_metadata_scope_for_get_and_update() -> None:
     assert deleted.status == "deleted"
     assert repo.get_by_id_calls == [{"asset_id": 9, "metadata_scope": scope}]
     assert repo.update_calls[0]["metadata_scope"] == scope
+
+
+@pytest.mark.asyncio
+async def test_upsert_active_asset_uses_metadata_scope_for_existing_asset_update() -> None:
+    repo = _FakeFileAssetRepository({10: _asset(10)})
+    service = _service(repo)
+    scope = _scope()
+
+    updated = await service.upsert_active_asset(
+        owner_id=None,
+        storage_type="local",
+        bucket=None,
+        region=None,
+        key="training_material/10.txt",
+        original_filename="scoped-update.txt",
+        content_type="text/plain",
+        kind="training_material",
+        size=32,
+        etag="etag-updated",
+        url="https://files.test/training_material/10.txt",
+        metadata={"title": "Scoped update"},
+        metadata_scope=scope,
+    )
+
+    assert updated.id == 10
+    assert updated.status == "active"
+    assert repo.get_by_key_calls == [
+        {"key": "training_material/10.txt", "metadata_scope": scope}
+    ]
+    assert repo.update_calls[0]["metadata_scope"] == scope
+    assert repo.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_purge_asset_by_id_uses_metadata_scope_for_lookup_and_delete() -> None:
+    repo = _FakeFileAssetRepository({11: _asset(11, status="active")})
+    storage = _FakeStorage()
+    service = _service(repo, storage=storage)
+    scope = _scope()
+
+    await service.purge_asset_by_id(11, metadata_scope=scope)
+
+    assert repo.get_by_id_calls == [{"asset_id": 11, "metadata_scope": scope}]
+    assert repo.delete_calls == [{"asset_id": 11, "metadata_scope": scope}]
+    assert storage.delete_calls == ["training_material/11.txt"]
+
+
+@pytest.mark.asyncio
+async def test_purge_asset_by_key_uses_metadata_scope_for_lookup_and_delete() -> None:
+    repo = _FakeFileAssetRepository({12: _asset(12, status="active")})
+    storage = _FakeStorage()
+    service = _service(repo, storage=storage)
+    scope = _scope()
+
+    await service.purge_asset_by_key("training_material/12.txt", metadata_scope=scope)
+
+    assert repo.get_by_key_calls == [
+        {"key": "training_material/12.txt", "metadata_scope": scope}
+    ]
+    assert repo.delete_calls == [{"asset_id": 12, "metadata_scope": scope}]
+    assert storage.delete_calls == ["training_material/12.txt"]

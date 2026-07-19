@@ -821,6 +821,87 @@ async def test_conversation_service_forks_message_tree_with_remapped_parents(ses
 
 
 @pytest.mark.asyncio
+async def test_conversation_service_fork_remaps_selected_path_metadata(session_factory):
+    conversation, first_user, first_assistant, off_path_user = await _seed_conversation(
+        session_factory
+    )
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        conversation.metadata = {
+            "selectedPath": {
+                "branchId": first_assistant.branch_id,
+                "tailMessageId": first_assistant.public_id,
+                "messageIds": [
+                    first_user.public_id,
+                    first_assistant.public_id,
+                    off_path_user.public_id,
+                ],
+                "purpose": "training_replay_context",
+                "replayContextOnly": True,
+                "affectsScoring": False,
+                "affectsCompletion": False,
+            },
+            "currentBranchTail": {
+                "branchId": off_path_user.branch_id,
+                "messageId": off_path_user.public_id,
+            },
+            "messageTreeSelection": {
+                "selectedMessageId": first_assistant.public_id,
+                "path": [
+                    {"publicId": first_user.public_id, "role": "user"},
+                    {
+                        "publicId": first_assistant.public_id,
+                        "parentMessageId": first_user.public_id,
+                        "role": "assistant",
+                    },
+                    {"publicId": off_path_user.public_id, "role": "user"},
+                ],
+                "affectsScoring": False,
+                "affectsCompletion": False,
+            },
+        }
+        await uow.conversation_repository.update(conversation)
+
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+
+    result = await service.fork_conversation(
+        conversation.id,
+        first_assistant.public_id,
+        ForkConversationDTO(option="directPath", statuses=["active"]),
+    )
+
+    copied_by_source = result.source_to_forked_id
+    metadata = result.conversation.metadata
+    assert set(copied_by_source) == {first_user.public_id, first_assistant.public_id}
+    assert metadata["selectedPath"]["tailMessageId"] == copied_by_source[
+        first_assistant.public_id
+    ]
+    assert metadata["selectedPath"]["messageIds"] == [
+        copied_by_source[first_user.public_id],
+        copied_by_source[first_assistant.public_id],
+    ]
+    assert metadata["selectedPath"]["affectsScoring"] is False
+    assert metadata["selectedPath"]["affectsCompletion"] is False
+    assert metadata["currentBranchTail"]["messageId"] is None
+    assert metadata["messageTreeSelection"]["selectedMessageId"] == copied_by_source[
+        first_assistant.public_id
+    ]
+    assert [item["publicId"] for item in metadata["messageTreeSelection"]["path"]] == [
+        copied_by_source[first_user.public_id],
+        copied_by_source[first_assistant.public_id],
+    ]
+    assert metadata["messageTreeSelection"]["path"][1]["parentMessageId"] == copied_by_source[
+        first_user.public_id
+    ]
+    assert metadata["messageTreeSelection"]["affectsScoring"] is False
+    assert metadata["messageTreeSelection"]["affectsCompletion"] is False
+
+
+@pytest.mark.asyncio
 async def test_conversation_service_message_action_fork_returns_forked_context(
     session_factory,
 ):
