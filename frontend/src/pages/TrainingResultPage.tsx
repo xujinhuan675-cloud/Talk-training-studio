@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
-  CheckCircle2,
   Clock3,
   ExternalLink,
   GitBranch,
@@ -552,6 +551,17 @@ export default function TrainingResultPage() {
     ? Math.round(dimensionScores.reduce((sum, score) => sum + score, 0) / dimensionScores.length)
     : undefined
   const overallScore = dimensionAverage ?? progressScore
+  const scoreSourceLabel = dimensionAverage !== undefined
+    ? tr('来自报告', 'from report')
+    : progressScore !== undefined
+      ? tr('来自进度', 'from progress')
+      : tr('暂无分数来源', 'No score source')
+  const dimensionMetaText = dimensions.length > 0
+    ? tr('{count} 项 · {source}', '{count} items · {source}', {
+      count: dimensions.length,
+      source: scoreSourceLabel,
+    })
+    : scoreSourceLabel
   const failureReason = session?.status === 'failed'
     ? session.failure_reason || scenarioProgress?.failureReason || tr('训练会话失败，但后端未返回失败原因。', 'The training session failed, but no backend failure reason was returned.')
     : ''
@@ -560,6 +570,12 @@ export default function TrainingResultPage() {
   const isLiveCoachSession = isLiveCoachTrainingSession(session)
   const liveCoachLanguages = getLiveCoachLanguages(session)
   const liveCoachLanguagePair = getLiveCoachLanguagePair(session, locale, tr)
+  const sourceBadges = [
+    session ? tr('会话', 'Session') : '',
+    report ? (isLiveCoachSession ? tr('教练报告', 'Coach report') : tr('复盘报告', 'Report')) : '',
+    roomDetail ? (isLiveCoachSession ? tr('真实转写', 'Transcript') : tr('聊天转写', 'Transcript')) : '',
+    scenarioProgress ? tr('本地进度', 'Local progress') : '',
+  ].filter((label): label is string => Boolean(label))
   const scenarioTitle = getScenarioTitle(session, tr)
   const scenarioDescription = getScenarioDescription(session)
   const roomId = Number(session?.room_id)
@@ -629,12 +645,19 @@ export default function TrainingResultPage() {
             <h1>{scenarioTitle}</h1>
             {scenarioDescription && <p>{scenarioDescription}</p>}
             {isLiveCoachSession && <p>{tr('双语辅助：{pair}', 'Bilingual assist: {pair}', { pair: liveCoachLanguagePair })}</p>}
+            {sourceBadges.length > 0 && (
+              <div className="training-result-source-strip" aria-label={tr('复盘数据来源', 'Review data sources')}>
+                {sourceBadges.map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="training-result-actions">
           <Link to={APP_ROUTES.practiceScenarios} className="training-result-secondary-link">
             <RotateCcw size={15} />
-            {tr('再次练习', 'Practice again')}
+            {tr('回到训练', 'Back to training')}
           </Link>
           <Link to={APP_ROUTES.reviewSessions} className="training-result-secondary-link">
             {tr('训练记录', 'History')}
@@ -662,6 +685,9 @@ export default function TrainingResultPage() {
           </div>
           <div className="training-result-grade">
             {session?.status === 'failed' ? statusLabel(session.status, tr) : gradeLabel(overallScore, tr)}
+          </div>
+          <div className="training-result-score-source">
+            {scoreSourceLabel}
           </div>
           {failureReason && (
             <div className="training-result-empty-inline">
@@ -691,7 +717,7 @@ export default function TrainingResultPage() {
         <article className="training-result-card training-result-dimensions">
           <div className="training-result-card-head">
             <h2>{tr('维度评分', 'Dimension scores')}</h2>
-            <span>{tr('{count} 项', '{count} items', { count: dimensions.length || 0 })}</span>
+            <span>{dimensionMetaText}</span>
           </div>
           {dimensions.length > 0 ? (
             <div className="training-result-dimension-list">
@@ -740,10 +766,6 @@ export default function TrainingResultPage() {
                   {branchPathDetail}
                 </em>
               )}
-            </div>
-            <div className="training-result-branch-item">
-              <span>{tr('metadata 来源', 'Metadata source')}</span>
-              <strong title={branchInfo.sourceDetail}>{branchSourceDetailText(branchInfo, tr)}</strong>
             </div>
             <div className="training-result-branch-item">
               <span>{tr('正文状态', 'Text state')}</span>
@@ -805,7 +827,7 @@ export default function TrainingResultPage() {
         </section>
       )}
 
-      {reportError && (
+      {reportError && dimensions.length > 0 && (
         <section className="training-result-notice">
           <Clock3 size={16} />
           <span>{reportError}</span>
@@ -892,7 +914,7 @@ export default function TrainingResultPage() {
             </div>
           ) : (
             <div className="training-result-empty-inline">
-              {tr('本次会话还没有保存的实时教练事件。结束训练前出现的风险提醒、下一句建议和行动项会沉淀在这里。', 'No saved live coach events yet. Risk alerts, next replies, and action items from the session will appear here.')}
+              {tr('本次会话还没有保存的实时教练事件。', 'No saved live coach events yet.')}
             </div>
           )}
         </section>
@@ -937,16 +959,6 @@ export default function TrainingResultPage() {
         )}
       </section>
 
-      {session?.status === 'completed' && (
-        <footer className="training-result-footer-note">
-          <CheckCircle2 size={16} />
-          <span>
-            {isLiveCoachSession
-              ? tr('复盘数据来自训练会话、教练报告、真实对话转写和本地进度。', 'Review data is assembled from the training session, coach report, real conversation transcript, and local progress.')
-              : tr('结果数据来自训练会话、复盘报告、聊天转写和本地场景进度。', 'Result data is assembled from the Training Session, report, chat transcript, and local scenario progress.')}
-          </span>
-        </footer>
-      )}
     </PageShell>
   )
 }

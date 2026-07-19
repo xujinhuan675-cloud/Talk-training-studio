@@ -136,116 +136,135 @@ export default function DefensePrepPage() {
     }
   }
 
-  const selectedPersonaNames = selectedPersonaIds.map(id => personaMap[id]?.name ?? id).join(locale === 'zh' ? '、' : ', ')
+  const selectedPersonaNames = selectedPersonaIds.map((id) => personaMap[id]?.name ?? id).join(locale === 'zh' ? '、' : ', ')
   const selectedScenario = SCENARIO_OPTIONS.find((o) => o.value === scenarioType)
   const questions = session?.question_strategy?.questions ?? []
 
   return (
     <div className="dp-page">
       <div className="dp-container">
-        {/* Back link */}
-        <button className="dp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
-          <ArrowLeft size={16} />
-          <span>{t('common.backToTrainingCatalog')}</span>
-        </button>
-
-        {/* Title */}
-        <div className="dp-title-row">
-          <FileText size={22} className="dp-title-icon" />
-          <h1 className="dp-title">{tr('答辩准备', 'Defense Prep')}</h1>
-        </div>
-
-        {/* Step indicator */}
-        <div className="dp-steps">
-          {[1, 2].map((n) => (
-            <div key={n} className="dp-step-item">
-              <div className={`dp-step-dot ${step === n ? 'active' : step > n ? 'done' : ''}`}>
-                {n}
-              </div>
-              <span className={`dp-step-label ${step === n ? 'active' : ''}`}>
-                {n === 1 ? tr('准备材料', 'Prepare material') : tr('确认问题', 'Confirm questions')}
-              </span>
-              {n < 2 && <div className={`dp-step-line ${step > n ? 'done' : ''}`} />}
+        <header className="dp-header">
+          <div className="dp-heading">
+            <button className="dp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
+              <ArrowLeft size={16} />
+              <span>{t('common.backToTrainingCatalog')}</span>
+            </button>
+            <div className="dp-title-row">
+              <FileText size={22} className="dp-title-icon" />
+              <h1 className="dp-title">{tr('答辩准备', 'Defense Prep')}</h1>
             </div>
-          ))}
-        </div>
+          </div>
+
+          <div className="dp-steps" aria-label={tr('准备流程', 'Preparation steps')}>
+            {[1, 2].map((n) => (
+              <div key={n} className="dp-step-item">
+                <div className={`dp-step-dot ${step === n ? 'active' : step > n ? 'done' : ''}`}>
+                  {n}
+                </div>
+                <span className={`dp-step-label ${step === n ? 'active' : ''}`}>
+                  {n === 1 ? tr('准备材料', 'Prepare material') : tr('确认问题', 'Confirm questions')}
+                </span>
+                {n < 2 && <div className={`dp-step-line ${step > n ? 'done' : ''}`} />}
+              </div>
+            ))}
+          </div>
+        </header>
 
         {/* ---- Step 1: Upload + Select ---- */}
         {step === 1 && (
           <div className="dp-card">
+            <div className="dp-prep-grid">
+              <section className="dp-panel dp-panel--upload">
+                <div className="dp-panel-header">
+                  <div className="dp-section-label">{tr('训练材料', 'Practice material')}</div>
+                </div>
 
-            {/* File upload */}
-            <div className="dp-section-label">{tr('训练材料', 'Practice material')}</div>
-            {!file ? (
-              <div
-                className={`dp-upload-area ${dragOver ? 'drag-over' : ''}`}
-                onClick={() => fileInputRef.current?.click()}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-              >
-                <Upload size={28} className="dp-upload-icon" />
-                <span className="dp-upload-text">{tr('点击或拖拽上传文件', 'Click or drag to upload a file')}</span>
-                <span className="dp-upload-hint">{tr('支持 PDF、Word、PPT、Markdown 等格式', 'Supports PDF, Word, PPT, Markdown, and more')}</span>
-              </div>
-            ) : (
-              <div className="dp-file-selected">
-                <FileText size={20} className="dp-file-icon" />
-                <span className="dp-file-name">{file.name}</span>
-                <button
-                  className="dp-file-remove"
-                  onClick={() => setState((s) => ({ ...s, file: null }))}
-                >
-                  {t('common.remove')}
-                </button>
-              </div>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="dp-file-input"
-              onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
-            />
+                {!file ? (
+                  <div
+                    className={`dp-upload-area ${dragOver ? 'drag-over' : ''}`}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                  >
+                    <Upload size={24} className="dp-upload-icon" />
+                    <span className="dp-upload-text">{tr('点击或拖拽上传文件', 'Click or drag to upload a file')}</span>
+                    <span className="dp-upload-hint">{tr('PDF、Word、PPT、Markdown', 'PDF, Word, PPT, Markdown')}</span>
+                  </div>
+                ) : (
+                  <div className="dp-file-selected">
+                    <FileText size={20} className="dp-file-icon" />
+                    <span className="dp-file-name">{file.name}</span>
+                    <button
+                      className="dp-file-remove"
+                      onClick={() => setState((s) => ({ ...s, file: null }))}
+                    >
+                      {t('common.remove')}
+                    </button>
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="dp-file-input"
+                  onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
+                />
+              </section>
 
-            {/* Persona selection */}
-            <div className="dp-section-label">{tr('选择答辩官（最多 5 位）', 'Choose Reviewers (up to 5)')}</div>
-            <div className="dp-multi-select">
-              {personas.map((p) => (
-                <label key={p.id} className={`dp-multi-option ${selectedPersonaIds.includes(p.id) ? 'selected' : ''}`}>
-                  <input
-                    type="checkbox"
-                    checked={selectedPersonaIds.includes(p.id)}
-                    onChange={() => {
-                      setState((s) => {
-                        const ids = s.selectedPersonaIds.includes(p.id)
-                          ? s.selectedPersonaIds.filter((x) => x !== p.id)
-                          : s.selectedPersonaIds.length < 5
-                            ? [...s.selectedPersonaIds, p.id]
-                            : s.selectedPersonaIds
-                        return { ...s, selectedPersonaIds: ids }
-                      })
-                    }}
-                  />
-                  <span className="dp-multi-option-name">{p.name}</span>
-                  <span className="dp-multi-option-role">{p.role}</span>
-                </label>
-              ))}
-            </div>
+              <section className="dp-panel dp-panel--personas">
+                <div className="dp-panel-header">
+                  <div className="dp-section-label">{tr('答辩官', 'Reviewers')}</div>
+                  <span className="dp-count">{selectedPersonaIds.length}/5</span>
+                </div>
 
-            {/* Scenario selection */}
-            <div className="dp-section-label">{tr('答辩场景', 'Defense Scenario')}</div>
-            <div className="dp-scenario-grid">
-              {SCENARIO_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={`dp-scenario-card ${scenarioType === opt.value ? 'selected' : ''}`}
-                  onClick={() => setState((s) => ({ ...s, scenarioType: opt.value }))}
-                >
-                  <span className="dp-scenario-label">{t(opt.labelKey)}</span>
-                  <span className="dp-scenario-desc">{t(opt.descKey)}</span>
-                </button>
-              ))}
+                {personas.length > 0 ? (
+                  <div className="dp-multi-select">
+                    {personas.map((p) => (
+                      <label key={p.id} className={`dp-multi-option ${selectedPersonaIds.includes(p.id) ? 'selected' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPersonaIds.includes(p.id)}
+                          onChange={() => {
+                            setState((s) => {
+                              const ids = s.selectedPersonaIds.includes(p.id)
+                                ? s.selectedPersonaIds.filter((x) => x !== p.id)
+                                : s.selectedPersonaIds.length < 5
+                                  ? [...s.selectedPersonaIds, p.id]
+                                  : s.selectedPersonaIds
+                              return { ...s, selectedPersonaIds: ids }
+                            })
+                          }}
+                        />
+                        <span className="dp-multi-option-name">{p.name}</span>
+                        <span className="dp-multi-option-role">{p.role}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="dp-empty">{tr('暂无可选答辩官', 'No reviewers available')}</div>
+                )}
+              </section>
+
+              <section className="dp-panel dp-panel--scenario">
+                <div className="dp-panel-header">
+                  <div className="dp-section-label">{tr('答辩场景', 'Defense Scenario')}</div>
+                </div>
+
+                <div className="dp-scenario-grid">
+                  {SCENARIO_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`dp-scenario-card ${scenarioType === opt.value ? 'selected' : ''}`}
+                      onClick={() => setState((s) => ({ ...s, scenarioType: opt.value }))}
+                      aria-label={`${t(opt.labelKey)}. ${t(opt.descKey)}`}
+                      title={t(opt.descKey)}
+                    >
+                      <span className="dp-scenario-label">{t(opt.labelKey)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
 
             {error && <div className="dp-error">{error}</div>}
@@ -275,44 +294,56 @@ export default function DefensePrepPage() {
         {/* ---- Step 2: Confirm + Start ---- */}
         {step === 2 && session && (
           <div className="dp-card">
-            {/* Summary */}
-            <div className="dp-summary">
-              <div className="dp-summary-row">
-                <span className="dp-summary-label">{tr('文档', 'Document')}</span>
-                <span className="dp-summary-value">{session.document_title}</span>
-              </div>
-              <div className="dp-summary-row">
-                <span className="dp-summary-label">{tr('答辩官', 'Reviewers')}</span>
-                <span className="dp-summary-value">{selectedPersonaNames}</span>
-              </div>
-              <div className="dp-summary-row">
-                <span className="dp-summary-label">{tr('场景', 'Scenario')}</span>
-                <span className="dp-summary-value">
-                  {selectedScenario ? t(selectedScenario.labelKey) : session.scenario_type}
-                </span>
-              </div>
-            </div>
+            <div className="dp-confirm-grid">
+              <section className="dp-panel">
+                <div className="dp-panel-header">
+                  <div className="dp-section-label">{tr('训练设置', 'Practice setup')}</div>
+                </div>
 
-            {/* Question preview */}
-            {questions.length > 0 && (
-              <>
-                <div className="dp-section-label">{tr('预设问题 ({count})', 'Prepared Questions ({count})', { count: questions.length })}</div>
-                <div className="dp-question-list">
-                  {questions.map((q, i) => (
-                    <div key={i} className="dp-question-item">
-                      <span className="dp-question-index">{i + 1}</span>
-                      <div className="dp-question-text">
-                        {q.question}
-                        <div className="dp-question-meta">
-                          <span className="dp-question-badge">{q.dimension}</span>
-                          <span className="dp-question-badge">{q.difficulty}</span>
+                <div className="dp-summary">
+                  <div className="dp-summary-row">
+                    <span className="dp-summary-label">{tr('文档', 'Document')}</span>
+                    <span className="dp-summary-value">{session.document_title}</span>
+                  </div>
+                  <div className="dp-summary-row">
+                    <span className="dp-summary-label">{tr('答辩官', 'Reviewers')}</span>
+                    <span className="dp-summary-value">{selectedPersonaNames}</span>
+                  </div>
+                  <div className="dp-summary-row">
+                    <span className="dp-summary-label">{tr('场景', 'Scenario')}</span>
+                    <span className="dp-summary-value">
+                      {selectedScenario ? t(selectedScenario.labelKey) : session.scenario_type}
+                    </span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="dp-panel">
+                <div className="dp-panel-header">
+                  <div className="dp-section-label">{tr('预设问题', 'Prepared Questions')}</div>
+                  <span className="dp-count">{questions.length}</span>
+                </div>
+
+                {questions.length > 0 ? (
+                  <div className="dp-question-list">
+                    {questions.map((q, i) => (
+                      <div key={i} className="dp-question-item">
+                        <span className="dp-question-index">{i + 1}</span>
+                        <div className="dp-question-text">
+                          {q.question}
+                          <div className="dp-question-meta">
+                            <span className="dp-question-badge">{q.dimension}</span>
+                            <span className="dp-question-badge">{q.difficulty}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+                    ))}
+                  </div>
+                ) : (
+                  <div className="dp-empty">{tr('暂无预设问题', 'No prepared questions')}</div>
+                )}
+              </section>
+            </div>
 
             {error && <div className="dp-error">{error}</div>}
 

@@ -46,40 +46,6 @@
   line-height: 1.55;
 }
 
-.home-status-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.home-status-card {
-  display: flex;
-  min-width: 0;
-  min-height: 70px;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-card);
-}
-
-.home-status-card span {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.home-status-card strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
 .home-progress-block {
   display: flex;
   flex-direction: column;
@@ -417,10 +383,6 @@
 @media (max-width: 767px) {
   .home-page {
     gap: 18px;
-  }
-
-  .home-status-grid {
-    grid-template-columns: 1fr;
   }
 
   .home-primary-session-head {

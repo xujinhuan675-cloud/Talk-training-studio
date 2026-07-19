@@ -101,61 +101,66 @@ export default function BattlePrepPage() {
     }))
   }
 
-  const personaInitial = personaName ? personaName.charAt(0).toUpperCase() : '?'
-
   return (
     <div className="bpp-page">
       <div className="bpp-container">
-        {/* Back link */}
-        <button className="bpp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
-          <ArrowLeft size={16} />
-          <span>{t('common.backToTrainingCatalog')}</span>
-        </button>
-
-        {/* Title */}
-        <div className="bpp-title-row">
-          <Zap size={22} className="bpp-title-icon" />
-          <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
-        </div>
-
-        {/* Step indicator */}
-        <div className="bpp-steps">
-          {[1, 2].map((n) => (
-            <div key={n} className="bpp-step-item">
-              <div className={`bpp-step-dot ${step === n ? 'active' : step > n ? 'done' : ''}`}>
-                {n}
-              </div>
-              <span className={`bpp-step-label ${step === n ? 'active' : ''}`}>
-                {n === 1
-                  ? tr('描述会议', 'Describe Meeting')
-                  : tr('确认对手', 'Confirm opponent')}
-              </span>
-              {n < 2 && <div className={`bpp-step-line ${step > n ? 'done' : ''}`} />}
+        <header className="bpp-header">
+          <div className="bpp-heading">
+            <button className="bpp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
+              <ArrowLeft size={16} />
+              <span>{t('common.backToTrainingCatalog')}</span>
+            </button>
+            <div className="bpp-title-row">
+              <Zap size={22} className="bpp-title-icon" />
+              <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
             </div>
-          ))}
-        </div>
+          </div>
+
+          <div className="bpp-steps" aria-label={tr('准备流程', 'Preparation steps')}>
+            {[1, 2].map((n) => (
+              <div key={n} className="bpp-step-item">
+                <div className={`bpp-step-dot ${step === n ? 'active' : step > n ? 'done' : ''}`}>
+                  {n}
+                </div>
+                <span className={`bpp-step-label ${step === n ? 'active' : ''}`}>
+                  {n === 1
+                    ? tr('描述会议', 'Describe Meeting')
+                    : tr('确认对手', 'Confirm opponent')}
+                </span>
+                {n < 2 && <div className={`bpp-step-line ${step > n ? 'done' : ''}`} />}
+              </div>
+            ))}
+          </div>
+        </header>
 
         {/* ---- Step 1: Describe Meeting ---- */}
         {step === 1 && (
           <div className="bpp-card">
+            <div className="bpp-setup-grid">
+              <label className="bpp-brief-panel">
+                <span className="bpp-field-label">{tr('训练情境', 'Training brief')}</span>
+                <textarea
+                  className="bpp-textarea"
+                  value={description}
+                  onChange={(e) => setState((s) => ({ ...s, description: e.target.value }))}
+                  placeholder={tr(
+                    '跟谁谈、谈什么、你的目标、对方可能的态度...',
+                    'Who you will talk to, the topic, your goal, and the other side’s likely stance...',
+                  )}
+                  rows={6}
+                  disabled={loading}
+                />
+                <span className="bpp-field-note">
+                  {tr('至少 10 字', '10 characters minimum')}
+                </span>
+              </label>
 
-            <textarea
-              className="bpp-textarea"
-              value={description}
-              onChange={(e) => setState((s) => ({ ...s, description: e.target.value }))}
-              placeholder={tr(
-                '描述你即将参加的会议：跟谁谈、谈什么、你的目标是什么、对方可能的态度...',
-                'Describe the meeting: who you will talk to, the topic, your goal, and the other side’s likely stance...',
-              )}
-              rows={6}
-              disabled={loading}
-            />
-
-            <TrainingStudioLauncher
-              value={studioConfig}
-              onChange={(next) => setState((s) => ({ ...s, studioConfig: next }))}
-              disabled={loading}
-            />
+              <TrainingStudioLauncher
+                value={studioConfig}
+                onChange={(next) => setState((s) => ({ ...s, studioConfig: next }))}
+                disabled={loading}
+              />
+            </div>
 
             {error && <div className="bpp-error">{error}</div>}
 
@@ -184,59 +189,64 @@ export default function BattlePrepPage() {
         {/* ---- Step 2: Review Opponent ---- */}
         {step === 2 && prepResult && (
           <div className="bpp-card">
-            {/* Persona preview */}
-            <div className="bpp-persona-preview">
-              <div className="bpp-persona-avatar">{personaInitial}</div>
-              <div className="bpp-persona-meta">
-                <span className="bpp-persona-name-display">{personaName || tr('未命名', 'Unnamed')}</span>
-                <span className="bpp-persona-role-display">{personaRole || tr('未知角色', 'Unknown role')}</span>
-              </div>
-            </div>
+            <div className="bpp-review-grid">
+              <section className="bpp-panel">
+                <div className="bpp-panel-header">
+                  <div className="bpp-section-label">{tr('对手设定', 'Opponent setup')}</div>
+                </div>
 
-            {/* Editable fields */}
-            <div className="bpp-fields">
-              <label className="bpp-field">
-                <span className="bpp-field-label">{tr('角色名称', 'Persona Name')}</span>
-                <input
-                  type="text"
-                  className="bpp-input"
-                  value={personaName}
-                  onChange={(e) => setState((s) => ({ ...s, personaName: e.target.value }))}
-                />
-              </label>
-              <label className="bpp-field">
-                <span className="bpp-field-label">{tr('职位 / 角色', 'Position / Role')}</span>
-                <input
-                  type="text"
-                  className="bpp-input"
-                  value={personaRole}
-                  onChange={(e) => setState((s) => ({ ...s, personaRole: e.target.value }))}
-                />
-              </label>
-              <label className="bpp-field">
-                <span className="bpp-field-label">{tr('互动风格', 'Interaction style')}</span>
-                <textarea
-                  className="bpp-textarea bpp-textarea--sm"
-                  value={personaStyle}
-                  onChange={(e) => setState((s) => ({ ...s, personaStyle: e.target.value }))}
-                  rows={3}
-                />
-              </label>
-            </div>
+                <div className="bpp-fields">
+                  <label className="bpp-field">
+                    <span className="bpp-field-label">{tr('角色名称', 'Persona Name')}</span>
+                    <input
+                      type="text"
+                      className="bpp-input"
+                      value={personaName}
+                      onChange={(e) => setState((s) => ({ ...s, personaName: e.target.value }))}
+                    />
+                  </label>
+                  <label className="bpp-field">
+                    <span className="bpp-field-label">{tr('职位 / 角色', 'Position / Role')}</span>
+                    <input
+                      type="text"
+                      className="bpp-input"
+                      value={personaRole}
+                      onChange={(e) => setState((s) => ({ ...s, personaRole: e.target.value }))}
+                    />
+                  </label>
+                  <label className="bpp-field bpp-field--span-2">
+                    <span className="bpp-field-label">{tr('互动风格', 'Interaction style')}</span>
+                    <textarea
+                      className="bpp-textarea bpp-textarea--sm"
+                      value={personaStyle}
+                      onChange={(e) => setState((s) => ({ ...s, personaStyle: e.target.value }))}
+                      rows={3}
+                    />
+                  </label>
+                </div>
+              </section>
 
-            {/* Training points */}
-            <div className="bpp-section-label">{tr('训练点（至少选 1 个）', 'Training Points (choose at least 1)')}</div>
-            <div className="bpp-training-list">
-              {prepResult.training_points.map((point) => (
-                <label key={point} className={`bpp-training-item ${selectedPoints.includes(point) ? 'checked' : ''}`}>
-                  <input
-                    type="checkbox"
-                    checked={selectedPoints.includes(point)}
-                    onChange={() => togglePoint(point)}
-                  />
-                  <span>{point}</span>
-                </label>
-              ))}
+              <section className="bpp-panel">
+                <div className="bpp-panel-header">
+                  <div className="bpp-section-label">{tr('训练点', 'Training Points')}</div>
+                  <span className="bpp-count">
+                    {selectedPoints.length}/{prepResult.training_points.length}
+                  </span>
+                </div>
+
+                <div className="bpp-training-list">
+                  {prepResult.training_points.map((point) => (
+                    <label key={point} className={`bpp-training-item ${selectedPoints.includes(point) ? 'checked' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPoints.includes(point)}
+                        onChange={() => togglePoint(point)}
+                      />
+                      <span>{point}</span>
+                    </label>
+                  ))}
+                </div>
+              </section>
             </div>
 
             {error && <div className="bpp-error">{error}</div>}

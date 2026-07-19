@@ -8,7 +8,6 @@
 .training-result-main-grid,
 .training-result-dual-grid,
 .training-result-notice,
-.training-result-footer-note,
 .training-result-state,
 .training-result-insights,
 .training-result-coach-events,
@@ -76,6 +75,29 @@
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.55;
+}
+
+.training-result-source-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.training-result-title .training-result-source-strip span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  margin: 0;
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  padding: 0 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .training-result-actions {
@@ -170,13 +192,20 @@
 }
 
 .training-result-grade {
-  margin: 8px 0 18px;
+  margin: 8px 0 6px;
   border-radius: 7px;
   padding: 3px 10px;
   background: var(--green-soft);
   color: var(--green);
   font-size: 12px;
   font-weight: 850;
+}
+
+.training-result-score-source {
+  margin-bottom: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .training-result-score-meta {
@@ -703,20 +732,6 @@
 .training-result-message.system p {
   background: var(--amber-soft);
   color: #7a4d11;
-}
-
-.training-result-footer-note {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 14px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.training-result-footer-note svg {
-  color: var(--green);
 }
 
 .training-result-spin {

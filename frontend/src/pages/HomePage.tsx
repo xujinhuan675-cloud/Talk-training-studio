@@ -122,7 +122,6 @@ const HomePage: React.FC = () => {
   const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
   const dailyProgressPercent = Math.round(dailyChallenge.progress * 100)
   const dailyXpLabel = formatXp(dailyChallenge.xp, tr)
-  const operatorLabel = currentUser?.teamName ?? currentUser?.name ?? tr('模拟用户', 'Mock user')
 
   const startDailyChallenge = async () => {
     const scenario = getScenarioTrainingCardById(dailyChallenge.scenarioId)
@@ -212,18 +211,13 @@ const HomePage: React.FC = () => {
             <Badge tone="warning">{dailyXpLabel}</Badge>
           </div>
 
-          <div className="home-status-grid">
-            <div className="home-status-card">
-              <span>{tr('进度', 'Progress')}</span>
-              <strong>{dailyProgressPercent}%</strong>
+          <div className="home-progress-block" aria-label={tr('今日训练进度', 'Today training progress')}>
+            <div className="home-progress-copy">
+              <span>{tr('已完成 {percent}%', '{percent}% complete', { percent: dailyProgressPercent })}</span>
+              <strong>{dailyXpLabel}</strong>
             </div>
-            <div className="home-status-card">
-              <span>{tr('模式', 'Mode')}</span>
-              <strong>{tr('文本对话', 'Text chat')}</strong>
-            </div>
-            <div className="home-status-card">
-              <span>{tr('范围', 'Scope')}</span>
-              <strong>{operatorLabel}</strong>
+            <div className="home-progress-track" aria-hidden="true">
+              <span style={{ width: `${dailyProgressPercent}%` }} />
             </div>
           </div>
 

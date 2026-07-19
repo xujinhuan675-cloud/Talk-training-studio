@@ -206,27 +206,25 @@
   background: var(--bg-card);
 }
 
+.training-studio-capability-panel.compact {
+  padding: 12px 14px;
+}
+
 .training-studio-capability-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
 }
 
-.training-studio-capability-kicker {
+.training-studio-capability-header h2 {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--green);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.training-studio-capability-header h2 {
-  margin: 4px 0 0;
+  gap: 7px;
+  margin: 0;
   color: var(--text-primary);
-  font-size: 18px;
-  line-height: 1.25;
+  font-size: 14px;
+  line-height: 1.2;
   font-weight: 800;
 }
 
@@ -476,7 +474,7 @@
 
 .training-studio-realtime-diagnostics-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
 }
@@ -490,20 +488,14 @@
   flex-shrink: 0;
 }
 
-.training-studio-realtime-kicker {
+.training-studio-realtime-diagnostics h2 {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--green);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.training-studio-realtime-diagnostics h2 {
-  margin: 4px 0 0;
+  gap: 7px;
+  margin: 0;
   color: var(--text-primary);
-  font-size: 18px;
-  line-height: 1.25;
+  font-size: 14px;
+  line-height: 1.2;
   font-weight: 800;
 }
 

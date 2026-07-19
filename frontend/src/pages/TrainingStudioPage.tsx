@@ -531,6 +531,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   ]
   const capabilityReadyCount = capabilityItems.filter((item) => item.status === 'ready').length
   const capabilityAttentionCount = capabilityItems.length - capabilityReadyCount
+  const showCapabilitySummary = capabilityDetailsOpen || capabilityErrors.length > 0 || capabilityAttentionCount > 0
 
   const pipecatRealtimeStatus = realtimeCapabilities
     ? getPipecatRealtimeStatus(realtimeCapabilities.pipecat, tr)
@@ -792,18 +793,15 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
         </div>
 
         <section
-          className="training-studio-capability-panel"
+          className={`training-studio-capability-panel ${showCapabilitySummary ? 'expanded' : 'compact'}`}
           aria-label={tr('后端能力就绪状态', 'Backend capability readiness')}
           aria-live="polite"
         >
           <div className="training-studio-capability-header">
-            <div>
-              <span className="training-studio-capability-kicker">
-                <ShieldCheck size={14} />
-                {tr('系统检查', 'System checks')}
-              </span>
-              <h2>{tr('运行状态', 'Runtime status')}</h2>
-            </div>
+            <h2>
+              <ShieldCheck size={15} />
+              {tr('系统检查', 'System checks')}
+            </h2>
             <div className="training-studio-capability-actions">
               <span className={`training-studio-capability-status ${capabilityReadiness.overallStatus}`}>
                 {capabilityStatusIcon(capabilityReadiness.overallStatus, capabilityLoading)}
@@ -836,21 +834,23 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 {(realtimeCapabilitiesLoading || llmRegistryLoading)
                   ? <Loader2 size={14} className="training-studio-spin" />
                   : <RefreshCw size={14} />}
-                {tr('刷新', 'Refresh')}
+                {t('common.refresh')}
               </button>
             </div>
           </div>
 
-          <div className="training-studio-capability-summary">
-            <span>
-              <strong>{capabilityReadyCount}/{capabilityItems.length}</strong>
-              {tr('已就绪', 'ready')}
-            </span>
-            <span className={capabilityAttentionCount > 0 ? 'warning' : ''}>
-              <strong>{capabilityAttentionCount}</strong>
-              {tr('需处理', 'needs attention')}
-            </span>
-          </div>
+          {showCapabilitySummary && (
+            <div className="training-studio-capability-summary">
+              <span>
+                <strong>{capabilityReadyCount}/{capabilityItems.length}</strong>
+                {tr('已就绪', 'ready')}
+              </span>
+              <span className={capabilityAttentionCount > 0 ? 'warning' : ''}>
+                <strong>{capabilityAttentionCount}</strong>
+                {tr('需处理', 'needs attention')}
+              </span>
+            </div>
+          )}
 
           {capabilityErrors.length > 0 && (
             <div className="training-studio-capability-alerts">
@@ -962,13 +962,10 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             aria-live="polite"
           >
             <div className="training-studio-realtime-diagnostics-header">
-              <div>
-                <span className="training-studio-realtime-kicker">
-                  <ShieldCheck size={14} />
-                  {tr('通话前诊断', 'Pre-call diagnostics')}
-                </span>
-                <h2>{tr('实时语音就绪状态', 'Realtime / Pipecat readiness')}</h2>
-              </div>
+              <h2>
+                <ShieldCheck size={15} />
+                {tr('实时语音就绪状态', 'Realtime / Pipecat readiness')}
+              </h2>
               <div className="training-studio-realtime-actions">
                 <span className={`training-studio-realtime-status ${pipecatRealtimeStatus.tone}`}>
                   {realtimeStatusIcon(pipecatRealtimeStatus.tone)}
@@ -991,7 +988,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                   disabled={realtimeCapabilitiesLoading}
                 >
                   {realtimeCapabilitiesLoading ? <Loader2 size={14} className="training-studio-spin" /> : <RefreshCw size={14} />}
-                  {tr('刷新', 'Refresh')}
+                  {t('common.refresh')}
                 </button>
               </div>
             </div>
@@ -1091,7 +1088,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                         ))}
                       </ul>
                     ) : (
-                      <p>{tr('没有 blockingReasons 或 errors。', 'No blockingReasons or errors returned.')}</p>
+                      <p>{tr('暂无阻塞项。', 'No blockers.')}</p>
                     )}
                   </section>
 

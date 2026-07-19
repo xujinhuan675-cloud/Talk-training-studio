@@ -9,6 +9,7 @@ import {
   GitBranch,
   History,
   Loader2,
+  RotateCcw,
   Search,
   Trophy,
 } from 'lucide-react'
@@ -231,14 +232,30 @@ function historyBranchSummaryText(info: TrainingConversationBranchInfo, tr: Tran
 }
 
 function historyEntryMetaText(entry: HistoryEntry, tr: TranslateInline): string {
-  const source = translateLabel(sourceLabels[entry.source], tr)
+  const details: string[] = []
   if (typeof entry.messageCount === 'number') {
-    return tr('{source} · {count} 条消息', '{source} · {count} messages', {
-      source,
-      count: entry.messageCount,
-    })
+    details.push(tr('{count} 条消息', '{count} messages', { count: entry.messageCount }))
   }
-  return source
+  if (entry.sessionId) {
+    details.push(tr('会话 {value}', 'Session {value}', {
+      value: compactHistoryBranchText(entry.sessionId, 18),
+    }))
+  } else if (entry.scenarioId) {
+    details.push(tr('场景 {value}', 'Scenario {value}', {
+      value: compactHistoryBranchText(entry.scenarioId, 18),
+    }))
+  }
+  return details.join(' · ') || tr('暂无记录详情', 'No record details')
+}
+
+function historyTimeContext(entry: HistoryEntry, locale: Locale, tr: TranslateInline): string {
+  const practicedAt = entry.completedAt || entry.lastPracticedAt || entry.startedAt
+  const clock = formatClock(practicedAt, locale)
+  if (clock) return clock
+  if (entry.completedAt) return tr('已完成', 'Completed')
+  if (entry.lastPracticedAt) return tr('最近练习', 'Last practiced')
+  if (entry.startedAt) return tr('已开始', 'Started')
+  return tr('未记录时间', 'No time recorded')
 }
 
 function gradeKey(score?: number): string {
@@ -483,6 +500,12 @@ export default function TrainingHistoryPage() {
   const selectedStatusLabel = statusFilter === 'all'
     ? tr('全部状态', 'All statuses')
     : getScenarioStatusFilterLabel(statusFilter, tr)
+  const filterCountText = hasActiveFilters
+    ? tr('{filtered} / {total} 条', '{filtered} of {total} records', {
+      filtered: filteredEntries.length,
+      total: entries.length,
+    })
+    : tr('{count} 条', '{count} records', { count: entries.length })
   const resetFilters = () => {
     setQuery('')
     setScenarioFilter('all')
@@ -539,7 +562,7 @@ export default function TrainingHistoryPage() {
 
       <section className="training-history-filter-summary" aria-label={tr('当前筛选', 'Current filters')}>
         <div>
-          <span>{tr('{count} 条', '{count} records', { count: filteredEntries.length })}</span>
+          <span>{filterCountText}</span>
           {scenarioFilter !== 'all' && <strong>{selectedScenarioLabel}</strong>}
           {statusFilter !== 'all' && <strong>{selectedStatusLabel}</strong>}
           {query.trim() && <strong>{query.trim()}</strong>}
@@ -586,8 +609,24 @@ export default function TrainingHistoryPage() {
 
         {!loading && filteredEntries.length === 0 && (
           <div className="training-history-empty">
-            <Search size={24} />
-            <p>{tr('没有匹配的训练记录。', 'No matching training records.')}</p>
+            {entries.length === 0 ? <History size={24} /> : <Search size={24} />}
+            <p>
+              {entries.length === 0
+                ? tr('还没有训练记录。', 'No training records yet.')
+                : tr('没有匹配当前筛选的记录。', 'No records match the current filters.')}
+            </p>
+            <div className="training-history-empty-actions">
+              {entries.length === 0 ? (
+                <Link to={APP_ROUTES.practiceScenarios}>
+                  <RotateCcw size={14} />
+                  {tr('回到训练', 'Back to training')}
+                </Link>
+              ) : hasActiveFilters ? (
+                <button type="button" onClick={resetFilters}>
+                  {tr('清空筛选', 'Clear filters')}
+                </button>
+              ) : null}
+            </div>
           </div>
         )}
 
@@ -603,7 +642,7 @@ export default function TrainingHistoryPage() {
             <article className="training-history-row" key={entry.key}>
               <div className="training-history-time">
                 <strong>{formatDate(practicedAt, locale, tr)}</strong>
-                <span>{formatClock(practicedAt, locale) || translateLabel(sourceLabels[entry.source], tr)}</span>
+                <span>{historyTimeContext(entry, locale, tr)}</span>
               </div>
 
               <div className="training-history-scenario">
@@ -612,6 +651,9 @@ export default function TrainingHistoryPage() {
                   <span>{historyEntryMetaText(entry, tr)}</span>
                 </div>
                 <div className="training-history-tags">
+                  <span className={`training-history-source-tag ${entry.source}`}>
+                    {translateLabel(sourceLabels[entry.source], tr)}
+                  </span>
                   {entry.difficulty && (
                     <span>{translatedDifficulty(entry.difficulty, tr)}</span>
                   )}
@@ -663,14 +705,23 @@ export default function TrainingHistoryPage() {
 
               <div className="training-history-actions">
                 {entry.sessionId ? (
-                  <Link to={APP_ROUTES.reviewSession(entry.sessionId)}>
-                    {tr('复盘', 'Review')}
+                  <Link className="training-history-review-link" to={APP_ROUTES.reviewSession(entry.sessionId)}>
+                    <FileText size={14} />
+                    {tr('查看结果', 'View result')}
                   </Link>
                 ) : (
-                  <span>{tr('仅进度', 'Progress only')}</span>
+                  <Link className="training-history-review-link" to={APP_ROUTES.practiceScenarios}>
+                    <RotateCcw size={14} />
+                    {tr('回到训练', 'Back to training')}
+                  </Link>
                 )}
                 {chatPath && (
-                  <Link to={chatPath} title={tr('打开聊天回放', 'Open chat replay')} aria-label={tr('打开聊天回放', 'Open chat replay')}>
+                  <Link
+                    className="training-history-icon-link"
+                    to={chatPath}
+                    title={tr('打开聊天回放', 'Open chat replay')}
+                    aria-label={tr('打开聊天回放', 'Open chat replay')}
+                  >
                     <ExternalLink size={14} />
                   </Link>
                 )}
