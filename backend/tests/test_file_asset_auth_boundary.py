@@ -10,10 +10,16 @@ from api.routes.files import router as files_router
 from application.dto import FileAssetDTO
 from core.exceptions import register_exception_handlers
 from domain.common.exceptions import FileAssetNotFoundException
+from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset.entity import FileAsset
 
 
-def _asset(asset_id: int = 1) -> FileAsset:
+def _asset(
+    asset_id: int = 1,
+    *,
+    owner_user_id: str = "user-sales-001",
+    team_id: str = "team-revenue",
+) -> FileAsset:
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     return FileAsset(
         id=asset_id,
@@ -27,9 +33,9 @@ def _asset(asset_id: int = 1) -> FileAsset:
         original_filename=f"{asset_id}.txt",
         kind="training_material",
         metadata={
-            "ownerUserId": "user-sales-001",
-            "teamId": "team-revenue",
-            "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            "ownerUserId": owner_user_id,
+            "teamId": team_id,
+            "authScope": {"userId": owner_user_id, "teamId": team_id},
         },
         url=None,
         status="active",
@@ -40,22 +46,41 @@ def _asset(asset_id: int = 1) -> FileAsset:
 
 
 class FakeFileAssetService:
-    def __init__(self) -> None:
+    def __init__(self, assets: list[FileAsset] | None = None) -> None:
+        self.assets = {asset.id: asset for asset in assets or [_asset()]}
         self.list_scopes = []
         self.get_scopes = []
         self.delete_scopes = []
         self.sign_calls = []
         self.blocked_asset_ids = set()
 
-    async def list_assets(self, **kwargs):
-        self.list_scopes.append(kwargs.get("metadata_scope"))
-        return [FileAssetDTO.model_validate(_asset())], 1
+    async def list_assets(
+        self,
+        *,
+        owner_id,
+        kind,
+        status,
+        skip,
+        limit,
+        metadata_scope,
+    ):
+        _ = (owner_id, kind, status, skip, limit)
+        self.list_scopes.append(metadata_scope)
+        items = [
+            asset
+            for asset in self.assets.values()
+            if _matches_metadata_scope(asset.metadata, metadata_scope)
+        ]
+        return [FileAssetDTO.model_validate(asset) for asset in items], len(items)
 
-    async def get_asset_raw(self, asset_id: int, *, metadata_scope=None):
+    async def get_asset_raw(self, asset_id: int, *, metadata_scope):
         self.get_scopes.append(metadata_scope)
         if asset_id in self.blocked_asset_ids:
             raise FileAssetNotFoundException(asset_id)
-        return _asset(asset_id)
+        asset = self.assets.get(asset_id) or _asset(asset_id)
+        if not _matches_metadata_scope(asset.metadata, metadata_scope):
+            raise FileAssetNotFoundException(asset_id)
+        return asset
 
     async def generate_access_url_by_info(self, **kwargs):
         return {"url": f"https://files.test/{kwargs['key']}"}
@@ -65,11 +90,47 @@ class FakeFileAssetService:
         self.sign_calls.append(kwargs)
         return {"url": f"https://files.test/{asset.key}"}
 
-    async def soft_delete(self, asset_id: int, *, metadata_scope=None):
+    async def soft_delete(self, asset_id: int, *, metadata_scope):
         self.delete_scopes.append(metadata_scope)
-        asset = _asset(asset_id)
+        asset = self.assets.get(asset_id) or _asset(asset_id)
+        if not _matches_metadata_scope(asset.metadata, metadata_scope):
+            raise FileAssetNotFoundException(asset_id)
         asset.mark_deleted()
         return FileAssetDTO.model_validate(asset)
+
+
+def _matches_metadata_scope(
+    metadata: dict | None,
+    scope: OwnedMetadataScope,
+) -> bool:
+    metadata = metadata or {}
+    auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), dict) else {}
+    owner_user_id = (
+        auth_scope.get("userId")
+        or auth_scope.get("user_id")
+        or metadata.get("ownerUserId")
+        or metadata.get("owner_user_id")
+        or metadata.get("createdByUserId")
+        or metadata.get("created_by_user_id")
+    )
+    owner_team_id = (
+        auth_scope.get("teamId")
+        or auth_scope.get("team_id")
+        or metadata.get("teamId")
+        or metadata.get("team_id")
+        or metadata.get("ownerTeamId")
+        or metadata.get("owner_team_id")
+    )
+    owner_user_id = str(owner_user_id).strip() if owner_user_id else ""
+    owner_team_id = str(owner_team_id).strip() if owner_team_id else ""
+
+    if owner_user_id and owner_user_id == scope.user_id:
+        return True
+    if scope.team_id and owner_team_id == scope.team_id:
+        return bool(scope.include_team_scope or not owner_user_id)
+    if not owner_user_id and not owner_team_id:
+        return scope.allow_unscoped
+    return False
 
 
 def _client(fake_service: FakeFileAssetService) -> TestClient:
@@ -95,6 +156,26 @@ def test_file_list_uses_current_user_metadata_scope() -> None:
     assert scope.team_id == "team-revenue"
     assert scope.include_team_scope is False
     assert scope.allow_unscoped is False
+
+
+def test_file_list_hides_assets_outside_current_user_scope() -> None:
+    fake = FakeFileAssetService(
+        assets=[
+            _asset(1),
+            _asset(2, owner_user_id="user-cs-001", team_id="team-service"),
+        ]
+    )
+    client = _client(fake)
+
+    response = client.get(
+        "/api/v1/files?kind=training_material",
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 1
+    assert [item["id"] for item in data["items"]] == [1]
 
 
 def test_file_detail_and_delete_use_current_user_metadata_scope() -> None:

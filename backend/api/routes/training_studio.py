@@ -1839,6 +1839,8 @@ async def _material_review_replay_context(
     replay_limit = 40
     with suppress(Exception):
         detail = await chatroom_svc.get_room_detail(room_id, message_limit=replay_limit)
+        if not _material_review_room_matches_session(detail, session):
+            return MaterialReviewReplayContext(turns=[])
         turns = [
             _material_review_message_text(message)
             for message in detail.messages
@@ -1849,6 +1851,28 @@ async def _material_review_replay_context(
             truncated=len(detail.messages) >= replay_limit,
         )
     return MaterialReviewReplayContext(turns=[])
+
+
+def _material_review_room_matches_session(detail, session) -> bool:
+    room = getattr(detail, "room", None)
+    room_id = getattr(room, "id", None)
+    if room_id is not None and str(room_id) != str(session.room_id):
+        return False
+    session_user_id = str(getattr(session, "user_id", "") or "").strip()
+    if not session_user_id:
+        return False
+    messages = list(getattr(detail, "messages", []) or [])
+    if not messages:
+        return True
+    saw_session_user_message = False
+    for message in messages:
+        if getattr(message, "sender_type", None) != "user":
+            continue
+        sender_id = str(getattr(message, "sender_id", "") or "").strip()
+        if not sender_id or sender_id != session_user_id:
+            return False
+        saw_session_user_message = True
+    return saw_session_user_message
 
 
 def _material_review_message_text(message: MessageDTO) -> str:

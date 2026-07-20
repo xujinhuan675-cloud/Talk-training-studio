@@ -59,6 +59,7 @@ class FakeFileAssetService:
         self.presign_calls = 0
         self.generate_calls = 0
         self.last_metadata = None
+        self.last_metadata_scope = None
         self.get_raw_calls = []
         self.get_by_key_raw_calls = []
         self.complete_calls = []
@@ -76,9 +77,11 @@ class FakeFileAssetService:
         method: str = "PUT",
         expires_in: int = 600,
         metadata=None,
+        metadata_scope,
     ):
         _ = (user_id, mime_type, kind, expires_in, size_bytes)
         self.last_metadata = metadata
+        self.last_metadata_scope = metadata_scope
         self.presign_calls += 1
         file_summary = FileAssetSummaryDTO(
             id=self.presign_calls,
@@ -111,13 +114,13 @@ class FakeFileAssetService:
             expires_in=600,
         )
 
-    async def get_asset_raw(self, asset_id: int, *, metadata_scope=None):
+    async def get_asset_raw(self, asset_id: int, *, metadata_scope):
         self.get_raw_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
         if asset_id in self.blocked_asset_ids:
             raise FileAssetNotFoundException(asset_id)
         return _file_asset(asset_id=asset_id)
 
-    async def get_asset_by_key_raw(self, key: str, *, metadata_scope=None):
+    async def get_asset_by_key_raw(self, key: str, *, metadata_scope):
         self.get_by_key_raw_calls.append({"key": key, "metadata_scope": metadata_scope})
         if key == "blocked.txt":
             raise FileAssetNotFoundException(key=key)
@@ -128,7 +131,7 @@ class FakeFileAssetService:
         *,
         asset_id=None,
         key=None,
-        metadata_scope=None,
+        metadata_scope,
     ):
         self.complete_calls.append(
             {"asset_id": asset_id, "key": key, "metadata_scope": metadata_scope}
@@ -145,7 +148,7 @@ class FakeFileAssetService:
         content_type=None,
         size_hint=None,
         metadata=None,
-        metadata_scope=None,
+        metadata_scope,
     ):
         chunks = []
         async for chunk in file_stream:
@@ -239,6 +242,8 @@ async def test_presign_upload_idempotent_replay() -> None:
     assert fake.presign_calls == 1
     assert fake.generate_calls == 1
     assert fake.last_metadata["authScope"]["userId"] == "user-admin-001"
+    assert fake.last_metadata_scope.user_id == "user-admin-001"
+    assert fake.last_metadata_scope.allow_unscoped is False
 
 
 @pytest.mark.asyncio
@@ -305,6 +310,10 @@ async def test_presign_upload_stamps_current_user_file_scope() -> None:
             "teamId": "team-revenue",
         },
     }
+    assert fake.last_metadata_scope.user_id == "user-sales-001"
+    assert fake.last_metadata_scope.team_id == "team-revenue"
+    assert fake.last_metadata_scope.include_team_scope is False
+    assert fake.last_metadata_scope.allow_unscoped is False
 
 
 @pytest.mark.asyncio

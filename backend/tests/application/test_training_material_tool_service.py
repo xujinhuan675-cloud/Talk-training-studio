@@ -96,25 +96,42 @@ class _FakeFileAssetService:
         self.get_by_key_calls: list[dict[str, Any]] = []
         self.read_calls: list[dict[str, Any]] = []
 
-    async def list_assets(self, **kwargs):
+    async def list_assets(
+        self,
+        *,
+        owner_id,
+        kind,
+        status,
+        skip,
+        limit,
+        metadata_scope,
+    ):
+        kwargs = {
+            "owner_id": owner_id,
+            "kind": kind,
+            "status": status,
+            "skip": skip,
+            "limit": limit,
+            "metadata_scope": metadata_scope,
+        }
         self.list_calls.append(kwargs)
         return self.list_items, len(self.list_items)
 
-    async def get_asset(self, asset_id: int, *, metadata_scope=None):
+    async def get_asset(self, asset_id: int, *, metadata_scope):
         self.get_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
         asset = self.assets_by_id.get(asset_id)
         if asset is None:
             raise FileAssetNotFoundException(asset_id)
         return asset
 
-    async def get_asset_by_key_raw(self, key: str, *, metadata_scope=None):
+    async def get_asset_by_key_raw(self, key: str, *, metadata_scope):
         self.get_by_key_calls.append({"key": key, "metadata_scope": metadata_scope})
         asset = self.assets_by_key.get(key)
         if asset is None:
             raise FileAssetNotFoundException(key=key)
         return asset
 
-    async def read_asset_bytes(self, asset_id: int, *, metadata_scope=None, max_bytes=8192):
+    async def read_asset_bytes(self, asset_id: int, *, metadata_scope, max_bytes=8192):
         self.read_calls.append(
             {
                 "asset_id": asset_id,
@@ -312,3 +329,20 @@ async def test_training_material_consumer_requires_metadata_scope() -> None:
         await service.get_material(1, metadata_scope=None)
     with pytest.raises(DomainValidationException):
         await service.get_material_by_key("training_material/1.txt", metadata_scope=None)
+
+
+@pytest.mark.asyncio
+async def test_training_material_consumer_rejects_allow_unscoped_scope() -> None:
+    file_service = _FakeFileAssetService()
+    service = TrainingMaterialToolConsumerService(file_service)
+    unsafe_scope = OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=True,
+        allow_unscoped=True,
+    )
+
+    with pytest.raises(DomainValidationException):
+        await service.list_materials(metadata_scope=unsafe_scope)
+
+    assert file_service.list_calls == []

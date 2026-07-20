@@ -141,6 +141,7 @@ async def presign_upload(
         if decision is not None and not decision.execute and decision.payload:
             return await _build_response_from_pending(decision.payload)
 
+    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
     try:
         file_summary, presigned = await service.presign_upload(
             user_id=None,  # No user tracking
@@ -154,6 +155,7 @@ async def presign_upload(
                 current_user=current_user,
                 kind=payload.kind,
             ),
+            metadata_scope=metadata_scope,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

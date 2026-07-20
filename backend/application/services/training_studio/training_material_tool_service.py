@@ -122,28 +122,28 @@ class TrainingMaterialFileAssetReader(Protocol):
         status: str | None,
         skip: int,
         limit: int,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> tuple[list[FileAssetDTO], int]: ...
 
     async def get_asset(
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> FileAssetDTO: ...
 
     async def get_asset_by_key_raw(
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> FileAsset: ...
 
     async def read_asset_bytes(
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
         max_bytes: int = _CONTENT_EXCERPT_MAX_BYTES,
     ) -> tuple[bytes, bool]: ...
 
@@ -162,7 +162,7 @@ class TrainingMaterialToolConsumerService:
     async def list_materials(
         self,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
         skip: int = 0,
         limit: int = 20,
         include_content_excerpt: bool = False,
@@ -197,7 +197,7 @@ class TrainingMaterialToolConsumerService:
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
         include_content_excerpt: bool = False,
     ) -> TrainingMaterialAssetSummaryDTO:
         scope = _require_metadata_scope(metadata_scope)
@@ -213,7 +213,7 @@ class TrainingMaterialToolConsumerService:
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
         include_content_excerpt: bool = False,
     ) -> TrainingMaterialAssetSummaryDTO:
         scope = _require_metadata_scope(metadata_scope)
@@ -258,6 +258,12 @@ def _require_metadata_scope(scope: OwnedMetadataScope | None) -> OwnedMetadataSc
             "metadata_scope is required for training material access",
             field="metadata_scope",
             message_key="training_material.scope.required",
+        )
+    if scope.allow_unscoped:
+        raise DomainValidationException(
+            "allow_unscoped metadata_scope is not allowed for training material access",
+            field="metadata_scope",
+            message_key="training_material.scope.unscoped_forbidden",
         )
     return scope
 

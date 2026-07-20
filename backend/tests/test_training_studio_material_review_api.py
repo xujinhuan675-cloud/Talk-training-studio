@@ -132,14 +132,14 @@ class _FakeFileAssetService:
         self.get_calls: list[dict[str, Any]] = []
         self.read_calls: list[dict[str, Any]] = []
 
-    async def get_asset(self, asset_id: int, *, metadata_scope=None):
+    async def get_asset(self, asset_id: int, *, metadata_scope):
         self.get_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
         asset = self.assets.get(asset_id)
         if asset is None or not _matches_metadata_scope(asset.metadata, metadata_scope):
             raise FileAssetNotFoundException(asset_id)
         return asset
 
-    async def read_asset_bytes(self, asset_id: int, *, metadata_scope=None, max_bytes=8192):
+    async def read_asset_bytes(self, asset_id: int, *, metadata_scope, max_bytes=8192):
         self.read_calls.append(
             {"asset_id": asset_id, "metadata_scope": metadata_scope, "max_bytes": max_bytes}
         )
@@ -168,22 +168,24 @@ class _FakeAnalysisReader:
 
 
 class _FakeChatroomService:
-    def __init__(self) -> None:
+    def __init__(self, messages: list[MessageDTO] | None = None) -> None:
         self.get_calls: list[dict[str, Any]] = []
+        self.messages = messages or [
+            MessageDTO(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="user-sales-001",
+                content="We can prove ROI with activation metrics.",
+                metadata={},
+            )
+        ]
 
     async def get_room_detail(self, room_id: int, *, message_limit: int = 50):
         self.get_calls.append({"room_id": room_id, "message_limit": message_limit})
         return SimpleNamespace(
-            messages=[
-                MessageDTO(
-                    id=1,
-                    room_id=room_id,
-                    sender_type="user",
-                    sender_id="user-sales-001",
-                    content="We can prove ROI with activation metrics.",
-                    metadata={},
-                )
-            ]
+            room=SimpleNamespace(id=room_id),
+            messages=self.messages,
         )
 
 
@@ -199,10 +201,8 @@ class _FakeLLM:
 
 def _matches_metadata_scope(
     metadata: dict[str, Any] | None,
-    scope: OwnedMetadataScope | None,
+    scope: OwnedMetadataScope,
 ) -> bool:
-    if scope is None:
-        return True
     metadata = metadata or {}
     auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), dict) else {}
     owner_user_id = (
@@ -330,6 +330,34 @@ def test_material_review_rejects_existing_material_outside_scope_without_reading
     assert response.status_code == 404
     assert response.json()["detail"] == "Training material not found"
     assert file_service.read_calls == []
+
+
+def test_material_review_drops_replay_from_room_bound_to_another_session_user() -> None:
+    session_service = _FakeTrainingSessionService([_session()])
+    file_service = _FakeFileAssetService([_material_asset()])
+    chatroom = _FakeChatroomService(
+        messages=[
+            MessageDTO(
+                id=1,
+                room_id=42,
+                sender_type="user",
+                sender_id="user-cs-001",
+                content="Foreign transcript must not enter material review.",
+                metadata={},
+            )
+        ]
+    )
+    client = _client(session_service, file_service, chatroom=chatroom)
+
+    response = client.post(
+        "/api/v1/training-studio/tool-consumers/review-assistant/material-review",
+        json={"session_id": "training-1", "material_ids": [7]},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 200
+    assert chatroom.get_calls == [{"room_id": 42, "message_limit": 40}]
+    assert response.json()["data"]["source_state"]["replay_used"] is False
 
 
 def test_material_review_admin_uses_explicit_scopes_without_unscoped_material_access() -> None:

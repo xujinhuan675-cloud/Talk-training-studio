@@ -193,9 +193,9 @@ async def test_existing_asset_access_requires_metadata_scope_before_repository_o
     service = _service(repo, storage=storage)
 
     with pytest.raises(DomainValidationException):
-        await service.confirm_direct_upload(asset_id=7)
+        await service.confirm_direct_upload(asset_id=7, metadata_scope=None)
     with pytest.raises(DomainValidationException):
-        await service.read_asset_bytes(7, max_bytes=8)
+        await service.read_asset_bytes(7, metadata_scope=None, max_bytes=8)
     with pytest.raises(DomainValidationException):
         await service.list_assets(
             owner_id=None,
@@ -203,6 +203,7 @@ async def test_existing_asset_access_requires_metadata_scope_before_repository_o
             status="active",
             skip=0,
             limit=10,
+            metadata_scope=None,
         )
 
     assert repo.get_by_id_calls == []
@@ -217,18 +218,75 @@ async def test_destructive_helpers_require_metadata_scope_before_delete() -> Non
     service = _service(repo, storage=storage)
 
     with pytest.raises(DomainValidationException):
-        await service.purge_asset_by_id(11)
+        await service.purge_asset_by_id(11, metadata_scope=None)
     with pytest.raises(DomainValidationException):
-        await service.purge_asset_by_key("training_material/11.txt")
+        await service.purge_asset_by_key("training_material/11.txt", metadata_scope=None)
     with pytest.raises(DomainValidationException):
-        await service.delete_record_by_id(11)
+        await service.delete_record_by_id(11, metadata_scope=None)
     with pytest.raises(DomainValidationException):
-        await service.delete_record_by_key("training_material/11.txt")
+        await service.delete_record_by_key("training_material/11.txt", metadata_scope=None)
 
     assert repo.get_by_id_calls == []
     assert repo.get_by_key_calls == []
     assert repo.delete_calls == []
     assert storage.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_file_asset_service_rejects_allow_unscoped_scope_before_repository() -> None:
+    repo = _FakeFileAssetRepository({7: _asset(7, status="active")})
+    storage = _FakeStorage()
+    service = _service(repo, storage=storage)
+    unsafe_scope = OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=True,
+        allow_unscoped=True,
+    )
+
+    with pytest.raises(DomainValidationException):
+        await service.get_asset(7, metadata_scope=unsafe_scope)
+    with pytest.raises(DomainValidationException):
+        await service.read_asset_bytes(7, metadata_scope=unsafe_scope)
+    with pytest.raises(DomainValidationException):
+        await service.soft_delete(7, metadata_scope=unsafe_scope)
+
+    assert repo.get_by_id_calls == []
+    assert repo.update_calls == []
+    assert storage.stream_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_pending_asset_stamps_scope_acl_and_ignores_forged_acl_metadata() -> None:
+    repo = _FakeFileAssetRepository({})
+    service = _service(repo)
+
+    created = await service.create_pending_asset(
+        owner_id=None,
+        storage_type="local",
+        bucket=None,
+        region=None,
+        key="training_material/new.txt",
+        original_filename="new.txt",
+        content_type="text/plain",
+        kind="training_material",
+        metadata={
+            "title": "Scoped material",
+            "ownerUserId": "user-cs-001",
+            "owner_user_id": "user-cs-001",
+            "teamId": "team-service",
+            "authScope": {"userId": "user-cs-001", "teamId": "team-service"},
+        },
+        metadata_scope=_scope(),
+    )
+
+    assert created.id == 1
+    assert repo.create_calls[0].metadata == {
+        "title": "Scoped material",
+        "teamId": "team-revenue",
+        "ownerUserId": "user-sales-001",
+        "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+    }
 
 
 @pytest.mark.asyncio

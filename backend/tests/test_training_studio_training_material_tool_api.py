@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from api.dependencies import get_file_asset_service
 from api.routes.training_studio import router
 from application.dto import FileAssetDTO
+from domain.common.exceptions import FileAssetNotFoundException
+from domain.conversation.repository import OwnedMetadataScope
 
 
 def _material_asset(
@@ -58,20 +60,42 @@ class _FakeFileAssetService:
         self.get_calls: list[dict[str, Any]] = []
         self.read_calls: list[dict[str, Any]] = []
 
-    async def list_assets(self, **kwargs):
+    async def list_assets(
+        self,
+        *,
+        owner_id,
+        kind,
+        status,
+        skip,
+        limit,
+        metadata_scope,
+    ):
+        kwargs = {
+            "owner_id": owner_id,
+            "kind": kind,
+            "status": status,
+            "skip": skip,
+            "limit": limit,
+            "metadata_scope": metadata_scope,
+        }
         self.list_calls.append(kwargs)
         items = [
             asset
             for asset in self.assets.values()
-            if asset.kind == kwargs.get("kind") and asset.status == kwargs.get("status")
+            if asset.kind == kind
+            and asset.status == status
+            and _matches_metadata_scope(asset.metadata, metadata_scope)
         ]
         return items, len(items)
 
-    async def get_asset(self, asset_id: int, *, metadata_scope=None):
+    async def get_asset(self, asset_id: int, *, metadata_scope):
         self.get_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
-        return self.assets[asset_id]
+        asset = self.assets.get(asset_id)
+        if asset is None or not _matches_metadata_scope(asset.metadata, metadata_scope):
+            raise FileAssetNotFoundException(asset_id)
+        return asset
 
-    async def read_asset_bytes(self, asset_id: int, *, metadata_scope=None, max_bytes=8192):
+    async def read_asset_bytes(self, asset_id: int, *, metadata_scope, max_bytes=8192):
         self.read_calls.append(
             {
                 "asset_id": asset_id,
@@ -80,6 +104,40 @@ class _FakeFileAssetService:
             }
         )
         return self.content_by_id[asset_id]
+
+
+def _matches_metadata_scope(
+    metadata: dict[str, Any] | None,
+    scope: OwnedMetadataScope,
+) -> bool:
+    metadata = metadata or {}
+    auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), dict) else {}
+    owner_user_id = (
+        auth_scope.get("userId")
+        or auth_scope.get("user_id")
+        or metadata.get("ownerUserId")
+        or metadata.get("owner_user_id")
+        or metadata.get("createdByUserId")
+        or metadata.get("created_by_user_id")
+    )
+    owner_team_id = (
+        auth_scope.get("teamId")
+        or auth_scope.get("team_id")
+        or metadata.get("teamId")
+        or metadata.get("team_id")
+        or metadata.get("ownerTeamId")
+        or metadata.get("owner_team_id")
+    )
+    owner_user_id = str(owner_user_id).strip() if owner_user_id else ""
+    owner_team_id = str(owner_team_id).strip() if owner_team_id else ""
+
+    if owner_user_id and owner_user_id == scope.user_id:
+        return True
+    if scope.team_id and owner_team_id == scope.team_id:
+        return bool(scope.include_team_scope or not owner_user_id)
+    if not owner_user_id and not owner_team_id:
+        return scope.allow_unscoped
+    return False
 
 
 def _client(fake_service: _FakeFileAssetService) -> TestClient:
@@ -153,6 +211,61 @@ def test_training_material_tool_consumer_leader_uses_team_scope() -> None:
     assert scope.team_id == "team-revenue"
     assert scope.include_team_scope is True
     assert scope.allow_unscoped is False
+
+
+def test_training_material_tool_consumer_list_filters_materials_outside_scope() -> None:
+    fake = _FakeFileAssetService(
+        assets=[
+            _material_asset(1),
+            _material_asset(
+                2,
+                metadata={
+                    "title": "Other team material",
+                    "summary": "Must be filtered before response.",
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            ),
+        ]
+    )
+    client = _client(fake)
+
+    response = client.get(
+        "/api/v1/training-studio/tool-consumers/training-materials",
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 1
+    assert [item["id"] for item in data["items"]] == [1]
+    assert "Other team material" not in response.text
+
+
+def test_training_material_tool_consumer_get_rejects_material_outside_scope() -> None:
+    fake = _FakeFileAssetService(
+        assets=[
+            _material_asset(
+                3,
+                metadata={
+                    "title": "Outside material",
+                    "summary": "Must not be returned.",
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            )
+        ]
+    )
+    client = _client(fake)
+
+    response = client.get(
+        "/api/v1/training-studio/tool-consumers/training-materials/3",
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Training material not found"
+    assert fake.read_calls == []
 
 
 def test_training_material_tool_consumer_lists_opt_in_content_excerpt() -> None:
