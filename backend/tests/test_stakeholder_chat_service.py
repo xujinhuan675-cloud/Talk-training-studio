@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from application.ports.llm import LLMChunk, LLMMessage, LLMResponse
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    unrestricted_stakeholder_room_scope,
+)
 from domain.stakeholder.persona_entity import (
     DecisionPattern,
     ExpressionStyle,
@@ -125,7 +129,11 @@ async def _create_room(sf, name="Test", persona_ids=None):
 
 async def _send_and_reply(svc, room_id, content):
     """Helper: send message then generate replies (simulates BackgroundTasks)."""
-    msg, room = await svc.send_message(room_id, content)
+    msg, room = await svc.send_message(
+        room_id,
+        content,
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
     await svc.generate_replies(room_id, room)
     return msg
 
@@ -147,7 +155,11 @@ async def test_send_message_saves_user_msg(session_factory):
         persona_loader=FakePersonaLoader(),
         llm=FakeLLM(),
     )
-    result, _ = await svc.send_message(room_id, "Hello")
+    result, _ = await svc.send_message(
+        room_id,
+        "Hello",
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
     assert result.sender_type == "user"
     assert result.content == "Hello"
 
@@ -271,7 +283,41 @@ async def test_send_message_room_not_found(session_factory):
         llm=FakeLLM(),
     )
     with pytest.raises(BusinessException):
-        await svc.send_message(99999, "Hello")
+        await svc.send_message(
+            99999,
+            "Hello",
+            access_scope=unrestricted_stakeholder_room_scope(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_message_scoped_miss_does_not_write(session_factory):
+    from application.services.stakeholder.stakeholder_chat_service import (
+        StakeholderChatService,
+    )
+    from domain.common.exceptions import BusinessException
+
+    room_id = await _create_room(session_factory)
+    svc = StakeholderChatService(
+        uow_factory=_uow_factory(session_factory),
+        persona_loader=FakePersonaLoader(),
+        llm=FakeLLM(),
+    )
+
+    with pytest.raises(BusinessException):
+        await svc.send_message(
+            room_id,
+            "Hello",
+            access_scope=StakeholderRoomAccessScope(
+                user_id="user-sales-001",
+                allowed_team_ids=frozenset(["foreign-team"]),
+            ),
+        )
+
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        messages = await uow.stakeholder_message_repository.list_by_room_id(room_id)
+
+    assert messages == []
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +361,7 @@ async def test_selected_llm_model_metadata_is_passed_to_stream(session_factory):
     _, room = await svc.send_message(
         room_id,
         "Use the selected training model.",
+        access_scope=unrestricted_stakeholder_room_scope(),
         metadata={
             "source": "training_room_selector",
             "llm": {

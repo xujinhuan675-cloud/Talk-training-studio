@@ -11,6 +11,9 @@ import json
 
 import pytest
 
+from application.services.stakeholder.room_access_policy import (
+    unrestricted_stakeholder_room_scope,
+)
 from application.services.stakeholder.sse import RoomEventBus, format_sse
 
 
@@ -202,7 +205,11 @@ async def test_sse_events_on_send(session_factory):
         persona_loader=FakePersonaLoader(),
         llm=FakeLLM(),
     )
-    msg, room = await svc.send_message(room_id, "Hello")
+    msg, room = await svc.send_message(
+        room_id,
+        "Hello",
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
     await svc.generate_replies(room_id, room)
 
     # Collect all events
@@ -252,7 +259,11 @@ async def test_sse_round_end_for_group(session_factory):
         llm=FakeLLM(),
         dispatcher=FakeDispatcher(),
     )
-    msg, room = await svc.send_message(room_id, "Team discussion")
+    msg, room = await svc.send_message(
+        room_id,
+        "Team discussion",
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
     await svc.generate_replies(room_id, room)
 
     events = []

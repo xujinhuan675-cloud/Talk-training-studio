@@ -15,6 +15,9 @@ from application.ports.llm import LLMMessage, LLMPort
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.dto import CreateChatRoomDTO
 from application.services.stakeholder.persona_loader import PersonaLoader
+from application.services.stakeholder.room_access_policy import (
+    unrestricted_stakeholder_room_scope,
+)
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.defense_prep.entity import DefenseSession
 from domain.defense_prep.scenario import ScenarioType, SCENARIO_CONFIGS
@@ -325,7 +328,7 @@ class DefensePrepService:
         detail = await self._chatroom_service.get_room_detail(
             session.room_id,
             message_limit=200,
-            access_scope=None,
+            access_scope=unrestricted_stakeholder_room_scope(),
         )
         messages = detail.messages
         if not messages:

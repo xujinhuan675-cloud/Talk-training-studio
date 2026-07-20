@@ -25,6 +25,7 @@ from application.services.stakeholder.dto import (
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.persona_editor_service import PersonaEditorService
 from application.services.stakeholder.persona_loader import PersonaLoader
+from application.services.stakeholder.room_access_policy import StakeholderRoomAccessScope
 from domain.common.unit_of_work import AbstractUnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -289,12 +290,17 @@ class BattlePrepService:
             )
         )
 
-    async def generate_cheat_sheet(self, room_id: int) -> CheatSheetDTO:
+    async def generate_cheat_sheet(
+        self,
+        room_id: int,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> CheatSheetDTO:
         """Post-conversation: generate cheat sheet from conversation history."""
         detail = await self._chatroom_service.get_room_detail(
             room_id,
             message_limit=200,
-            access_scope=None,
+            access_scope=access_scope,
         )
         room = detail.room
         messages = detail.messages

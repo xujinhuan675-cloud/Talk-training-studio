@@ -39,7 +39,13 @@ class _FakeStakeholderChatService:
         self.reply_jobs: list[tuple[int, ChatRoom]] = []
         self.reply_started = Event()
 
-    async def send_message(self, room_id: int, content: str) -> tuple[MessageDTO, ChatRoom]:
+    async def send_message(
+        self,
+        room_id: int,
+        content: str,
+        *,
+        access_scope,
+    ) -> tuple[MessageDTO, ChatRoom]:
         self.sent_messages.append((room_id, content))
         room = ChatRoom(
             id=room_id,

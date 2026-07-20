@@ -120,38 +120,38 @@ async def client(session_factory):
     svc = ChatRoomApplicationService(uow_factory=_uow_factory, persona_loader=stub_loader)
 
     class _FakeStakeholderChatService:
-        async def send_message(self, room_id, content, metadata=None):
+        async def send_message(self, room_id, content, *, metadata=None, access_scope):
             raise AssertionError("send_message should not run for inaccessible rooms")
 
         async def generate_replies(self, room_id, room) -> None:
             raise AssertionError("generate_replies should not run for inaccessible rooms")
 
     class _FakeRoomScopedDownstreamService:
-        async def generate_report(self, room_id):
+        async def generate_report(self, room_id, *, access_scope):
             raise AssertionError("generate_report should not run for inaccessible rooms")
 
-        async def list_reports(self, room_id, *, skip=0, limit=50):
+        async def list_reports(self, room_id, *, skip=0, limit=50, access_scope):
             raise AssertionError("list_reports should not run for inaccessible rooms")
 
-        async def get_report(self, report_id):
+        async def get_report(self, report_id, *, room_id, access_scope):
             raise AssertionError("get_report should not run for inaccessible rooms")
 
-        async def prepare_start_session(self, room_id, report_id):
+        async def prepare_start_session(self, room_id, report_id, *, access_scope):
             raise AssertionError("prepare_start_session should not run for inaccessible rooms")
 
-        async def prepare_live_advice(self, room_id):
+        async def prepare_live_advice(self, room_id, *, access_scope):
             raise AssertionError("prepare_live_advice should not run for inaccessible rooms")
 
-        async def prepare_send_message(self, room_id, session_id, content):
+        async def prepare_send_message(self, room_id, session_id, content, *, access_scope):
             raise AssertionError("prepare_send_message should not run for inaccessible rooms")
 
-        async def get_session(self, session_id):
+        async def get_session(self, session_id, *, room_id, access_scope):
             raise AssertionError("get_session should not run for inaccessible rooms")
 
-        async def list_sessions(self, room_id, *, skip=0, limit=50):
+        async def list_sessions(self, room_id, *, skip=0, limit=50, access_scope):
             raise AssertionError("list_sessions should not run for inaccessible rooms")
 
-        async def generate_cheat_sheet(self, room_id):
+        async def generate_cheat_sheet(self, room_id, *, access_scope):
             raise AssertionError("generate_cheat_sheet should not run for inaccessible rooms")
 
         async def evaluate_competency(self, report_id):

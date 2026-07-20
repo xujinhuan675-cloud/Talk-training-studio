@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Callable
 
 from application.services.stakeholder.dto import (
@@ -15,40 +14,18 @@ from application.services.stakeholder.dto import (
     CreateChatRoomDTO,
     MessageDTO,
 )
-from domain.common.exceptions import BusinessException, DomainValidationException
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    StakeholderRoomAction,
+    raise_stakeholder_room_not_found,
+    require_stakeholder_room_access,
+    require_stakeholder_room_access_scope,
+    stakeholder_room_matches_access_scope,
+)
+from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import ChatRoom
-from domain.stakeholder.persona_entity import Persona
 from domain.stakeholder.service import ChatRoomDomainService
-from shared.codes import BusinessCode
-
-
-@dataclass(frozen=True)
-class StakeholderRoomAccessScope:
-    """Caller visibility boundary for stakeholder rooms.
-
-    Rooms do not yet persist owner/team metadata, so scoped access is derived
-    from every persona currently attached to the room.
-    """
-
-    user_id: str | None = None
-    team_id: str | None = None
-    include_team_scope: bool = False
-    allowed_persona_ids: frozenset[str] = field(default_factory=frozenset)
-    allowed_team_ids: frozenset[str] = field(default_factory=frozenset)
-    allowed_organization_ids: frozenset[str] = field(default_factory=frozenset)
-    unrestricted: bool = False
-
-
-def _normalized_scope_value(value: object | None) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _normalized_scope_values(values: list[object | None]) -> frozenset[str]:
-    return frozenset(text for value in values if (text := _normalized_scope_value(value)))
 
 
 class ChatRoomApplicationService:
@@ -93,33 +70,11 @@ class ChatRoomApplicationService:
         room: ChatRoom,
         access_scope: StakeholderRoomAccessScope | None,
     ) -> bool:
-        if access_scope is None or access_scope.unrestricted:
-            return True
-        if not room.persona_ids:
-            return False
-        return all(
-            self._persona_id_matches_access_scope(persona_id, access_scope)
-            for persona_id in room.persona_ids
+        return stakeholder_room_matches_access_scope(
+            room,
+            access_scope,
+            self._persona_loader,
         )
-
-    def _persona_id_matches_access_scope(
-        self,
-        persona_id: str,
-        access_scope: StakeholderRoomAccessScope,
-    ) -> bool:
-        if persona_id in access_scope.allowed_persona_ids:
-            return True
-
-        persona = self._persona_loader.get_persona(persona_id)
-        if persona is None:
-            return False
-
-        persona_scope = _persona_scope_values(persona)
-        if persona_scope["team_ids"] & access_scope.allowed_team_ids:
-            return True
-        if persona_scope["organization_ids"] & access_scope.allowed_organization_ids:
-            return True
-        return False
 
     async def list_rooms(
         self,
@@ -128,13 +83,17 @@ class ChatRoomApplicationService:
         limit: int = 50,
         access_scope: StakeholderRoomAccessScope | None,
     ) -> list[ChatRoomDTO]:
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="list_stakeholder_rooms",
+        )
         async with self._uow_factory(readonly=True) as uow:
-            if access_scope is not None and not access_scope.unrestricted:
+            if not scope.unrestricted:
                 rooms = await self._list_scoped_rooms(
                     uow,
                     skip=skip,
                     limit=limit,
-                    access_scope=access_scope,
+                    access_scope=scope,
                 )
                 return [ChatRoomDTO.model_validate(r) for r in rooms]
             rooms = await uow.chat_room_repository.list_rooms(skip=skip, limit=limit)
@@ -172,10 +131,14 @@ class ChatRoomApplicationService:
         *,
         access_scope: StakeholderRoomAccessScope | None,
     ) -> bool:
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="delete_stakeholder_room",
+        )
         async with self._uow_factory() as uow:
-            if access_scope is not None and not access_scope.unrestricted:
+            if not scope.unrestricted:
                 room = await uow.chat_room_repository.get_by_id(room_id)
-                if room is None or not self._room_matches_access_scope(room, access_scope):
+                if room is None or not self._room_matches_access_scope(room, scope):
                     return False
             deleted = await uow.chat_room_repository.delete(room_id)
             return deleted
@@ -187,10 +150,19 @@ class ChatRoomApplicationService:
         message_limit: int = 50,
         access_scope: StakeholderRoomAccessScope | None,
     ) -> ChatRoomDetailDTO:
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="read_stakeholder_room",
+        )
         async with self._uow_factory(readonly=True) as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
-            if room is None or not self._room_matches_access_scope(room, access_scope):
-                _raise_room_not_found(room_id)
+            room = require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            ).room
             messages = await uow.stakeholder_message_repository.list_by_room_id(
                 room_id, limit=message_limit
             )
@@ -199,20 +171,4 @@ class ChatRoomApplicationService:
                 messages=[MessageDTO.model_validate(m) for m in messages],
             )
 
-
-def _persona_scope_values(persona: Persona) -> dict[str, frozenset[str]]:
-    return {
-        "team_ids": _normalized_scope_values([getattr(persona, "team_id", None)]),
-        "organization_ids": _normalized_scope_values(
-            [getattr(persona, "organization_id", None)]
-        ),
-    }
-
-
-def _raise_room_not_found(room_id: int) -> None:
-    raise BusinessException(
-        code=BusinessCode.CHATROOM_NOT_FOUND,
-        message=f"Chat room {room_id} not found",
-        error_type="ChatRoomNotFound",
-        details={"room_id": room_id},
-    )
+_raise_room_not_found = raise_stakeholder_room_not_found

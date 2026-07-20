@@ -25,6 +25,12 @@ from application.services.stakeholder.dto import (
     AnalysisReportDTO,
     AnalysisReportSummaryDTO,
 )
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    StakeholderRoomAction,
+    require_stakeholder_room_access,
+    require_stakeholder_room_access_scope,
+)
 from domain.common.exceptions import BusinessException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import AnalysisReport
@@ -488,19 +494,28 @@ class AnalysisService:
         self._llm = llm
         self._persona_loader = persona_loader
 
-    async def generate_report(self, room_id: int) -> AnalysisReportDTO:
+    async def generate_report(
+        self,
+        room_id: int,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> AnalysisReportDTO:
         """Generate a new analysis report for the given room."""
 
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="generate_analysis_report",
+        )
         # 1. Load room and messages
         async with self._uow_factory(readonly=True) as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
-            if room is None:
-                raise BusinessException(
-                    code=BusinessCode.CHATROOM_NOT_FOUND,
-                    message=f"Chat room {room_id} not found",
-                    error_type="ChatRoomNotFound",
-                    details={"room_id": room_id},
-                )
+            room = require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            ).room
 
             messages = await uow.stakeholder_message_repository.list_by_room_id(room_id, limit=200)
 
@@ -637,12 +652,32 @@ class AnalysisService:
             created_at=saved.created_at,
         )
 
-    async def get_report(self, report_id: int) -> Optional[AnalysisReportDTO]:
+    async def get_report(
+        self,
+        report_id: int,
+        *,
+        room_id: int,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> Optional[AnalysisReportDTO]:
         """Get a single analysis report by ID."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="read_analysis_report",
+        )
         async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
             report = await uow.analysis_report_repository.get_by_id(report_id)
 
         if report is None:
+            return None
+        if report.room_id != room_id:
             return None
 
         content_dto = AnalysisContentDTO.model_validate(report.content)
@@ -655,10 +690,27 @@ class AnalysisService:
         )
 
     async def list_reports(
-        self, room_id: int, *, skip: int = 0, limit: int = 50
+        self,
+        room_id: int,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+        access_scope: StakeholderRoomAccessScope | None,
     ) -> list[AnalysisReportSummaryDTO]:
         """List analysis reports for a room (summary only)."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="list_analysis_reports",
+        )
         async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
             reports = await uow.analysis_report_repository.list_by_room_id(
                 room_id, skip=skip, limit=limit
             )
@@ -677,19 +729,44 @@ class AnalysisService:
 class AnalysisReaderService:
     """Read-only service for querying existing analysis reports.
 
-    Unlike AnalysisService, this does NOT require LLM or PersonaLoader
-    dependencies — it only reads persisted reports from the database.
+    Unlike AnalysisService, this does NOT require LLM. It still needs the
+    PersonaLoader because report reads are room-scoped.
     """
 
-    def __init__(self, uow_factory: Callable[..., AbstractUnitOfWork]) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[..., AbstractUnitOfWork],
+        persona_loader,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._persona_loader = persona_loader
 
-    async def get_report(self, report_id: int) -> Optional[AnalysisReportDTO]:
+    async def get_report(
+        self,
+        report_id: int,
+        *,
+        room_id: int,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> Optional[AnalysisReportDTO]:
         """Get a single analysis report by ID."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="read_analysis_report",
+        )
         async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
             report = await uow.analysis_report_repository.get_by_id(report_id)
 
         if report is None:
+            return None
+        if report.room_id != room_id:
             return None
 
         content_dto = AnalysisContentDTO.model_validate(report.content)
@@ -702,10 +779,27 @@ class AnalysisReaderService:
         )
 
     async def list_reports(
-        self, room_id: int, *, skip: int = 0, limit: int = 50
+        self,
+        room_id: int,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+        access_scope: StakeholderRoomAccessScope | None,
     ) -> list[AnalysisReportSummaryDTO]:
         """List analysis reports for a room (summary only)."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="list_analysis_reports",
+        )
         async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
             reports = await uow.analysis_report_repository.list_by_room_id(
                 room_id, skip=skip, limit=limit
             )

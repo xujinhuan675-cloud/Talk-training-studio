@@ -29,12 +29,16 @@ from application.services.stakeholder.prompt_builder import (
     build_compressed_llm_messages,
     build_org_context,
 )
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    StakeholderRoomAction,
+    require_stakeholder_room_access,
+    require_stakeholder_room_access_scope,
+)
 from core.config import settings
 from application.services.stakeholder.sse import room_event_bus
-from domain.common.exceptions import BusinessException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import ChatRoom, Message
-from shared.codes import BusinessCode
 
 logger = logging.getLogger(__name__)
 
@@ -133,19 +137,25 @@ class StakeholderChatService:
         self,
         room_id: int,
         content: str,
+        *,
         metadata: dict[str, object] | None = None,
+        access_scope: StakeholderRoomAccessScope | None,
     ) -> tuple[MessageDTO, ChatRoom]:
         """Save user message (committed immediately). Returns (dto, room) for background reply generation."""
 
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="write_stakeholder_message",
+        )
         async with self._uow_factory() as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
-            if room is None:
-                raise BusinessException(
-                    code=BusinessCode.CHATROOM_NOT_FOUND,
-                    message=f"Chat room {room_id} not found",
-                    error_type="ChatRoomNotFound",
-                    details={"room_id": room_id},
-                )
+            room = require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.WRITE,
+            ).room
 
             user_msg = Message(
                 id=None,

@@ -374,9 +374,11 @@ async def get_analysis_service(
     return AnalysisService(uow_factory=SQLAlchemyUnitOfWork, llm=llm, persona_loader=loader)
 
 
-def get_analysis_reader_service() -> AnalysisReaderService:
-    """Read-only analysis service for list/get (no LLM or PersonaLoader needed)."""
-    return AnalysisReaderService(uow_factory=SQLAlchemyUnitOfWork)
+async def get_analysis_reader_service(
+    loader: PersonaLoader = Depends(get_persona_loader_with_v2),
+) -> AnalysisReaderService:
+    """Read-only analysis service for list/get."""
+    return AnalysisReaderService(uow_factory=SQLAlchemyUnitOfWork, persona_loader=loader)
 
 
 async def get_coaching_service(

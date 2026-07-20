@@ -73,6 +73,9 @@ from application.ports.realtime import (
 from application.services.stakeholder.analysis_service import AnalysisReaderService, AnalysisService
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.dto import CreateChatRoomDTO, MessageDTO
+from application.services.stakeholder.room_access_policy import (
+    unrestricted_stakeholder_room_scope,
+)
 from application.services.stakeholder.sse import room_event_bus
 from application.services.conversation_service import ConversationApplicationService
 from application.services.training_studio.catalog_service import (
@@ -758,10 +761,25 @@ async def _require_report_id_for_training_session(
         report_lookup_id = int(report_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Training session report not found") from exc
-    report = await reader_svc.get_report(report_lookup_id)
-    if report is None or str(report.room_id) != str(session.room_id):
+    try:
+        room_lookup_id = _stakeholder_room_id_for_training_session(session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Training session report not found") from exc
+    report = await reader_svc.get_report(
+        report_lookup_id,
+        room_id=room_lookup_id,
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
+    if report is None or str(report.room_id) != str(room_lookup_id):
         raise HTTPException(status_code=404, detail="Training session report not found")
     return str(report_lookup_id)
+
+
+def _stakeholder_room_id_for_training_session(session) -> int:
+    room_id = getattr(session, "room_id", None)
+    if room_id is None:
+        raise ValueError("Training session room_id is missing")
+    return int(room_id)
 
 
 def _event_to_wire(event: RealtimeEvent) -> dict:
@@ -1086,7 +1104,7 @@ async def _generate_training_guidance(
         detail = await chatroom_svc.get_room_detail(
             room_id,
             message_limit=body.message_limit,
-            access_scope=None,
+            access_scope=unrestricted_stakeholder_room_scope(),
         )
         recent_turns = [
             _message_to_guidance_turn(message)
@@ -1810,9 +1828,17 @@ async def _material_review_report_context(
         report_lookup_id = int(session.report_id)
     except (TypeError, ValueError):
         return MaterialReviewReportContext()
+    try:
+        room_lookup_id = _stakeholder_room_id_for_training_session(session)
+    except (TypeError, ValueError):
+        return MaterialReviewReportContext()
     with suppress(Exception):
-        report = await reader_svc.get_report(report_lookup_id)
-        if report is None or str(report.room_id) != str(session.room_id):
+        report = await reader_svc.get_report(
+            report_lookup_id,
+            room_id=room_lookup_id,
+            access_scope=unrestricted_stakeholder_room_scope(),
+        )
+        if report is None or str(report.room_id) != str(room_lookup_id):
             return MaterialReviewReportContext()
         return MaterialReviewReportContext(
             summary=report.summary or "",
@@ -1845,7 +1871,7 @@ async def _material_review_replay_context(
         detail = await chatroom_svc.get_room_detail(
             room_id,
             message_limit=replay_limit,
-            access_scope=None,
+            access_scope=unrestricted_stakeholder_room_scope(),
         )
         if not _material_review_room_matches_session(detail, session):
             return MaterialReviewReplayContext(turns=[])
@@ -2093,7 +2119,10 @@ async def complete_training_session(
                 status_code=400, detail="Session room_id must be numeric to generate a report"
             ) from exc
         try:
-            report = await analysis_svc.generate_report(room_id)
+            report = await analysis_svc.generate_report(
+                room_id,
+                access_scope=unrestricted_stakeholder_room_scope(),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         report_id = str(report.id)
@@ -2166,8 +2195,16 @@ async def get_training_session_report(
         report_lookup_id = int(session.report_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Training session report not found") from exc
-    report = await reader_svc.get_report(report_lookup_id)
-    if report is None or str(report.room_id) != str(session.room_id):
+    try:
+        room_lookup_id = _stakeholder_room_id_for_training_session(session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Training session report not found") from exc
+    report = await reader_svc.get_report(
+        report_lookup_id,
+        room_id=room_lookup_id,
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
+    if report is None or str(report.room_id) != str(room_lookup_id):
         raise HTTPException(status_code=404, detail="Training session report not found")
     return success_response(data=report.model_dump(mode="json"))
 

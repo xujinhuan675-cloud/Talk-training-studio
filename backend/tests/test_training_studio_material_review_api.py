@@ -153,7 +153,7 @@ class _FakeAnalysisReader:
     def __init__(self) -> None:
         self.get_calls: list[int] = []
 
-    async def get_report(self, report_id: int):
+    async def get_report(self, report_id: int, *, room_id: int, access_scope):
         self.get_calls.append(report_id)
         return SimpleNamespace(
             id=report_id,
@@ -364,7 +364,9 @@ def test_material_review_drops_replay_from_room_bound_to_another_session_user() 
     )
 
     assert response.status_code == 200
-    assert chatroom.get_calls == [{"room_id": 42, "message_limit": 40, "access_scope": None}]
+    assert chatroom.get_calls[0]["room_id"] == 42
+    assert chatroom.get_calls[0]["message_limit"] == 40
+    assert chatroom.get_calls[0]["access_scope"].unrestricted is True
     assert response.json()["data"]["source_state"]["replay_used"] is False
 
 

@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from application.services.stakeholder.chatroom_service import StakeholderRoomAccessScope
+from application.services.stakeholder.room_access_policy import (
+    unrestricted_stakeholder_room_scope,
+)
 from infrastructure.models.base import Base
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
@@ -86,6 +89,28 @@ def test_room_read_delete_methods_require_explicit_access_scope():
     for method_name in ("list_rooms", "get_room_detail", "delete_room"):
         signature = inspect.signature(getattr(ChatRoomApplicationService, method_name))
         assert signature.parameters["access_scope"].default is inspect.Parameter.empty
+
+
+@pytest.mark.asyncio
+async def test_room_read_delete_methods_reject_none_access_scope(session_factory):
+    from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
+    from application.services.stakeholder.dto import CreateChatRoomDTO
+    from domain.common.exceptions import DomainValidationException
+
+    loader = FakePersonaLoader({"jianfeng"})
+    svc = ChatRoomApplicationService(
+        uow_factory=_uow_factory(session_factory), persona_loader=loader
+    )
+    room = await svc.create_room(
+        CreateChatRoomDTO(name="Scoped Room", type="private", persona_ids=["jianfeng"])
+    )
+
+    with pytest.raises(DomainValidationException):
+        await svc.list_rooms(access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await svc.get_room_detail(room.id, access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await svc.delete_room(room.id, access_scope=None)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +232,7 @@ async def test_list_rooms_ordered(session_factory):
     await svc.create_room(CreateChatRoomDTO(name="Room1", type="private", persona_ids=["a"]))
     await svc.create_room(CreateChatRoomDTO(name="Room2", type="group", persona_ids=["b", "c"]))
 
-    rooms = await svc.list_rooms(access_scope=None)
+    rooms = await svc.list_rooms(access_scope=unrestricted_stakeholder_room_scope())
     assert len(rooms) == 2
     # Both have no messages yet so last_message_at is None, ordered by id desc
     assert rooms[0].name == "Room2"
@@ -251,7 +276,7 @@ async def test_get_room_detail(session_factory):
     room = await svc.create_room(
         CreateChatRoomDTO(name="Detail Test", type="private", persona_ids=["jianfeng"])
     )
-    detail = await svc.get_room_detail(room.id, access_scope=None)
+    detail = await svc.get_room_detail(room.id, access_scope=unrestricted_stakeholder_room_scope())
     assert detail.room.id == room.id
     assert isinstance(detail.messages, list)
 
@@ -274,7 +299,10 @@ async def test_get_and_delete_room_with_access_scope_hide_foreign_room(session_f
         await svc.get_room_detail(foreign_room.id, access_scope=_team_scope("team-revenue"))
 
     deleted = await svc.delete_room(foreign_room.id, access_scope=_team_scope("team-revenue"))
-    admin_detail = await svc.get_room_detail(foreign_room.id, access_scope=None)
+    admin_detail = await svc.get_room_detail(
+        foreign_room.id,
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
 
     assert deleted is False
     assert admin_detail.room.id == foreign_room.id
@@ -295,4 +323,4 @@ async def test_get_nonexistent_room(session_factory):
         uow_factory=_uow_factory(session_factory), persona_loader=loader
     )
     with pytest.raises(BusinessException):
-        await svc.get_room_detail(99999, access_scope=None)
+        await svc.get_room_detail(99999, access_scope=unrestricted_stakeholder_room_scope())

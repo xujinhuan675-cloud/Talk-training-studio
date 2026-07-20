@@ -28,6 +28,12 @@ from application.services.stakeholder.dto import (
     CoachingSessionDTO,
     CoachingSessionSummaryDTO,
 )
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    StakeholderRoomAction,
+    require_stakeholder_room_access,
+    require_stakeholder_room_access_scope,
+)
 from domain.common.exceptions import BusinessException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import CoachingMessage, CoachingSession
@@ -135,12 +141,26 @@ class CoachingService:
         self._llm = llm
         self._persona_loader = persona_loader
 
-    async def _build_room_org_context(self, room_id: int) -> str:
+    async def _build_room_org_context(
+        self,
+        room_id: int,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> str:
         """Build combined org context for all personas in a room."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="build_coaching_room_context",
+        )
         async with self._uow_factory(readonly=True) as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
-            if not room:
-                return ""
+            room = require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            ).room
 
             # Find first persona with an org_id
             org_id = None
@@ -179,14 +199,71 @@ class CoachingService:
             relationships=rel_dicts if rel_dicts else None,
         )
 
-    async def prepare_start_session(self, room_id: int, report_id: int) -> dict:
+    async def _require_coaching_session_access(
+        self,
+        room_id: int,
+        session_id: int,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+        require_active: bool = False,
+    ) -> CoachingSession:
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="read_coaching_session",
+        )
+        async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
+            session = await uow.coaching_session_repository.get_by_id(session_id)
+
+        if session is None or session.room_id != room_id:
+            raise BusinessException(
+                code=BusinessCode.COACHING_SESSION_NOT_FOUND,
+                message=f"Coaching session {session_id} not found",
+                error_type="CoachingSessionNotFound",
+                details={"session_id": session_id},
+            )
+        if require_active and session.status != "active":
+            raise BusinessException(
+                code=BusinessCode.COACHING_SESSION_NOT_FOUND,
+                message="Coaching session is no longer active",
+                error_type="CoachingSessionCompleted",
+                details={"session_id": session_id, "status": session.status},
+            )
+        return session
+
+    async def prepare_start_session(
+        self,
+        room_id: int,
+        report_id: int,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> dict:
         """Validate inputs and prepare context for streaming.
 
         Must be awaited BEFORE creating StreamingResponse so that
         BusinessException is raised while the HTTP response hasn't started yet.
         """
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="start_coaching_session",
+        )
         # 1. Load report and validate
         async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.WRITE,
+            )
             report = await uow.analysis_report_repository.get_by_id(report_id)
             if report is None or report.room_id != room_id:
                 raise BusinessException(
@@ -215,7 +292,7 @@ class CoachingService:
         conversation_text = _build_conversation_text(non_system[-30:], self._persona_loader)
 
         # 3. Build org context + coaching system prompt
-        org_ctx = await self._build_room_org_context(room_id)
+        org_ctx = await self._build_room_org_context(room_id, access_scope=scope)
         system_prompt = _build_coaching_system_prompt(
             report_summary=report.summary,
             report_content=report.content,
@@ -234,16 +311,35 @@ class CoachingService:
 
         return {
             "session_id": session.id,
+            "room_id": room_id,
             "report_id": report_id,
             "system_prompt": system_prompt,
         }
 
-    async def stream_opening(self, ctx: dict) -> AsyncIterator[str]:
+    async def stream_opening(
+        self,
+        ctx: dict,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> AsyncIterator[str]:
         """Stream the Coach's opening message (call after prepare_start_session).
 
         Yields SSE events: session_created → message_delta* → message_complete → done.
         """
         session_id = ctx["session_id"]
+        room_id = ctx["room_id"]
+        try:
+            await self._require_coaching_session_access(
+                room_id,
+                session_id,
+                access_scope=access_scope,
+                require_active=True,
+            )
+        except BusinessException as exc:
+            yield _sse_event("error", {"message": exc.message})
+            yield _sse_event("done", {})
+            return
+
         yield _sse_event(
             "session_created", {"session_id": session_id, "report_id": ctx["report_id"]}
         )
@@ -287,14 +383,33 @@ class CoachingService:
 
         yield _sse_event("done", {})
 
-    async def prepare_send_message(self, room_id: int, session_id: int, content: str) -> dict:
+    async def prepare_send_message(
+        self,
+        room_id: int,
+        session_id: int,
+        content: str,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> dict:
         """Validate session and save user message.
 
         Must be awaited BEFORE creating StreamingResponse so that
         BusinessException is raised while the HTTP response hasn't started yet.
         """
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="send_coaching_message",
+        )
         # 1. Validate session
         async with self._uow_factory() as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.WRITE,
+            )
             session = await uow.coaching_session_repository.get_by_id(session_id)
             if session is None or session.room_id != room_id:
                 raise BusinessException(
@@ -343,7 +458,7 @@ class CoachingService:
         conversation_text = _build_conversation_text(non_system[-30:], self._persona_loader)
 
         # 4. Build LLM messages
-        org_ctx = await self._build_room_org_context(session.room_id)
+        org_ctx = await self._build_room_org_context(session.room_id, access_scope=scope)
         system_prompt = _build_coaching_system_prompt(
             report_summary=report.summary if report else "",
             report_content=report.content if report else {},
@@ -356,14 +471,32 @@ class CoachingService:
             role = "assistant" if msg.role == "coach" else "user"
             llm_messages.append(LLMMessage(role=role, content=msg.content))
 
-        return {"session_id": session_id, "llm_messages": llm_messages}
+        return {"session_id": session_id, "room_id": room_id, "llm_messages": llm_messages}
 
-    async def stream_reply(self, ctx: dict) -> AsyncIterator[str]:
+    async def stream_reply(
+        self,
+        ctx: dict,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> AsyncIterator[str]:
         """Stream Coach reply (call after prepare_send_message).
 
         Yields SSE events: message_delta* → message_complete → done.
         """
         session_id = ctx["session_id"]
+        room_id = ctx["room_id"]
+        try:
+            await self._require_coaching_session_access(
+                room_id,
+                session_id,
+                access_scope=access_scope,
+                require_active=True,
+            )
+        except BusinessException as exc:
+            yield _sse_event("error", {"message": exc.message})
+            yield _sse_event("done", {})
+            return
+
         llm_messages = ctx["llm_messages"]
 
         full_content = ""
@@ -397,11 +530,29 @@ class CoachingService:
 
         yield _sse_event("done", {})
 
-    async def get_session(self, session_id: int) -> Optional[CoachingSessionDTO]:
+    async def get_session(
+        self,
+        session_id: int,
+        *,
+        room_id: int,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> Optional[CoachingSessionDTO]:
         """Get a coaching session with full message history."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="read_coaching_session",
+        )
         async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
             session = await uow.coaching_session_repository.get_by_id(session_id)
-            if session is None:
+            if session is None or session.room_id != room_id:
                 return None
             messages = await uow.coaching_message_repository.list_by_session_id(session_id)
 
@@ -425,10 +576,27 @@ class CoachingService:
         )
 
     async def list_sessions(
-        self, room_id: int, *, skip: int = 0, limit: int = 50
+        self,
+        room_id: int,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+        access_scope: StakeholderRoomAccessScope | None,
     ) -> list[CoachingSessionSummaryDTO]:
         """List coaching sessions for a room."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="list_coaching_sessions",
+        )
         async with self._uow_factory(readonly=True) as uow:
+            room = await uow.chat_room_repository.get_by_id(room_id)
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
             sessions = await uow.coaching_session_repository.list_by_room_id(
                 room_id, skip=skip, limit=limit
             )
@@ -448,17 +616,26 @@ class CoachingService:
     # Live coaching (stateless, no DB writes)
     # ------------------------------------------------------------------
 
-    async def prepare_live_advice(self, room_id: int) -> dict:
+    async def prepare_live_advice(
+        self,
+        room_id: int,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> dict:
         """Build context for a live coaching stream. No DB writes."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="prepare_live_coaching",
+        )
         async with self._uow_factory(readonly=True) as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
-            if room is None:
-                raise BusinessException(
-                    code=BusinessCode.CHATROOM_NOT_FOUND,
-                    message=f"Chat room {room_id} not found",
-                    error_type="ChatRoomNotFound",
-                    details={"room_id": room_id},
-                )
+            require_stakeholder_room_access(
+                room,
+                room_id=room_id,
+                access_scope=scope,
+                persona_loader=self._persona_loader,
+                action=StakeholderRoomAction.READ,
+            )
             history_entities = await uow.stakeholder_message_repository.list_by_room_id(
                 room_id, limit=200
             )
@@ -483,7 +660,7 @@ class CoachingService:
             )
 
         conversation_text, _ = _build_conversation_text(non_system[-30:], self._persona_loader)
-        org_ctx = await self._build_room_org_context(room_id)
+        org_ctx = await self._build_room_org_context(room_id, access_scope=scope)
         system_prompt = _build_live_coaching_system_prompt(conversation_text, org_ctx)
 
         return {"room_id": room_id, "system_prompt": system_prompt}

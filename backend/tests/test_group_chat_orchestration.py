@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from application.ports.llm import LLMMessage, LLMResponse
+from application.services.stakeholder.room_access_policy import (
+    unrestricted_stakeholder_room_scope,
+)
 from domain.stakeholder.persona_entity import (
     DecisionPattern,
     ExpressionStyle,
@@ -185,7 +188,11 @@ async def _create_group_room(sf, name="Group Room", persona_ids=None):
 
 async def _send_and_reply(svc, room_id, content):
     """Helper: send message then generate replies (simulates BackgroundTasks)."""
-    msg, room = await svc.send_message(room_id, content)
+    msg, room = await svc.send_message(
+        room_id,
+        content,
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
     await svc.generate_replies(room_id, room)
     return msg
 

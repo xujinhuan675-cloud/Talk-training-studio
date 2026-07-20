@@ -9,6 +9,11 @@ import pytest
 
 from application.ports.llm import LLMResponse
 from application.services.stakeholder.analysis_service import AnalysisService
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    unrestricted_stakeholder_room_scope,
+)
+from domain.common.exceptions import BusinessException
 from domain.stakeholder.entity import AnalysisReport, ChatRoom, Message
 
 
@@ -193,7 +198,7 @@ async def test_generate_report_adds_anchors_and_enhanced_sections():
     llm = _FakeLLM("preface\n```json\n" + json.dumps(payload) + "\n```\npostscript")
     service = AnalysisService(_uow_factory(state), llm=llm, persona_loader=_PersonaLoader())
 
-    report = await service.generate_report(1)
+    report = await service.generate_report(1, access_scope=unrestricted_stakeholder_room_scope())
 
     assert "evidence_reviews" in llm.messages[0].content
     assert report.content.resistance_ranking[0].message_ids == [102]
@@ -229,7 +234,7 @@ async def test_generate_report_keeps_legacy_fields_when_enhanced_fields_missing(
     )
     service = AnalysisService(_uow_factory(state), llm=llm, persona_loader=_PersonaLoader())
 
-    report = await service.generate_report(1)
+    report = await service.generate_report(1, access_scope=unrestricted_stakeholder_room_scope())
 
     assert report.summary == "Legacy report"
     assert report.content.evidence_reviews == []
@@ -288,7 +293,7 @@ async def test_generate_report_turns_video_answer_marker_into_report_placeholder
     )
     service = AnalysisService(_uow_factory(state), llm=llm, persona_loader=_PersonaLoader())
 
-    report = await service.generate_report(1)
+    report = await service.generate_report(1, access_scope=unrestricted_stakeholder_room_scope())
 
     prompt = llm.messages[0].content
     assert "[video-answer]" not in prompt
@@ -301,3 +306,31 @@ async def test_generate_report_turns_video_answer_marker_into_report_placeholder
     assert report.content.camera_presence.score is None
     assert report.content.camera_presence.status == "placeholder"
     assert report.content.message_anchors[0].quote.startswith("Here is my recorded answer.")
+
+
+@pytest.mark.asyncio
+async def test_generate_report_scoped_miss_does_not_call_llm_or_create_report():
+    state = _state()
+    llm = _FakeLLM(
+        json.dumps(
+            {
+                "summary": "Should not be used",
+                "resistance_ranking": [],
+                "effective_arguments": [],
+                "communication_suggestions": [],
+            }
+        )
+    )
+    service = AnalysisService(_uow_factory(state), llm=llm, persona_loader=_PersonaLoader())
+
+    with pytest.raises(BusinessException):
+        await service.generate_report(
+            1,
+            access_scope=StakeholderRoomAccessScope(
+                user_id="user-sales-001",
+                allowed_team_ids=frozenset(["foreign-team"]),
+            ),
+        )
+
+    assert llm.messages == []
+    assert state.report_repo.created is None

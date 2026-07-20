@@ -53,7 +53,7 @@ class FakeAnalysisService:
     def __init__(self) -> None:
         self.generated_for: list[int] = []
 
-    async def generate_report(self, room_id: int) -> FakeReport:
+    async def generate_report(self, room_id: int, *, access_scope) -> FakeReport:
         self.generated_for.append(room_id)
         return FakeReport(id=501, room_id=room_id)
 
@@ -63,7 +63,7 @@ class FakeAnalysisReaderService:
         self.reports: dict[int, FakeReport] = {}
         self.requested_ids: list[int] = []
 
-    async def get_report(self, report_id: int) -> FakeReport | None:
+    async def get_report(self, report_id: int, *, room_id: int, access_scope) -> FakeReport | None:
         self.requested_ids.append(report_id)
         return self.reports.get(report_id)
 

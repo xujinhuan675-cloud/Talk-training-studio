@@ -656,15 +656,25 @@ async def send_message(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     await _ensure_room_accepts_user_message(
         room_id,
         chatroom_svc,
-        _stakeholder_room_scope_for_current_user(current_user),
+        access_scope,
     )
     if body.metadata:
-        msg, room = await svc.send_message(room_id, body.content, metadata=body.metadata)
+        msg, room = await svc.send_message(
+            room_id,
+            body.content,
+            metadata=body.metadata,
+            access_scope=access_scope,
+        )
     else:
-        msg, room = await svc.send_message(room_id, body.content)
+        msg, room = await svc.send_message(
+            room_id,
+            body.content,
+            access_scope=access_scope,
+        )
     background_tasks.add_task(svc.generate_replies, room_id, room)
     return success_response(data=msg.model_dump())
 
@@ -784,6 +794,7 @@ async def voice_ws(
         return
 
     audio_buffer = bytearray()
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
 
     try:
         while True:
@@ -808,7 +819,7 @@ async def voice_ws(
                     await _ensure_room_accepts_user_message(
                         room_id,
                         chatroom_svc,
-                        _stakeholder_room_scope_for_current_user(current_user),
+                        access_scope,
                     )
                 except HTTPException as exc:
                     if not await send_voice_json({"type": "error", "message": str(exc.detail)}):
@@ -835,7 +846,11 @@ async def voice_ws(
                     # the frontend may close immediately after final transcription.
                     message_ack_sent = True
                     if text:
-                        msg, room = await svc.send_message(room_id, text)
+                        msg, room = await svc.send_message(
+                            room_id,
+                            text,
+                            access_scope=access_scope,
+                        )
                         # Generate replies in background (TTS audio will come via SSE)
                         asyncio.create_task(svc.generate_replies(room_id, room))
                         message_ack_sent = await send_voice_json(
@@ -949,12 +964,13 @@ async def generate_analysis(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    report = await svc.generate_report(room_id)
+    report = await svc.generate_report(room_id, access_scope=access_scope)
     # Auto-trigger competency evaluation in background
     background_tasks.add_task(growth_svc.evaluate_competency, report.id)
     return success_response(data=report.model_dump())
@@ -969,12 +985,13 @@ async def list_analysis_reports(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    reports = await svc.list_reports(room_id, skip=skip, limit=limit)
+    reports = await svc.list_reports(room_id, skip=skip, limit=limit, access_scope=access_scope)
     return success_response(data=[r.model_dump() for r in reports])
 
 
@@ -986,13 +1003,14 @@ async def get_analysis_report(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    report = await svc.get_report(report_id)
-    if report is None or report.room_id != room_id:
+    report = await svc.get_report(report_id, room_id=room_id, access_scope=access_scope)
+    if report is None:
         raise HTTPException(status_code=404, detail="Analysis report not found")
     return success_response(data=report.model_dump())
 
@@ -1015,15 +1033,16 @@ async def start_coaching(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Create a coaching session and stream the Coach's opening message (SSE)."""
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     # Validate & prepare before streaming so exceptions become normal HTTP errors
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    ctx = await svc.prepare_start_session(room_id, report_id)
+    ctx = await svc.prepare_start_session(room_id, report_id, access_scope=access_scope)
     return StreamingResponse(
-        svc.stream_opening(ctx),
+        svc.stream_opening(ctx, access_scope=access_scope),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -1045,12 +1064,13 @@ async def start_live_coaching(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Stream live coaching advice based on current conversation context (SSE)."""
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    ctx = await svc.prepare_live_advice(room_id)
+    ctx = await svc.prepare_live_advice(room_id, access_scope=access_scope)
     return StreamingResponse(
         svc.stream_live_advice(ctx),
         media_type="text/event-stream",
@@ -1070,6 +1090,7 @@ async def send_live_coaching_reply(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Follow-up question to live coach. Frontend sends full coaching history."""
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     content = body.get("content", "").strip()
     if not content:
         raise HTTPException(status_code=422, detail="Message content is required")
@@ -1081,7 +1102,7 @@ async def send_live_coaching_reply(
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    ctx = await svc.prepare_live_advice(room_id)
+    ctx = await svc.prepare_live_advice(room_id, access_scope=access_scope)
     return StreamingResponse(
         svc.stream_live_advice(ctx, coaching_history=coaching_history),
         media_type="text/event-stream",
@@ -1102,6 +1123,7 @@ async def send_coaching_message(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Send a user message and stream the Coach's reply (SSE)."""
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     content = body.get("content", "").strip()
     if not content:
         raise HTTPException(status_code=422, detail="Message content is required")
@@ -1111,9 +1133,14 @@ async def send_coaching_message(
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    ctx = await svc.prepare_send_message(room_id, session_id, content)
+    ctx = await svc.prepare_send_message(
+        room_id,
+        session_id,
+        content,
+        access_scope=access_scope,
+    )
     return StreamingResponse(
-        svc.stream_reply(ctx),
+        svc.stream_reply(ctx, access_scope=access_scope),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -1127,13 +1154,14 @@ async def get_coaching_session(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    session = await svc.get_session(session_id)
-    if session is None or session.room_id != room_id:
+    session = await svc.get_session(session_id, room_id=room_id, access_scope=access_scope)
+    if session is None:
         raise HTTPException(status_code=404, detail="Coaching session not found")
     return success_response(data=session.model_dump())
 
@@ -1147,12 +1175,13 @@ async def list_coaching_sessions(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = _stakeholder_room_scope_for_current_user(current_user)
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
     )
-    sessions = await svc.list_sessions(room_id, skip=skip, limit=limit)
+    sessions = await svc.list_sessions(room_id, skip=skip, limit=limit, access_scope=access_scope)
     return success_response(data=[s.model_dump() for s in sessions])
 
 
@@ -1330,12 +1359,13 @@ async def generate_cheat_sheet(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
+        access_scope = _stakeholder_room_scope_for_current_user(current_user)
         await _require_stakeholder_room_access(
             room_id,
             chatroom_svc=chatroom_svc,
             current_user=current_user,
         )
-        sheet = await svc.generate_cheat_sheet(room_id)
+        sheet = await svc.generate_cheat_sheet(room_id, access_scope=access_scope)
         return success_response(data=sheet.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
