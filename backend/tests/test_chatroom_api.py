@@ -16,7 +16,15 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from api.dependencies import get_chatroom_service, get_stakeholder_chat_service
+from api.dependencies import (
+    get_analysis_reader_service,
+    get_analysis_service,
+    get_battle_prep_service,
+    get_chatroom_service,
+    get_coaching_service,
+    get_growth_service,
+    get_stakeholder_chat_service,
+)
 from api.routes.stakeholder import router
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from core.exceptions import register_exception_handlers
@@ -118,6 +126,37 @@ async def client(session_factory):
         async def generate_replies(self, room_id, room) -> None:
             raise AssertionError("generate_replies should not run for inaccessible rooms")
 
+    class _FakeRoomScopedDownstreamService:
+        async def generate_report(self, room_id):
+            raise AssertionError("generate_report should not run for inaccessible rooms")
+
+        async def list_reports(self, room_id, *, skip=0, limit=50):
+            raise AssertionError("list_reports should not run for inaccessible rooms")
+
+        async def get_report(self, report_id):
+            raise AssertionError("get_report should not run for inaccessible rooms")
+
+        async def prepare_start_session(self, room_id, report_id):
+            raise AssertionError("prepare_start_session should not run for inaccessible rooms")
+
+        async def prepare_live_advice(self, room_id):
+            raise AssertionError("prepare_live_advice should not run for inaccessible rooms")
+
+        async def prepare_send_message(self, room_id, session_id, content):
+            raise AssertionError("prepare_send_message should not run for inaccessible rooms")
+
+        async def get_session(self, session_id):
+            raise AssertionError("get_session should not run for inaccessible rooms")
+
+        async def list_sessions(self, room_id, *, skip=0, limit=50):
+            raise AssertionError("list_sessions should not run for inaccessible rooms")
+
+        async def generate_cheat_sheet(self, room_id):
+            raise AssertionError("generate_cheat_sheet should not run for inaccessible rooms")
+
+        async def evaluate_competency(self, report_id):
+            raise AssertionError("evaluate_competency should not run for inaccessible rooms")
+
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router, prefix="/api/v1")
@@ -125,6 +164,12 @@ async def client(session_factory):
     # Override dependency
     app.dependency_overrides[get_chatroom_service] = lambda: svc
     app.dependency_overrides[get_stakeholder_chat_service] = _FakeStakeholderChatService
+    downstream = _FakeRoomScopedDownstreamService()
+    app.dependency_overrides[get_analysis_service] = lambda: downstream
+    app.dependency_overrides[get_analysis_reader_service] = lambda: downstream
+    app.dependency_overrides[get_coaching_service] = lambda: downstream
+    app.dependency_overrides[get_battle_prep_service] = lambda: downstream
+    app.dependency_overrides[get_growth_service] = lambda: downstream
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -312,6 +357,41 @@ async def test_send_message_hides_room_outside_scope_before_write(client: AsyncC
     )
 
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_room_scoped_downstream_routes_hide_rooms_outside_scope(client: AsyncClient):
+    create_resp = await client.post(
+        "/api/v1/stakeholder/rooms",
+        json={"name": "Service Workflow", "type": "private", "persona_ids": ["casey"]},
+    )
+    room_id = create_resp.json()["data"]["id"]
+    headers = {"X-Mock-User": "sales"}
+    cases = [
+        ("GET", f"/api/v1/stakeholder/rooms/{room_id}/stream", {}),
+        ("POST", f"/api/v1/stakeholder/rooms/{room_id}/analysis", {}),
+        ("GET", f"/api/v1/stakeholder/rooms/{room_id}/analysis", {}),
+        ("GET", f"/api/v1/stakeholder/rooms/{room_id}/analysis/1", {}),
+        ("POST", f"/api/v1/stakeholder/rooms/{room_id}/analysis/1/coaching", {}),
+        ("POST", f"/api/v1/stakeholder/rooms/{room_id}/coaching/live", {}),
+        (
+            "POST",
+            f"/api/v1/stakeholder/rooms/{room_id}/coaching/live/reply",
+            {"json": {"content": "help", "history": []}},
+        ),
+        (
+            "POST",
+            f"/api/v1/stakeholder/rooms/{room_id}/coaching/1/messages",
+            {"json": {"content": "follow up"}},
+        ),
+        ("GET", f"/api/v1/stakeholder/rooms/{room_id}/coaching/1", {}),
+        ("GET", f"/api/v1/stakeholder/rooms/{room_id}/coaching", {}),
+        ("POST", f"/api/v1/stakeholder/rooms/{room_id}/cheatsheet", {}),
+    ]
+
+    for method, path, kwargs in cases:
+        resp = await client.request(method, path, headers=headers, **kwargs)
+        assert resp.status_code == 404, path
 
 
 @pytest.mark.asyncio

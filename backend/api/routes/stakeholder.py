@@ -91,6 +91,26 @@ def _stakeholder_room_scope_for_current_user(
     )
 
 
+async def _require_stakeholder_room_access(
+    room_id: int,
+    *,
+    chatroom_svc: ChatRoomApplicationService,
+    current_user: CurrentUser,
+    message_limit: int = 1,
+):
+    """Resolve room access before any room-scoped action.
+
+    This mirrors LibreChat's resource guard pattern while keeping TalkWise's
+    current persona-derived room scope instead of migrating the full ACL table.
+    """
+
+    return await chatroom_svc.get_room_detail(
+        room_id,
+        message_limit=message_limit,
+        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Persona endpoints (existing)
 # ---------------------------------------------------------------------------
@@ -655,8 +675,17 @@ async def send_message(
 
 
 @router.get("/rooms/{room_id}/stream", summary="SSE 实时推送")
-async def stream_room(room_id: int):
+async def stream_room(
+    room_id: int,
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Subscribe to real-time events for a chat room via Server-Sent Events."""
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
 
     async def event_generator():
         queue = room_event_bus.subscribe(room_id)
@@ -917,7 +946,14 @@ async def generate_analysis(
     background_tasks: BackgroundTasks,
     svc: AnalysisService = Depends(get_analysis_service),
     growth_svc=Depends(get_growth_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     report = await svc.generate_report(room_id)
     # Auto-trigger competency evaluation in background
     background_tasks.add_task(growth_svc.evaluate_competency, report.id)
@@ -930,7 +966,14 @@ async def list_analysis_reports(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     svc: AnalysisReaderService = Depends(get_analysis_reader_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     reports = await svc.list_reports(room_id, skip=skip, limit=limit)
     return success_response(data=[r.model_dump() for r in reports])
 
@@ -940,7 +983,14 @@ async def get_analysis_report(
     room_id: int,
     report_id: int,
     svc: AnalysisReaderService = Depends(get_analysis_reader_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     report = await svc.get_report(report_id)
     if report is None or report.room_id != room_id:
         raise HTTPException(status_code=404, detail="Analysis report not found")
@@ -961,9 +1011,16 @@ async def start_coaching(
     room_id: int,
     report_id: int,
     svc: CoachingService = Depends(get_coaching_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Create a coaching session and stream the Coach's opening message (SSE)."""
     # Validate & prepare before streaming so exceptions become normal HTTP errors
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     ctx = await svc.prepare_start_session(room_id, report_id)
     return StreamingResponse(
         svc.stream_opening(ctx),
@@ -984,8 +1041,15 @@ async def start_coaching(
 async def start_live_coaching(
     room_id: int,
     svc: CoachingService = Depends(get_coaching_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Stream live coaching advice based on current conversation context (SSE)."""
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     ctx = await svc.prepare_live_advice(room_id)
     return StreamingResponse(
         svc.stream_live_advice(ctx),
@@ -1002,6 +1066,8 @@ async def send_live_coaching_reply(
     room_id: int,
     body: dict,
     svc: CoachingService = Depends(get_coaching_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Follow-up question to live coach. Frontend sends full coaching history."""
     content = body.get("content", "").strip()
@@ -1010,6 +1076,11 @@ async def send_live_coaching_reply(
     coaching_history: list[dict] = body.get("history", [])
     # Append the new user message to history
     coaching_history.append({"role": "user", "content": content})
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     ctx = await svc.prepare_live_advice(room_id)
     return StreamingResponse(
         svc.stream_live_advice(ctx, coaching_history=coaching_history),
@@ -1027,12 +1098,19 @@ async def send_coaching_message(
     session_id: int,
     body: dict,
     svc: CoachingService = Depends(get_coaching_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Send a user message and stream the Coach's reply (SSE)."""
     content = body.get("content", "").strip()
     if not content:
         raise HTTPException(status_code=422, detail="Message content is required")
     # Validate & prepare before streaming so exceptions become normal HTTP errors
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     ctx = await svc.prepare_send_message(room_id, session_id, content)
     return StreamingResponse(
         svc.stream_reply(ctx),
@@ -1046,7 +1124,14 @@ async def get_coaching_session(
     room_id: int,
     session_id: int,
     svc: CoachingService = Depends(get_coaching_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     session = await svc.get_session(session_id)
     if session is None or session.room_id != room_id:
         raise HTTPException(status_code=404, detail="Coaching session not found")
@@ -1059,7 +1144,14 @@ async def list_coaching_sessions(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     svc: CoachingService = Depends(get_coaching_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+    )
     sessions = await svc.list_sessions(room_id, skip=skip, limit=limit)
     return success_response(data=[s.model_dump() for s in sessions])
 
@@ -1234,8 +1326,15 @@ async def start_battle(
 async def generate_cheat_sheet(
     room_id: int,
     svc=Depends(get_battle_prep_service),
+    chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
+        await _require_stakeholder_room_access(
+            room_id,
+            chatroom_svc=chatroom_svc,
+            current_user=current_user,
+        )
         sheet = await svc.generate_cheat_sheet(room_id)
         return success_response(data=sheet.model_dump())
     except ValueError as e:
