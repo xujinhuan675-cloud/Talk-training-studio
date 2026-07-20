@@ -245,6 +245,7 @@ async def test_chat_sync_requires_metadata_scope(session_factory):
         await service.send_message_sync(
             7,
             ChatRequestDTO(message="Hello."),
+            metadata_scope=None,
         )
 
     assert llm.calls == []
@@ -264,6 +265,7 @@ async def test_chat_stream_requires_metadata_scope(session_factory):
     stream = service.send_message_stream(
         7,
         ChatRequestDTO(message="Hello.", stream=True),
+        metadata_scope=None,
     )
 
     with pytest.raises(DomainValidationException):

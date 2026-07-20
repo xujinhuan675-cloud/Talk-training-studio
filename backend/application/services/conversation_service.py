@@ -457,7 +457,7 @@ class ConversationApplicationService:
         self,
         dto: CreateConversationDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> ConversationDTO:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="create_conversation")
         _require_metadata_within_scope(dto.metadata, scope, operation="create_conversation")
@@ -479,7 +479,7 @@ class ConversationApplicationService:
         self,
         conversation_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> ConversationDTO:
         scope = _require_metadata_scope(metadata_scope, operation="get_conversation")
         async with self._uow_factory(readonly=True) as uow:
@@ -497,7 +497,7 @@ class ConversationApplicationService:
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Tuple[list[ConversationDTO], int]:
         scope = _require_metadata_scope(metadata_scope, operation="list_conversations")
         async with self._uow_factory(readonly=True) as uow:
@@ -518,7 +518,7 @@ class ConversationApplicationService:
         conversation_id: int,
         dto: UpdateConversationDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> ConversationDTO:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="update_conversation")
         async with self._uow_factory() as uow:
@@ -550,7 +550,7 @@ class ConversationApplicationService:
         self,
         conversation_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> ConversationDTO:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="delete_conversation")
         async with self._uow_factory() as uow:
@@ -578,7 +578,7 @@ class ConversationApplicationService:
         branch_id: str | None = None,
         statuses: Sequence[str] | None = None,
         include_deleted: bool = False,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Tuple[list[MessageDTO_Agent], int]:
         scope = _require_metadata_scope(metadata_scope, operation="list_messages")
         async with self._uow_factory(readonly=True) as uow:
@@ -612,7 +612,7 @@ class ConversationApplicationService:
         limit: int = 200,
         include_deleted: bool = False,
         statuses: Sequence[str] | None = None,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[MessageDTO_Agent]:
         scope = _require_metadata_scope(metadata_scope, operation="get_message_path")
         async with self._uow_factory(readonly=True) as uow:
@@ -641,7 +641,7 @@ class ConversationApplicationService:
         *,
         statuses: Sequence[str] | None = None,
         include_deleted: bool = False,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[MessageDTO_Agent]:
         scope = _require_metadata_scope(metadata_scope, operation="list_message_children")
         async with self._uow_factory(readonly=True) as uow:
@@ -674,7 +674,7 @@ class ConversationApplicationService:
         message_public_id: str,
         dto: MessageActionDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> MessageActionResultDTO:
         action = dto.action
         if action == "branch":
@@ -757,7 +757,7 @@ class ConversationApplicationService:
         action: Literal["branch", "edit", "retry", "fork"],
         include_deleted: bool = False,
         statuses: Sequence[str] | None = None,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> MessageActionResultDTO:
         scope = _require_metadata_scope(
             metadata_scope,
@@ -830,7 +830,7 @@ class ConversationApplicationService:
         message_public_id: str,
         dto: ForkConversationDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> ForkConversationResultDTO:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="fork_conversation")
         async with self._uow_factory() as uow:
@@ -945,7 +945,7 @@ class ConversationApplicationService:
         message_public_id: str,
         dto: EditMessageDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> MessageDTO_Agent:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="edit_message")
         async with self._uow_factory() as uow:
@@ -980,7 +980,7 @@ class ConversationApplicationService:
         message_public_id: str,
         dto: RetryMessageDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> MessageDTO_Agent:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="retry_message")
         async with self._uow_factory() as uow:
@@ -1016,7 +1016,7 @@ class ConversationApplicationService:
         *,
         before: int = 2,
         after: int = 2,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> MessageLocationDTO:
         scope = _require_metadata_scope(metadata_scope, operation="locate_message")
         async with self._uow_factory(readonly=True) as uow:
@@ -1065,7 +1065,7 @@ class ConversationApplicationService:
         include_path: bool = True,
         context_before: int = 1,
         context_after: int = 1,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[MessageSearchResultDTO]:
         scope = _require_metadata_scope(metadata_scope, operation="search_messages")
         normalized_query = _clean_optional_text(query)
@@ -1133,7 +1133,7 @@ class ConversationApplicationService:
         provider: str | None = None,
         status: str | None = None,
         trigger_message_id: str | None = None,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[RunDTO]:
         scope = _require_metadata_scope(metadata_scope, operation="list_runs")
         async with self._uow_factory(readonly=True) as uow:
@@ -1159,7 +1159,7 @@ class ConversationApplicationService:
         self,
         dto: CreateAgentConfigDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> AgentConfigDTO:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="create_agent_config")
         _require_metadata_within_scope(dto.metadata, scope, operation="create_agent_config")
@@ -1191,7 +1191,7 @@ class ConversationApplicationService:
         self,
         config_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> AgentConfigDTO:
         scope = _require_metadata_scope(metadata_scope, operation="get_agent_config")
         async with self._uow_factory(readonly=True) as uow:
@@ -1208,7 +1208,7 @@ class ConversationApplicationService:
         *,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Tuple[list[AgentConfigDTO], int]:
         scope = _require_metadata_scope(metadata_scope, operation="list_agent_configs")
         async with self._uow_factory(readonly=True) as uow:
@@ -1225,7 +1225,7 @@ class ConversationApplicationService:
         config_id: int,
         dto: UpdateAgentConfigDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> AgentConfigDTO:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="update_agent_config")
         async with self._uow_factory() as uow:
@@ -1269,7 +1269,7 @@ class ConversationApplicationService:
         self,
         config_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> None:
         scope = _require_mutation_metadata_scope(metadata_scope, operation="delete_agent_config")
         async with self._uow_factory() as uow:

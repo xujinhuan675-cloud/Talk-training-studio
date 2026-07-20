@@ -181,8 +181,16 @@ class _FakeChatroomService:
             )
         ]
 
-    async def get_room_detail(self, room_id: int, *, message_limit: int = 50):
-        self.get_calls.append({"room_id": room_id, "message_limit": message_limit})
+    async def get_room_detail(
+        self,
+        room_id: int,
+        *,
+        message_limit: int = 50,
+        access_scope=None,
+    ):
+        self.get_calls.append(
+            {"room_id": room_id, "message_limit": message_limit, "access_scope": access_scope}
+        )
         return SimpleNamespace(
             room=SimpleNamespace(id=room_id),
             messages=self.messages,
@@ -356,7 +364,7 @@ def test_material_review_drops_replay_from_room_bound_to_another_session_user() 
     )
 
     assert response.status_code == 200
-    assert chatroom.get_calls == [{"room_id": 42, "message_limit": 40}]
+    assert chatroom.get_calls == [{"room_id": 42, "message_limit": 40, "access_scope": None}]
     assert response.json()["data"]["source_state"]["replay_used"] is False
 
 

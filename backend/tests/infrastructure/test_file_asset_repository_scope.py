@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from inspect import Parameter, signature
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -9,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from domain.common.exceptions import FileAssetNotFoundException
 from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset.entity import FileAsset
+from domain.file_asset.repository import FileAssetRepository
 from infrastructure.models.base import Base
 from infrastructure.repositories.file_asset_repository import SQLAlchemyFileAssetRepository
 
@@ -44,6 +46,29 @@ def _asset(filename: str, day: int, metadata: dict) -> FileAsset:
         created_at=created_at,
         updated_at=created_at,
     )
+
+
+def test_file_asset_repository_metadata_scope_is_required_keyword_contract() -> None:
+    scoped_methods = (
+        "update",
+        "delete",
+        "delete_by_key",
+        "get_by_id",
+        "get_by_key",
+        "list",
+        "count",
+    )
+
+    for method_name in scoped_methods:
+        abstract_param = signature(getattr(FileAssetRepository, method_name)).parameters[
+            "metadata_scope"
+        ]
+        concrete_param = signature(getattr(SQLAlchemyFileAssetRepository, method_name)).parameters[
+            "metadata_scope"
+        ]
+
+        assert abstract_param.default is Parameter.empty
+        assert concrete_param.default is Parameter.empty
 
 
 @pytest.mark.asyncio
@@ -184,9 +209,9 @@ async def test_file_asset_repository_applies_metadata_scope_to_update_and_delete
     with pytest.raises(FileAssetNotFoundException):
         await repo.delete_by_key(hidden_for_delete_by_key.key, metadata_scope=scope)
 
-    assert await repo.get_by_id(hidden_for_update.id or 0) is not None
-    assert await repo.get_by_id(hidden_for_delete.id or 0) is not None
-    assert await repo.get_by_key(hidden_for_delete_by_key.key) is not None
+    assert await repo.get_by_id(hidden_for_update.id or 0, metadata_scope=None) is not None
+    assert await repo.get_by_id(hidden_for_delete.id or 0, metadata_scope=None) is not None
+    assert await repo.get_by_key(hidden_for_delete_by_key.key, metadata_scope=None) is not None
 
 
 @pytest.mark.asyncio
@@ -211,7 +236,7 @@ async def test_file_asset_repository_rejects_unscoped_update_delete_when_allow_u
     with pytest.raises(FileAssetNotFoundException):
         await repo.delete_by_key(unscoped_for_delete.key, metadata_scope=scope)
 
-    persisted = await repo.get_by_id(unscoped_for_update.id or 0)
+    persisted = await repo.get_by_id(unscoped_for_update.id or 0, metadata_scope=None)
     assert persisted is not None
     assert persisted.metadata == {}
-    assert await repo.get_by_id(unscoped_for_delete.id or 0) is not None
+    assert await repo.get_by_id(unscoped_for_delete.id or 0, metadata_scope=None) is not None

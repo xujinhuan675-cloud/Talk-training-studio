@@ -68,7 +68,12 @@ class _FakeChatRoomService:
         self.room_type = room_type
         self.user_message_count = user_message_count
 
-    async def get_room_detail(self, room_id: int, message_limit: int = 200) -> SimpleNamespace:
+    async def get_room_detail(
+        self,
+        room_id: int,
+        message_limit: int = 200,
+        access_scope=None,
+    ) -> SimpleNamespace:
         messages = [
             SimpleNamespace(sender_type="user")
             for _ in range(self.user_message_count)

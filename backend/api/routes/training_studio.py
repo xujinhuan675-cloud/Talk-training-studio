@@ -1083,7 +1083,11 @@ async def _generate_training_guidance(
         source = "request"
     else:
         room_id = await _require_active_guidance_room_id(session_id, svc, current_user)
-        detail = await chatroom_svc.get_room_detail(room_id, message_limit=body.message_limit)
+        detail = await chatroom_svc.get_room_detail(
+            room_id,
+            message_limit=body.message_limit,
+            access_scope=None,
+        )
         recent_turns = [
             _message_to_guidance_turn(message)
             for message in detail.messages
@@ -1838,7 +1842,11 @@ async def _material_review_replay_context(
 
     replay_limit = 40
     with suppress(Exception):
-        detail = await chatroom_svc.get_room_detail(room_id, message_limit=replay_limit)
+        detail = await chatroom_svc.get_room_detail(
+            room_id,
+            message_limit=replay_limit,
+            access_scope=None,
+        )
         if not _material_review_room_matches_session(detail, session):
             return MaterialReviewReplayContext(turns=[])
         turns = [

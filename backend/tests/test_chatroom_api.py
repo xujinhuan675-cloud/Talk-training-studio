@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from api.dependencies import get_chatroom_service
+from api.dependencies import get_chatroom_service, get_stakeholder_chat_service
 from api.routes.stakeholder import router
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from core.exceptions import register_exception_handlers
@@ -39,6 +39,8 @@ class _StubPersonaLoader:
                 "name": "李建峰",
                 "role": "CTO",
                 "avatar_color": "#f00",
+                "organization_id": None,
+                "team_id": "team-revenue",
                 "parse_status": "ok",
                 "profile_summary": "test",
             },
@@ -51,6 +53,22 @@ class _StubPersonaLoader:
                 "name": "Robin",
                 "role": "CEO",
                 "avatar_color": "#0f0",
+                "organization_id": None,
+                "team_id": "team-revenue",
+                "parse_status": "ok",
+                "profile_summary": "test",
+            },
+        )(),
+        "casey": type(
+            "P",
+            (),
+            {
+                "id": "casey",
+                "name": "Casey",
+                "role": "Support",
+                "avatar_color": "#00f",
+                "organization_id": None,
+                "team_id": "team-service",
                 "parse_status": "ok",
                 "profile_summary": "test",
             },
@@ -93,12 +111,20 @@ async def client(session_factory):
 
     svc = ChatRoomApplicationService(uow_factory=_uow_factory, persona_loader=stub_loader)
 
+    class _FakeStakeholderChatService:
+        async def send_message(self, room_id, content, metadata=None):
+            raise AssertionError("send_message should not run for inaccessible rooms")
+
+        async def generate_replies(self, room_id, room) -> None:
+            raise AssertionError("generate_replies should not run for inaccessible rooms")
+
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router, prefix="/api/v1")
 
     # Override dependency
     app.dependency_overrides[get_chatroom_service] = lambda: svc
+    app.dependency_overrides[get_stakeholder_chat_service] = _FakeStakeholderChatService
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -203,6 +229,27 @@ async def test_list_rooms(client: AsyncClient):
     assert len(rooms) == 2
 
 
+@pytest.mark.asyncio
+async def test_list_rooms_filters_to_current_user_team(client: AsyncClient):
+    await client.post(
+        "/api/v1/stakeholder/rooms",
+        json={"name": "Revenue Room", "type": "private", "persona_ids": ["jianfeng"]},
+    )
+    await client.post(
+        "/api/v1/stakeholder/rooms",
+        json={"name": "Service Room", "type": "private", "persona_ids": ["casey"]},
+    )
+
+    resp = await client.get(
+        "/api/v1/stakeholder/rooms",
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert resp.status_code == 200
+    rooms = resp.json()["data"]
+    assert [room["name"] for room in rooms] == ["Revenue Room"]
+
+
 # ---------------------------------------------------------------------------
 # AC7: Get room detail with messages
 # ---------------------------------------------------------------------------
@@ -222,9 +269,49 @@ async def test_get_room_detail_with_messages(client: AsyncClient):
     assert isinstance(data["messages"], list)
 
 
+@pytest.mark.asyncio
+async def test_room_detail_and_delete_hide_rooms_outside_scope(client: AsyncClient):
+    create_resp = await client.post(
+        "/api/v1/stakeholder/rooms",
+        json={"name": "Service Detail", "type": "private", "persona_ids": ["casey"]},
+    )
+    room_id = create_resp.json()["data"]["id"]
+
+    detail_resp = await client.get(
+        f"/api/v1/stakeholder/rooms/{room_id}",
+        headers={"X-Mock-User": "sales"},
+    )
+    delete_resp = await client.delete(
+        f"/api/v1/stakeholder/rooms/{room_id}",
+        headers={"X-Mock-User": "sales"},
+    )
+    admin_detail = await client.get(f"/api/v1/stakeholder/rooms/{room_id}")
+
+    assert detail_resp.status_code == 404
+    assert delete_resp.status_code == 404
+    assert admin_detail.status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # AC8: Get nonexistent room → 404
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_message_hides_room_outside_scope_before_write(client: AsyncClient):
+    create_resp = await client.post(
+        "/api/v1/stakeholder/rooms",
+        json={"name": "Service Send", "type": "private", "persona_ids": ["casey"]},
+    )
+    room_id = create_resp.json()["data"]["id"]
+
+    resp = await client.post(
+        f"/api/v1/stakeholder/rooms/{room_id}/messages",
+        json={"content": "hello"},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

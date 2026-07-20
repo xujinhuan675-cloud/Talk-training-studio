@@ -291,7 +291,11 @@ class BattlePrepService:
 
     async def generate_cheat_sheet(self, room_id: int) -> CheatSheetDTO:
         """Post-conversation: generate cheat sheet from conversation history."""
-        detail = await self._chatroom_service.get_room_detail(room_id, message_limit=200)
+        detail = await self._chatroom_service.get_room_detail(
+            room_id,
+            message_limit=200,
+            access_scope=None,
+        )
         room = detail.room
         messages = detail.messages
 

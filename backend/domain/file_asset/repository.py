@@ -11,7 +11,11 @@ from .entity import FileAsset
 
 
 class FileAssetRepository(ABC):
-    """Contract for persisting and querying file assets."""
+    """Contract for persisting and querying file assets.
+
+    Callers must pass ``metadata_scope`` explicitly for read/write access.
+    ``metadata_scope=None`` is reserved for deliberate internal unscoped access.
+    """
 
     @abstractmethod
     async def create(self, asset: FileAsset) -> FileAsset: ...
@@ -21,7 +25,7 @@ class FileAssetRepository(ABC):
         self,
         asset: FileAsset,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope | None,
     ) -> FileAsset: ...
 
     @abstractmethod
@@ -29,7 +33,7 @@ class FileAssetRepository(ABC):
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope | None,
     ) -> None: ...
 
     @abstractmethod
@@ -37,7 +41,7 @@ class FileAssetRepository(ABC):
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope | None,
     ) -> None: ...
 
     @abstractmethod
@@ -45,7 +49,7 @@ class FileAssetRepository(ABC):
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope | None,
     ) -> Optional[FileAsset]: ...
 
     @abstractmethod
@@ -53,7 +57,7 @@ class FileAssetRepository(ABC):
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope | None,
     ) -> Optional[FileAsset]: ...
 
     @abstractmethod
@@ -65,7 +69,7 @@ class FileAssetRepository(ABC):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope | None,
     ) -> list[FileAsset]: ...
 
     @abstractmethod
@@ -75,5 +79,5 @@ class FileAssetRepository(ABC):
         owner_id: Optional[int] = None,
         kind: Optional[str] = None,
         status: Optional[str] = None,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope | None,
     ) -> int: ...

@@ -220,7 +220,7 @@ class ChatApplicationService:
         conversation_id: int,
         dto: ChatRequestDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> AsyncIterator[str]:
         """Send a user message and stream the assistant response as SSE events.
 
@@ -394,7 +394,7 @@ class ChatApplicationService:
         conversation_id: int,
         dto: ChatRequestDTO,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> dict:
         """Send a user message and return the full assistant response (non-streaming)."""
         scope = _require_mutation_metadata_scope(

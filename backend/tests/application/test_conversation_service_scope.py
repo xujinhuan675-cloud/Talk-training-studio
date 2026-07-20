@@ -409,6 +409,7 @@ async def test_create_conversation_requires_metadata_scope() -> None:
     with pytest.raises(DomainValidationException):
         await service.create_conversation(
             CreateConversationDTO(title="Unscoped", metadata=dict(_config(1, "x").metadata)),
+            metadata_scope=None,
         )
 
     assert repo.create_calls == []
@@ -447,7 +448,7 @@ async def test_agent_config_methods_require_metadata_scope(method_name: str) -> 
     service = _service(repo)
 
     with pytest.raises(DomainValidationException):
-        await _call_agent_config_method(service, method_name)
+        await _call_agent_config_method(service, method_name, metadata_scope=None)
 
     assert repo.get_by_name_calls == []
     assert repo.create_calls == []
@@ -540,7 +541,11 @@ async def test_conversation_top_level_methods_require_metadata_scope(
     service = _service_with_repositories(conversation_repository=repo)
 
     with pytest.raises(DomainValidationException):
-        await _call_conversation_top_level_method(service, method_name)
+        await _call_conversation_top_level_method(
+            service,
+            method_name,
+            metadata_scope=None,
+        )
 
     assert repo.get_by_id_calls == []
 
@@ -625,7 +630,11 @@ async def test_conversation_child_methods_require_metadata_scope(method_name: st
     service = _service_with_repositories(conversation_repository=repo)
 
     with pytest.raises(DomainValidationException):
-        await _call_conversation_child_method(service, method_name)
+        await _call_conversation_child_method(
+            service,
+            method_name,
+            metadata_scope=None,
+        )
 
     assert repo.get_by_id_calls == []
 

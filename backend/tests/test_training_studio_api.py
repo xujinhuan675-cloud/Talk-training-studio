@@ -86,7 +86,13 @@ class FakeChatroomService:
         self.created_rooms.append(dto)
         return SimpleNamespace(id=701)
 
-    async def get_room_detail(self, room_id: int, *, message_limit: int = 50) -> ChatRoomDetailDTO:
+    async def get_room_detail(
+        self,
+        room_id: int,
+        *,
+        message_limit: int = 50,
+        access_scope=None,
+    ) -> ChatRoomDetailDTO:
         self.detail_calls.append((room_id, message_limit))
         return self.details[room_id]
 

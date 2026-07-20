@@ -23,6 +23,7 @@ from fastapi import (
 from starlette.responses import Response, StreamingResponse
 
 from api.dependencies import (
+    CurrentUser,
     get_analysis_service,
     get_analysis_reader_service,
     get_battle_prep_service,
@@ -38,8 +39,12 @@ from api.dependencies import (
     get_scenario_service,
     get_speaker_detection_service,
     get_stakeholder_chat_service,
+    get_current_user,
 )
-from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
+from application.services.stakeholder.chatroom_service import (
+    ChatRoomApplicationService,
+    StakeholderRoomAccessScope,
+)
 from application.services.stakeholder.dto import (
     BattlePrepGenerateDTO,
     CreateChatRoomDTO,
@@ -71,6 +76,19 @@ from core.response import success_response
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
 router = APIRouter(prefix="/stakeholder", tags=["Stakeholder Chat"])
+
+
+def _stakeholder_room_scope_for_current_user(
+    current_user: CurrentUser,
+) -> StakeholderRoomAccessScope:
+    team_id = (current_user.team_id or "").strip() or None
+    return StakeholderRoomAccessScope(
+        user_id=current_user.user_id,
+        team_id=team_id,
+        include_team_scope=current_user.is_admin or current_user.is_leader,
+        allowed_team_ids=frozenset([team_id]) if team_id else frozenset(),
+        unrestricted=current_user.is_admin,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +344,13 @@ async def list_rooms(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    rooms = await svc.list_rooms(skip=skip, limit=limit)
+    rooms = await svc.list_rooms(
+        skip=skip,
+        limit=limit,
+        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+    )
     return success_response(data=[r.model_dump() for r in rooms])
 
 
@@ -335,8 +358,12 @@ async def list_rooms(
 async def delete_room(
     room_id: int,
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    deleted = await svc.delete_room(room_id)
+    deleted = await svc.delete_room(
+        room_id,
+        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="Room not found")
     return success_response(data=None)
@@ -347,8 +374,13 @@ async def get_room_detail(
     room_id: int,
     limit: int = Query(50, ge=1, le=200),
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    detail = await svc.get_room_detail(room_id, message_limit=limit)
+    detail = await svc.get_room_detail(
+        room_id,
+        message_limit=limit,
+        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+    )
     return success_response(data=detail.model_dump())
 
 
@@ -362,8 +394,13 @@ async def export_room(
     room_id: int,
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     loader: PersonaLoader = Depends(get_persona_loader),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    detail = await svc.get_room_detail(room_id, message_limit=9999)
+    detail = await svc.get_room_detail(
+        room_id,
+        message_limit=9999,
+        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+    )
     room = detail.room
     msgs = detail.messages
 
@@ -418,12 +455,17 @@ async def export_room_html(
     room_id: int,
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     loader: PersonaLoader = Depends(get_persona_loader),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     import re
     from html import escape
     from urllib.parse import quote
 
-    detail = await svc.get_room_detail(room_id, message_limit=9999)
+    detail = await svc.get_room_detail(
+        room_id,
+        message_limit=9999,
+        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+    )
     room = detail.room
     msgs = detail.messages
 
@@ -568,9 +610,14 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica 
 async def _ensure_room_accepts_user_message(
     room_id: int,
     chatroom_svc: ChatRoomApplicationService,
+    access_scope: StakeholderRoomAccessScope,
 ) -> None:
     """Keep text and voice sends on the same battle-prep turn limit."""
-    detail = await chatroom_svc.get_room_detail(room_id, message_limit=200)
+    detail = await chatroom_svc.get_room_detail(
+        room_id,
+        message_limit=200,
+        access_scope=access_scope,
+    )
     if detail.room.type == "battle_prep":
         user_msg_count = sum(1 for m in detail.messages if m.sender_type == "user")
         if user_msg_count >= 12:
@@ -587,8 +634,13 @@ async def send_message(
     background_tasks: BackgroundTasks,
     svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    await _ensure_room_accepts_user_message(room_id, chatroom_svc)
+    await _ensure_room_accepts_user_message(
+        room_id,
+        chatroom_svc,
+        _stakeholder_room_scope_for_current_user(current_user),
+    )
     if body.metadata:
         msg, room = await svc.send_message(room_id, body.content, metadata=body.metadata)
     else:
@@ -643,6 +695,7 @@ async def voice_ws(
     room_id: int,
     svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """WebSocket for voice message input.
 
@@ -723,7 +776,11 @@ async def voice_ws(
                     continue
 
                 try:
-                    await _ensure_room_accepts_user_message(room_id, chatroom_svc)
+                    await _ensure_room_accepts_user_message(
+                        room_id,
+                        chatroom_svc,
+                        _stakeholder_room_scope_for_current_user(current_user),
+                    )
                 except HTTPException as exc:
                     if not await send_voice_json({"type": "error", "message": str(exc.detail)}):
                         break

@@ -322,7 +322,11 @@ class DefensePrepService:
                 raise ValueError(f"Defense session {session_id} not found")
         if session.room_id is None:
             raise ValueError("Session has no room — simulation not started")
-        detail = await self._chatroom_service.get_room_detail(session.room_id, message_limit=200)
+        detail = await self._chatroom_service.get_room_detail(
+            session.room_id,
+            message_limit=200,
+            access_scope=None,
+        )
         messages = detail.messages
         if not messages:
             raise ValueError("对话记录为空，无法生成报告")
