@@ -1,11 +1,23 @@
 .tsl-panel {
+  --tsl-bg: var(--training-workbench-surface, var(--bg-card));
+  --tsl-bg-input: var(--training-workbench-bg, var(--bg-base));
+  --tsl-bg-muted: var(--training-workbench-surface-muted, var(--bg-soft));
+  --tsl-border: var(--training-workbench-border, var(--border));
+  --tsl-border-accent: var(--training-workbench-border-accent, var(--border-accent));
+  --tsl-primary: var(--training-workbench-primary, var(--green));
+  --tsl-primary-soft: var(--training-workbench-primary-soft, var(--green-soft));
+  --tsl-warning: var(--training-workbench-warning, var(--amber));
+  --tsl-danger: var(--training-workbench-danger, var(--rose));
+  --tsl-focus: var(--training-workbench-focus, var(--focus-ring));
+  --tsl-shadow: var(--training-workbench-shadow, var(--shadow-sm));
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 18px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tsl-border);
   border-radius: 8px;
-  background: var(--bg-card);
+  background: var(--tsl-bg);
+  box-shadow: var(--tsl-shadow);
 }
 
 .tsl-header {
@@ -33,10 +45,10 @@
 
 .tsl-reset {
   flex-shrink: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tsl-border);
   border-radius: 8px;
   padding: 7px 10px;
-  background: var(--bg-base);
+  background: var(--tsl-bg-input);
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 700;
@@ -45,9 +57,9 @@
 }
 
 .tsl-reset:hover:not(:disabled) {
-  border-color: var(--amber);
-  color: var(--amber);
-  background: var(--amber-soft);
+  border-color: var(--tsl-primary);
+  color: var(--tsl-primary);
+  background: var(--tsl-primary-soft);
 }
 
 .tsl-section {
@@ -70,7 +82,7 @@
 }
 
 .tsl-section-heading .tsl-custom-status {
-  color: var(--amber);
+  color: var(--tsl-warning);
   font-weight: 700;
 }
 
@@ -95,9 +107,9 @@
   justify-content: center;
   gap: 3px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tsl-border);
   border-radius: 8px;
-  background: var(--bg-base);
+  background: var(--tsl-bg-input);
   color: var(--text-primary);
   cursor: pointer;
   text-align: left;
@@ -105,13 +117,13 @@
 }
 
 .tsl-preset-option:hover:not(:disabled) {
-  border-color: var(--amber);
-  background: var(--amber-soft);
+  border-color: var(--tsl-border-accent);
+  background: var(--tsl-primary-soft);
 }
 
 .tsl-preset-option.selected {
-  border-color: var(--amber);
-  background: var(--amber-soft);
+  border-color: var(--tsl-border-accent);
+  background: var(--tsl-primary-soft);
 }
 
 .tsl-preset-option span {
@@ -155,9 +167,9 @@
   box-sizing: border-box;
   min-height: 38px;
   padding: 0 11px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tsl-border);
   border-radius: 8px;
-  background: var(--bg-base);
+  background: var(--tsl-bg-input);
   color: var(--text-primary);
   font: inherit;
   font-size: 13px;
@@ -167,8 +179,8 @@
 
 .tsl-field input:focus,
 .tsl-field select:focus {
-  border-color: var(--amber);
-  box-shadow: 0 0 0 3px var(--amber-soft);
+  border-color: var(--tsl-primary);
+  box-shadow: 0 0 0 3px var(--tsl-focus);
 }
 
 .tsl-advanced-shell {
@@ -184,17 +196,17 @@
   gap: 10px;
   align-items: center;
   padding: 11px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tsl-border);
   border-radius: 8px;
-  background: var(--bg-base);
+  background: var(--tsl-bg-input);
   color: var(--text-primary);
   cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
 .tsl-advanced-toggle:hover {
-  border-color: var(--amber);
-  background: var(--amber-soft);
+  border-color: var(--tsl-primary);
+  background: var(--tsl-primary-soft);
 }
 
 .tsl-advanced-toggle span {
@@ -220,7 +232,7 @@
 }
 
 .tsl-advanced-toggle em {
-  color: var(--amber);
+  color: var(--tsl-primary);
   font-size: 12px;
   font-style: normal;
   font-weight: 700;
@@ -248,7 +260,7 @@
 }
 
 .tsl-total {
-  color: var(--rose);
+  color: var(--tsl-danger);
   font-size: 12px;
   font-weight: 700;
 }
@@ -269,9 +281,9 @@
   gap: 8px;
   align-items: center;
   padding: 10px 11px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tsl-border);
   border-radius: 8px;
-  background: var(--bg-base);
+  background: var(--tsl-bg-input);
 }
 
 .tsl-range span {
@@ -283,11 +295,11 @@
 .tsl-range input {
   grid-column: 1 / -1;
   width: 100%;
-  accent-color: var(--amber);
+  accent-color: var(--tsl-primary);
 }
 
 .tsl-range output {
-  color: var(--amber);
+  color: var(--tsl-primary);
   font-size: 12px;
   font-weight: 700;
 }

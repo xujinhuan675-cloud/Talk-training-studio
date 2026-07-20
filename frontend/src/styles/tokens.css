@@ -1,5 +1,11 @@
-:root {
+:root,
+:root[data-theme='light'] {
   /* === Neutral Light Theme === */
+  color-scheme: light;
+  --font-sans: -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', ui-monospace, monospace;
+  --font-size-body: 14px;
+  --line-height-body: 1.5;
   --bg-base: #F7F9FC;
   --bg-card: #FFFFFF;
   --bg-elevated: #FFFFFF;
@@ -57,4 +63,61 @@
   --info-bg: #EFF6FF;
   --focus-ring: rgba(15,118,110,0.18);
   --surface-quiet: #F8FAFC;
+  --app-bg-gradient: linear-gradient(180deg, #F8FBFC 0%, var(--bg-base) 260px);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --font-sans: -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', ui-monospace, monospace;
+  --font-size-body: 14px;
+  --line-height-body: 1.5;
+  --bg-base: #0B1118;
+  --bg-card: #111827;
+  --bg-elevated: #172033;
+  --bg-soft: #1D2735;
+  --border: #273447;
+  --border-accent: rgba(45,212,191,0.24);
+  --text-primary: #E5EEF8;
+  --text-secondary: #A6B3C5;
+  --text-muted: #7E8CA0;
+  --green: #2DD4BF;
+  --green-hover: #5EEAD4;
+  --green-soft: rgba(45,212,191,0.14);
+  --amber: #F59E0B;
+  --amber-soft: rgba(245,158,11,0.14);
+  --violet: #A5B4FC;
+  --violet-soft: rgba(165,180,252,0.14);
+  --rose: #FB7185;
+  --rose-soft: rgba(251,113,133,0.14);
+  --blue: #60A5FA;
+  --blue-soft: rgba(96,165,250,0.14);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.24);
+  --shadow-md: 0 8px 18px rgba(0,0,0,0.28);
+  --shadow-lg: 0 18px 40px rgba(0,0,0,0.36);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --page-max-width: 1180px;
+  --page-gutter: 28px;
+  --page-gutter-mobile: 16px;
+  --primary: var(--green);
+  --primary-hover: var(--green-hover);
+  --primary-light: var(--green-soft);
+  --surface-2: var(--bg-soft);
+  --bg-main: var(--bg-base);
+  --text-tertiary: var(--text-muted);
+  --primary-gradient: linear-gradient(135deg, #2DD4BF, #2563EB);
+  --border-light: #1F2A3A;
+  --success: #34D399;
+  --success-bg: rgba(52,211,153,0.12);
+  --warning-bg: rgba(245,158,11,0.12);
+  --danger-bg: rgba(251,113,133,0.12);
+  --info-bg: rgba(96,165,250,0.12);
+  --focus-ring: rgba(45,212,191,0.22);
+  --surface-quiet: #0F172A;
+  --app-bg-gradient: linear-gradient(180deg, #0F172A 0%, var(--bg-base) 280px);
 }

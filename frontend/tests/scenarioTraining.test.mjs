@@ -764,6 +764,15 @@ test('scenario config default weights validate to 100 percent by category', () =
   }
 })
 
+test('scenario config default dimensions expose localized display copy', () => {
+  const localization = scenarioConfigData.DEFAULT_SCENARIO_DIMENSION_LOCALIZATION
+
+  assert.equal(localization.substance.name[0], '内容质量')
+  assert.equal(localization.substance.name[1], 'Substance')
+  assert.match(localization.structure.description[0], /表达是否易于跟随/)
+  assert.match(localization.structure.description[1], /easy to follow/)
+})
+
 test('scenario config seeds local drafts from the scenario catalog', () => {
   const state = scenarioConfigData.createScenarioConfigState(scenarioTrainingData.scenarioTrainingCatalog)
 

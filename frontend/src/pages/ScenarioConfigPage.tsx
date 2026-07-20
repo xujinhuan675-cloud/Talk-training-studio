@@ -14,6 +14,7 @@ import {
 import {
   createBlankScenarioDraft,
   calculateScenarioWeightTotal,
+  DEFAULT_SCENARIO_DIMENSION_LOCALIZATION,
   distributeScenarioWeights,
   getDefaultDimensionWeights,
   loadScenarioConfigState,
@@ -66,6 +67,16 @@ function translateLabel(label: LocalizedText, tr: TranslateInline): string {
   return tr(label[0], label[1])
 }
 
+function getDimensionDisplayName(dimension: ScenarioDimensionDefinition, tr: TranslateInline): string {
+  const localization = DEFAULT_SCENARIO_DIMENSION_LOCALIZATION[dimension.id]
+  return localization ? translateLabel(localization.name, tr) : dimension.name
+}
+
+function getDimensionDisplayDescription(dimension: ScenarioDimensionDefinition, tr: TranslateInline): string {
+  const localization = DEFAULT_SCENARIO_DIMENSION_LOCALIZATION[dimension.id]
+  return localization ? translateLabel(localization.description, tr) : dimension.description
+}
+
 function getFrameworkLabel(value: ScenarioConfigFramework, tr: TranslateInline): string {
   return translateLabel(frameworkOptions.find((option) => option.value === value)?.label ?? [value, value], tr)
 }
@@ -115,10 +126,20 @@ function scenarioMatchesQuery(scenario: ScenarioConfigDraft, query: string): boo
   ].some((value) => value.toLowerCase().includes(needle))
 }
 
-function dimensionMatchesQuery(dimension: ScenarioDimensionDefinition, query: string): boolean {
+function dimensionMatchesQuery(
+  dimension: ScenarioDimensionDefinition,
+  query: string,
+  tr: TranslateInline,
+): boolean {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
-  return [dimension.name, dimension.description, dimension.id].some((value) => value.toLowerCase().includes(needle))
+  return [
+    getDimensionDisplayName(dimension, tr),
+    getDimensionDisplayDescription(dimension, tr),
+    dimension.name,
+    dimension.description,
+    dimension.id,
+  ].some((value) => value.toLowerCase().includes(needle))
 }
 
 function getErrorMessage(error: unknown): string {
@@ -183,10 +204,7 @@ export default function ScenarioConfigPage() {
         setState(remoteState)
         saveScenarioConfigState(remoteState)
         syncDraftsFromState(remoteState)
-        setNotice({
-          tone: 'success',
-          message: trRef.current('已从后端加载场景配置。', 'Loaded scenario config from backend.'),
-        })
+        setNotice(null)
       })
       .catch((error: unknown) => {
         if (!active) return
@@ -210,8 +228,8 @@ export default function ScenarioConfigPage() {
     [scenarioQuery, state.scenarios],
   )
   const filteredDimensions = useMemo(
-    () => state.dimensions.filter((dimension) => dimensionMatchesQuery(dimension, dimensionQuery)),
-    [dimensionQuery, state.dimensions],
+    () => state.dimensions.filter((dimension) => dimensionMatchesQuery(dimension, dimensionQuery, tr)),
+    [dimensionQuery, state.dimensions, tr],
   )
   const enabledDimensions = useMemo(
     () => state.dimensions.filter((dimension) => dimension.enabled),
@@ -674,6 +692,8 @@ export default function ScenarioConfigPage() {
                 {state.dimensions.map((dimension) => {
                   const selected = isDimensionSelected(dimension.id)
                   const weight = draft.dimensionWeights.find((item) => item.dimensionId === dimension.id)?.weight ?? 0
+                  const displayName = getDimensionDisplayName(dimension, tr)
+                  const displayDescription = getDimensionDisplayDescription(dimension, tr)
                   return (
                     <div key={dimension.id} className={!dimension.enabled ? 'disabled' : ''}>
                       <button
@@ -683,9 +703,9 @@ export default function ScenarioConfigPage() {
                         disabled={!dimension.enabled && !selected}
                       >
                         {selected ? <CheckCircle2 size={15} /> : <Plus size={15} />}
-                        <span>{dimension.name}</span>
+                        <span>{displayName}</span>
                       </button>
-                      <p>{dimension.description || tr('暂无评分标准。', 'No scoring criteria yet.')}</p>
+                      <p>{displayDescription || tr('暂无评分标准。', 'No scoring criteria yet.')}</p>
                       <label>
                         <input
                           type="number"
@@ -719,28 +739,31 @@ export default function ScenarioConfigPage() {
             </label>
 
             <div className="scenario-config-list-items">
-              {filteredDimensions.map((dimension) => (
+              {filteredDimensions.map((dimension) => {
+                const displayName = getDimensionDisplayName(dimension, tr)
+                return (
                 <button
                   type="button"
                   key={dimension.id}
                   className={dimension.id === dimensionDraft.id ? 'selected' : ''}
                   onClick={() => selectDimension(dimension.id)}
                 >
-                  <span className="scenario-config-row-title">{dimension.name}</span>
+                  <span className="scenario-config-row-title">{displayName}</span>
                   <span className="scenario-config-row-meta">
                     {dimension.enabled ? tr('已启用', 'Enabled') : tr('已禁用', 'Disabled')} · {tr('{count} 个引用', '{count} refs', {
                       count: dimensionRefs.get(dimension.id) ?? 0,
                     })}
                   </span>
                 </button>
-              ))}
+                )
+              })}
             </div>
           </aside>
 
           <section className="scenario-config-editor" aria-label={tr('编辑所选维度', 'Edit selected dimension')}>
             <div className="scenario-config-editor-head">
               <div>
-                <h2>{dimensionDraft.name || tr('未命名维度', 'Untitled dimension')}</h2>
+                <h2>{getDimensionDisplayName(dimensionDraft, tr) || tr('未命名维度', 'Untitled dimension')}</h2>
                 <p>{dimensionDraft.id}</p>
               </div>
               <button type="button" className="scenario-config-save" onClick={saveDimensionDraft} disabled={isRemoteSaving}>

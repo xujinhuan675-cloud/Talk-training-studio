@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, Outlet, useLocation, useParams } from 'react-r
 import Layout from './components/layout/Layout'
 import { AppProvider } from './contexts/AppContext'
 import { AuthProvider, useAuthContext } from './contexts/AuthContext'
+import { ThemeProvider } from './contexts/ThemeContext'
 import { I18nProvider, useI18n } from './i18n'
 import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from './services/auth'
 import { APP_ROUTES } from './appRoutes'
@@ -92,42 +93,44 @@ function PersonaEditRedirect() {
 function App() {
   return (
     <I18nProvider>
-      <AuthProvider>
-        <AppProvider>
-          <Suspense fallback={<RouteLoadingFallback />}>
-            <Routes>
-              <Route element={<Layout />}>
-                <Route index element={<HomePage />} />
-                <Route path="practice" element={<Outlet />}>
-                  <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
-                  <Route path="scenarios" element={<ScenarioTrainingPage />} />
-                  <Route path="custom" element={managementOnly(<TrainingStudioPage />)} />
-                  <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
-                  <Route path="defense-prep" element={<DefensePrepPage />} />
-                  <Route path="battle-prep" element={managementOnly(<BattlePrepPage />)} />
+      <ThemeProvider>
+        <AuthProvider>
+          <AppProvider>
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <Routes>
+                <Route element={<Layout />}>
+                  <Route index element={<HomePage />} />
+                  <Route path="practice" element={<Outlet />}>
+                    <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
+                    <Route path="scenarios" element={<ScenarioTrainingPage />} />
+                    <Route path="custom" element={managementOnly(<TrainingStudioPage />)} />
+                    <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
+                    <Route path="defense-prep" element={<DefensePrepPage />} />
+                    <Route path="battle-prep" element={managementOnly(<BattlePrepPage />)} />
+                  </Route>
+                  <Route path="chat/:roomId" element={<ConversationRoomRedirect />} />
+                  <Route path="conversations" element={<ChatPage />} />
+                  <Route path="conversations/:roomId" element={<ChatPage />} />
+                  <Route path="review" element={<Outlet />}>
+                    <Route index element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
+                    <Route path="sessions" element={<TrainingHistoryPage />} />
+                    <Route path="sessions/:sessionId" element={<TrainingResultPage />} />
+                  </Route>
+                  <Route path="review/session/:sessionId" element={<TrainingResultSessionRedirect />} />
+                  <Route path="growth" element={<GrowthPage />} />
+                  <Route path="growth/leaderboard" element={<ScenarioLeaderboardPage />} />
+                  <Route path="config" element={managementOnly(<SettingsPage />)} />
+                  <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
+                  <Route path="config/personas/new" element={managementOnly(<PersonaBuilderPage />)} />
+                  <Route path="config/personas/:id/edit" element={managementOnly(<PersonaEditorPage />)} />
+                  <Route path="config/persona/:id/edit" element={<PersonaEditRedirect />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>
-                <Route path="chat/:roomId" element={<ConversationRoomRedirect />} />
-                <Route path="conversations" element={<ChatPage />} />
-                <Route path="conversations/:roomId" element={<ChatPage />} />
-                <Route path="review" element={<Outlet />}>
-                  <Route index element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
-                  <Route path="sessions" element={<TrainingHistoryPage />} />
-                  <Route path="sessions/:sessionId" element={<TrainingResultPage />} />
-                </Route>
-                <Route path="review/session/:sessionId" element={<TrainingResultSessionRedirect />} />
-                <Route path="growth" element={<GrowthPage />} />
-                <Route path="growth/leaderboard" element={<ScenarioLeaderboardPage />} />
-                <Route path="config" element={managementOnly(<SettingsPage />)} />
-                <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
-                <Route path="config/personas/new" element={managementOnly(<PersonaBuilderPage />)} />
-                <Route path="config/personas/:id/edit" element={managementOnly(<PersonaEditorPage />)} />
-                <Route path="config/persona/:id/edit" element={<PersonaEditRedirect />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Route>
-            </Routes>
-          </Suspense>
-        </AppProvider>
-      </AuthProvider>
+              </Routes>
+            </Suspense>
+          </AppProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </I18nProvider>
   )
 }

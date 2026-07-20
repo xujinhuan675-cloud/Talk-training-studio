@@ -1,6 +1,48 @@
 .scenario-config-page {
+  --training-workbench-page-bg: var(--app-bg-gradient);
+  --training-workbench-bg: var(--bg-base);
+  --training-workbench-surface: var(--bg-card);
+  --training-workbench-surface-raised: var(--bg-elevated);
+  --training-workbench-surface-muted: var(--bg-soft);
+  --training-workbench-border: var(--border);
+  --training-workbench-border-soft: var(--border-light);
+  --training-workbench-border-accent: var(--border-accent);
+  --training-workbench-primary: var(--green);
+  --training-workbench-primary-hover: var(--green-hover);
+  --training-workbench-primary-soft: var(--green-soft);
+  --training-workbench-accent: var(--blue);
+  --training-workbench-accent-soft: var(--blue-soft);
+  --training-workbench-warning: var(--amber);
+  --training-workbench-warning-soft: var(--amber-soft);
+  --training-workbench-danger: var(--rose);
+  --training-workbench-danger-soft: var(--rose-soft);
+  --training-workbench-focus: var(--focus-ring);
+  --training-workbench-shadow: var(--shadow-sm);
+  --training-workbench-shadow-strong: var(--shadow-md);
+  --training-workbench-on-primary: var(--bg-card);
+  --config-bg: var(--training-workbench-bg);
+  --config-surface: var(--training-workbench-surface);
+  --config-surface-muted: var(--training-workbench-surface-muted);
+  --config-surface-raised: var(--training-workbench-surface-raised);
+  --config-border: var(--training-workbench-border);
+  --config-border-soft: var(--training-workbench-border-soft);
+  --config-border-accent: var(--training-workbench-border-accent);
+  --config-primary: var(--training-workbench-primary);
+  --config-primary-hover: var(--training-workbench-primary-hover);
+  --config-primary-soft: var(--training-workbench-primary-soft);
+  --config-accent: var(--training-workbench-accent);
+  --config-accent-soft: var(--training-workbench-accent-soft);
+  --config-warning: var(--training-workbench-warning);
+  --config-warning-soft: var(--training-workbench-warning-soft);
+  --config-danger: var(--training-workbench-danger);
+  --config-danger-soft: var(--training-workbench-danger-soft);
+  --config-focus: var(--training-workbench-focus);
+  --config-shadow: var(--training-workbench-shadow-strong);
+  --config-shadow-soft: var(--training-workbench-shadow);
+  --config-on-primary: var(--training-workbench-on-primary);
   min-height: 100%;
-  background: var(--bg-base);
+  padding: 4px 0 28px;
+  background: var(--training-workbench-page-bg);
   color: var(--text-primary);
 }
 
@@ -19,7 +61,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
+  border: 1px solid var(--config-border-soft);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--config-surface);
+  box-shadow: var(--config-shadow-soft);
 }
 
 .scenario-config-kicker {
@@ -27,14 +74,14 @@
   align-items: center;
   gap: 7px;
   margin-bottom: 8px;
-  color: var(--green);
+  color: var(--config-primary);
   font-size: 12px;
   font-weight: 800;
 }
 
 .scenario-config-header h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 26px;
   line-height: 1.18;
   font-weight: 800;
   letter-spacing: 0;
@@ -42,7 +89,7 @@
 
 .scenario-config-header p {
   max-width: 720px;
-  margin: 8px 0 0;
+  margin: 7px 0 0;
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.55;
@@ -66,10 +113,10 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border);
   border-radius: 8px;
   padding: 0 12px;
-  background: var(--bg-card);
+  background: var(--config-surface);
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
@@ -84,22 +131,23 @@
 .scenario-config-weight-head button:hover:not(:disabled),
 .scenario-config-switch-row button:hover,
 .scenario-config-dimension-footer button:hover {
-  border-color: var(--green);
-  color: var(--green);
+  border-color: var(--config-primary);
+  background: var(--config-primary-soft);
+  color: var(--config-primary);
 }
 
 .scenario-config-header-actions .primary,
 .scenario-config-save {
-  border-color: var(--green);
-  background: var(--green);
-  color: #fff;
+  border-color: var(--config-primary);
+  background: var(--config-primary);
+  color: var(--config-on-primary);
 }
 
 .scenario-config-header-actions .primary:hover,
 .scenario-config-save:hover {
-  border-color: var(--green-hover);
-  background: var(--green-hover);
-  color: #fff;
+  border-color: var(--config-primary-hover);
+  background: var(--config-primary-hover);
+  color: var(--config-on-primary);
 }
 
 .scenario-config-header-actions button:disabled,
@@ -113,7 +161,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .scenario-config-stats div {
@@ -121,10 +169,11 @@
   display: grid;
   align-content: center;
   gap: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border-soft);
   border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--bg-card);
+  padding: 11px 12px;
+  background: var(--config-surface);
+  box-shadow: var(--config-shadow-soft);
 }
 
 .scenario-config-stats strong {
@@ -144,21 +193,21 @@
 }
 
 .scenario-config-stats .ok strong {
-  color: var(--green);
+  color: var(--config-primary);
 }
 
 .scenario-config-stats .warning strong {
-  color: var(--rose);
+  color: var(--config-danger);
 }
 
 .scenario-config-notice {
   display: flex;
   align-items: flex-start;
   gap: 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border);
   border-radius: 8px;
   padding: 11px 12px;
-  background: var(--bg-card);
+  background: var(--config-surface);
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
@@ -166,46 +215,46 @@
 
 .scenario-config-notice {
   margin-bottom: 12px;
-  border-color: var(--border-accent);
-  background: var(--green-soft);
-  color: var(--green);
+  border-color: var(--config-border-accent);
+  background: var(--config-primary-soft);
+  color: var(--config-primary);
   font-weight: 700;
 }
 
 .scenario-config-notice.info {
-  border-color: var(--border);
-  background: var(--bg-card);
+  border-color: var(--config-border);
+  background: var(--config-surface);
   color: var(--text-secondary);
 }
 
 .scenario-config-notice.warning {
-  border-color: var(--amber);
-  background: var(--amber-soft);
-  color: var(--amber);
+  border-color: var(--config-warning);
+  background: var(--config-warning-soft);
+  color: var(--config-warning);
 }
 
 .scenario-config-notice.error {
-  border-color: var(--rose);
-  background: var(--rose-soft);
-  color: var(--rose);
+  border-color: var(--config-danger);
+  background: var(--config-danger-soft);
+  color: var(--config-danger);
 }
 
 .scenario-config-tabbar {
   display: flex;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .scenario-config-tabs {
   width: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-  border: 1px solid var(--border);
+  gap: 4px;
+  border: 1px solid var(--config-border);
   border-radius: 8px;
   padding: 4px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
+  background: var(--config-surface-muted);
+  box-shadow: var(--config-shadow-soft);
 }
 
 .scenario-config-tabs button {
@@ -223,7 +272,7 @@
   place-items: center;
   border-radius: 999px;
   padding: 0 6px;
-  background: var(--bg-base);
+  background: var(--config-bg);
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 900;
@@ -231,14 +280,15 @@
 }
 
 .scenario-config-tabs button.selected {
-  border-color: var(--green);
-  background: var(--green-soft);
-  color: var(--green);
+  border-color: var(--config-surface);
+  background: var(--config-surface);
+  color: var(--config-primary);
+  box-shadow: var(--config-shadow-soft);
 }
 
 .scenario-config-tabs button.selected span {
-  background: #fff;
-  color: var(--green);
+  background: var(--config-surface);
+  color: var(--config-primary);
 }
 
 .scenario-config-workspace {
@@ -251,10 +301,10 @@
 .scenario-config-list,
 .scenario-config-editor {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border);
   border-radius: 8px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
+  background: var(--config-surface);
+  box-shadow: var(--config-shadow);
 }
 
 .scenario-config-list {
@@ -268,10 +318,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border);
   border-radius: 8px;
   padding: 0 11px;
-  background: var(--bg-base);
+  background: var(--config-surface-muted);
   color: var(--text-secondary);
 }
 
@@ -299,10 +349,10 @@
   min-width: 0;
   display: grid;
   gap: 4px;
-  border: 1px solid var(--border-light);
+  border: 1px solid var(--config-border-soft);
   border-radius: 8px;
   padding: 10px;
-  background: var(--bg-elevated);
+  background: var(--config-surface-raised);
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
@@ -311,8 +361,8 @@
 
 .scenario-config-list-items > button:hover,
 .scenario-config-list-items > button.selected {
-  border-color: var(--green);
-  background: var(--green-soft);
+  border-color: var(--config-primary);
+  background: var(--config-primary-soft);
 }
 
 .scenario-config-row-title,
@@ -334,7 +384,7 @@
 }
 
 .scenario-config-row-alert {
-  color: var(--rose);
+  color: var(--config-danger);
   font-size: 11px;
   font-weight: 800;
 }
@@ -374,11 +424,11 @@
 }
 
 .scenario-config-weight-head p.ok {
-  color: var(--green);
+  color: var(--config-primary);
 }
 
 .scenario-config-weight-head p.warning {
-  color: var(--rose);
+  color: var(--config-danger);
 }
 
 .scenario-config-form-grid {
@@ -407,9 +457,9 @@
 .scenario-config-weight-table input {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border);
   border-radius: 8px;
-  background: var(--bg-base);
+  background: var(--config-surface-muted);
   color: var(--text-primary);
   font: inherit;
   font-size: 13px;
@@ -427,8 +477,8 @@
 .scenario-config-form-grid select:focus,
 .scenario-config-field textarea:focus,
 .scenario-config-weight-table input:focus {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--green-soft);
+  border-color: var(--config-primary);
+  box-shadow: 0 0 0 3px var(--config-focus);
 }
 
 .scenario-config-form-grid input:disabled {
@@ -456,18 +506,18 @@
 }
 
 .scenario-config-switch-row button.selected {
-  border-color: var(--amber);
-  background: var(--amber-soft);
-  color: var(--amber);
+  border-color: var(--config-accent);
+  background: var(--config-accent-soft);
+  color: var(--config-accent);
 }
 
 .scenario-config-weight-editor {
   display: grid;
   gap: 12px;
-  border: 1px solid var(--border-light);
+  border: 1px solid var(--config-border-soft);
   border-radius: 8px;
   padding: 14px;
-  background: var(--bg-base);
+  background: var(--config-surface-muted);
 }
 
 .scenario-config-weight-head > div:last-child {
@@ -485,7 +535,7 @@
 .scenario-config-weight-meter {
   height: 8px;
   border-radius: 999px;
-  background: var(--border-light);
+  background: var(--config-border-soft);
   overflow: hidden;
 }
 
@@ -493,7 +543,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--green), var(--amber));
+  background: linear-gradient(90deg, var(--config-primary), var(--config-accent), var(--config-warning));
   transition: width var(--transition-normal);
 }
 
@@ -507,10 +557,10 @@
   grid-template-columns: minmax(150px, 190px) minmax(0, 1fr) 92px;
   gap: 10px;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border-soft);
   border-radius: 8px;
   padding: 10px;
-  background: var(--bg-card);
+  background: var(--config-surface);
 }
 
 .scenario-config-weight-table > div.disabled {
@@ -523,10 +573,10 @@
   align-items: center;
   justify-content: flex-start;
   gap: 7px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--config-border);
   border-radius: 8px;
   padding: 0 10px;
-  background: var(--bg-base);
+  background: var(--config-surface-muted);
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
@@ -535,9 +585,9 @@
 }
 
 .scenario-config-weight-table button.selected {
-  border-color: var(--green);
-  background: var(--green-soft);
-  color: var(--green);
+  border-color: var(--config-border-accent);
+  background: var(--config-primary-soft);
+  color: var(--config-primary);
 }
 
 .scenario-config-weight-table button:disabled {
@@ -571,7 +621,7 @@
 }
 
 .scenario-config-dimension-footer {
-  border-top: 1px solid var(--border-light);
+  border-top: 1px solid var(--config-border-soft);
   padding-top: 12px;
 }
 

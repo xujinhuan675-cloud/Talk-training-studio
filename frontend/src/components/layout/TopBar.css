@@ -7,7 +7,7 @@
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  font-family: -apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* ---- Left side ---- */
@@ -58,6 +58,14 @@
   border-color: var(--border-accent);
 }
 
+.topbar-search:focus-visible,
+.topbar-language:focus-within,
+.topbar-theme-control:focus-within {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
+  outline: none;
+}
+
 .topbar-search-text {
   font-size: 13px;
   color: var(--text-muted);
@@ -99,6 +107,57 @@
   font-weight: 600;
 }
 
+.topbar-theme-control {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+}
+
+.topbar-theme-option {
+  min-width: 30px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.topbar-theme-option:hover {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.topbar-theme-option[aria-pressed='true'] {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.topbar-theme-option:focus-visible {
+  outline: none;
+}
+
+.topbar-theme-option svg {
+  color: var(--green);
+  flex-shrink: 0;
+}
+
 .topbar-language svg {
   color: var(--green);
   flex-shrink: 0;
@@ -132,5 +191,13 @@
 
   .topbar-right {
     gap: 8px;
+  }
+
+  .topbar-theme-option {
+    padding: 0;
+  }
+
+  .topbar-theme-option span {
+    display: none;
   }
 }

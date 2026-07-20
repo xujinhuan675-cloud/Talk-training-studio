@@ -3,9 +3,9 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: -apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
   color: var(--text-primary);
   background: var(--bg-base);
   -webkit-font-smoothing: antialiased;

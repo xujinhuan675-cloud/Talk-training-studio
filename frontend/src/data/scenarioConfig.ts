@@ -59,6 +59,13 @@ export interface ScenarioWeightValidation {
   message: string
 }
 
+export type ScenarioDimensionLocalizedText = readonly [zh: string, en: string]
+
+export interface ScenarioDimensionLocalization {
+  name: ScenarioDimensionLocalizedText
+  description: ScenarioDimensionLocalizedText
+}
+
 export const SCENARIO_CONFIG_STORAGE_KEY = 'talkwise.scenarioConfig.v1'
 
 export const DEFAULT_SCENARIO_DIMENSIONS: ScenarioDimensionDefinition[] = [
@@ -103,6 +110,44 @@ export const DEFAULT_SCENARIO_DIMENSIONS: ScenarioDimensionDefinition[] = [
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
 ]
+
+export const DEFAULT_SCENARIO_DIMENSION_LOCALIZATION: Record<string, ScenarioDimensionLocalization> = {
+  substance: {
+    name: ['内容质量', 'Substance'],
+    description: [
+      '回答是否抓住真实业务问题，提供具体信息、清晰取舍和可执行下一步。',
+      'The answer addresses the real business issue with concrete information, clear trade-offs, and useful next steps.',
+    ],
+  },
+  structure: {
+    name: ['表达结构', 'Structure'],
+    description: [
+      '表达是否易于跟随，能使用合适框架，并在不跑题的情况下推动对话。',
+      'The response is easy to follow, uses an appropriate framework, and keeps the conversation moving without rambling.',
+    ],
+  },
+  relevance: {
+    name: ['回应相关性', 'Relevance'],
+    description: [
+      '是否听到对方真实诉求或异议，并围绕当前场景回应，而不是套用泛泛话术。',
+      'The learner listens to the counterpart, responds to the actual objection or need, and avoids generic scripts.',
+    ],
+  },
+  credibility: {
+    name: ['可信度', 'Credibility'],
+    description: [
+      '观点是否有证据、案例、限制条件或可信的落地计划支撑。',
+      'Claims are supported by evidence, examples, limitations, or a believable implementation plan.',
+    ],
+  },
+  differentiation: {
+    name: ['差异化', 'Differentiation'],
+    description: [
+      '回答是否形成清晰观点、有用对比或差异化价值，而不是听起来可以互换。',
+      'The answer creates a clear point of view, useful contrast, or differentiated value instead of sounding interchangeable.',
+    ],
+  },
+}
 
 const DEFAULT_WEIGHTS_BY_CATEGORY: Record<ScenarioTrainingCategory, Record<string, number>> = {
   interview: {
