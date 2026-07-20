@@ -18,6 +18,7 @@ import { buildTrainingSessionStartRequest, createTrainingSession, startTrainingS
 import {
   buildTrainingModeChatPath,
   type InteractionMode,
+  type TrainingFeedbackMode,
   type TrainingMode,
 } from '../services/trainingMode'
 import { launchTrainingSessionFlow } from '../services/trainingLaunch'
@@ -59,7 +60,8 @@ type ScenarioLaunchMode = TrainingMode | 'realtime'
 
 const difficultyOptions: DifficultyFilter[] = ['all', ...scenarioDifficultyOptions]
 const categoryOptions: CategoryFilter[] = ['all', ...scenarioCategoryOptions]
-const modeOptions: ScenarioLaunchMode[] = ['text', 'voice', 'realtime']
+const modeOptions: ScenarioLaunchMode[] = ['text', 'voice', 'video', 'realtime']
+const feedbackModeOptions: TrainingFeedbackMode[] = ['simulation', 'assisted', 'drill']
 
 function getModeLabel(value: ScenarioLaunchMode, t: Translate): string {
   switch (value) {
@@ -71,6 +73,28 @@ function getModeLabel(value: ScenarioLaunchMode, t: Translate): string {
       return t('training.mode.video.label')
     case 'realtime':
       return t('training.mode.realtime.label')
+  }
+}
+
+function getFeedbackModeLabel(value: TrainingFeedbackMode, tr: TranslateInline): string {
+  switch (value) {
+    case 'simulation':
+      return tr('完整模拟', 'Simulation')
+    case 'assisted':
+      return tr('旁路提示', 'Assisted')
+    case 'drill':
+      return tr('逐句纠正', 'Drill')
+  }
+}
+
+function getFeedbackModeDescription(value: TrainingFeedbackMode, tr: TranslateInline): string {
+  switch (value) {
+    case 'simulation':
+      return tr('连续对话，结束后统一复盘。', 'Continuous interview, review at the end.')
+    case 'assisted':
+      return tr('不中断对话，旁边给下一句和风险提示。', 'Side guidance without interrupting the conversation.')
+    case 'drill':
+      return tr('说一句、改一句，达标后再进入下一题。', 'Correct each answer before moving on.')
   }
 }
 
@@ -122,6 +146,7 @@ export default function ScenarioTrainingPage() {
   const { locale, t, tr } = useI18n()
   const { currentUser, hasAnySystemRole } = useAuthContext()
   const [mode, setMode] = useState<ScenarioLaunchMode>('text')
+  const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
   const [query, setQuery] = useState('')
   const [difficulty, setDifficulty] = useState<DifficultyFilter>('all')
   const [category, setCategory] = useState<CategoryFilter>('all')
@@ -201,7 +226,7 @@ export default function ScenarioTrainingPage() {
       const interactionMode = getScenarioInteractionMode(mode)
       const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
       const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
-      const taskConfig = buildScenarioTrainingTaskConfig(scenario)
+      const taskConfig = buildScenarioTrainingTaskConfig(scenario, { feedbackMode })
       const scenarioTrainingMetadata = taskConfig.metadata?.scenario_training
       const scenarioTrainingRecord = scenarioTrainingMetadata
         && typeof scenarioTrainingMetadata === 'object'
@@ -220,11 +245,14 @@ export default function ScenarioTrainingPage() {
               ...taskConfig.metadata,
               trainingMode,
               interactionMode,
+              feedbackMode,
+              trainingFeedbackMode: feedbackMode,
               trainingProfile: 'practice',
               scenario_training: {
                 ...scenarioTrainingRecord,
                 trainingMode,
                 interactionMode,
+                feedbackMode,
               },
             },
           },
@@ -232,7 +260,7 @@ export default function ScenarioTrainingPage() {
         createTrainingSession,
         battlePayload: useConversationMessageTreeRuntime
           ? null
-          : buildScenarioTrainingBattlePayload(scenario, trainingMode),
+          : buildScenarioTrainingBattlePayload(scenario, trainingMode, { feedbackMode }),
         startBattle,
         startTrainingSession,
         buildTrainingSessionStartRequest,
@@ -244,13 +272,15 @@ export default function ScenarioTrainingPage() {
             nextTrainingMode,
             trainingSessionId,
             nextInteractionMode,
+            { trainingFeedbackMode: feedbackMode },
           )
           return `${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`
         },
         buildNavigationState: ({ startedSession }) => ({
-          ...buildScenarioTrainingRouteState(scenario),
+          ...buildScenarioTrainingRouteState(scenario, { feedbackMode }),
           trainingMode,
           interactionMode,
+          trainingFeedbackMode: feedbackMode,
           trainingSessionId: startedSession.session_id,
         }),
         navigate,
@@ -328,7 +358,7 @@ export default function ScenarioTrainingPage() {
         </label>
 
         <div className="scenario-training-mode" role="group" aria-label={tr('训练模式', 'Training mode')}>
-          <span className="scenario-training-mode-label">{tr('模式', 'Mode')}</span>
+          <span className="scenario-training-mode-label">{tr('形式', 'Channel')}</span>
           {modeOptions.map((option) => (
             <button
               key={option}
@@ -338,6 +368,22 @@ export default function ScenarioTrainingPage() {
               onClick={() => setMode(option)}
             >
               {getModeLabel(option, t)}
+            </button>
+          ))}
+        </div>
+
+        <div className="scenario-training-mode feedback" role="group" aria-label={tr('反馈模式', 'Feedback mode')}>
+          <span className="scenario-training-mode-label">{tr('练法', 'Practice')}</span>
+          {feedbackModeOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={feedbackMode === option}
+              className={feedbackMode === option ? 'selected' : ''}
+              onClick={() => setFeedbackMode(option)}
+              title={getFeedbackModeDescription(option, tr)}
+            >
+              {getFeedbackModeLabel(option, tr)}
             </button>
           ))}
         </div>

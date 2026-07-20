@@ -8,6 +8,7 @@ import {
   type PersonaSummary,
   type RoundEndData,
 } from '../services/api'
+import type { TrainingFeedbackMode } from '../services/trainingMode'
 import { useI18n } from '../i18n'
 
 const API_BASE = '/api/v1/stakeholder'
@@ -26,6 +27,8 @@ export interface LocalVideoAttachment {
     schemaVersion: number
     reportDimensions: Array<'content_delivery' | 'camera_presence'>
     cameraPresenceStatus: 'placeholder'
+    feedbackMode?: TrainingFeedbackMode
+    trainingFeedbackMode?: TrainingFeedbackMode
   }
 }
 

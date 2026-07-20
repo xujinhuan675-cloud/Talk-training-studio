@@ -81,6 +81,33 @@ test('buildTrainingModeChatPath carries live coach profile and language pair', (
   assert.equal(url.searchParams.get('targetLanguage'), 'en-US')
 })
 
+test('buildTrainingModeChatPath carries non-default training feedback modes', () => {
+  const assistedPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice', null, null, {
+    trainingFeedbackMode: 'assisted',
+  }), 'http://localhost')
+  const drillPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice', null, null, {
+    trainingFeedbackMode: 'drill',
+  }), 'http://localhost')
+
+  assert.equal(trainingMode.TRAINING_FEEDBACK_MODE_QUERY_PARAM, 'trainingFeedbackMode')
+  assert.equal(assistedPath.searchParams.get('trainingFeedbackMode'), 'assisted')
+  assert.equal(drillPath.searchParams.get('trainingFeedbackMode'), 'drill')
+})
+
+test('buildTrainingModeChatPath preserves existing URLs when feedback mode is omitted or default', () => {
+  const omittedPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice'), 'http://localhost')
+  const defaultPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice', null, null, {
+    trainingFeedbackMode: 'simulation',
+  }), 'http://localhost')
+  const invalidPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice', null, null, {
+    trainingFeedbackMode: 'review',
+  }), 'http://localhost')
+
+  assert.equal(omittedPath.searchParams.has('trainingFeedbackMode'), false)
+  assert.equal(defaultPath.searchParams.has('trainingFeedbackMode'), false)
+  assert.equal(invalidPath.searchParams.has('trainingFeedbackMode'), false)
+})
+
 test('getTrainingModeFromLocation reads valid modes from query first', () => {
   assert.equal(
     trainingMode.getTrainingModeFromLocation('?trainingMode=voice', { trainingMode: 'text' }),
@@ -146,6 +173,28 @@ test('getTrainingProfileFromLocation reads query first and defaults to practice'
   assert.equal(trainingMode.getTrainingProfileFromLocation('', { trainingProfile: 'live_coach' }), 'live_coach')
   assert.equal(trainingMode.getTrainingProfileFromLocation('', { source: 'live-coach' }), 'live_coach')
   assert.equal(trainingMode.getTrainingProfileFromLocation('?trainingProfile=invalid', null), 'practice')
+})
+
+test('getTrainingFeedbackModeFromLocation reads query first and falls back to route state', () => {
+  assert.equal(
+    trainingMode.getTrainingFeedbackModeFromLocation('?trainingFeedbackMode=assisted', {
+      trainingFeedbackMode: 'drill',
+    }),
+    'assisted',
+  )
+  assert.equal(trainingMode.getTrainingFeedbackModeFromLocation('?trainingFeedbackMode=drill', null), 'drill')
+  assert.equal(
+    trainingMode.getTrainingFeedbackModeFromLocation('?trainingFeedbackMode=invalid', {
+      trainingFeedbackMode: 'drill',
+    }),
+    'drill',
+  )
+  assert.equal(trainingMode.getTrainingFeedbackModeFromLocation('', { trainingFeedbackMode: 'simulation' }), 'simulation')
+})
+
+test('getTrainingFeedbackModeFromLocation defaults to simulation', () => {
+  assert.equal(trainingMode.getTrainingFeedbackModeFromLocation('', null), 'simulation')
+  assert.equal(trainingMode.getTrainingFeedbackModeFromLocation('?trainingFeedbackMode=invalid', null), 'simulation')
 })
 
 test('getLiveCoachLanguagePairFromLocation reads query first and falls back to state', () => {

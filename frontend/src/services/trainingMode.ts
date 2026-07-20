@@ -2,11 +2,13 @@ export type TrainingMode = 'text' | 'voice' | 'video'
 export type NormalizedTrainingMode = TrainingMode
 export type InteractionMode = 'turn_based' | 'realtime'
 export type TrainingProfile = 'practice' | 'live_coach'
+export type TrainingFeedbackMode = 'simulation' | 'assisted' | 'drill'
 export type LegacyTrainingMode = TrainingMode | 'realtime'
 
 export const TRAINING_MODE_QUERY_PARAM = 'trainingMode'
 export const INTERACTION_MODE_QUERY_PARAM = 'interactionMode'
 export const TRAINING_PROFILE_QUERY_PARAM = 'trainingProfile'
+export const TRAINING_FEEDBACK_MODE_QUERY_PARAM = 'trainingFeedbackMode'
 export const SOURCE_LANGUAGE_QUERY_PARAM = 'sourceLanguage'
 export const TARGET_LANGUAGE_QUERY_PARAM = 'targetLanguage'
 const CONVERSATION_ROUTE_PREFIX = '/conversations'
@@ -14,6 +16,8 @@ const CONVERSATION_ROUTE_PREFIX = '/conversations'
 const TRAINING_MODES = new Set<NormalizedTrainingMode>(['text', 'voice', 'video'])
 const INTERACTION_MODES = new Set<InteractionMode>(['turn_based', 'realtime'])
 const TRAINING_PROFILES = new Set<TrainingProfile>(['practice', 'live_coach'])
+const TRAINING_FEEDBACK_MODES = new Set<TrainingFeedbackMode>(['simulation', 'assisted', 'drill'])
+const DEFAULT_TRAINING_FEEDBACK_MODE: TrainingFeedbackMode = 'simulation'
 
 export interface TrainingModeLocationState {
   source?: string
@@ -21,12 +25,14 @@ export interface TrainingModeLocationState {
   interactionMode?: InteractionMode
   trainingSessionId?: string
   trainingProfile?: TrainingProfile
+  trainingFeedbackMode?: TrainingFeedbackMode
   sourceLanguage?: string
   targetLanguage?: string
 }
 
 export interface TrainingModeChatPathOptions {
   trainingProfile?: TrainingProfile | null
+  trainingFeedbackMode?: TrainingFeedbackMode | null
   sourceLanguage?: string | null
   targetLanguage?: string | null
 }
@@ -45,6 +51,12 @@ function isInteractionMode(value: unknown): value is InteractionMode {
 function normalizeTrainingProfile(value: unknown): TrainingProfile | null {
   return typeof value === 'string' && TRAINING_PROFILES.has(value as TrainingProfile)
     ? value as TrainingProfile
+    : null
+}
+
+function normalizeTrainingFeedbackMode(value: unknown): TrainingFeedbackMode | null {
+  return typeof value === 'string' && TRAINING_FEEDBACK_MODES.has(value as TrainingFeedbackMode)
+    ? value as TrainingFeedbackMode
     : null
 }
 
@@ -78,6 +90,10 @@ export function buildTrainingModeChatPath(
   const trainingProfile = normalizeTrainingProfile(options.trainingProfile)
   if (trainingProfile && trainingProfile !== 'practice') {
     params.set(TRAINING_PROFILE_QUERY_PARAM, trainingProfile)
+  }
+  const trainingFeedbackMode = normalizeTrainingFeedbackMode(options.trainingFeedbackMode)
+  if (trainingFeedbackMode && trainingFeedbackMode !== DEFAULT_TRAINING_FEEDBACK_MODE) {
+    params.set(TRAINING_FEEDBACK_MODE_QUERY_PARAM, trainingFeedbackMode)
   }
   const sourceLanguage = normalizeLanguage(options.sourceLanguage)
   const targetLanguage = normalizeLanguage(options.targetLanguage)
@@ -153,6 +169,21 @@ export function getTrainingProfileFromLocation(search: string, state: unknown): 
   }
 
   return getStateValue(state, 'source') === 'live-coach' ? 'live_coach' : 'practice'
+}
+
+export function getTrainingFeedbackModeFromLocation(search: string, state: unknown): TrainingFeedbackMode {
+  const searchParams = new URLSearchParams(search)
+  const feedbackModeFromQuery = normalizeTrainingFeedbackMode(searchParams.get(TRAINING_FEEDBACK_MODE_QUERY_PARAM))
+  if (feedbackModeFromQuery) {
+    return feedbackModeFromQuery
+  }
+
+  const feedbackModeFromState = normalizeTrainingFeedbackMode(getStateValue(state, 'trainingFeedbackMode'))
+  if (feedbackModeFromState) {
+    return feedbackModeFromState
+  }
+
+  return DEFAULT_TRAINING_FEEDBACK_MODE
 }
 
 export function getLiveCoachLanguagePairFromLocation(

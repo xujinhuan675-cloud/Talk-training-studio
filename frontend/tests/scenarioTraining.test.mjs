@@ -393,12 +393,22 @@ test('scenario task config maps MVP card values to Training Studio enums', () =>
 
   const serviceConfig = scenarioTrainingData.buildScenarioTrainingTaskConfig(customerServiceScenario)
   const expertConfig = scenarioTrainingData.buildScenarioTrainingTaskConfig(expertScenario)
+  const drillConfig = scenarioTrainingData.buildScenarioTrainingTaskConfig(customerServiceScenario, {
+    feedbackMode: 'drill',
+  })
 
   assert.equal(serviceConfig.category, 'workplace')
   assert.equal(expertConfig.difficulty, 'hard')
   assert.equal(expertConfig.category, 'negotiation')
   assert.equal(expertConfig.metadata.source, 'scenario_training')
+  assert.equal(serviceConfig.metadata.feedbackMode, 'simulation')
+  assert.equal(serviceConfig.metadata.trainingFeedbackMode, 'simulation')
   assert.equal(expertConfig.metadata.scenario_training.id, expertScenario.id)
+  assert.equal(drillConfig.metadata.feedbackMode, 'drill')
+  assert.equal(drillConfig.metadata.trainingFeedbackMode, 'drill')
+  assert.equal(drillConfig.metadata.feedbackPolicy.mode, 'drill')
+  assert.equal(drillConfig.metadata.feedbackPolicy.channelAgnostic, true)
+  assert.equal(drillConfig.metadata.scenario_training.feedbackMode, 'drill')
   assert.deepEqual(serviceConfig.rubric_weights, {
     substance: 0.25,
     structure: 0.2,
@@ -423,14 +433,27 @@ test('scenario prompts carry realistic customer simulation rules', () => {
   assert.ok(scenario)
 
   const prompt = scenarioTrainingData.buildScenarioTrainingPrompt(scenario, 'text')
+  const drillPrompt = scenarioTrainingData.buildScenarioTrainingPrompt(scenario, 'text', {
+    feedbackMode: 'drill',
+  })
   const payload = scenarioTrainingData.buildScenarioTrainingBattlePayload(scenario, 'text')
+  const drillPayload = scenarioTrainingData.buildScenarioTrainingBattlePayload(scenario, 'voice', {
+    feedbackMode: 'drill',
+  })
 
   assert.match(prompt, /not a cooperative demo/)
   assert.match(prompt, /30-120 Chinese characters/)
   assert.match(prompt, /Do not reveal all needs, budget, objections, or bottom lines at once/)
   assert.match(prompt, /never score the learner/)
+  assert.match(prompt, /complete simulation/)
   assert.match(prompt, /Difficulty behavior:/)
   assert.match(payload.persona_style, /Speak like a real counterpart/)
+  assert.match(payload.persona_style, /Feedback mode: simulation/)
+  assert.match(drillPrompt, /deliberate drill/)
+  assert.match(drillPrompt, /one concise correction, one stronger rewrite/)
+  assert.doesNotMatch(drillPrompt, /never give coaching advice/)
+  assert.match(drillPayload.persona_style, /Run deliberate drill turns/)
+  assert.match(drillPayload.persona_style, /Feedback mode: drill/)
 })
 
 test('scenario context helpers find catalog cards and session-linked progress', () => {
@@ -464,7 +487,9 @@ test('scenario route state carries full chat context without sharing mutable arr
 
   assert.ok(scenario)
 
-  const state = scenarioTrainingData.buildScenarioTrainingRouteState(scenario)
+  const state = scenarioTrainingData.buildScenarioTrainingRouteState(scenario, {
+    feedbackMode: 'assisted',
+  })
 
   assert.equal(state.source, 'scenario-training')
   assert.equal(state.scenarioTrainingId, scenario.id)
@@ -479,6 +504,7 @@ test('scenario route state carries full chat context without sharing mutable arr
   assert.equal(state.scenarioDifficulty, scenario.difficulty)
   assert.equal(state.scenarioCategory, scenario.category)
   assert.equal(state.scenarioRequired, scenario.required)
+  assert.equal(state.trainingFeedbackMode, 'assisted')
   assert.deepEqual(state.scenarioTrainingPoints, scenario.trainingPoints)
   assert.notEqual(state.scenarioTrainingPoints, scenario.trainingPoints)
 })

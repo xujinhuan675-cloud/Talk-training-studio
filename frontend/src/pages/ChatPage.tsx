@@ -74,10 +74,12 @@ import {
 import {
   getInteractionModeFromLocation,
   getLiveCoachLanguagePairFromLocation,
+  getTrainingFeedbackModeFromLocation,
   getTrainingProfileFromLocation,
   getTrainingModeFromLocation,
   getTrainingSessionIdFromLocation,
   isTrainingModeBattlePrep,
+  type TrainingFeedbackMode,
 } from '../services/trainingMode'
 import {
   findScenarioTrainingIdBySession,
@@ -418,6 +420,12 @@ function getInteractionModeLabel(mode: string, tr: TranslateInline): string {
   return mode
 }
 
+function getTrainingFeedbackModeLabel(mode: TrainingFeedbackMode, tr: TranslateInline): string {
+  if (mode === 'simulation') return tr('完整模拟', 'Full simulation')
+  if (mode === 'assisted') return tr('旁路提示', 'Side guidance')
+  return tr('逐句纠正', 'Drill correction')
+}
+
 type RefreshGuidanceOptions = {
   open?: boolean
   extraTurn?: TranscriptTurnDTO
@@ -450,9 +458,12 @@ function ChatArea() {
   const interactionMode = getInteractionModeFromLocation(location.search, location.state)
   const trainingSessionId = getTrainingSessionIdFromLocation(location.search, location.state)
   const trainingProfile = getTrainingProfileFromLocation(location.search, location.state)
+  const trainingFeedbackMode = getTrainingFeedbackModeFromLocation(location.search, location.state)
   const liveCoachLanguagePair = getLiveCoachLanguagePairFromLocation(location.search, location.state)
   const isLiveCoachSession = trainingProfile === 'live_coach'
   const isTrainingSession = Boolean(trainingSessionId)
+  const isDrillFeedbackMode = trainingFeedbackMode === 'drill'
+  const trainingGuidanceEnabled = isTrainingSession && (isLiveCoachSession || trainingFeedbackMode !== 'simulation')
   const progressScope = React.useMemo(() => ({
     userId: currentUser?.userId ?? null,
     teamId: currentUser?.teamId ?? null,
@@ -509,9 +520,23 @@ function ChatArea() {
 
   const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.sourceLanguage, locale)
   const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.targetLanguage, locale)
+  const trainingFeedbackMetadata = React.useMemo(() => (
+    isTrainingSession
+      ? {
+          feedbackMode: trainingFeedbackMode,
+          trainingFeedbackMode,
+          feedbackPolicy: {
+            mode: trainingFeedbackMode,
+            version: 1,
+            channelAgnostic: true,
+          },
+        }
+      : undefined
+  ), [isTrainingSession, trainingFeedbackMode])
   const liveCoachGuidanceMetadata = React.useMemo(() => {
     if (!isLiveCoachSession) return undefined
     return {
+      ...(trainingFeedbackMetadata || {}),
       source: 'live_coach_bilingual_mvp',
       trainingProfile,
       liveCoach: {
@@ -541,6 +566,7 @@ function ChatArea() {
     liveCoachLanguagePair.targetLanguage,
     sourceLanguageLabel,
     targetLanguageLabel,
+    trainingFeedbackMetadata,
     trainingProfile,
   ])
   const liveCoachRealtimeTranscriptMetadata = React.useMemo(() => (
@@ -551,6 +577,10 @@ function ChatArea() {
         }
       : undefined
   ), [liveCoachGuidanceMetadata])
+  const realtimeTranscriptMetadata = React.useMemo(
+    () => mergeMetadata(liveCoachRealtimeTranscriptMetadata, trainingFeedbackMetadata),
+    [liveCoachRealtimeTranscriptMetadata, trainingFeedbackMetadata],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -616,8 +646,8 @@ function ChatArea() {
     [selectedLlmChoice],
   )
   const outgoingMessageMetadata = React.useMemo(
-    () => mergeMetadata(liveCoachGuidanceMetadata, llmSelectionMetadata),
-    [liveCoachGuidanceMetadata, llmSelectionMetadata],
+    () => mergeMetadata(liveCoachGuidanceMetadata, trainingFeedbackMetadata, llmSelectionMetadata),
+    [liveCoachGuidanceMetadata, llmSelectionMetadata, trainingFeedbackMetadata],
   )
 
   useEffect(() => {
@@ -680,7 +710,16 @@ function ChatArea() {
   }, [])
 
   useEffect(() => {
-    if (!trainingSessionId) return
+    if (!trainingGuidanceEnabled || !trainingSessionId) {
+      if (guidanceEventSourceRef.current) {
+        guidanceStreamVersionRef.current += 1
+        guidanceEventSourceRef.current.close()
+        guidanceEventSourceRef.current = null
+      }
+      setGuidanceLoading(false)
+      setGuidanceStreamConnected(false)
+      return
+    }
     if (guidanceEventSourceRef.current) {
       guidanceStreamVersionRef.current += 1
       guidanceEventSourceRef.current.close()
@@ -708,7 +747,10 @@ function ChatArea() {
         setGuidanceLoading(false)
         setGuidanceError(null)
         setGuidanceEvents(data.events)
-        if (data.events.some((item) => item.severity !== 'info')) {
+        if (
+          (isDrillFeedbackMode && data.events.length > 0)
+          || data.events.some((item) => item.severity !== 'info')
+        ) {
           setGuidanceOpen(true)
         }
       } catch {
@@ -742,7 +784,7 @@ function ChatArea() {
       }
       setGuidanceStreamConnected(false)
     }
-  }, [trainingSessionId, tr])
+  }, [isDrillFeedbackMode, trainingGuidanceEnabled, trainingSessionId, tr])
 
   // Compute battle prep round count from existing messages
   const selectedRoomMessages = chat.selectedRoom?.messages
@@ -768,6 +810,7 @@ function ChatArea() {
         turn_id: String(message.id),
         metadata: {
           ...(liveCoachGuidanceMetadata || {}),
+          ...(trainingFeedbackMetadata || {}),
           ...((message as { metadata?: Record<string, unknown> }).metadata || {}),
           room_id: message.room_id,
           sender_id: message.sender_id,
@@ -776,7 +819,7 @@ function ChatArea() {
           emotion_label: message.emotion_label,
         },
       }))
-  }, [liveCoachGuidanceMetadata, selectedRoomMessages])
+  }, [liveCoachGuidanceMetadata, selectedRoomMessages, trainingFeedbackMetadata])
 
   useEffect(() => {
     guidanceTurnsRef.current = guidanceTurns
@@ -805,7 +848,7 @@ function ChatArea() {
   }, [battlePrepEnding, chat.selectedRoom, personaMap, tr])
 
   const refreshGuidance = React.useCallback(async (options: RefreshGuidanceOptions = {}) => {
-    if (!trainingSessionId) return
+    if (!trainingGuidanceEnabled || !trainingSessionId) return
     if (guidanceInFlightRef.current) {
       if (options.open) setGuidanceOpen(true)
       return
@@ -847,7 +890,10 @@ function ChatArea() {
       const result = await requestTrainingGuidance(trainingSessionId, requestBody)
       if (guidanceRequestSeqRef.current !== requestId) return
       setGuidanceEvents(result.events)
-      if (options.autoOpenOnSignal && result.events.some((event) => event.severity !== 'info')) {
+      const shouldAutoOpen = isDrillFeedbackMode
+        ? result.events.length > 0
+        : result.events.some((event) => event.severity !== 'info')
+      if (options.autoOpenOnSignal && shouldAutoOpen) {
         setGuidanceOpen(true)
       }
     } catch (e: unknown) {
@@ -859,10 +905,10 @@ function ChatArea() {
         setGuidanceLoading(false)
       }
     }
-  }, [trainingSessionId, tr])
+  }, [isDrillFeedbackMode, trainingGuidanceEnabled, trainingSessionId, tr])
 
   const scheduleGuidanceRefresh = React.useCallback((options: RefreshGuidanceOptions = {}) => {
-    if (!trainingSessionId || guidanceStreamConnected) return
+    if (!trainingGuidanceEnabled || guidanceStreamConnected) return
     if (guidanceTimerRef.current !== null) {
       window.clearTimeout(guidanceTimerRef.current)
     }
@@ -870,26 +916,27 @@ function ChatArea() {
       guidanceTimerRef.current = null
       void refreshGuidance(options)
     }, GUIDANCE_AUTO_DELAY_MS)
-  }, [guidanceStreamConnected, refreshGuidance, trainingSessionId])
+  }, [guidanceStreamConnected, refreshGuidance, trainingGuidanceEnabled])
 
   const handleSend = React.useCallback(async () => {
     const outgoingText = chat.inputValue.trim()
     const success = await sendChatMessage(outgoingMessageMetadata)
     if (!success) return
-    if (trainingSessionId && outgoingText) {
+    if (trainingGuidanceEnabled && outgoingText) {
       scheduleGuidanceRefresh({
-        extraTurn: isLiveCoachSession
-          ? {
-              speaker: 'user',
-              text: outgoingText,
-              metadata: {
-                ...(outgoingMessageMetadata || {}),
-                source: 'live_coach_text_input',
-                trainingMode,
-                interactionMode,
-              },
-            }
-          : undefined,
+        extraTurn: {
+          speaker: 'user',
+          text: outgoingText,
+          metadata: {
+            ...(outgoingMessageMetadata || {}),
+            source: isLiveCoachSession ? 'live_coach_text_input' : 'training_text_input',
+            trainingMode,
+            interactionMode,
+            trainingFeedbackMode,
+          },
+        },
+        open: isDrillFeedbackMode,
+        autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
         minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
       })
     }
@@ -906,11 +953,14 @@ function ChatArea() {
     chat.inputValue,
     handleEndBattle,
     interactionMode,
+    isDrillFeedbackMode,
     isLiveCoachSession,
     outgoingMessageMetadata,
     scheduleGuidanceRefresh,
     selectedRoomType,
     sendChatMessage,
+    trainingFeedbackMode,
+    trainingGuidanceEnabled,
     trainingMode,
     trainingSessionId,
   ])
@@ -1015,6 +1065,7 @@ function ChatArea() {
         : null,
     trainingMode ? { label: getTrainingModeLabel(trainingMode, tr), tone: 'mode' } : null,
     { label: getInteractionModeLabel(interactionMode, tr), tone: 'mode' },
+    isTrainingSession ? { label: getTrainingFeedbackModeLabel(trainingFeedbackMode, tr), tone: isDrillFeedbackMode ? 'live' : 'mode' } : null,
   ])
   const trainingContextDescription = scenarioTrainingCard?.description
     || scenarioDescriptionFromState
@@ -1067,6 +1118,26 @@ function ChatArea() {
     ? tr('正在观察实时转写', 'Watching the live transcript')
     : tr('本次训练中正在流式输出', 'Streaming during this training session')
   const guidanceActionText = isLiveCoachSession ? tr('问教练', 'Ask coach') : tr('给我指导', 'Guide me')
+  const resolvedGuidanceBarTitle = isLiveCoachSession
+    ? guidanceBarTitle
+    : isDrillFeedbackMode
+      ? tr('逐句纠正', 'Drill correction')
+      : tr('旁路提示', 'Side guidance')
+  const resolvedGuidanceReadyText = isLiveCoachSession
+    ? guidanceReadyText
+    : isDrillFeedbackMode
+      ? tr('每次回答后会给出纠正、改写和重试建议。', 'Each answer can receive correction, rewrite, and retry guidance.')
+      : tr('对话旁路提示已就绪，不会打断完整模拟。', 'Side guidance is ready without interrupting the conversation.')
+  const resolvedGuidanceStreamingText = isLiveCoachSession
+    ? guidanceStreamingText
+    : isDrillFeedbackMode
+      ? tr('正在根据最新一轮生成纠正建议。', 'Generating correction guidance from the latest turn.')
+      : tr('正在根据当前对话生成旁路提示。', 'Generating side guidance from the current conversation.')
+  const resolvedGuidanceActionText = isLiveCoachSession
+    ? guidanceActionText
+    : isDrillFeedbackMode
+      ? tr('纠正这一句', 'Correct this turn')
+      : tr('给我提示', 'Guide me')
   const realtimeBarTitle = isLiveCoachSession
     ? tr('真实对话教练', 'Live conversation coach')
     : tr('实时语音训练', 'Realtime voice practice')
@@ -1075,19 +1146,23 @@ function ChatArea() {
     : latestPersonaPrompt || tr('实时通道已绑定当前训练房间', 'Realtime channel is bound to this training room')
 
   useEffect(() => {
-    if (!trainingSessionId || !latestGuidanceMessage || latestGuidanceMessage.sender_type !== 'persona') return
+    if (!trainingGuidanceEnabled || !latestGuidanceMessage || latestGuidanceMessage.sender_type !== 'persona') return
     const messageKey = `${selectedRoomId || 'room'}:${latestGuidanceMessage.id}`
     if (lastAutoGuidanceMessageKeyRef.current === messageKey) return
     lastAutoGuidanceMessageKeyRef.current = messageKey
     scheduleGuidanceRefresh({
-      autoOpenOnSignal: true,
+      open: isDrillFeedbackMode,
+      autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
       minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
     })
   }, [
+    isDrillFeedbackMode,
+    isLiveCoachSession,
     latestGuidanceMessage,
     scheduleGuidanceRefresh,
     selectedRoomId,
-    trainingSessionId,
+    trainingFeedbackMode,
+    trainingGuidanceEnabled,
   ])
 
   useEffect(() => {
@@ -1166,23 +1241,27 @@ function ChatArea() {
         speaker: role === 'assistant' ? 'counterpart' : 'user',
         text: transcript,
         metadata: {
-          ...(liveCoachRealtimeTranscriptMetadata || {}),
+          ...(realtimeTranscriptMetadata || {}),
           source: isLiveCoachSession ? 'live_coach_realtime_voice' : 'realtime_voice',
           trainingMode: 'voice',
           interactionMode: 'realtime',
           trainingProfile,
+          trainingFeedbackMode,
           realtimeRole: role,
         },
       },
-      autoOpenOnSignal: true,
+      open: isDrillFeedbackMode,
+      autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
       minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
     })
     setTimeout(chat.scrollToBottom, 100)
   }, [
     chat.scrollToBottom,
+    isDrillFeedbackMode,
     isLiveCoachSession,
-    liveCoachRealtimeTranscriptMetadata,
+    realtimeTranscriptMetadata,
     scheduleGuidanceRefresh,
+    trainingFeedbackMode,
     trainingProfile,
   ])
 
@@ -1193,7 +1272,7 @@ function ChatArea() {
     ))
     setTrainingSessionCompleting(true)
     try {
-      if (isLiveCoachSession && guidanceEvents.length > 0) {
+      if (trainingGuidanceEnabled && guidanceEvents.length > 0) {
         const signature = guidanceEventsSignature(guidanceEvents)
         if (persistedGuidanceSignatureRef.current !== signature) {
           try {
@@ -1205,9 +1284,11 @@ function ChatArea() {
               total_turn_count: guidanceTurnsRef.current.length,
               metadata: {
                 ...(liveCoachGuidanceMetadata || {}),
+                ...(trainingFeedbackMetadata || {}),
                 trainingMode,
                 interactionMode,
                 trainingProfile,
+                trainingFeedbackMode,
               },
             })
             persistedGuidanceSignatureRef.current = signature
@@ -1222,9 +1303,10 @@ function ChatArea() {
         }
       }
       const completionBranchMetadata = buildTrainingCompletionBranchMetadata(messageTreeSelection)
+      const completionMetadata = mergeMetadata(completionBranchMetadata, trainingFeedbackMetadata)
       const session = await completeTrainingSession(trainingSessionId, {
         generate_report: hasMessages,
-        ...(completionBranchMetadata ? { metadata: completionBranchMetadata } : {}),
+        ...(completionMetadata ? { metadata: completionMetadata } : {}),
       })
       setTrainingSessionCompleted(true)
       const reportId = Number(session.report_id)
@@ -1272,6 +1354,9 @@ function ChatArea() {
     scenarioTrainingId,
     selectedRoomMessages,
     trainingMode,
+    trainingFeedbackMetadata,
+    trainingFeedbackMode,
+    trainingGuidanceEnabled,
     trainingProfile,
     trainingSessionCompleting,
     trainingSessionId,
@@ -1279,9 +1364,9 @@ function ChatArea() {
   ])
 
   const handleRequestGuidance = React.useCallback(async () => {
-    if (guidanceLoading) return
+    if (guidanceLoading || !trainingGuidanceEnabled) return
     await refreshGuidance({ open: true })
-  }, [guidanceLoading, refreshGuidance])
+  }, [guidanceLoading, refreshGuidance, trainingGuidanceEnabled])
 
   const videoAnswerCount = React.useMemo(() => {
     if (!isVideoBattlePrep || !selectedRoomMessages) return 0
@@ -1376,6 +1461,8 @@ function ChatArea() {
         schemaVersion: 1,
         reportDimensions: ['content_delivery', 'camera_presence'],
         cameraPresenceStatus: 'placeholder',
+        feedbackMode: trainingFeedbackMode,
+        trainingFeedbackMode,
       } : undefined,
     }, chat.inputValue.trim() || fallbackCaption)
     if (sent && isVideoBattlePrep) {
@@ -1386,21 +1473,24 @@ function ChatArea() {
           speaker: 'user',
           text: chat.inputValue.trim() || fallbackCaption || tr('我提交了一段视频回答。', 'I submitted a recorded video answer.'),
           metadata: {
+            ...(trainingFeedbackMetadata || {}),
             source: 'video_answer',
             mimeType: result.mimeType,
             durationMs: result.durationMs,
             trainingMode: 'video',
             interactionMode: 'turn_based',
+            trainingFeedbackMode,
           },
         },
-        autoOpenOnSignal: true,
+        open: isDrillFeedbackMode,
+        autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
         minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
       })
     } else if (isVideoBattlePrep) {
       setVideoAnswerStatus('error')
       setVideoAnswerError(tr('视频消息发送失败', 'Video message failed to send'))
     }
-  }, [chat, isVideoBattlePrep, scheduleGuidanceRefresh, tr])
+  }, [chat, isDrillFeedbackMode, isLiveCoachSession, isVideoBattlePrep, scheduleGuidanceRefresh, trainingFeedbackMetadata, trainingFeedbackMode, tr])
 
   return (
     <>
@@ -1645,18 +1735,18 @@ function ChatArea() {
         </section>
       )}
 
-      {trainingSessionId && (
+      {trainingGuidanceEnabled && (
         <section className="chat-page-guidance-bar" data-testid="training-guidance-bar">
           <div className="guidance-copy">
             <Lightbulb size={15} />
-            <strong>{guidanceBarTitle}</strong>
+            <strong>{resolvedGuidanceBarTitle}</strong>
             <span>
               {guidanceError
                 ? guidanceError
                 : localizedGuidanceEvents[0]?.displayMessage || (
                   guidanceStreamConnected
-                    ? guidanceStreamingText
-                    : guidanceReadyText
+                    ? resolvedGuidanceStreamingText
+                    : resolvedGuidanceReadyText
                 )}
             </span>
           </div>
@@ -1665,9 +1755,10 @@ function ChatArea() {
             type="button"
             onClick={handleRequestGuidance}
             disabled={guidanceLoading}
+            aria-label={resolvedGuidanceActionText}
           >
             {guidanceLoading ? <Loader2 size={14} className="spin" /> : <Lightbulb size={14} />}
-            {guidanceLoading ? tr('思考中', 'Thinking') : guidanceActionText}
+            {guidanceLoading ? tr('思考中', 'Thinking') : resolvedGuidanceActionText}
           </button>
         </section>
       )}
@@ -1682,10 +1773,10 @@ function ChatArea() {
         </section>
       )}
 
-      {trainingSessionId && guidanceOpen && (
+      {trainingGuidanceEnabled && guidanceOpen && (
         <section className="chat-page-guidance-panel" data-testid="training-guidance-panel">
           <div className="guidance-panel-header">
-            <strong>{isLiveCoachSession ? tr('实时教练', 'Live coach') : tr('实时指导', 'Realtime guidance')}</strong>
+            <strong>{resolvedGuidanceBarTitle}</strong>
             <button
               type="button"
               onClick={() => setGuidanceOpen(false)}
@@ -1842,7 +1933,7 @@ function ChatArea() {
             disabled={chat.sending}
             personaId={primaryPersona?.id || null}
             counterpartName={counterpartName}
-            transcriptMetadata={liveCoachRealtimeTranscriptMetadata}
+            transcriptMetadata={realtimeTranscriptMetadata}
             onPersistedTranscript={handleRealtimeTranscriptPersisted}
           />
         </div>
@@ -1995,12 +2086,15 @@ function ChatArea() {
                   text: transcript,
                   metadata: {
                     ...(liveCoachGuidanceMetadata || {}),
+                    ...(trainingFeedbackMetadata || {}),
                     source: isLiveCoachSession ? 'live_coach_voice_transcription' : 'voice_transcription',
                     trainingMode: 'voice',
                     interactionMode: 'turn_based',
+                    trainingFeedbackMode,
                   },
                 },
-                autoOpenOnSignal: true,
+                open: isDrillFeedbackMode,
+                autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
                 minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
               })
               setTimeout(chat.scrollToBottom, 100)

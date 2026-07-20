@@ -230,6 +230,43 @@ SCENARIO_TRAINING_TEMPLATES: tuple[ScenarioTrainingTemplate, ...] = (
         training_points=["用结果开场", "用 STAR 讲清楚关键案例", "解释动机和岗位匹配"],
     ),
     ScenarioTrainingTemplate(
+        id="ai-web3-agent-pm-comprehensive-interview",
+        title="AI Agent + Web3 产品经理综合面试",
+        description=(
+            "围绕 AI Agent 产品岗位进行一场完整综合面试，覆盖自我介绍、求职动机、"
+            "XStable 真实工作经历、NOFX 项目边界、OpenEvolve Agent 机制理解、"
+            "AI + Web3 交易产品判断和毕业一年超预期能力证明。"
+        ),
+        customer_profile=(
+            "AI Agent / AI 产品方向招聘面试官，熟悉 Web3 交易、海外信息流和智能体产品，"
+            "关注候选人的真实贡献、证据密度、技术边界、风险意识和岗位匹配度。"
+        ),
+        difficulty="hard",
+        category="interview",
+        required=False,
+        status="not_started",
+        opening_line="请你先用 90 秒介绍自己，重点说明为什么你适合 AI Agent / Web3 交易产品方向。",
+        persona=ScenarioTrainingPersona(
+            name="顾面试官",
+            role="AI Agent 产品招聘面试官",
+            style=(
+                "结构化、证据导向、追问真实贡献和边界。按完整面试推进：先听自我介绍，"
+                "再深挖 XStable、NOFX、OpenEvolve，随后用压力问题测试岗位匹配、"
+                "交易产品理解、Agent 机制判断和毕业一年超预期表达。"
+            ),
+        ),
+        learner_role="AI Agent Product Manager Candidate",
+        framework=ExpressionFramework.STAR,
+        training_points=[
+            "用 AI Agent 为主线，清楚说明 Web3 交易、海外信息流和区块链经验如何形成差异化",
+            "讲清 XStable 的岗位职责、产品模块、交易链路、链上数据、TG 场景和可脱敏结果",
+            "把 NOFX 表达为基于开源项目的本地二次开发、产品拆解、联调验证和作品集包装",
+            "用 OpenEvolve 证明对 Agent 记忆、技能晋升、失败回流、评测和治理机制的理解",
+            "面对压力追问时，用具体案例说明毕业一年为什么已接近或达到超预期线",
+            "在回答中保留风险边界，不夸大所有权、结果数据或无法公开的公司信息",
+        ],
+    ),
+    ScenarioTrainingTemplate(
         id="angry-vip-priority",
         title="VIP 优先级升级",
         description="重点客户认为自己被忽视，要求立即升级优先级。",
