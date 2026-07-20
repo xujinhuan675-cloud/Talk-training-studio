@@ -28,6 +28,42 @@ _EVENT_PUMP_CLOSE_TIMEOUT_SECONDS = 1.0
 RealtimePipelineEventSink = Callable[[Mapping[str, Any]], Awaitable[None] | None]
 logger = logging.getLogger(__name__)
 
+REALTIME_PROVIDER_ERROR_TAXONOMY: tuple[dict[str, Any], ...] = (
+    {
+        "errorCategory": "authentication",
+        "code": "REALTIME_PROVIDER_AUTHENTICATION",
+        "retryable": False,
+        "fatal": True,
+    },
+    {
+        "errorCategory": "rate_limit",
+        "code": "REALTIME_PROVIDER_RATE_LIMIT",
+        "retryable": True,
+        "fatal": False,
+    },
+    {
+        "errorCategory": "provider_unavailable",
+        "code": "REALTIME_PROVIDER_UNAVAILABLE",
+        "retryable": True,
+        "fatal": True,
+    },
+    {
+        "errorCategory": "bad_request",
+        "code": "REALTIME_PROVIDER_BAD_REQUEST",
+        "retryable": False,
+        "fatal": True,
+    },
+    {
+        "errorCategory": "provider_error",
+        "code": "REALTIME_PROVIDER_ERROR",
+        "retryable": False,
+        "fatal": True,
+    },
+)
+_ERROR_TAXONOMY_BY_CATEGORY = {
+    str(item["errorCategory"]): item for item in REALTIME_PROVIDER_ERROR_TAXONOMY
+}
+
 
 class RealtimePipelineRunnerStateError(ValueError):
     """Raised when a runner command is called before the pipeline is ready."""
@@ -98,9 +134,13 @@ class RealtimePipelineProviderError(RuntimeError):
         self.provider = provider
         message = _provider_error_message(self.payload)
         super().__init__(message)
-        self.code = _provider_error_code(self.payload)
+        self.error_category = _provider_error_category(self.payload)
+        self.code = _provider_error_public_code(self.error_category)
+        self.retryable = _provider_error_retryable(self.error_category)
+        self.fatal = _provider_error_fatal(self.error_category, self.payload)
         self.phase = "provider_event"
         self.event_type = str(self.payload.get("type") or "")
+        self.processor = _provider_error_processor(self.payload)
 
     def to_realtime_error(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -109,10 +149,15 @@ class RealtimePipelineProviderError(RuntimeError):
             "phase": self.phase,
             "provider": self.provider,
             "eventType": self.event_type,
+            "errorCategory": self.error_category,
+            "retryable": self.retryable,
+            "fatal": self.fatal,
         }
         source_code = _provider_error_source_code(self.payload)
         if source_code is not None:
             payload["sourceCode"] = source_code
+        if self.processor is not None:
+            payload["processor"] = self.processor
         metadata = _provider_error_metadata(self.payload)
         if metadata:
             payload["metadata"] = metadata
@@ -257,13 +302,27 @@ class RealtimePipelineSessionRunner:
             async for event in self._adapter.events():
                 payload = dict(event)
                 if _is_provider_error(payload):
-                    raise RealtimePipelineProviderError(payload, provider=config.provider)
+                    provider_error = RealtimePipelineProviderError(
+                        payload,
+                        provider=config.provider,
+                    )
+                    if not provider_error.fatal:
+                        await self._forward_event(
+                            _provider_error_event(
+                                provider_error,
+                                context=context,
+                                config=config,
+                                realtime_session_id=realtime_session_id,
+                            )
+                        )
+                        continue
+                    raise provider_error
                 persisted = await self._persist_final_transcript(
                     payload,
-                context,
-                config,
-                realtime_session_id,
-            )
+                    context,
+                    config,
+                    realtime_session_id,
+                )
                 if persisted is not None:
                     await self._forward_event(
                         _live_guidance_trigger_event(
@@ -357,7 +416,31 @@ class RealtimePipelineSessionRunner:
 
 def _is_provider_error(payload: Mapping[str, object]) -> bool:
     event_type = str(payload.get("type") or "").lower()
-    return event_type in {"error", "pipeline.error", "realtime.error"}
+    return event_type in {"error", "pipeline.error", "realtime.error"} or event_type.endswith(
+        ".error"
+    )
+
+
+def _provider_error_event(
+    error: RealtimePipelineProviderError,
+    *,
+    context: TrainingVoiceContext,
+    config: RealtimePipelineConfig,
+    realtime_session_id: str,
+) -> dict[str, Any]:
+    payload = error.to_realtime_error()
+    runtime = normalize_realtime_runtime(config.runtime, provider=config.provider)
+    payload.setdefault("runtime", runtime)
+    payload.setdefault("realtimeRuntime", runtime)
+    payload.setdefault("trainingSessionId", context.binding.training_session_id)
+    payload.setdefault("roomId", context.binding.room_id)
+    payload.setdefault("realtimeSessionId", realtime_session_id)
+    return {
+        "type": "error",
+        "schemaVersion": 1,
+        "source": "realtime_pipeline",
+        **payload,
+    }
 
 
 def _live_guidance_trigger_event(
@@ -432,9 +515,114 @@ def _provider_error_code(payload: Mapping[str, object]) -> str:
 
 def _provider_error_source_code(payload: Mapping[str, object]) -> str | None:
     code = _provider_error_code(payload)
-    if code == "PIPECAT_PROVIDER_ERROR":
+    if code in {
+        "PIPECAT_PROVIDER_ERROR",
+        _provider_error_public_code(_provider_error_category(payload)),
+    }:
         return None
     return code
+
+
+def _provider_error_public_code(category: str) -> str:
+    item = _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY[
+        "provider_error"
+    ]
+    return str(item["code"])
+
+
+def _provider_error_retryable(category: str) -> bool:
+    item = _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY[
+        "provider_error"
+    ]
+    return bool(item["retryable"])
+
+
+def _provider_error_fatal(category: str, payload: Mapping[str, object]) -> bool:
+    value = payload.get("fatal")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+        return value.strip().lower() == "true"
+    error = payload.get("error")
+    if isinstance(error, Mapping):
+        for key in ("fatal", "isFatal"):
+            nested = error.get(key)
+            if isinstance(nested, bool):
+                return nested
+    item = _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY[
+        "provider_error"
+    ]
+    return bool(item["fatal"])
+
+
+def _provider_error_processor(payload: Mapping[str, object]) -> str | None:
+    for key in ("processor", "service", "sourceProcessor", "source_processor"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    error = payload.get("error")
+    if isinstance(error, Mapping):
+        for key in ("processor", "service", "sourceProcessor", "source_processor"):
+            value = error.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _provider_error_category(payload: Mapping[str, object]) -> str:
+    source_code = _provider_error_code(payload).lower()
+    status_code = _provider_error_status_code(payload)
+    message = _provider_error_message(payload).lower()
+    haystack = " ".join(part for part in (source_code, message) if part)
+
+    if status_code in {401, 403} or any(
+        token in haystack
+        for token in (
+            "api key",
+            "api_key",
+            "auth",
+            "authentication",
+            "forbidden",
+            "unauthorized",
+        )
+    ):
+        return "authentication"
+    if status_code == 429 or any(
+        token in haystack for token in ("quota", "rate limit", "rate_limit", "too many")
+    ):
+        return "rate_limit"
+    if status_code in {408, 409} or status_code >= 500 or any(
+        token in haystack
+        for token in (
+            "connection",
+            "connect",
+            "disconnect",
+            "overload",
+            "overloaded",
+            "temporarily",
+            "timeout",
+            "unavailable",
+        )
+    ):
+        return "provider_unavailable"
+    if 400 <= status_code < 500 or any(
+        token in haystack for token in ("bad request", "bad_request", "invalid_request")
+    ):
+        return "bad_request"
+    return "provider_error"
+
+
+def _provider_error_status_code(payload: Mapping[str, object]) -> int:
+    for key in ("status", "statusCode", "status_code"):
+        value = payload.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    error = payload.get("error")
+    if isinstance(error, Mapping):
+        return _provider_error_status_code(error)
+    return 0
 
 
 def _provider_error_metadata(payload: Mapping[str, object]) -> dict[str, Any]:
@@ -443,6 +631,9 @@ def _provider_error_metadata(payload: Mapping[str, object]) -> dict[str, Any]:
         value = payload.get(key)
         if isinstance(value, str | int | float | bool):
             metadata[key] = value
+    status_code = _provider_error_status_code(payload)
+    if status_code:
+        metadata["statusCode"] = status_code
     nested_metadata = payload.get("metadata")
     if isinstance(nested_metadata, Mapping):
         for key, value in nested_metadata.items():
@@ -523,6 +714,7 @@ def _realtime_error_from_exception(exc: BaseException) -> dict[str, Any]:
 
 
 __all__ = [
+    "REALTIME_PROVIDER_ERROR_TAXONOMY",
     "RealtimePipelineEventSink",
     "RealtimePipelineProviderError",
     "RealtimePipelineStartError",

@@ -14,6 +14,9 @@ from application.services.training_studio.realtime_pipeline import (
     extract_final_transcript,
     transcript_to_message_metadata,
 )
+from application.services.training_studio.realtime_pipeline_runner import (
+    RealtimePipelineProviderError,
+)
 from domain.stakeholder.entity import ChatRoom, Message
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 
@@ -193,6 +196,35 @@ def test_non_final_or_empty_transcript_events_are_ignored():
         )
         is None
     )
+
+
+def test_provider_error_event_uses_provider_neutral_taxonomy():
+    error = RealtimePipelineProviderError(
+        {
+            "type": "error",
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": "Provider rate limit exceeded",
+                "status": 429,
+            },
+            "processor": "OpenAIRealtimeSTTService",
+            "metadata": {"requestId": "req-123", "apiKey": "sk-should-not-leak"},
+        },
+        provider="pipecat",
+    )
+
+    payload = error.to_realtime_error()
+
+    assert payload["code"] == "REALTIME_PROVIDER_RATE_LIMIT"
+    assert payload["sourceCode"] == "rate_limit_exceeded"
+    assert payload["errorCategory"] == "rate_limit"
+    assert payload["retryable"] is True
+    assert payload["fatal"] is False
+    assert payload["provider"] == "pipecat"
+    assert payload["phase"] == "provider_event"
+    assert payload["eventType"] == "error"
+    assert payload["processor"] == "OpenAIRealtimeSTTService"
+    assert payload["metadata"] == {"requestId": "req-123", "statusCode": 429}
 
 
 @pytest.mark.asyncio

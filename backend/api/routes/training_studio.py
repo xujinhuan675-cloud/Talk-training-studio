@@ -94,6 +94,7 @@ from application.services.training_studio.realtime_pipeline import (
     build_realtime_transcript,
 )
 from application.services.training_studio.realtime_pipeline_runner import (
+    REALTIME_PROVIDER_ERROR_TAXONOMY,
     RealtimePipelineSessionRunner,
 )
 from application.services.training_studio.realtime_session import (
@@ -179,6 +180,12 @@ _VIDEO_EXTENSIONS = {
 _TRAINING_GUIDANCE_MESSAGE_SOURCE = "training_live_guidance"
 _REALTIME_CONTEXT_RECENT_TURN_LIMIT = 8
 _TRAINING_GUIDANCE_SENDER_ID = "training_coach"
+_REALTIME_LIFECYCLE_CONTRACT_EVENTS = (
+    "status.changed",
+    "session.configured",
+    "session.closed",
+    "error",
+)
 _ENV_ASSIGNMENT_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 _VOICE_TTS_PROVIDERS = {"minimax", "elevenlabs", "openrouter"}
 _VOICE_STT_PROVIDERS = {"minimax", "whisper"}
@@ -852,10 +859,14 @@ def _exception_realtime_error_payload(
         ),
     }
     for key in (
+        "errorCategory",
         "feature",
+        "fatal",
         "missingEnv",
         "modules",
         "eventType",
+        "processor",
+        "retryable",
         "sourceCode",
         "metadata",
     ):
@@ -1267,7 +1278,7 @@ def _pipecat_unavailable_capability_response(
         ),
         runtime=REALTIME_RUNTIME_PIPECAT,
     ).to_dict()
-    return {
+    payload = {
         "runtime": REALTIME_RUNTIME_PIPECAT,
         "provider": "pipecat",
         "available": False,
@@ -1289,6 +1300,36 @@ def _pipecat_unavailable_capability_response(
             require_websocket=True,
         ),
     }
+    payload["smoke"] = _provider_neutral_realtime_smoke_contract(payload["smoke"])
+    return payload
+
+
+def _provider_neutral_realtime_smoke_contract(smoke: object) -> dict[str, object]:
+    smoke_payload = dict(smoke) if isinstance(smoke, Mapping) else {}
+    contract_events = [str(event) for event in (smoke_payload.get("contractEvents") or ())]
+    for event_type in _REALTIME_LIFECYCLE_CONTRACT_EVENTS:
+        if event_type not in contract_events:
+            contract_events.append(event_type)
+    smoke_payload["contractEvents"] = contract_events
+    smoke_payload["errorTaxonomy"] = [dict(item) for item in REALTIME_PROVIDER_ERROR_TAXONOMY]
+    smoke_payload["eventOrder"] = {
+        "finalTranscript": [
+            "transcript.done",
+            "transcript.persisted",
+            "training.live_guidance.triggered",
+        ],
+        "assistantAudioThenTranscript": [
+            "audio.output",
+            "transcript.done",
+            "transcript.persisted",
+        ],
+    }
+    smoke_payload["readinessAssertions"] = {
+        "readyForCallImpliesLocalRuntimeReady": True,
+        "browserE2EVerified": False,
+        "requiresExplicitMediaPermission": True,
+    }
+    return smoke_payload
 
 
 def _pipecat_realtime_capability_response() -> dict[str, object]:
@@ -1303,7 +1344,9 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
             message=f"Pipecat capability check failed: {exc}",
             code="PIPECAT_CAPABILITY_ERROR",
         )
-    return dict(response)
+    data = dict(response)
+    data["smoke"] = _provider_neutral_realtime_smoke_contract(data.get("smoke"))
+    return data
 
 
 def _realtime_capabilities_response() -> dict[str, object]:

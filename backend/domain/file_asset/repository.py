@@ -13,8 +13,9 @@ from .entity import FileAsset
 class FileAssetRepository(ABC):
     """Contract for persisting and querying file assets.
 
-    Callers must pass ``metadata_scope`` explicitly for read/write access.
-    ``metadata_scope=None`` is reserved for deliberate internal unscoped access.
+    Application-service callers must pass ``metadata_scope`` explicitly for
+    read/write access. Repository-level unscoped helpers must be narrow and
+    named for their purpose rather than hidden behind ``metadata_scope=None``.
     """
 
     @abstractmethod
@@ -59,6 +60,14 @@ class FileAssetRepository(ABC):
         *,
         metadata_scope: OwnedMetadataScope | None,
     ) -> Optional[FileAsset]: ...
+
+    @abstractmethod
+    async def key_exists_outside_metadata_scope(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope,
+    ) -> bool: ...
 
     @abstractmethod
     async def list(

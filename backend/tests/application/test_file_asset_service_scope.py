@@ -12,7 +12,13 @@ from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset.entity import FileAsset
 
 
-def _asset(asset_id: int = 1, *, status: str = "pending") -> FileAsset:
+def _asset(
+    asset_id: int = 1,
+    *,
+    status: str = "pending",
+    key: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> FileAsset:
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     return FileAsset(
         id=asset_id,
@@ -20,14 +26,16 @@ def _asset(asset_id: int = 1, *, status: str = "pending") -> FileAsset:
         storage_type="local",
         bucket=None,
         region=None,
-        key=f"training_material/{asset_id}.txt",
+        key=key or f"training_material/{asset_id}.txt",
         size=1,
         etag=None,
         content_type="text/plain",
         original_filename=f"{asset_id}.txt",
         kind="training_material",
         is_public=False,
-        metadata={
+        metadata=metadata
+        if metadata is not None
+        else {
             "ownerUserId": "user-sales-001",
             "teamId": "team-revenue",
             "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
@@ -49,25 +57,74 @@ def _scope() -> OwnedMetadataScope:
     )
 
 
+def _matches_metadata_scope(
+    metadata: dict[str, Any] | None,
+    scope: OwnedMetadataScope | None,
+) -> bool:
+    if scope is None:
+        return True
+    metadata = metadata or {}
+    auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), dict) else {}
+    owner_user_id = (
+        auth_scope.get("userId")
+        or auth_scope.get("user_id")
+        or metadata.get("ownerUserId")
+        or metadata.get("owner_user_id")
+        or metadata.get("createdByUserId")
+        or metadata.get("created_by_user_id")
+    )
+    owner_team_id = (
+        auth_scope.get("teamId")
+        or auth_scope.get("team_id")
+        or metadata.get("teamId")
+        or metadata.get("team_id")
+        or metadata.get("ownerTeamId")
+        or metadata.get("owner_team_id")
+    )
+    owner_user_id = str(owner_user_id).strip() if owner_user_id else ""
+    owner_team_id = str(owner_team_id).strip() if owner_team_id else ""
+
+    if owner_user_id and owner_user_id == scope.user_id:
+        return True
+    if scope.team_id and owner_team_id == scope.team_id:
+        return bool(scope.include_team_scope or not owner_user_id)
+    if not owner_user_id and not owner_team_id:
+        return scope.allow_unscoped
+    return False
+
+
 class _FakeFileAssetRepository:
     def __init__(self, assets: dict[int, FileAsset]) -> None:
         self.assets = assets
         self.get_by_id_calls: list[dict[str, Any]] = []
         self.get_by_key_calls: list[dict[str, Any]] = []
+        self.key_exists_outside_scope_calls: list[dict[str, Any]] = []
         self.update_calls: list[dict[str, Any]] = []
         self.delete_calls: list[dict[str, Any]] = []
         self.create_calls: list[FileAsset] = []
 
     async def get_by_id(self, asset_id: int, *, metadata_scope=None):
         self.get_by_id_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
-        return self.assets.get(asset_id)
+        asset = self.assets.get(asset_id)
+        if asset is None or not _matches_metadata_scope(asset.metadata, metadata_scope):
+            return None
+        return asset
 
     async def get_by_key(self, key: str, *, metadata_scope=None):
         self.get_by_key_calls.append({"key": key, "metadata_scope": metadata_scope})
         for asset in self.assets.values():
-            if asset.key == key:
+            if asset.key == key and _matches_metadata_scope(asset.metadata, metadata_scope):
                 return asset
         return None
+
+    async def key_exists_outside_metadata_scope(self, key: str, *, metadata_scope):
+        self.key_exists_outside_scope_calls.append(
+            {"key": key, "metadata_scope": metadata_scope}
+        )
+        return any(
+            asset.key == key and not _matches_metadata_scope(asset.metadata, metadata_scope)
+            for asset in self.assets.values()
+        )
 
     async def create(self, asset: FileAsset):
         self.create_calls.append(asset)
@@ -78,24 +135,35 @@ class _FakeFileAssetRepository:
 
     async def update(self, asset: FileAsset, *, metadata_scope=None):
         self.update_calls.append({"asset": asset, "metadata_scope": metadata_scope})
+        existing = self.assets.get(asset.id or 0)
+        if existing is None or not _matches_metadata_scope(existing.metadata, metadata_scope):
+            raise FileAssetNotFoundException(asset.id)
         self.assets[asset.id or 0] = asset
         return asset
 
     async def delete(self, asset_id: int, *, metadata_scope=None):
         self.delete_calls.append({"asset_id": asset_id, "metadata_scope": metadata_scope})
+        asset = self.assets.get(asset_id)
+        if asset is None or not _matches_metadata_scope(asset.metadata, metadata_scope):
+            raise FileAssetNotFoundException(asset_id)
         self.assets.pop(asset_id, None)
 
     async def delete_by_key(self, key: str, *, metadata_scope=None):
         for asset_id, asset in list(self.assets.items()):
-            if asset.key == key:
+            if asset.key == key and _matches_metadata_scope(asset.metadata, metadata_scope):
                 await self.delete(asset_id, metadata_scope=metadata_scope)
                 return
+        raise FileAssetNotFoundException(key=key)
 
     async def list(self, *, metadata_scope=None, **kwargs):
-        return list(self.assets.values())
+        return [
+            asset
+            for asset in self.assets.values()
+            if _matches_metadata_scope(asset.metadata, metadata_scope)
+        ]
 
     async def count(self, *, metadata_scope=None, **kwargs):
-        return len(self.assets)
+        return len(await self.list(metadata_scope=metadata_scope, **kwargs))
 
 
 class _FakeUnitOfWork:
@@ -439,6 +507,97 @@ async def test_upsert_active_asset_uses_metadata_scope_for_existing_asset_update
     ]
     assert repo.update_calls[0]["metadata_scope"] == scope
     assert repo.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_active_asset_rejects_key_scoped_miss_without_creating() -> None:
+    hidden_key = "training_material/shared-key.txt"
+    repo = _FakeFileAssetRepository(
+        {
+            20: _asset(
+                20,
+                key=hidden_key,
+                status="active",
+                metadata={
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                },
+            )
+        }
+    )
+    service = _service(repo)
+    scope = _scope()
+
+    with pytest.raises(FileAssetNotFoundException):
+        await service.upsert_active_asset(
+            owner_id=None,
+            storage_type="local",
+            bucket=None,
+            region=None,
+            key=hidden_key,
+            original_filename="scoped-update.txt",
+            content_type="text/plain",
+            kind="training_material",
+            size=32,
+            etag="etag-updated",
+            url="https://files.test/training_material/shared-key.txt",
+            metadata={"title": "Must not create on scoped miss"},
+            metadata_scope=scope,
+        )
+
+    assert repo.get_by_key_calls == [
+        {"key": hidden_key, "metadata_scope": scope},
+    ]
+    assert repo.key_exists_outside_scope_calls == [
+        {"key": hidden_key, "metadata_scope": scope},
+    ]
+    assert repo.create_calls == []
+    assert repo.update_calls == []
+    assert repo.assets[20].metadata == {
+        "ownerUserId": "user-cs-001",
+        "teamId": "team-service",
+    }
+
+
+@pytest.mark.asyncio
+async def test_upsert_active_asset_rejects_legacy_unscoped_key_without_creating() -> None:
+    hidden_key = "training_material/legacy-shared-key.txt"
+    repo = _FakeFileAssetRepository(
+        {
+            21: _asset(
+                21,
+                key=hidden_key,
+                status="active",
+                metadata={},
+            )
+        }
+    )
+    service = _service(repo)
+    scope = _scope()
+
+    with pytest.raises(FileAssetNotFoundException):
+        await service.upsert_active_asset(
+            owner_id=None,
+            storage_type="local",
+            bucket=None,
+            region=None,
+            key=hidden_key,
+            original_filename="scoped-update.txt",
+            content_type="text/plain",
+            kind="training_material",
+            size=32,
+            etag="etag-updated",
+            url="https://files.test/training_material/legacy-shared-key.txt",
+            metadata={"title": "Must not claim legacy unscoped key"},
+            metadata_scope=scope,
+        )
+
+    assert repo.key_exists_outside_scope_calls == [
+        {"key": hidden_key, "metadata_scope": scope},
+    ]
+    assert repo.create_calls == []
+    assert repo.update_calls == []
+    assert repo.assets[21].metadata == {}
 
 
 @pytest.mark.asyncio

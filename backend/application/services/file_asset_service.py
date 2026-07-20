@@ -136,6 +136,20 @@ def _limit_stream(
     return _gen()
 
 
+async def _key_exists_outside_metadata_scope(
+    repo: Any,
+    *,
+    key: str,
+    metadata_scope: OwnedMetadataScope,
+) -> bool:
+    checker = getattr(repo, "key_exists_outside_metadata_scope", None)
+    if not callable(checker):
+        raise RuntimeError(
+            "File asset repository must expose key_exists_outside_metadata_scope"
+        )
+    return bool(await checker(key, metadata_scope=metadata_scope))
+
+
 class FileAssetApplicationService:
     """High-level file asset workflows bridging API and domain layers."""
 
@@ -662,6 +676,13 @@ class FileAssetApplicationService:
             repo = uow.file_asset_repository
             asset = await repo.get_by_key(key, metadata_scope=scope)
             if asset is None:
+                if await _key_exists_outside_metadata_scope(
+                    repo,
+                    key=key,
+                    metadata_scope=scope,
+                ):
+                    raise FileAssetNotFoundException(key=key)
+
                 now = _utcnow()
                 asset = FileAsset(
                     id=None,

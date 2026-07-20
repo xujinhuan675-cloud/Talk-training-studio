@@ -178,17 +178,18 @@ class TrainingMaterialToolConsumerService:
             limit=safe_limit,
             metadata_scope=scope,
         )
+        scoped_items = [item for item in items if _asset_matches_metadata_scope(item, scope)]
         summaries = [
             await self._to_training_material_summary(
                 item,
                 metadata_scope=scope,
                 include_content_excerpt=include_content_excerpt,
             )
-            for item in items
+            for item in scoped_items
         ]
         return TrainingMaterialAssetListDTO(
             items=summaries,
-            total=total,
+            total=total if len(scoped_items) == len(items) else len(scoped_items),
             skip=safe_skip,
             limit=safe_limit,
         )
@@ -202,6 +203,7 @@ class TrainingMaterialToolConsumerService:
     ) -> TrainingMaterialAssetSummaryDTO:
         scope = _require_metadata_scope(metadata_scope)
         asset = await self._file_assets.get_asset(asset_id, metadata_scope=scope)
+        _require_asset_metadata_scope(asset, scope, asset_id=asset_id)
         _require_training_material(asset, asset_id=asset_id)
         return await self._to_training_material_summary(
             asset,
@@ -218,6 +220,7 @@ class TrainingMaterialToolConsumerService:
     ) -> TrainingMaterialAssetSummaryDTO:
         scope = _require_metadata_scope(metadata_scope)
         asset = await self._file_assets.get_asset_by_key_raw(key, metadata_scope=scope)
+        _require_asset_metadata_scope(asset, scope, key=key)
         _require_training_material(asset, key=key)
         return await self._to_training_material_summary(
             asset,
@@ -296,6 +299,54 @@ def _require_training_material(
         raise FileAssetNotFoundException(asset_id, key=key)
     if getattr(asset, "status", None) != TRAINING_MATERIAL_STATUS:
         raise FileAssetNotFoundException(asset_id, key=key)
+
+
+def _require_asset_metadata_scope(
+    asset: FileAssetDTO | FileAsset,
+    scope: OwnedMetadataScope,
+    *,
+    asset_id: int | None = None,
+    key: str | None = None,
+) -> None:
+    if not _asset_matches_metadata_scope(asset, scope):
+        raise FileAssetNotFoundException(asset_id, key=key)
+
+
+def _asset_matches_metadata_scope(
+    asset: FileAssetDTO | FileAsset,
+    scope: OwnedMetadataScope,
+) -> bool:
+    metadata = getattr(asset, "metadata", None)
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    auth_scope = metadata.get("authScope") if isinstance(metadata.get("authScope"), dict) else {}
+    owner_user_id = (
+        auth_scope.get("userId")
+        or auth_scope.get("user_id")
+        or metadata.get("ownerUserId")
+        or metadata.get("owner_user_id")
+        or metadata.get("createdByUserId")
+        or metadata.get("created_by_user_id")
+    )
+    owner_team_id = (
+        auth_scope.get("teamId")
+        or auth_scope.get("team_id")
+        or metadata.get("teamId")
+        or metadata.get("team_id")
+        or metadata.get("ownerTeamId")
+        or metadata.get("owner_team_id")
+    )
+    owner_user_id = str(owner_user_id).strip() if owner_user_id else ""
+    owner_team_id = str(owner_team_id).strip() if owner_team_id else ""
+
+    if owner_user_id and owner_user_id == scope.user_id:
+        return True
+    if scope.team_id and owner_team_id == scope.team_id:
+        return bool(scope.include_team_scope or not owner_user_id)
+    if not owner_user_id and not owner_team_id:
+        return scope.allow_unscoped
+    return False
 
 
 def _to_training_material_summary(

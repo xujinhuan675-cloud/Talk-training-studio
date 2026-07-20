@@ -16,6 +16,15 @@ from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset.entity import FileAsset
 
 
+def _scoped_metadata(metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "ownerUserId": "user-sales-001",
+        "teamId": "team-revenue",
+        "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+        **(metadata or {}),
+    }
+
+
 def _file_asset_dto(
     *,
     asset_id: int = 1,
@@ -40,7 +49,7 @@ def _file_asset_dto(
         original_filename=original_filename,
         kind=kind,
         is_public=False,
-        metadata=metadata or {},
+        metadata=_scoped_metadata(metadata),
         url=None,
         status=status,
         created_at=now,
@@ -70,7 +79,7 @@ def _file_asset_entity(
         original_filename=original_filename,
         kind=TRAINING_MATERIAL_KIND,
         is_public=False,
-        metadata=metadata or {},
+        metadata=_scoped_metadata(metadata),
         url=None,
         status=TRAINING_MATERIAL_STATUS,
         created_at=now,
@@ -246,6 +255,39 @@ async def test_list_materials_can_include_bounded_text_content_excerpt() -> None
 
 
 @pytest.mark.asyncio
+async def test_list_materials_filters_reader_scope_escape_before_content_read() -> None:
+    file_service = _FakeFileAssetService(
+        list_items=[
+            _file_asset_dto(asset_id=1, metadata={"title": "Visible material"}),
+            _file_asset_dto(
+                asset_id=2,
+                metadata={
+                    "title": "Hidden material",
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                    "authScope": {"userId": "user-cs-001", "teamId": "team-service"},
+                },
+            ),
+        ]
+    )
+    file_service.content_by_id[1] = (b"Visible scoped content.", False)
+    file_service.content_by_id[2] = (b"Hidden content must not be read.", False)
+    scope = _scope()
+    service = TrainingMaterialToolConsumerService(file_service)
+
+    result = await service.list_materials(
+        metadata_scope=scope,
+        include_content_excerpt=True,
+    )
+
+    assert result.total == 1
+    assert [material.id for material in result.items] == [1]
+    assert file_service.read_calls == [
+        {"asset_id": 1, "metadata_scope": scope, "max_bytes": 8192}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_list_materials_skips_binary_content_excerpt_reads() -> None:
     file_service = _FakeFileAssetService(
         list_items=[
@@ -291,6 +333,32 @@ async def test_get_material_keeps_scope_and_hides_non_material_assets() -> None:
         await service.get_material(2, metadata_scope=scope)
     with pytest.raises(FileAssetNotFoundException):
         await service.get_material(3, metadata_scope=scope)
+
+
+@pytest.mark.asyncio
+async def test_get_material_hides_reader_scope_escape_without_content_read() -> None:
+    scope = _scope()
+    file_service = _FakeFileAssetService(
+        assets_by_id={
+            4: _file_asset_dto(
+                asset_id=4,
+                metadata={
+                    "title": "Hidden material",
+                    "ownerUserId": "user-cs-001",
+                    "teamId": "team-service",
+                    "authScope": {"userId": "user-cs-001", "teamId": "team-service"},
+                },
+            )
+        }
+    )
+    file_service.content_by_id[4] = (b"Hidden content must not be read.", False)
+    service = TrainingMaterialToolConsumerService(file_service)
+
+    with pytest.raises(FileAssetNotFoundException):
+        await service.get_material(4, metadata_scope=scope, include_content_excerpt=True)
+
+    assert file_service.get_calls == [{"asset_id": 4, "metadata_scope": scope}]
+    assert file_service.read_calls == []
 
 
 @pytest.mark.asyncio

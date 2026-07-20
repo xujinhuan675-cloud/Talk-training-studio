@@ -474,6 +474,58 @@ def test_material_review_uses_optional_llm_adapter_when_configured() -> None:
     assert session_service.mutating_calls == []
 
 
+def test_material_review_llm_cannot_reference_unselected_material_ids() -> None:
+    session_service = _FakeTrainingSessionService([_session()])
+    file_service = _FakeFileAssetService([_material_asset()])
+    llm = _FakeLLM(
+        """
+        {
+          "matched_points": [
+            {
+              "material_id": 999,
+              "point": "This material was never scoped into the review.",
+              "evidence": "Invented evidence."
+            },
+            {
+              "material_id": 7,
+              "material_title": "Forged title",
+              "point": "The learner paired ROI proof with a success metric.",
+              "evidence": "The report says the learner used ROI proof."
+            }
+          ],
+          "missed_points": [
+            {
+              "material_id": 999,
+              "point": "Unknown material must not be returned.",
+              "evidence": null
+            }
+          ],
+          "suggested_rewrites": [
+            "Next drill: pair ROI proof with the buyer's success metric."
+          ]
+        }
+        """
+    )
+    client = _client(session_service, file_service, llm=llm)
+
+    response = client.post(
+        "/api/v1/training-studio/tool-consumers/review-assistant/material-review",
+        json={"session_id": "training-1", "material_ids": [7]},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    returned_ids = {
+        item["material_id"] for item in data["matched_points"] + data["missed_points"]
+    }
+    assert returned_ids == {7}
+    assert data["matched_points"][0]["material_title"] == "Renewal playbook"
+    assert "999" not in response.text
+    assert len(llm.calls) == 1
+    assert session_service.mutating_calls == []
+
+
 def test_material_review_does_not_pollute_scoring_growth_or_completion() -> None:
     session = _session()
     before = {

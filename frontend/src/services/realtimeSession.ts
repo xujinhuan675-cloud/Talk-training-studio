@@ -34,6 +34,45 @@ export interface RealtimeAudioOutputEvent {
   createdAt?: string
 }
 
+export interface RealtimeErrorPayload {
+  message: string
+  code?: string
+  provider?: string
+  phase?: string
+  runtime?: string
+  realtimeRuntime?: string
+  errorCategory?: string
+  eventType?: string
+  sourceCode?: string
+  processor?: string
+  retryable?: boolean
+  fatal?: boolean
+  trainingSessionId?: string
+  roomId?: number
+  realtimeSessionId?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface RealtimeErrorEvent {
+  type: 'error'
+  message: string
+  code?: string
+  provider?: string
+  phase?: string
+  runtime?: string
+  realtimeRuntime?: string
+  errorCategory?: string
+  eventType?: string
+  sourceCode?: string
+  processor?: string
+  retryable?: boolean
+  fatal?: boolean
+  payload?: RealtimeErrorPayload
+  sessionId?: string
+  status?: RealtimeSessionStatus
+  createdAt?: string
+}
+
 export type RealtimeClientEvent =
   | { type: 'session.start'; sessionId?: string; metadata?: Record<string, unknown> }
   | { type: 'session.configure'; sessionId?: string; roomId?: number | string }
@@ -100,7 +139,7 @@ export type RealtimeServerEvent =
   | { type: 'transcript.delta'; text: string }
   | { type: 'transcript.done'; text: string }
   | { type: 'status'; status: RealtimeSessionStatus }
-  | { type: 'error'; message: string; code?: string }
+  | RealtimeErrorEvent
 
 export interface RealtimeSessionHandlers {
   onStatusChange?: (status: RealtimeSessionStatus) => void
@@ -198,6 +237,65 @@ function invalidAudioOutputEvent(message: string): RealtimeServerEvent {
   return { type: 'error', message, code: 'INVALID_AUDIO_OUTPUT' }
 }
 
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function normalizeRealtimeErrorEvent(event: Record<string, unknown>): RealtimeErrorEvent {
+  const payload = isRecord(event.payload) ? event.payload : null
+  const message = optionalText(wireValue(event, payload, ['message', 'detail', 'error']))
+    || 'Realtime session error'
+  const code = optionalText(wireValue(event, payload, ['code', 'errorCode', 'error_code']))
+  const outputPayload: RealtimeErrorPayload = { message }
+  if (code) outputPayload.code = code
+
+  for (const key of [
+    'provider',
+    'phase',
+    'runtime',
+    'realtimeRuntime',
+    'errorCategory',
+    'eventType',
+    'sourceCode',
+    'processor',
+    'trainingSessionId',
+    'realtimeSessionId',
+  ] as const) {
+    const value = optionalText(wireValue(event, payload, [key]))
+    if (value) outputPayload[key] = value
+  }
+
+  const roomId = optionalNumber(wireValue(event, payload, ['roomId', 'room_id']))
+  if (roomId !== undefined) outputPayload.roomId = roomId
+  const retryable = optionalBoolean(wireValue(event, payload, ['retryable']))
+  if (retryable !== undefined) outputPayload.retryable = retryable
+  const fatal = optionalBoolean(wireValue(event, payload, ['fatal']))
+  if (fatal !== undefined) outputPayload.fatal = fatal
+  const metadata = wireValue(event, payload, ['metadata'])
+  if (isRecord(metadata)) outputPayload.metadata = metadata
+
+  const output: RealtimeErrorEvent = {
+    type: 'error',
+    message,
+    payload: outputPayload,
+  }
+  if (code) output.code = code
+  if (outputPayload.provider) output.provider = outputPayload.provider
+  if (outputPayload.phase) output.phase = outputPayload.phase
+  if (outputPayload.runtime) output.runtime = outputPayload.runtime
+  if (outputPayload.realtimeRuntime) output.realtimeRuntime = outputPayload.realtimeRuntime
+  if (outputPayload.errorCategory) output.errorCategory = outputPayload.errorCategory
+  if (outputPayload.eventType) output.eventType = outputPayload.eventType
+  if (outputPayload.sourceCode) output.sourceCode = outputPayload.sourceCode
+  if (outputPayload.processor) output.processor = outputPayload.processor
+  if (outputPayload.retryable !== undefined) output.retryable = outputPayload.retryable
+  if (outputPayload.fatal !== undefined) output.fatal = outputPayload.fatal
+  if (typeof event.sessionId === 'string') output.sessionId = event.sessionId
+  if (isRealtimeSessionStatus(event.status)) output.status = event.status
+  if (typeof event.createdAt === 'string') output.createdAt = event.createdAt
+  return output
+}
+
 function normalizeAudioOutputEvent(event: Record<string, unknown>): RealtimeServerEvent {
   const payload = isRecord(event.payload) ? event.payload : null
   const audio = decodeBase64Audio(wireValue(event, payload, ['audio', 'audioData', 'data', 'chunk', 'base64']))
@@ -243,6 +341,9 @@ export function decodeRealtimeServerEvent(data: unknown): RealtimeServerEvent | 
       const parsed = JSON.parse(data)
       if (isRecord(parsed) && parsed.type === 'audio.output') {
         return normalizeAudioOutputEvent(parsed)
+      }
+      if (isRecord(parsed) && parsed.type === 'error') {
+        return normalizeRealtimeErrorEvent(parsed)
       }
       return parsed as RealtimeServerEvent
     } catch {

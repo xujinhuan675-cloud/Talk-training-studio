@@ -11,7 +11,10 @@ from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset import FileAsset, FileAssetRepository
 from domain.common.exceptions import FileAssetNotFoundException
 from infrastructure.models.file_asset import FileAssetModel
-from infrastructure.repositories.metadata_scope import apply_owned_metadata_scope
+from infrastructure.repositories.metadata_scope import (
+    apply_owned_metadata_scope,
+    owned_metadata_scope_condition,
+)
 import hashlib
 
 
@@ -181,6 +184,30 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
+
+    async def key_exists_outside_metadata_scope(
+        self,
+        key: str,
+        *,
+        metadata_scope: OwnedMetadataScope,
+    ) -> bool:
+        visible_condition = owned_metadata_scope_condition(
+            FileAssetModel.extra_metadata,
+            metadata_scope,
+        )
+        total_query = (
+            select(func.count())
+            .select_from(FileAssetModel)
+            .where(FileAssetModel.key == key)
+        )
+        visible_query = (
+            select(func.count())
+            .select_from(FileAssetModel)
+            .where(FileAssetModel.key == key, visible_condition)
+        )
+        total_result = await self.session.execute(total_query)
+        visible_result = await self.session.execute(visible_query)
+        return int(total_result.scalar() or 0) > int(visible_result.scalar() or 0)
 
     async def list(
         self,

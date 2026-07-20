@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence as SequenceABC
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import AsyncIterator, Callable, Optional
@@ -30,6 +32,37 @@ from domain.conversation.repository import OwnedMetadataScope
 
 logger = get_logger(__name__)
 _HISTORY_MESSAGE_STATUSES = {"active", "superseded"}
+_MESSAGE_TREE_REPLAY_METADATA_KEYS = (
+    "selectedPath",
+    "selected_path",
+    "messageTreeSelection",
+    "message_tree_selection",
+)
+_MESSAGE_TREE_TAIL_METADATA_KEYS = ("currentBranchTail", "current_branch_tail")
+_SCORING_GROWTH_COMPLETION_METADATA_KEYS = {
+    "score",
+    "score_id",
+    "scoreid",
+    "score_status",
+    "scorestatus",
+    "overall_score",
+    "overallscore",
+    "evaluation",
+    "evaluation_id",
+    "evaluationid",
+    "growth",
+    "growth_report",
+    "growthreport",
+    "report",
+    "report_id",
+    "reportid",
+    "completion",
+    "completion_status",
+    "completionstatus",
+    "completed",
+    "completed_at",
+    "completedat",
+}
 
 
 def _utcnow() -> datetime:
@@ -523,6 +556,66 @@ def _metadata_mapping(value: object | None) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _metadata_key_token(key: object) -> str:
+    return str(key).replace("-", "_").replace(" ", "_").strip().lower()
+
+
+def _is_scoring_growth_completion_key(key: object) -> bool:
+    return _metadata_key_token(key) in _SCORING_GROWTH_COMPLETION_METADATA_KEYS
+
+
+def _is_non_text_sequence(value: object) -> bool:
+    return isinstance(value, SequenceABC) and not isinstance(
+        value,
+        str | bytes | bytearray,
+    )
+
+
+def _sanitize_replay_metadata_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        sanitized: dict[str, object] = {}
+        for key, nested_value in value.items():
+            text_key = str(key).strip()
+            if not text_key or _is_scoring_growth_completion_key(text_key):
+                continue
+            sanitized[text_key] = _sanitize_replay_metadata_value(nested_value)
+        return sanitized
+    if _is_non_text_sequence(value):
+        return [_sanitize_replay_metadata_value(item) for item in value]
+    return deepcopy(value)
+
+
+def _normalize_replay_record(value: object, *, replay_only: bool) -> object:
+    if not isinstance(value, Mapping):
+        return deepcopy(value)
+    normalized = _sanitize_replay_metadata_value(value)
+    if isinstance(normalized, dict) and replay_only:
+        normalized["purpose"] = "training_replay_context"
+        normalized["replayContextOnly"] = True
+        normalized["affectsScoring"] = False
+        normalized["affectsCompletion"] = False
+    return normalized
+
+
+def _normalize_message_tree_replay_metadata(
+    metadata: dict[str, object] | None,
+) -> dict[str, object]:
+    normalized = deepcopy(dict(metadata or {}))
+    for key in _MESSAGE_TREE_REPLAY_METADATA_KEYS:
+        if key in normalized:
+            normalized[key] = _normalize_replay_record(
+                normalized[key],
+                replay_only=True,
+            )
+    for key in _MESSAGE_TREE_TAIL_METADATA_KEYS:
+        if key in normalized:
+            normalized[key] = _normalize_replay_record(
+                normalized[key],
+                replay_only=False,
+            )
+    return normalized
+
+
 def _metadata_text(metadata: dict[str, object], *keys: str) -> str | None:
     for key in keys:
         text = _clean_optional_text(metadata.get(key))
@@ -604,8 +697,11 @@ def _run_request_metadata(
     runtime_selection: _RuntimeSelection | None = None,
     request_metadata: dict[str, object] | None = None,
 ) -> dict[str, object | None]:
+    request_metadata = _normalize_message_tree_replay_metadata(
+        _metadata_mapping(request_metadata),
+    )
     metadata: dict[str, object | None] = {
-        **_metadata_mapping(request_metadata),
+        **request_metadata,
         "provider": provider,
         "model": model,
         "model_spec": model_spec,

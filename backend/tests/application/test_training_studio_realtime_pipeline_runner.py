@@ -359,7 +359,7 @@ async def test_runner_rejects_audio_commands_after_close():
 
 
 @pytest.mark.parametrize(
-    ("provider_event", "expected_message"),
+    ("provider_event", "expected_message", "expected_code", "expected_category"),
     [
         (
             {
@@ -367,6 +367,8 @@ async def test_runner_rejects_audio_commands_after_close():
                 "error": {"message": "provider websocket disconnected"},
             },
             "provider websocket disconnected",
+            "REALTIME_PROVIDER_UNAVAILABLE",
+            "provider_unavailable",
         ),
         (
             {
@@ -374,6 +376,8 @@ async def test_runner_rejects_audio_commands_after_close():
                 "message": "provider rejected audio frame",
             },
             "provider rejected audio frame",
+            "REALTIME_PROVIDER_ERROR",
+            "provider_error",
         ),
         (
             {
@@ -381,6 +385,8 @@ async def test_runner_rejects_audio_commands_after_close():
                 "detail": "provider realtime session expired",
             },
             "provider realtime session expired",
+            "REALTIME_PROVIDER_ERROR",
+            "provider_error",
         ),
     ],
 )
@@ -388,6 +394,8 @@ async def test_runner_rejects_audio_commands_after_close():
 async def test_runner_surfaces_provider_error_events_to_later_commands(
     provider_event,
     expected_message,
+    expected_code,
+    expected_category,
 ):
     event_sink = FakeRealtimeEventSink()
     runner, adapter, _sink = await _started_runner(event_sink=event_sink)
@@ -403,10 +411,13 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
     with pytest.raises(RealtimePipelineRunnerStateError, match=expected_message) as exc_info:
         await runner.commit_audio()
 
-    assert exc_info.value.code == "PIPECAT_PROVIDER_ERROR"
+    assert exc_info.value.code == expected_code
     assert exc_info.value.phase == "provider_event"
     assert exc_info.value.provider == "pipecat"
     assert exc_info.value.metadata["eventType"] == provider_event["type"]
+    assert exc_info.value.metadata["errorCategory"] == expected_category
+    assert exc_info.value.metadata["fatal"] is True
+    assert exc_info.value.metadata["retryable"] is (expected_category == "provider_unavailable")
     await runner.close()
     assert event_sink.events == []
 
@@ -419,7 +430,7 @@ async def test_runner_sanitizes_provider_error_events_before_rethrowing():
         {
             "type": "pipeline.error",
             "error": {
-                "message": "provider failed with api_key=sk-secret-should-not-appear",
+                "message": "provider failed with invalid request sk-secret-should-not-appear",
                 "code": "bad_request",
             },
             "metadata": {
@@ -440,9 +451,12 @@ async def test_runner_sanitizes_provider_error_events_before_rethrowing():
         await runner.commit_audio()
 
     error = exc_info.value.to_realtime_error()
-    assert error["code"] == "bad_request"
+    assert error["code"] == "REALTIME_PROVIDER_BAD_REQUEST"
     assert error["phase"] == "provider_event"
     assert error["eventType"] == "pipeline.error"
+    assert error["errorCategory"] == "bad_request"
+    assert error["retryable"] is False
+    assert error["fatal"] is True
     assert error["sourceCode"] == "bad_request"
     assert error["metadata"] == {"safe": "kept"}
     serialized = json.dumps(error)

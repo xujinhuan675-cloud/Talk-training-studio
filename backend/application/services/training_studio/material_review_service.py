@@ -21,8 +21,11 @@ _MAX_MATERIALS = 5
 _MAX_MATERIAL_POINTS = 3
 _MAX_REPLAY_TURNS = 40
 _MAX_CONTEXT_CHARS = 12000
+_MAX_REVIEW_POINTS = 6
 _POINT_TEXT_LIMIT = 360
+_EVIDENCE_TEXT_LIMIT = 220
 _SUGGESTION_LIMIT = 3
+_SUGGESTION_TEXT_LIMIT = 220
 _WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'-]{2,}|[\u4e00-\u9fff]{2,}")
 
 
@@ -193,6 +196,12 @@ class TrainingMaterialReviewService:
             return fallback
         if llm_patch is None:
             return fallback
+        safe_patch = _sanitize_llm_patch(
+            llm_patch,
+            materials=materials[:_MAX_MATERIALS],
+        )
+        if safe_patch is None:
+            return fallback
         source_state = fallback.source_state.model_copy(
             update={
                 "strategy": "llm_adapter",
@@ -203,18 +212,18 @@ class TrainingMaterialReviewService:
             update={
                 "matched_points": (
                     fallback.matched_points
-                    if llm_patch.matched_points is None
-                    else llm_patch.matched_points
+                    if safe_patch.matched_points is None
+                    else safe_patch.matched_points
                 ),
                 "missed_points": (
                     fallback.missed_points
-                    if llm_patch.missed_points is None
-                    else llm_patch.missed_points
+                    if safe_patch.missed_points is None
+                    else safe_patch.missed_points
                 ),
                 "suggested_rewrites": (
                     fallback.suggested_rewrites
-                    if llm_patch.suggested_rewrites is None
-                    else llm_patch.suggested_rewrites
+                    if safe_patch.suggested_rewrites is None
+                    else safe_patch.suggested_rewrites
                 ),
                 "source_state": source_state,
             }
@@ -377,6 +386,65 @@ def _suggested_rewrites(
             f"Practice a tighter {role} answer: state the claim, give one proof point, then ask for the next constraint."
         )
     return _dedupe(suggestions)[:_SUGGESTION_LIMIT]
+
+
+def _sanitize_llm_patch(
+    patch: MaterialReviewPatchDTO,
+    *,
+    materials: list[TrainingMaterialAssetSummaryDTO],
+) -> MaterialReviewPatchDTO | None:
+    material_titles = {material.id: _material_title(material) for material in materials}
+    matched_points = _sanitize_patch_points(patch.matched_points, material_titles)
+    missed_points = _sanitize_patch_points(patch.missed_points, material_titles)
+    suggested_rewrites = _sanitize_patch_suggestions(patch.suggested_rewrites)
+    if matched_points is None and missed_points is None and suggested_rewrites is None:
+        return None
+    return MaterialReviewPatchDTO(
+        matched_points=matched_points,
+        missed_points=missed_points,
+        suggested_rewrites=suggested_rewrites,
+    )
+
+
+def _sanitize_patch_points(
+    points: list[MaterialReviewPointDTO] | None,
+    material_titles: dict[int, str],
+) -> list[MaterialReviewPointDTO] | None:
+    if not points:
+        return None
+
+    sanitized: list[MaterialReviewPointDTO] = []
+    seen: set[tuple[int, str]] = set()
+    for item in points:
+        if item.material_id not in material_titles:
+            continue
+        point = _limit_text(item.point, _POINT_TEXT_LIMIT)
+        if not point:
+            continue
+        dedupe_key = (item.material_id, point.lower())
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        evidence = _limit_text(item.evidence or "", _EVIDENCE_TEXT_LIMIT) or None
+        sanitized.append(
+            MaterialReviewPointDTO(
+                material_id=item.material_id,
+                material_title=material_titles[item.material_id],
+                point=point,
+                evidence=evidence,
+            )
+        )
+        if len(sanitized) >= _MAX_REVIEW_POINTS:
+            break
+    return sanitized or None
+
+
+def _sanitize_patch_suggestions(suggestions: list[str] | None) -> list[str] | None:
+    if not suggestions:
+        return None
+    return _dedupe(
+        [_limit_text(suggestion, _SUGGESTION_TEXT_LIMIT) for suggestion in suggestions]
+    )[:_SUGGESTION_LIMIT] or None
 
 
 def _report_suggestions(content: dict[str, Any]) -> list[str]:

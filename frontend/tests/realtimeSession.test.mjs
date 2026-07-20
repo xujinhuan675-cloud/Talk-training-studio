@@ -185,6 +185,57 @@ test('RealtimeSession updates status from backend wire events', () => {
   assert.equal(events[0].payload.message.content, 'Saved turn.')
 })
 
+test('decodeRealtimeServerEvent normalizes nested realtime error payloads', () => {
+  const event = realtimeSession.decodeRealtimeServerEvent(JSON.stringify({
+    type: 'error',
+    sessionId: 'session-1',
+    status: 'processing',
+    payload: {
+      message: 'Provider rate limit exceeded',
+      code: 'REALTIME_PROVIDER_RATE_LIMIT',
+      provider: 'pipecat',
+      phase: 'provider_event',
+      runtime: 'realtime_voice',
+      realtimeRuntime: 'pipecat',
+      errorCategory: 'rate_limit',
+      eventType: 'error',
+      sourceCode: 'rate_limit_exceeded',
+      retryable: true,
+      fatal: false,
+      trainingSessionId: 'session-1',
+      roomId: 42,
+      metadata: { requestId: 'req-rate-limit' },
+    },
+  }))
+
+  assert.equal(event.type, 'error')
+  assert.equal(event.message, 'Provider rate limit exceeded')
+  assert.equal(event.code, 'REALTIME_PROVIDER_RATE_LIMIT')
+  assert.equal(event.provider, 'pipecat')
+  assert.equal(event.phase, 'provider_event')
+  assert.equal(event.errorCategory, 'rate_limit')
+  assert.equal(event.sourceCode, 'rate_limit_exceeded')
+  assert.equal(event.retryable, true)
+  assert.equal(event.fatal, false)
+  assert.equal(event.status, 'processing')
+  assert.deepEqual(event.payload, {
+    message: 'Provider rate limit exceeded',
+    code: 'REALTIME_PROVIDER_RATE_LIMIT',
+    provider: 'pipecat',
+    phase: 'provider_event',
+    runtime: 'realtime_voice',
+    realtimeRuntime: 'pipecat',
+    errorCategory: 'rate_limit',
+    eventType: 'error',
+    sourceCode: 'rate_limit_exceeded',
+    retryable: true,
+    fatal: false,
+    trainingSessionId: 'session-1',
+    roomId: 42,
+    metadata: { requestId: 'req-rate-limit' },
+  })
+})
+
 test('RealtimeSession decodes nested base64 audio.output events from the websocket', () => {
   let socket
   const events = []

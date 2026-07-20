@@ -476,6 +476,120 @@ test('applyConversationTreeMessageAction supports edit and retry write payloads'
   )
 })
 
+test('applyConversationTreeMessageAction posts replay-only branch metadata', async () => {
+  const context = trainingConversation.buildConversationTreeMessageActionContext({
+    provider: 'talkwise-conversation',
+    conversationId: 7,
+    messagePublicId: 'msg_answer',
+  })
+
+  await withMockFetch(
+    (url, init) => {
+      assert.equal(url, '/api/v1/conversations/7/messages/msg_answer/actions')
+      assert.deepEqual(JSON.parse(init.body), {
+        action: 'fork',
+        metadata: {
+          source: 'message_tree_panel',
+          selectedPath: {
+            branchId: 'branch-shadow',
+            tailMessageId: 'msg_answer',
+            messageIds: ['msg_root', 'msg_answer'],
+            purpose: 'training_replay_context',
+            replayContextOnly: true,
+            affectsScoring: false,
+            affectsCompletion: false,
+          },
+          messageTreeSelection: {
+            selectedMessageId: 'msg_answer',
+            path: [
+              {
+                publicId: 'msg_root',
+                content: 'Question',
+              },
+              {
+                publicId: 'msg_answer',
+                content: 'Answer',
+              },
+            ],
+            purpose: 'training_replay_context',
+            replayContextOnly: true,
+            affectsScoring: false,
+            affectsCompletion: false,
+          },
+          currentBranchTail: {
+            branchId: 'branch-shadow',
+            messageId: 'msg_answer',
+          },
+        },
+        option: 'targetLevel',
+      })
+      return {
+        action: 'fork',
+        message: {
+          id: 22,
+          conversation_id: 8,
+          role: 'assistant',
+          content: 'Forked selected answer',
+          public_id: 'msg_forked',
+          branch_id: 'main',
+          status: 'active',
+          created_at: '2026-07-20T00:03:00Z',
+        },
+        path: [],
+        children: [],
+        siblings: [],
+        branch_id: 'main',
+        conversation: { id: 8, title: 'Forked path', status: 'active', metadata: {} },
+        messages: [],
+        source_to_forked_id: { msg_answer: 'msg_forked' },
+      }
+    },
+    async () => {
+      const result = await trainingConversation.applyConversationTreeMessageAction(context, {
+        action: 'fork',
+        metadata: {
+          source: 'message_tree_panel',
+          score: 99,
+          growthReport: { id: 'growth-leak' },
+          completion: { status: 'done' },
+          selectedPath: {
+            branchId: 'branch-shadow',
+            tailMessageId: 'msg_answer',
+            messageIds: ['msg_root', 'msg_answer'],
+            affectsScoring: true,
+            affectsCompletion: true,
+            score: 100,
+          },
+          messageTreeSelection: {
+            selectedMessageId: 'msg_answer',
+            path: [
+              {
+                publicId: 'msg_root',
+                content: 'Question',
+                growthReport: { id: 'path-leak' },
+              },
+              {
+                publicId: 'msg_answer',
+                content: 'Answer',
+                completion: { status: 'done' },
+              },
+            ],
+            overallScore: 5,
+          },
+          currentBranchTail: {
+            branchId: 'branch-shadow',
+            messageId: 'msg_answer',
+            completedAt: '2026-07-20T00:03:00Z',
+          },
+        },
+      })
+
+      assert.equal(result.action, 'fork')
+      assert.equal(result.message.publicId, 'msg_forked')
+    },
+  )
+})
+
 test('applyConversationTreeMessageAction normalizes fork action result', async () => {
   const context = trainingConversation.buildConversationTreeMessageActionContext({
     provider: 'talkwise-conversation',

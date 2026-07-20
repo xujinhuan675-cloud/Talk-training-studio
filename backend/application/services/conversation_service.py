@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence as SequenceABC
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Literal, Optional, Sequence, Tuple
 
@@ -108,6 +109,37 @@ _ACL_METADATA_KEYS = {
 }
 _OWNER_USER_KEYS = ("ownerUserId", "owner_user_id", "createdByUserId", "created_by_user_id")
 _OWNER_TEAM_KEYS = ("teamId", "team_id", "ownerTeamId", "owner_team_id")
+_MESSAGE_TREE_REPLAY_METADATA_KEYS = (
+    "selectedPath",
+    "selected_path",
+    "messageTreeSelection",
+    "message_tree_selection",
+)
+_MESSAGE_TREE_TAIL_METADATA_KEYS = ("currentBranchTail", "current_branch_tail")
+_SCORING_GROWTH_COMPLETION_METADATA_KEYS = {
+    "score",
+    "score_id",
+    "scoreid",
+    "score_status",
+    "scorestatus",
+    "overall_score",
+    "overallscore",
+    "evaluation",
+    "evaluation_id",
+    "evaluationid",
+    "growth",
+    "growth_report",
+    "growthreport",
+    "report",
+    "report_id",
+    "reportid",
+    "completion",
+    "completion_status",
+    "completionstatus",
+    "completed",
+    "completed_at",
+    "completedat",
+}
 
 
 def _metadata_mapping(value: object | None) -> Mapping[str, Any]:
@@ -186,6 +218,78 @@ def _merge_metadata_preserving_acl(
         if existing and key in existing:
             merged[key] = existing[key]
     return merged
+
+
+def _metadata_key_token(key: object) -> str:
+    return str(key).replace("-", "_").replace(" ", "_").strip().lower()
+
+
+def _is_scoring_growth_completion_key(key: object) -> bool:
+    return _metadata_key_token(key) in _SCORING_GROWTH_COMPLETION_METADATA_KEYS
+
+
+def _is_non_text_sequence(value: object) -> bool:
+    return isinstance(value, SequenceABC) and not isinstance(
+        value,
+        str | bytes | bytearray,
+    )
+
+
+def _sanitize_replay_metadata_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        sanitized: dict[str, Any] = {}
+        for key, nested_value in value.items():
+            text_key = str(key).strip()
+            if not text_key or _is_scoring_growth_completion_key(text_key):
+                continue
+            sanitized[text_key] = _sanitize_replay_metadata_value(nested_value)
+        return sanitized
+    if _is_non_text_sequence(value):
+        return [_sanitize_replay_metadata_value(item) for item in value]
+    return deepcopy(value)
+
+
+def _normalize_replay_record(value: object, *, replay_only: bool) -> object:
+    if not isinstance(value, Mapping):
+        return deepcopy(value)
+    normalized = _sanitize_replay_metadata_value(value)
+    if isinstance(normalized, dict) and replay_only:
+        normalized["purpose"] = "training_replay_context"
+        normalized["replayContextOnly"] = True
+        normalized["affectsScoring"] = False
+        normalized["affectsCompletion"] = False
+    return normalized
+
+
+def _normalize_message_tree_replay_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    normalized = deepcopy(dict(metadata or {}))
+    for key in _MESSAGE_TREE_REPLAY_METADATA_KEYS:
+        if key in normalized:
+            normalized[key] = _normalize_replay_record(
+                normalized[key],
+                replay_only=True,
+            )
+    for key in _MESSAGE_TREE_TAIL_METADATA_KEYS:
+        if key in normalized:
+            normalized[key] = _normalize_replay_record(
+                normalized[key],
+                replay_only=False,
+            )
+    return normalized
+
+
+def _sanitize_message_tree_action_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        text_key = str(key).strip()
+        if not text_key or _is_scoring_growth_completion_key(text_key):
+            continue
+        sanitized[text_key] = deepcopy(value)
+    return _normalize_message_tree_replay_metadata(sanitized)
 
 
 async def _raise_conversation_not_found(
@@ -337,7 +441,7 @@ def _remap_fork_conversation_metadata(
     metadata: dict[str, Any],
     source_to_forked_id: Mapping[str, str],
 ) -> dict[str, Any]:
-    remapped = dict(metadata)
+    remapped = _normalize_message_tree_replay_metadata(metadata)
     for key, remap in {
         "selectedPath": _remap_selected_path_metadata,
         "currentBranchTail": _remap_branch_tail_metadata,
@@ -432,10 +536,11 @@ def _message_action_metadata(
     action_key: str,
     metadata: dict | None,
 ) -> dict:
-    inherited = dict(source.metadata or {})
+    inherited = _sanitize_message_tree_action_metadata(source.metadata)
+    incoming = _sanitize_message_tree_action_metadata(metadata)
     merged = {
         **inherited,
-        **(metadata or {}),
+        **incoming,
         action_key: source.public_id,
     }
     if source.provider is not None and not _clean_optional_text(merged.get("provider")):
@@ -860,12 +965,15 @@ class ConversationApplicationService:
                 raise MessageNotFoundException()
 
             now = _utcnow()
-            metadata = {
-                **_merge_metadata_preserving_acl(conv.metadata, dto.metadata),
+            metadata = _normalize_message_tree_replay_metadata({
+                **_merge_metadata_preserving_acl(
+                    conv.metadata,
+                    _sanitize_message_tree_action_metadata(dto.metadata),
+                ),
                 "forked_from_conversation_id": conversation_id,
                 "forked_from_message_id": message_public_id,
                 "fork_option": dto.option,
-            }
+            })
             forked_conversation = await uow.conversation_repository.create(
                 Conversation(
                     id=None,
@@ -910,7 +1018,7 @@ class ConversationApplicationService:
                     run_id=None,
                     token_count=source.token_count,
                     metadata={
-                        **(source.metadata or {}),
+                        **_sanitize_message_tree_action_metadata(source.metadata),
                         "forked_from_message_id": source.public_id,
                     },
                     created_at=_forked_created_at_after_parent(

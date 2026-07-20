@@ -232,6 +232,32 @@ const TRAINING_STUDIO_API_BASE = '/api/v1/training-studio'
 const CONVERSATION_API_BASE = '/api/v1/conversations'
 const STAKEHOLDER_ROOM_PROVIDER = 'talkwise-stakeholder-room'
 const PIPECAT_REALTIME_PROVIDER = 'pipecat'
+const MESSAGE_TREE_REPLAY_METADATA_KEYS = new Set([
+  'selectedPath',
+  'selected_path',
+  'messageTreeSelection',
+  'message_tree_selection',
+])
+const MESSAGE_TREE_TAIL_METADATA_KEYS = new Set([
+  'currentBranchTail',
+  'current_branch_tail',
+])
+const SCORING_GROWTH_COMPLETION_METADATA_KEYS = new Set([
+  'score',
+  'score_id',
+  'score_status',
+  'overall_score',
+  'evaluation',
+  'evaluation_id',
+  'growth',
+  'growth_report',
+  'report',
+  'report_id',
+  'completion',
+  'completion_status',
+  'completed',
+  'completed_at',
+])
 
 export function normalizeConversationRef(
   input: ConversationRefInput,
@@ -581,7 +607,7 @@ function buildConversationTreeMessageActionPayload(
 ): Record<string, unknown> {
   const action = normalizeMessageWriteAction(input.action)
   const payload: Record<string, unknown> = { action }
-  const metadata = cloneMetadata(input.metadata)
+  const metadata = sanitizeMessageTreeActionMetadata(input.metadata)
   if (Object.keys(metadata).length > 0) payload.metadata = metadata
 
   if (action === 'edit') {
@@ -873,6 +899,78 @@ function speakerForRole(role: TrainingTurnRole): TrainingTranscriptSpeaker {
 
 function normalizeToken(value: string | null | undefined): string | null {
   return cleanText(value)?.toLowerCase().replace(/[\s-]+/g, '_') ?? null
+}
+
+function metadataKeyToken(value: string): string {
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase()
+}
+
+function isScoringGrowthCompletionMetadataKey(value: string): boolean {
+  return SCORING_GROWTH_COMPLETION_METADATA_KEYS.has(metadataKeyToken(value))
+}
+
+function cloneMetadataValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneMetadataValue)
+  const record = recordValue(value)
+  if (!record) return value
+  return Object.fromEntries(
+    Object.entries(record).map(([key, nestedValue]) => [key, cloneMetadataValue(nestedValue)]),
+  )
+}
+
+function sanitizeReplayMetadataValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeReplayMetadataValue)
+  const record = recordValue(value)
+  if (!record) return value
+
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, nestedValue] of Object.entries(record)) {
+    if (isScoringGrowthCompletionMetadataKey(key)) continue
+    sanitized[key] = sanitizeReplayMetadataValue(nestedValue)
+  }
+  return sanitized
+}
+
+function normalizeReplayMetadataRecord(value: unknown, replayOnly: boolean): unknown {
+  const record = recordValue(value)
+  if (!record) return cloneMetadataValue(value)
+  const normalized = sanitizeReplayMetadataValue(record) as Record<string, unknown>
+  if (replayOnly) {
+    normalized.purpose = 'training_replay_context'
+    normalized.replayContextOnly = true
+    normalized.affectsScoring = false
+    normalized.affectsCompletion = false
+  }
+  return normalized
+}
+
+function normalizeMessageTreeReplayMetadata(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized = cloneMetadataValue(metadata) as Record<string, unknown>
+  for (const key of Object.keys(normalized)) {
+    if (MESSAGE_TREE_REPLAY_METADATA_KEYS.has(key)) {
+      normalized[key] = normalizeReplayMetadataRecord(normalized[key], true)
+    } else if (MESSAGE_TREE_TAIL_METADATA_KEYS.has(key)) {
+      normalized[key] = normalizeReplayMetadataRecord(normalized[key], false)
+    }
+  }
+  return normalized
+}
+
+function sanitizeMessageTreeActionMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(metadata ?? {})) {
+    if (isScoringGrowthCompletionMetadataKey(key)) continue
+    sanitized[key] = cloneMetadataValue(value)
+  }
+  return normalizeMessageTreeReplayMetadata(sanitized)
 }
 
 function normalizeMessageWriteAction(value: unknown): ConversationTreeMessageWriteActionKind {

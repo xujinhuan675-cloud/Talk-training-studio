@@ -15,9 +15,11 @@ from application.dto import (
     UpdateConversationDTO,
     UpdateAgentConfigDTO,
 )
+from application.ports.llm import LLMProviderMetadata
+from application.services.chat_service import _run_request_metadata
 from application.services.conversation_service import ConversationApplicationService
 from domain.common.exceptions import DomainValidationException
-from domain.conversation.entity import AgentConfig, Conversation
+from domain.conversation.entity import AgentConfig, Conversation, Message
 from domain.conversation.exceptions import (
     AgentConfigNotFoundException,
     ConversationNotFoundException,
@@ -147,10 +149,12 @@ class _FakeUnitOfWork:
         agent_config_repository=None,
         *,
         conversation_repository=None,
+        message_repository=None,
         readonly: bool = False,
     ) -> None:
         self.agent_config_repository = agent_config_repository
         self.conversation_repository = conversation_repository
+        self.message_repository = message_repository
         self.readonly = readonly
 
     async def __aenter__(self):
@@ -170,6 +174,75 @@ class _FakeConversationCreateRepository:
         return conversation
 
 
+class _FakeConversationRepository:
+    def __init__(self, conversation: Conversation) -> None:
+        self.conversations = {conversation.id: conversation}
+        self.next_id = max(self.conversations) + 1
+        self.create_calls: list[Conversation] = []
+        self.update_calls: list[dict[str, Any]] = []
+
+    async def get_by_id(self, conversation_id: int, *, metadata_scope=None):
+        return self.conversations.get(conversation_id)
+
+    async def create(self, conversation: Conversation) -> Conversation:
+        conversation.id = self.next_id
+        self.next_id += 1
+        self.conversations[conversation.id] = conversation
+        self.create_calls.append(conversation)
+        return conversation
+
+    async def update(self, conversation: Conversation, *, metadata_scope=None):
+        self.conversations[conversation.id] = conversation
+        self.update_calls.append(
+            {"conversation": conversation, "metadata_scope": metadata_scope}
+        )
+        return conversation
+
+
+class _FakeMessageRepository:
+    def __init__(self, messages: list[Message]) -> None:
+        self.messages = list(messages)
+        self.create_calls: list[Message] = []
+        self.update_calls: list[Message] = []
+
+    async def get_by_public_id(self, public_id: str):
+        return next(
+            (message for message in self.messages if message.public_id == public_id),
+            None,
+        )
+
+    async def list_by_conversation(
+        self,
+        conversation_id: int,
+        *,
+        limit: int = 10000,
+        statuses=None,
+        include_deleted: bool = False,
+        **kwargs,
+    ):
+        allowed_statuses = set(statuses or [])
+        messages = [
+            message
+            for message in self.messages
+            if message.conversation_id == conversation_id
+            and (include_deleted or message.status != "deleted")
+            and (not allowed_statuses or message.status in allowed_statuses)
+        ]
+        return messages[:limit]
+
+    async def create(self, message: Message):
+        message.id = (max((item.id or 0 for item in self.messages), default=0) + 1)
+        if message.created_at is None:
+            message.created_at = datetime(2026, 7, 20, tzinfo=timezone.utc)
+        self.messages.append(message)
+        self.create_calls.append(message)
+        return message
+
+    async def update(self, message: Message):
+        self.update_calls.append(message)
+        return message
+
+
 def _service(repo: _FakeAgentConfigRepository) -> ConversationApplicationService:
     def uow_factory(*, readonly: bool = False):
         return _FakeUnitOfWork(repo, readonly=readonly)
@@ -181,11 +254,13 @@ def _service_with_repositories(
     *,
     conversation_repository=None,
     agent_config_repository=None,
+    message_repository=None,
 ) -> ConversationApplicationService:
     def uow_factory(*, readonly: bool = False):
         return _FakeUnitOfWork(
             agent_config_repository,
             conversation_repository=conversation_repository,
+            message_repository=message_repository,
             readonly=readonly,
         )
 
@@ -430,6 +505,239 @@ async def test_create_conversation_rejects_metadata_outside_scope() -> None:
         )
 
     assert repo.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_message_edit_retry_metadata_is_replay_only_not_scoring_state() -> None:
+    conversation = Conversation(
+        id=7,
+        title="Training replay",
+        metadata={"ownerUserId": "user-sales-001", "teamId": "team-revenue"},
+    )
+    source = Message(
+        id=1,
+        conversation_id=7,
+        role="user",
+        content="Original answer",
+        public_id="msg-user-1",
+        metadata={
+            "source": "training_core",
+            "score": 91,
+            "evaluation": {"rubricId": "source-evaluation"},
+            "growthReport": {"id": "source-growth"},
+            "report": {"id": "source-report"},
+            "completed_at": "2026-07-20T01:00:00Z",
+            "completedAt": "2026-07-20T01:30:00Z",
+            "selectedPath": {
+                "branchId": "main",
+                "tailMessageId": "msg-user-1",
+                "messageIds": ["msg-user-1"],
+                "affectsScoring": True,
+                "score": 99,
+            },
+            "messageTreeSelection": {
+                "branchId": "main",
+                "messageIds": ["msg-user-1"],
+                "growthReport": {"id": "leak"},
+            },
+        },
+    )
+    message_repo = _FakeMessageRepository([source])
+    service = _service_with_repositories(
+        conversation_repository=_FakeConversationRepository(conversation),
+        message_repository=message_repo,
+    )
+
+    edited = await service.edit_message(
+        7,
+        "msg-user-1",
+        EditMessageDTO(
+            content="Edited answer",
+            metadata={
+                "score": 100,
+                "growth_report": {"id": "incoming-leak"},
+                "selectedPath": {
+                    "branchId": "edited",
+                    "messageIds": ["msg-user-1"],
+                    "completed": True,
+                },
+            },
+        ),
+        metadata_scope=_scope(),
+    )
+
+    retry = await service.retry_message(
+        7,
+        "msg-user-1",
+        RetryMessageDTO(
+            content="Retry answer",
+            metadata={
+                "completed_at": "2026-07-20T02:00:00Z",
+                "currentBranchTail": {
+                    "branchId": "retry",
+                    "messageId": "msg-user-1",
+                    "completionStatus": "done",
+                },
+            },
+        ),
+        metadata_scope=_scope(),
+    )
+
+    assert edited.metadata["edit_of"] == "msg-user-1"
+    assert retry.metadata["retry_of"] == "msg-user-1"
+    for metadata in (edited.metadata, retry.metadata):
+        assert "score" not in metadata
+        assert "evaluation" not in metadata
+        assert "growthReport" not in metadata
+        assert "report" not in metadata
+        assert "completed_at" not in metadata
+        assert "completedAt" not in metadata
+        assert "growth_report" not in metadata
+        assert metadata["selectedPath"]["purpose"] == "training_replay_context"
+        assert metadata["selectedPath"]["replayContextOnly"] is True
+        assert metadata["selectedPath"]["affectsScoring"] is False
+        assert metadata["selectedPath"]["affectsCompletion"] is False
+        assert "score" not in metadata["selectedPath"]
+    assert "growthReport" not in edited.metadata["messageTreeSelection"]
+    assert "completionStatus" not in retry.metadata["currentBranchTail"]
+
+
+@pytest.mark.asyncio
+async def test_fork_conversation_remaps_replay_path_without_scoring_metadata() -> None:
+    conversation = Conversation(
+        id=7,
+        title="Training replay",
+        metadata={
+            "ownerUserId": "user-sales-001",
+            "teamId": "team-revenue",
+            "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            "selectedPath": {
+                "branchId": "main",
+                "tailMessageId": "msg-assistant-1",
+                "messageIds": ["msg-user-1", "msg-assistant-1"],
+                "affectsScoring": True,
+                "completed": True,
+            },
+            "currentBranchTail": {
+                "branchId": "main",
+                "messageId": "msg-assistant-1",
+                "completed_at": "2026-07-20T01:00:00Z",
+            },
+        },
+    )
+    user_message = Message(
+        id=1,
+        conversation_id=7,
+        role="user",
+        content="Original answer",
+        public_id="msg-user-1",
+        metadata={"score": 1, "source": "training_core"},
+    )
+    assistant_message = Message(
+        id=2,
+        conversation_id=7,
+        role="assistant",
+        content="Counterpart reply",
+        public_id="msg-assistant-1",
+        parent_message_id="msg-user-1",
+        metadata={
+            "selectedPath": {
+                "branchId": "main",
+                "messageIds": ["msg-user-1", "msg-assistant-1"],
+                "affectsScoring": True,
+            },
+            "completed": True,
+        },
+    )
+    conversation_repo = _FakeConversationRepository(conversation)
+    message_repo = _FakeMessageRepository([user_message, assistant_message])
+    service = _service_with_repositories(
+        conversation_repository=conversation_repo,
+        message_repository=message_repo,
+    )
+
+    result = await service.fork_conversation(
+        7,
+        "msg-assistant-1",
+        ForkConversationDTO(
+            option="directPath",
+            metadata={
+                "growthReport": {"id": "incoming-leak"},
+                "selectedPath": {
+                    "branchId": "fork",
+                    "messageIds": ["msg-assistant-1"],
+                    "affectsCompletion": True,
+                },
+            },
+        ),
+        metadata_scope=_scope(),
+    )
+
+    forked_metadata = result.conversation.metadata
+    forked_user, forked_assistant = result.messages
+    assert forked_metadata["ownerUserId"] == "user-sales-001"
+    assert forked_metadata["teamId"] == "team-revenue"
+    assert forked_metadata["authScope"] == {
+        "userId": "user-sales-001",
+        "teamId": "team-revenue",
+    }
+    assert "growthReport" not in forked_metadata
+    assert "completed" not in forked_metadata["selectedPath"]
+    assert forked_metadata["selectedPath"]["purpose"] == "training_replay_context"
+    assert forked_metadata["selectedPath"]["replayContextOnly"] is True
+    assert forked_metadata["selectedPath"]["affectsScoring"] is False
+    assert forked_metadata["selectedPath"]["affectsCompletion"] is False
+    assert forked_metadata["selectedPath"]["messageIds"] == [forked_assistant.public_id]
+    assert forked_metadata["currentBranchTail"]["messageId"] == forked_assistant.public_id
+    assert "completed_at" not in forked_metadata["currentBranchTail"]
+    assert "score" not in forked_user.metadata
+    assert "completed" not in forked_assistant.metadata
+    assert forked_assistant.metadata["selectedPath"]["affectsScoring"] is False
+
+
+def test_chat_request_metadata_keeps_branch_replay_non_scoring() -> None:
+    metadata = _run_request_metadata(
+        provider="openai",
+        model="gpt-test",
+        provider_metadata=LLMProviderMetadata(provider="openai", default_model="gpt-test"),
+        request_metadata={
+            "source": "message_tree_chat",
+            "growthReport": {"id": "training-core-growth"},
+            "selectedPath": {
+                "branchId": "branch-review",
+                "tailMessageId": "msg-tail",
+                "messageIds": ["msg-root", "msg-tail"],
+                "affectsScoring": True,
+                "affectsCompletion": True,
+                "score": 99,
+                "completion": {"status": "done"},
+            },
+            "messageTreeSelection": {
+                "selectedMessageId": "msg-tail",
+                "path": [
+                    {
+                        "publicId": "msg-root",
+                        "content": "Question",
+                        "growthReport": {"id": "path-leak"},
+                    },
+                    {"publicId": "msg-tail", "content": "Answer"},
+                ],
+                "overallScore": 5,
+            },
+        },
+    )
+
+    assert metadata["growthReport"] == {"id": "training-core-growth"}
+    assert metadata["selectedPath"]["purpose"] == "training_replay_context"
+    assert metadata["selectedPath"]["replayContextOnly"] is True
+    assert metadata["selectedPath"]["affectsScoring"] is False
+    assert metadata["selectedPath"]["affectsCompletion"] is False
+    assert "score" not in metadata["selectedPath"]
+    assert "completion" not in metadata["selectedPath"]
+    assert metadata["messageTreeSelection"]["purpose"] == "training_replay_context"
+    assert metadata["messageTreeSelection"]["affectsScoring"] is False
+    assert "overallScore" not in metadata["messageTreeSelection"]
+    assert "growthReport" not in metadata["messageTreeSelection"]["path"][0]
 
 
 @pytest.mark.parametrize(

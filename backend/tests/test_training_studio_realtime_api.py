@@ -356,6 +356,28 @@ def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> No
         "interrupted",
         "silence_timeout",
     }.issubset(set(data["pipecat"]["smoke"]["contractEvents"]))
+    assert {
+        "status.changed",
+        "session.configured",
+        "session.closed",
+        "error",
+    }.issubset(set(data["pipecat"]["smoke"]["contractEvents"]))
+    assert data["pipecat"]["smoke"]["eventOrder"]["finalTranscript"] == [
+        "transcript.done",
+        "transcript.persisted",
+        "training.live_guidance.triggered",
+    ]
+    assert data["pipecat"]["smoke"]["errorTaxonomy"][0] == {
+        "code": "REALTIME_PROVIDER_AUTHENTICATION",
+        "errorCategory": "authentication",
+        "retryable": False,
+        "fatal": True,
+    }
+    assert data["pipecat"]["smoke"]["readinessAssertions"] == {
+        "readyForCallImpliesLocalRuntimeReady": True,
+        "browserE2EVerified": False,
+        "requiresExplicitMediaPermission": True,
+    }
     assert data["pipecat"]["readiness"]["ready"] is True
     assert data["pipecat"]["readiness"]["status"] == "ready"
     assert data["pipecat"]["readiness"]["blockingReasons"] == []
@@ -1379,13 +1401,67 @@ def test_realtime_websocket_pipecat_provider_surfaces_pipeline_error_on_commit()
 
     assert committed["status"] == "processing"
     assert error["type"] == "error"
-    assert error["payload"]["code"] == "PIPECAT_PROVIDER_ERROR"
+    assert error["payload"]["code"] == "REALTIME_PROVIDER_UNAVAILABLE"
     assert error["payload"]["provider"] == "pipecat"
     assert error["payload"]["phase"] == "provider_event"
     assert error["payload"]["eventType"] == "pipeline.error"
+    assert error["payload"]["errorCategory"] == "provider_unavailable"
+    assert error["payload"]["retryable"] is True
+    assert error["payload"]["fatal"] is True
     assert error["payload"]["trainingSessionId"] == "session-1"
     assert error["payload"]["roomId"] == 42
     assert "Pipecat provider disconnected" in error["payload"]["message"]
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_pipecat_provider_forwards_nonfatal_provider_error() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "error",
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": "Provider rate limit exceeded",
+                "status": 429,
+            },
+            "metadata": {"requestId": "req-rate-limit", "apiKey": "sk-should-not-leak"},
+        }
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "audio.commit"})
+        committed = ws.receive_json()
+        error = ws.receive_json()
+        listening = ws.receive_json()
+
+        ws.send_json({"type": "session.close", "reason": "nonfatal-error"})
+        closed = ws.receive_json()
+
+    assert committed["status"] == "processing"
+    assert error["type"] == "error"
+    assert error["status"] == "processing"
+    assert error["payload"]["code"] == "REALTIME_PROVIDER_RATE_LIMIT"
+    assert error["payload"]["sourceCode"] == "rate_limit_exceeded"
+    assert error["payload"]["errorCategory"] == "rate_limit"
+    assert error["payload"]["retryable"] is True
+    assert error["payload"]["fatal"] is False
+    assert error["payload"]["provider"] == "pipecat"
+    assert error["payload"]["phase"] == "provider_event"
+    assert error["payload"]["metadata"] == {"requestId": "req-rate-limit", "statusCode": 429}
+    assert "sk-should-not-leak" not in str(error)
+    assert listening["type"] == "status.changed"
+    assert listening["status"] == "listening"
+    assert closed["type"] == "session.closed"
     assert adapter.closed is True
 
 
