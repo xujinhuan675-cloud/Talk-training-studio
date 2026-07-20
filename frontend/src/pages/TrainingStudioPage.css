@@ -93,10 +93,9 @@
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
-.training-studio-mode:hover,
-.training-studio-mode:focus-within {
+.training-studio-mode:hover {
   border-color: var(--border-accent);
-  background: var(--green-soft);
+  background: var(--bg-card);
 }
 
 .training-studio-mode.selected {
@@ -121,6 +120,12 @@
 
 .training-studio-mode-main:disabled {
   cursor: not-allowed;
+}
+
+.training-studio-mode-main:focus-visible,
+.training-studio-interaction:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
 }
 
 .training-studio-mode-main span {

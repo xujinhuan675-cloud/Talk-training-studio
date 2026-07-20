@@ -183,9 +183,6 @@ function getLaunchInteractionMode(mode: LaunchMode): InteractionMode {
 }
 
 function isModeCardSelected(cardMode: TopLevelMode, selectedMode: LaunchMode): boolean {
-  if (cardMode === 'voice') {
-    return selectedMode === 'voice' || selectedMode === 'realtime'
-  }
   return cardMode === selectedMode
 }
 

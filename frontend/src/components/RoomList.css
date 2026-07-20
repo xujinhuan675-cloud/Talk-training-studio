@@ -106,7 +106,7 @@
 }
 
 .room-battle-title {
-  color: var(--amber);
+  color: var(--green);
 }
 
 .room-battle-create {
@@ -115,9 +115,9 @@
   gap: 4px;
   min-height: 24px;
   padding: 0 7px;
-  border: 1px solid var(--amber);
+  border: 1px solid var(--green);
   border-radius: var(--radius-sm);
-  background: var(--amber);
+  background: var(--primary-gradient);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -131,9 +131,9 @@
 }
 
 .room-battle-create:hover {
-  border-color: var(--amber);
-  background: var(--amber-soft);
-  color: var(--amber);
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 /* Hide old type badge in sidebar — not needed with icons */

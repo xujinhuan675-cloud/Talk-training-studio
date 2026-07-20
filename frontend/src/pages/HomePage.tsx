@@ -223,6 +223,10 @@ const HomePage: React.FC = () => {
         icon={<Target size={16} />}
         eyebrow={t('nav.home')}
         title={tr('训练工作台', 'Training workbench')}
+        description={tr(
+          '从训练目录进入场景演练，也可以继续最近训练、查看复盘和成长进度。',
+          'Start from the catalog, continue recent sessions, and track reviews and growth.',
+        )}
       />
 
       <div className="home-main-stack">

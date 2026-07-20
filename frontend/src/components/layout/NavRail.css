@@ -129,20 +129,24 @@
   flex-shrink: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   font: inherit;
   transition:
     background var(--transition-fast),
     border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
     color var(--transition-fast);
 }
 
-.navrail-toggle:hover {
+.navrail-toggle:hover,
+.navrail-toggle:focus-visible {
   background: var(--bg-base);
   border-color: var(--border-light);
+  box-shadow: var(--shadow-sm);
   color: var(--text-primary);
+  outline: none;
 }
 
 .navrail-toggle-icon {
