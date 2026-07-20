@@ -10,7 +10,10 @@ from application.services.training_studio.catalog_service import TrainingTaskCon
 from application.services.training_studio.live_guidance_service import (
     TrainingLiveGuidanceService,
 )
-from application.services.training_studio.session_service import TrainingSessionService
+from application.services.training_studio.session_service import (
+    CreateTrainingSessionDTO,
+    TrainingSessionService,
+)
 from application.services.training_studio.training_core import (
     ConversationRef,
     TrainingCoreOrchestrator,
@@ -19,6 +22,7 @@ from application.services.training_studio.training_core import (
     training_core_metadata_for_session,
 )
 from domain.training_studio.session import TrainingSession
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -110,6 +114,22 @@ def _task_config() -> TrainingTaskConfigDTO:
         tech_stack=["Roadmap", "Metrics"],
         question_type_ratios={"behavioral": 2, "craft": 1},
         question_count=6,
+    )
+
+
+def _session_payload() -> CreateTrainingSessionDTO:
+    return CreateTrainingSessionDTO(
+        task_config=_task_config(),
+        mode="text",
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+
+
+def _scope() -> TrainingSessionAccessScope:
+    return TrainingSessionAccessScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
     )
 
 
@@ -374,7 +394,7 @@ async def test_training_core_starts_session_with_runtime_conversation_binding():
         conversation_adapter=adapter,
     )
 
-    result = await orchestrator.start_session(_task_config())
+    result = await orchestrator.start_session(_session_payload())
 
     assert result.session.session_id == "session-1"
     assert result.session.room_id == "42"
@@ -402,6 +422,8 @@ async def test_training_core_starts_existing_session_with_branch_review_metadata
         {
             **_task_config().model_dump(),
             "metadata": {"source": "scenario_training"},
+            "user_id": "user-sales-001",
+            "team_id": "team-revenue",
         }
     )
     orchestrator = TrainingCoreOrchestrator(
@@ -409,7 +431,10 @@ async def test_training_core_starts_existing_session_with_branch_review_metadata
         conversation_adapter=adapter,
     )
 
-    started = await orchestrator.start_existing_session(" session-existing ")
+    started = await orchestrator.start_existing_session(
+        " session-existing ",
+        access_scope=_scope(),
+    )
     runtime_metadata["selectedPath"]["tailMessageId"] = "mutated"
 
     assert started.session.session_id == existing.session_id
@@ -467,14 +492,15 @@ async def test_training_core_contract_accepts_text_and_voice_conversation_refs(
         metadata={"source": "contract-test", "channel": "shared-training-core"},
     )
 
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
     updated = await orchestrator.record_turn(
         training_session_id=" session-1 ",
         conversation=started.conversation,
         turn=turn,
+        access_scope=_scope(),
     )
 
-    session = await session_service.get_session("session-1")
+    session = await session_service.get_session("session-1", access_scope=_scope())
     assert session.room_id == expected_room_id
     assert adapter.turns[0] is turn
     assert adapter.appended_conversations[0] == started.conversation
@@ -491,15 +517,16 @@ async def test_training_core_records_turns_and_preserves_branch_tail():
         session_service=session_service,
         conversation_adapter=adapter,
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
 
     updated = await orchestrator.record_turn(
         training_session_id="session-1",
         conversation=started.conversation,
         turn=TrainingTurn(speaker="user", text="The price feels high.", turn_id="msg-user-1"),
+        access_scope=_scope(),
     )
 
-    session = await session_service.get_session("session-1")
+    session = await session_service.get_session("session-1", access_scope=_scope())
     assert session.message_count == 1
     assert updated.branch_tail_message_id == "msg-user-1"
 
@@ -528,7 +555,7 @@ async def test_training_core_keeps_message_tree_metadata_out_of_training_semanti
         session_service=session_service,
         conversation_adapter=adapter,
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
 
     updated = await orchestrator.record_turn(
         training_session_id="session-1",
@@ -551,6 +578,7 @@ async def test_training_core_keeps_message_tree_metadata_out_of_training_semanti
                 "liveGuidance": {"enabled": False},
             },
         ),
+        access_scope=_scope(),
     )
 
     assert updated.metadata == training_metadata
@@ -579,7 +607,7 @@ async def test_training_core_guidance_preserves_turn_metadata_for_shared_evaluat
             async_llm_callback=capture_state,
         ),
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
     await orchestrator.record_turn(
         training_session_id="session-1",
         conversation=started.conversation,
@@ -589,6 +617,7 @@ async def test_training_core_guidance_preserves_turn_metadata_for_shared_evaluat
             turn_id="voice-turn-1",
             metadata={"source": "realtime_voice", "provider_event_id": "evt-1"},
         ),
+        access_scope=_scope(),
     )
 
     await orchestrator.generate_guidance(
@@ -617,7 +646,7 @@ async def test_training_core_guidance_reads_recent_turns_from_adapter():
         session_service=session_service,
         conversation_adapter=adapter,
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
     await orchestrator.record_turn(
         training_session_id="session-1",
         conversation=started.conversation,
@@ -626,6 +655,7 @@ async def test_training_core_guidance_reads_recent_turns_from_adapter():
             text="This may be a concern because the budget is tight.",
             turn_id="msg-user-1",
         ),
+        access_scope=_scope(),
     )
 
     events = await orchestrator.generate_guidance(
@@ -648,7 +678,7 @@ async def test_training_core_guidance_reads_default_window_from_adapter():
         conversation_adapter=adapter,
         guidance_service=TrainingLiveGuidanceService(window_size=3),
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
     for index in range(4):
         await orchestrator.record_turn(
             training_session_id="session-1",
@@ -658,6 +688,7 @@ async def test_training_core_guidance_reads_default_window_from_adapter():
                 text=f"Turn {index}",
                 turn_id=f"msg-{index}",
             ),
+            access_scope=_scope(),
         )
 
     await orchestrator.generate_guidance(
@@ -731,7 +762,7 @@ async def test_training_core_rejects_adapter_results_outside_conversation_ref_co
     )
 
     with pytest.raises(TypeError, match="ConversationRef"):
-        await orchestrator.start_session(_task_config())
+        await orchestrator.start_session(_session_payload())
 
 
 @pytest.mark.asyncio
@@ -740,13 +771,14 @@ async def test_training_core_rejects_append_results_outside_conversation_ref_con
         session_service=TrainingSessionService(id_factory=lambda: "session-1"),
         conversation_adapter=InvalidAppendConversationAdapter(),
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
 
     with pytest.raises(TypeError, match="ConversationRef"):
         await orchestrator.record_turn(
             training_session_id="session-1",
             conversation=started.conversation,
             turn=TrainingTurn(speaker="user", text="Hello."),
+            access_scope=_scope(),
         )
 
 
@@ -756,7 +788,7 @@ async def test_training_core_rejects_recent_turns_outside_training_turn_contract
         session_service=TrainingSessionService(id_factory=lambda: "session-1"),
         conversation_adapter=InvalidRecentTurnsConversationAdapter(),
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
 
     with pytest.raises(TypeError, match="TrainingTurn"):
         await orchestrator.generate_guidance(
@@ -773,7 +805,7 @@ async def test_training_core_guidance_rejects_non_positive_limit():
         session_service=TrainingSessionService(id_factory=lambda: "session-1"),
         conversation_adapter=adapter,
     )
-    started = await orchestrator.start_session(_task_config())
+    started = await orchestrator.start_session(_session_payload())
 
     with pytest.raises(ValueError, match="limit"):
         await orchestrator.generate_guidance(

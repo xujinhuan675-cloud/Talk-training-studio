@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
+from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.training_studio.catalog import TrainingTaskConfig
 from domain.training_studio.session import (
@@ -182,7 +183,7 @@ class TrainingSessionService:
         room_id: str | None = None,
         *,
         metadata: Mapping[str, object] | None = None,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
         resolved_room_id = room_id
@@ -201,7 +202,7 @@ class TrainingSessionService:
         score_id: str | None = None,
         *,
         metadata: Mapping[str, object] | None = None,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
         _merge_task_config_metadata(session, metadata)
@@ -213,7 +214,7 @@ class TrainingSessionService:
         session_id: str,
         reason: str,
         *,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
         session.fail(reason)
@@ -224,7 +225,7 @@ class TrainingSessionService:
         session_id: str,
         count: int = 1,
         *,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
         session.record_turn(count)
@@ -234,7 +235,7 @@ class TrainingSessionService:
         self,
         session_id: str,
         *,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> TrainingSession:
         return await self._require_session(session_id, access_scope=access_scope)
 
@@ -246,8 +247,9 @@ class TrainingSessionService:
         user_id: str | None = None,
         team_id: str | None = None,
         scenario_template_id: str | None = None,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> list[TrainingSession]:
+        scope = _require_access_scope(access_scope)
         user_id = self._normalize_optional_text(user_id)
         team_id = self._normalize_optional_text(team_id)
         scenario_template_id = self._normalize_optional_text(scenario_template_id)
@@ -258,7 +260,7 @@ class TrainingSessionService:
                 user_id=user_id,
                 team_id=team_id,
                 scenario_template_id=scenario_template_id,
-                access_scope=access_scope,
+                access_scope=scope,
             )
         async with self._uow_factory(readonly=True) as uow:
             sessions = await uow.training_session_repository.list(
@@ -267,7 +269,7 @@ class TrainingSessionService:
                 user_id=user_id,
                 team_id=team_id,
                 scenario_template_id=scenario_template_id,
-                access_scope=access_scope,
+                access_scope=scope,
             )
         return sessions
 
@@ -278,8 +280,9 @@ class TrainingSessionService:
         limit: int = 100,
         user_id: str | None = None,
         team_id: str | None = None,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> list[ScenarioTrainingProgressDTO]:
+        scope = _require_access_scope(access_scope)
         user_id = self._normalize_optional_text(user_id)
         team_id = self._normalize_optional_text(team_id)
         if self._uow_factory is None:
@@ -288,7 +291,7 @@ class TrainingSessionService:
                 limit=limit,
                 user_id=user_id,
                 team_id=team_id,
-                access_scope=access_scope,
+                access_scope=scope,
             )
             return await self._build_scenario_progress(sessions)
 
@@ -298,7 +301,7 @@ class TrainingSessionService:
                 limit=limit,
                 user_id=user_id,
                 team_id=team_id,
-                access_scope=access_scope,
+                access_scope=scope,
             )
             return await self._build_scenario_progress(
                 sessions,
@@ -397,26 +400,27 @@ class TrainingSessionService:
         self,
         session_id: str,
         *,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope | None,
     ) -> TrainingSession:
+        scope = _require_access_scope(access_scope)
         if self._uow_factory is None:
             repository = self._repository
-            session = await repository.get(session_id, access_scope=access_scope)
+            session = await repository.get(session_id, access_scope=scope)
             if session is None:
                 await self._raise_missing_or_forbidden(
                     repository,
                     session_id,
-                    access_scope,
+                    scope,
                 )
         else:
             async with self._uow_factory(readonly=True) as uow:
                 repository = uow.training_session_repository
-                session = await repository.get(session_id, access_scope=access_scope)
+                session = await repository.get(session_id, access_scope=scope)
                 if session is None:
                     await self._raise_missing_or_forbidden(
                         repository,
                         session_id,
-                        access_scope,
+                        scope,
                     )
         return session
 
@@ -424,12 +428,11 @@ class TrainingSessionService:
         self,
         repository: TrainingSessionRepository,
         session_id: str,
-        access_scope: TrainingSessionAccessScope | None,
+        access_scope: TrainingSessionAccessScope,
     ) -> None:
-        if access_scope is not None:
-            existing = await repository.get(session_id)
-            if existing is not None:
-                raise PermissionError("Training session is outside current user scope")
+        existing = await repository.get(session_id)
+        if existing is not None:
+            raise PermissionError("Training session is outside current user scope")
         raise ValueError(f"Training session not found: {session_id}")
 
     def _scenario_training_id(self, session: TrainingSession) -> str | None:
@@ -488,6 +491,18 @@ class TrainingSessionService:
             return None
         text = str(value).strip()
         return text or None
+
+
+def _require_access_scope(
+    access_scope: TrainingSessionAccessScope | None,
+) -> TrainingSessionAccessScope:
+    if access_scope is None:
+        raise DomainValidationException(
+            "access_scope is required for training session access",
+            field="access_scope",
+            message_key="training_session.scope.required",
+        )
+    return access_scope
 
 
 def _merge_task_config_metadata(

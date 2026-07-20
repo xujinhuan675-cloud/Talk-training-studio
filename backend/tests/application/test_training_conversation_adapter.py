@@ -20,6 +20,7 @@ from application.services.training_studio.training_core import (
 from domain.conversation.entity import Conversation as ConversationEntity
 from domain.conversation.entity import Message as ConversationMessage
 from domain.stakeholder.entity import ChatRoom, Message
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 from infrastructure.adapters.training_conversation import (
     ConversationTrainingConversationAdapter,
     StakeholderRoomTrainingConversationAdapter,
@@ -327,6 +328,22 @@ def _task_config() -> TrainingTaskConfigDTO:
     )
 
 
+def _session_payload(mode: str = "text") -> CreateTrainingSessionDTO:
+    return CreateTrainingSessionDTO(
+        task_config=_task_config(),
+        mode=mode,
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+
+
+def _session_scope() -> TrainingSessionAccessScope:
+    return TrainingSessionAccessScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+
+
 def _training_semantics(metadata: dict[str, object]) -> dict[str, object]:
     keys = (
         "runtime",
@@ -354,9 +371,7 @@ async def test_stakeholder_room_adapter_binds_training_core_to_current_room_runt
         conversation_adapter=adapter,
     )
 
-    started = await orchestrator.start_session(
-        CreateTrainingSessionDTO(task_config=_task_config(), mode="voice")
-    )
+    started = await orchestrator.start_session(_session_payload("voice"))
     updated = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
         conversation=started.conversation,
@@ -365,6 +380,7 @@ async def test_stakeholder_room_adapter_binds_training_core_to_current_room_runt
             text="Can we begin with a smaller pilot?",
             metadata={"source": "text"},
         ),
+        access_scope=_session_scope(),
     )
 
     recent_turns = await adapter.recent_turns(updated, limit=5)
@@ -407,9 +423,7 @@ async def test_stakeholder_room_adapter_reuses_existing_training_room_binding() 
         lambda **kwargs: _UnitOfWork(state, **kwargs)
     )
     session_service = TrainingSessionService(id_factory=lambda: "training-2")
-    session = await session_service.create_session(
-        CreateTrainingSessionDTO(task_config=_task_config(), mode="text")
-    )
+    session = await session_service.create_session(_session_payload("text"))
     session.room_id = "7"
 
     conversation = await adapter.create_conversation(session)
@@ -431,14 +445,7 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
         conversation_adapter=adapter,
     )
 
-    started = await orchestrator.start_session(
-        CreateTrainingSessionDTO(
-            task_config=_task_config(),
-            mode="text",
-            user_id="user-sales-001",
-            team_id="team-revenue",
-        )
-    )
+    started = await orchestrator.start_session(_session_payload("text"))
     first_ref = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
         conversation=started.conversation,
@@ -447,6 +454,7 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
             text="Can we start with a smaller pilot?",
             metadata={"source": "text", "provider": "openai", "model": "gpt-test"},
         ),
+        access_scope=_session_scope(),
     )
     second_ref = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
@@ -461,6 +469,7 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
             text="Yes, if we define a measurable success metric first.",
             metadata={"source": "text"},
         ),
+        access_scope=_session_scope(),
     )
 
     recent_turns = await adapter.recent_turns(second_ref, limit=5)
@@ -707,14 +716,7 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
         lambda **kwargs: _ConversationUnitOfWork(state, **kwargs)
     )
 
-    started = await orchestrator.start_session(
-        CreateTrainingSessionDTO(
-            task_config=_task_config(),
-            mode="text",
-            user_id="user-sales-001",
-            team_id="team-revenue",
-        )
-    )
+    started = await orchestrator.start_session(_session_payload("text"))
     user_ref = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
         conversation=started.conversation,
@@ -729,6 +731,7 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
                 "status": "draft",
             },
         ),
+        access_scope=_session_scope(),
     )
     assistant_ref = await orchestrator.record_turn(
         training_session_id=started.session.session_id,
@@ -738,6 +741,7 @@ async def test_conversation_adapter_preserves_training_semantics_across_tree_edi
             text="Yes, frame the pilot as a reversible decision.",
             metadata={"source": "text", "branch_id": "branch-risk"},
         ),
+        access_scope=_session_scope(),
     )
     original_user = state.messages[0]
     original_assistant = state.messages[1]

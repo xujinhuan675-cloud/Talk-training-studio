@@ -5,6 +5,7 @@ from application.services.training_studio.session_service import (
     InMemoryTrainingSessionRepository,
     TrainingSessionService,
 )
+from domain.common.exceptions import DomainValidationException
 from domain.training_studio.session import TrainingSessionStatus
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 
@@ -19,7 +20,22 @@ def make_payload() -> dict:
         "question_type_ratios": {"behavioral": 2, "craft": 1},
         "question_count": 6,
         "mode": "text",
+        "user_id": "user-sales-001",
+        "team_id": "team-revenue",
     }
+
+
+def _scope(
+    *,
+    user_id: str = "user-sales-001",
+    team_id: str = "team-revenue",
+    include_team_scope: bool = False,
+) -> TrainingSessionAccessScope:
+    return TrainingSessionAccessScope(
+        user_id=user_id,
+        team_id=team_id,
+        include_team_scope=include_team_scope,
+    )
 
 
 async def test_session_service_create_start_complete_with_room_creator():
@@ -35,11 +51,12 @@ async def test_session_service_create_start_complete_with_room_creator():
     )
 
     session = await service.create_session(make_payload())
-    started = await service.start_session(session.session_id)
+    started = await service.start_session(session.session_id, access_scope=_scope())
     completed = await service.complete_session(
         session.session_id,
         report_id="report-1",
         score_id="score-1",
+        access_scope=_scope(),
     )
 
     assert created_for == ["session-1"]
@@ -47,8 +64,8 @@ async def test_session_service_create_start_complete_with_room_creator():
     assert completed.status == TrainingSessionStatus.COMPLETED
     assert completed.report_id == "report-1"
     assert completed.score_id == "score-1"
-    assert await service.get_session("session-1") is completed
-    assert await service.list_sessions() == [completed]
+    assert await service.get_session("session-1", access_scope=_scope()) is completed
+    assert await service.list_sessions(access_scope=_scope()) == [completed]
 
 
 async def test_session_service_tracks_scenario_progress():
@@ -62,10 +79,18 @@ async def test_session_service_tracks_scenario_progress():
             "team_id": "team-revenue",
         }
     )
-    await service.start_session(session.session_id, room_id="42")
-    await service.complete_session(session.session_id, report_id="report-1")
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.complete_session(
+        session.session_id,
+        report_id="report-1",
+        access_scope=_scope(),
+    )
 
-    progress = await service.list_scenario_progress(user_id="user-sales-001", team_id="team-revenue")
+    progress = await service.list_scenario_progress(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        access_scope=_scope(),
+    )
 
     assert len(progress) == 1
     assert progress[0].scenario_id == "new-customer-discount"
@@ -83,23 +108,27 @@ async def test_session_service_can_fail_session():
     service = TrainingSessionService(id_factory=lambda: "session-1")
 
     session = await service.create_session(make_payload())
-    failed = await service.fail_session(session.session_id, "room creation failed")
+    failed = await service.fail_session(
+        session.session_id,
+        "room creation failed",
+        access_scope=_scope(),
+    )
 
     assert failed.status == TrainingSessionStatus.FAILED
     assert failed.failure_reason == "room creation failed"
     assert failed.completed_at is not None
-    assert await service.get_session("session-1") is failed
+    assert await service.get_session("session-1", access_scope=_scope()) is failed
 
 
 async def test_session_service_records_turn_count():
     service = TrainingSessionService(id_factory=lambda: "session-1")
 
     session = await service.create_session(make_payload())
-    await service.start_session(session.session_id, room_id="42")
-    updated = await service.record_turns(session.session_id, 3)
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    updated = await service.record_turns(session.session_id, 3, access_scope=_scope())
 
     assert updated.message_count == 3
-    assert (await service.get_session("session-1")).message_count == 3
+    assert (await service.get_session("session-1", access_scope=_scope())).message_count == 3
 
 
 async def test_session_service_start_merges_runtime_metadata_when_started():
@@ -131,6 +160,7 @@ async def test_session_service_start_merges_runtime_metadata_when_started():
         session.session_id,
         room_id="talkwise-conversation:7",
         metadata=runtime_metadata,
+        access_scope=_scope(),
     )
     runtime_metadata["selectedPath"]["tailMessageId"] = "mutated"
 
@@ -138,7 +168,7 @@ async def test_session_service_start_merges_runtime_metadata_when_started():
     assert started.task_config.metadata["source"] == "scenario_training"
     assert started.task_config.metadata["runtime"] == "conversation_message_tree"
     assert started.task_config.metadata["selectedPath"]["tailMessageId"] == "msg-tail"
-    assert (await service.get_session("session-1")).task_config.metadata[
+    assert (await service.get_session("session-1", access_scope=_scope())).task_config.metadata[
         "currentBranchTail"
     ] == {
         "branchId": "branch-review",
@@ -208,10 +238,14 @@ async def test_session_service_progress_preserves_failed_status_and_reason():
             "team_id": "team-revenue",
         }
     )
-    await service.start_session(session.session_id, room_id="42")
-    await service.fail_session(session.session_id, "analysis failed")
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.fail_session(session.session_id, "analysis failed", access_scope=_scope())
 
-    progress = await service.list_scenario_progress(user_id="user-sales-001", team_id="team-revenue")
+    progress = await service.list_scenario_progress(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        access_scope=_scope(),
+    )
 
     assert len(progress) == 1
     assert progress[0].status == "failed"
@@ -245,9 +279,12 @@ async def test_session_service_selected_branch_metadata_is_not_scoring_completio
             },
         }
     )
-    await service.start_session(session.session_id, room_id="42")
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
 
-    progress = await service.list_scenario_progress(user_id="user-sales-001")
+    progress = await service.list_scenario_progress(
+        user_id="user-sales-001",
+        access_scope=_scope(),
+    )
 
     assert len(progress) == 1
     assert progress[0].status == "in_progress"
@@ -270,7 +307,7 @@ async def test_session_service_complete_merges_branch_metadata_into_task_config(
             },
         }
     )
-    await service.start_session(session.session_id, room_id="42")
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
     completion_metadata = {
         "messageTreeSelection": {
             "provider": "talkwise-conversation",
@@ -310,6 +347,7 @@ async def test_session_service_complete_merges_branch_metadata_into_task_config(
         session.session_id,
         report_id="report-1",
         metadata=completion_metadata,
+        access_scope=_scope(),
     )
     completion_metadata["messageTreeSelection"]["path"][0]["publicId"] = "mutated"
 
@@ -324,7 +362,10 @@ async def test_session_service_complete_merges_branch_metadata_into_task_config(
         "msg-root"
     )
     assert completed.task_config.metadata["selectedPath"]["affectsScoring"] is False
-    progress = await service.list_scenario_progress(user_id="user-sales-001")
+    progress = await service.list_scenario_progress(
+        user_id="user-sales-001",
+        access_scope=_scope(),
+    )
     assert progress[0].status == "completed"
     assert progress[0].report_id == "report-1"
     assert progress[0].score_status == "pending"
@@ -367,8 +408,8 @@ async def test_session_service_progress_uses_competency_evaluation_scores():
         "user_id": "user-sales-001",
         "team_id": "team-revenue",
     })
-    await service.start_session(first.session_id, room_id="42")
-    await service.complete_session(first.session_id, report_id="501")
+    await service.start_session(first.session_id, room_id="42", access_scope=_scope())
+    await service.complete_session(first.session_id, report_id="501", access_scope=_scope())
 
     second = await service.create_session({
         **make_payload(),
@@ -376,10 +417,14 @@ async def test_session_service_progress_uses_competency_evaluation_scores():
         "user_id": "admin",
         "team_id": "team-ops",
     })
-    await service.start_session(second.session_id, room_id="43")
-    await service.complete_session(second.session_id, report_id="502")
+    admin_scope = _scope(user_id="admin", team_id="team-ops")
+    await service.start_session(second.session_id, room_id="43", access_scope=admin_scope)
+    await service.complete_session(second.session_id, report_id="502", access_scope=admin_scope)
 
-    progress = await service.list_scenario_progress(user_id="user-sales-001")
+    progress = await service.list_scenario_progress(
+        user_id="user-sales-001",
+        access_scope=_scope(),
+    )
 
     assert len(progress) == 1
     assert progress[0].training_session_id == "session-1"
@@ -393,7 +438,11 @@ async def test_session_service_can_start_with_explicit_room_id():
     service = TrainingSessionService(id_factory=lambda: "session-1")
 
     session = await service.create_session(make_payload(), mode="voice")
-    started = await service.start_session(session.session_id, room_id="room-explicit")
+    started = await service.start_session(
+        session.session_id,
+        room_id="room-explicit",
+        access_scope=_scope(),
+    )
 
     assert started.status == TrainingSessionStatus.ACTIVE
     assert started.room_id == "room-explicit"
@@ -404,11 +453,36 @@ async def test_session_service_requires_room_creator_without_room_id():
     session = await service.create_session(make_payload())
 
     with pytest.raises(ValueError, match="room_creator"):
-        await service.start_session(session.session_id)
+        await service.start_session(session.session_id, access_scope=_scope())
+
+
+async def test_session_service_requires_explicit_access_scope_for_reads_and_mutations():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(make_payload())
+
+    with pytest.raises(DomainValidationException):
+        await service.get_session(session.session_id, access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.list_sessions(access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.list_scenario_progress(access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.start_session(session.session_id, room_id="42", access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.complete_session(session.session_id, access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.fail_session(session.session_id, "blocked", access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.record_turns(session.session_id, access_scope=None)
+
+    stored = await service.get_session(session.session_id, access_scope=_scope())
+    assert stored.status == TrainingSessionStatus.CREATED
+    assert stored.room_id is None
+    assert stored.message_count == 0
 
 
 async def test_session_service_rejects_unknown_session():
     service = TrainingSessionService()
 
     with pytest.raises(ValueError, match="not found"):
-        await service.get_session("missing-session")
+        await service.get_session("missing-session", access_scope=_scope())

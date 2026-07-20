@@ -212,13 +212,14 @@ async def test_training_session_service_uses_sqlalchemy_uow(session_factory) -> 
     )
 
     created = await service.create_session(_flat_payload())
-    started = await service.start_session(created.session_id, room_id="42")
+    scope = TrainingSessionAccessScope(user_id="user-sales-001", team_id="team-revenue")
+    started = await service.start_session(created.session_id, room_id="42", access_scope=scope)
 
     assert started.status == TrainingSessionStatus.ACTIVE
 
     fresh_service = TrainingSessionService(uow_factory=_uow_factory(session_factory))
-    loaded = await fresh_service.get_session("service-session")
-    listed = await fresh_service.list_sessions()
+    loaded = await fresh_service.get_session("service-session", access_scope=scope)
+    listed = await fresh_service.list_sessions(access_scope=scope)
 
     assert loaded.room_id == "42"
     assert loaded.scenario_template_id == "enterprise-demo-objection"

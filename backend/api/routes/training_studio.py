@@ -1506,6 +1506,7 @@ class _WebSocketTrainingTranscriptSink:
         room_id: int,
         svc: TrainingSessionService,
         uow_factory: Callable[..., AbstractUnitOfWork],
+        access_scope: TrainingSessionAccessScope,
     ) -> None:
         self._websocket = websocket
         self._session = session
@@ -1515,6 +1516,7 @@ class _WebSocketTrainingTranscriptSink:
             uow_factory=uow_factory,
             session_service=svc,
             publish_message=_publish_realtime_room_message,
+            access_scope=access_scope,
         )
 
     async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
@@ -2852,6 +2854,7 @@ async def realtime_training_session(
             room_id=active_binding[1],
             svc=svc,
             uow_factory=uow_factory,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
         )
 
         async def _relay_pipeline_event(payload: Mapping[str, Any]) -> None:

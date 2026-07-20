@@ -38,6 +38,7 @@ from application.services.training_studio.scenario_config_service import (
 from application.services.training_studio.session_service import TrainingSessionService
 from core.config import VoiceSettings, settings
 from core.exceptions import register_exception_handlers
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 from domain.training_studio.storybank import StoryBankService
 
 
@@ -499,6 +500,19 @@ def admin_team_headers(team_id: str) -> dict[str, str]:
         "X-System-Role": "admin",
         "X-Team-Id": team_id,
     }
+
+
+def training_session_scope(
+    user_id: str = "user-admin-001",
+    team_id: str = "team-ops",
+    *,
+    include_team_scope: bool = True,
+) -> TrainingSessionAccessScope:
+    return TrainingSessionAccessScope(
+        user_id=user_id,
+        team_id=team_id,
+        include_team_scope=include_team_scope,
+    )
 
 
 def test_training_guidance_turn_preserves_message_metadata() -> None:
@@ -1204,7 +1218,10 @@ async def test_training_session_complete_rejects_unowned_explicit_report_id(
 
     assert complete_resp.status_code == 404
     assert "report not found" in complete_resp.json()["message"]
-    stored = await app.state.training_session_service.get_session(session_id)
+    stored = await app.state.training_session_service.get_session(
+        session_id,
+        access_scope=training_session_scope(),
+    )
     assert stored.report_id is None
 
 
@@ -1227,7 +1244,10 @@ async def test_training_session_complete_rejects_non_numeric_explicit_report_id(
 
     assert complete_resp.status_code == 404
     assert app.state.analysis_reader_service.requested_ids == []
-    stored = await app.state.training_session_service.get_session(session_id)
+    stored = await app.state.training_session_service.get_session(
+        session_id,
+        access_scope=training_session_scope(),
+    )
     assert stored.report_id is None
 
 
@@ -1624,7 +1644,14 @@ async def test_training_guidance_stream_refresh_preserves_current_user_scope(
 
     async def move_session_out_of_scope_and_publish() -> None:
         await asyncio.sleep(0.05)
-        session = await app.state.training_session_service.get_session(session_id)
+        session = await app.state.training_session_service.get_session(
+            session_id,
+            access_scope=training_session_scope(
+                user_id="user-sales-001",
+                team_id="team-revenue",
+                include_team_scope=False,
+            ),
+        )
         session.user_id = "user-cs-001"
         session.team_id = "team-service"
         app.state.chatroom_service.details[room_id] = chat_detail(

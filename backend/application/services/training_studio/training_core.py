@@ -232,13 +232,16 @@ class TrainingCoreOrchestrator:
         payload: CreateTrainingSessionDTO | TrainingTaskConfigDTO | dict,
     ) -> StartedTrainingSession:
         session = await self._session_service.create_session(payload)
-        return await self._start_existing_session(session)
+        return await self._start_existing_session(
+            session,
+            access_scope=_training_session_access_scope_from_session(session),
+        )
 
     async def start_existing_session(
         self,
         session_id: str,
         *,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> StartedTrainingSession:
         session = await self._session_service.get_session(
             _normalize_required_text(session_id, "session_id"),
@@ -250,7 +253,7 @@ class TrainingCoreOrchestrator:
         self,
         session: TrainingSession,
         *,
-        access_scope: TrainingSessionAccessScope | None = None,
+        access_scope: TrainingSessionAccessScope,
     ) -> StartedTrainingSession:
         conversation = _require_conversation_ref(
             await self._conversation_adapter.create_conversation(session)
@@ -269,6 +272,7 @@ class TrainingCoreOrchestrator:
         training_session_id: str,
         conversation: ConversationRef,
         turn: TrainingTurn,
+        access_scope: TrainingSessionAccessScope,
     ) -> ConversationRef:
         session_id = _normalize_required_text(training_session_id, "training_session_id")
         conversation = _require_conversation_ref(conversation)
@@ -276,7 +280,7 @@ class TrainingCoreOrchestrator:
         updated = _require_conversation_ref(
             await self._conversation_adapter.append_turn(conversation, turn)
         )
-        await self._session_service.record_turns(session_id)
+        await self._session_service.record_turns(session_id, access_scope=access_scope)
         return updated
 
     async def generate_guidance(
@@ -312,6 +316,20 @@ def _normalize_required_text(value: object, field_name: str) -> str:
     if not text:
         raise ValueError(f"{field_name} cannot be empty")
     return text
+
+
+def _training_session_access_scope_from_session(
+    session: TrainingSession,
+) -> TrainingSessionAccessScope:
+    user_id = _normalize_optional_text(session.user_id)
+    team_id = _normalize_optional_text(session.team_id)
+    if not user_id and not team_id:
+        raise ValueError("training session access scope is required")
+    return TrainingSessionAccessScope(
+        user_id=user_id,
+        team_id=team_id,
+        include_team_scope=False,
+    )
 
 
 def _normalize_optional_text(value: object | None) -> str | None:

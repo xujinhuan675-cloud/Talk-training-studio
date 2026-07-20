@@ -29,6 +29,7 @@ from application.services.stakeholder.sse import room_event_bus
 from application.services.training_studio.session_service import TrainingSessionService
 from core.config import settings
 from domain.stakeholder.entity import ChatRoom, Message
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 
 def _session_payload(
@@ -55,6 +56,14 @@ def _session_payload(
     if team_id is not None:
         payload["team_id"] = team_id
     return payload
+
+
+def _session_scope_from_payload(payload: dict) -> TrainingSessionAccessScope:
+    return TrainingSessionAccessScope(
+        user_id=payload.get("user_id") if isinstance(payload.get("user_id"), str) else None,
+        team_id=payload.get("team_id") if isinstance(payload.get("team_id"), str) else None,
+        include_team_scope=True,
+    )
 
 
 @dataclass
@@ -164,14 +173,21 @@ def _make_bound_app(
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     session_service = TrainingSessionService(id_factory=lambda: "session-1")
+    resolved_payload = session_payload or _session_payload(
+        user_id="user-admin-001",
+        team_id="team-ops",
+    )
     session = asyncio.run(
-        session_service.create_session(
-            session_payload
-            or _session_payload(user_id="user-admin-001", team_id="team-ops")
-        )
+        session_service.create_session(resolved_payload)
     )
     if active:
-        asyncio.run(session_service.start_session(session.session_id, room_id="42"))
+        asyncio.run(
+            session_service.start_session(
+                session.session_id,
+                room_id="42",
+                access_scope=_session_scope_from_payload(resolved_payload),
+            )
+        )
     state = _RealtimeRoomState(
         rooms={
             42: ChatRoom(

@@ -15,6 +15,7 @@ from application.services.training_studio.realtime_pipeline import (
     transcript_to_message_metadata,
 )
 from domain.stakeholder.entity import ChatRoom, Message
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 
 class _RoomRepository:
@@ -66,12 +67,21 @@ class _TrainingSessionRecorder:
         self.calls: list[tuple[str, int]] = []
         self.room_id = room_id
 
-    async def get_session(self, session_id: str):
+    async def get_session(self, session_id: str, *, access_scope):
+        self.calls.append((f"get:{session_id}", int(access_scope is not None)))
         return SimpleNamespace(session_id=session_id, room_id=self.room_id)
 
-    async def record_turns(self, session_id: str, count: int = 1):
+    async def record_turns(self, session_id: str, count: int = 1, *, access_scope):
+        assert access_scope is not None
         self.calls.append((session_id, count))
         return None
+
+
+def _scope() -> TrainingSessionAccessScope:
+    return TrainingSessionAccessScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
 
 
 def test_build_realtime_transcript_maps_pipecat_openai_stt_event_to_provider_neutral_dto():
@@ -236,6 +246,7 @@ async def test_persistence_sink_writes_room_message_publishes_and_records_turn()
         uow_factory=lambda **_kwargs: _RealtimePersistenceUoW(room, messages),
         session_service=recorder,
         publish_message=publish,
+        access_scope=_scope(),
     )
 
     persisted = await sink.persist(transcript)
@@ -252,7 +263,7 @@ async def test_persistence_sink_writes_room_message_publishes_and_records_turn()
     assert room.last_message_at == messages.messages[0].timestamp
     assert published[0][0] == 12
     assert published[0][1].content == "We can define the pilot metric first."
-    assert recorder.calls == [("training-6", 1)]
+    assert recorder.calls == [("get:training-6", 1), ("training-6", 1)]
 
 
 @pytest.mark.asyncio
@@ -274,13 +285,14 @@ async def test_persistence_sink_rejects_transcript_when_session_room_does_not_ma
     sink = RealtimeTranscriptPersistenceSink(
         uow_factory=lambda **_kwargs: _RealtimePersistenceUoW(room, messages),
         session_service=recorder,
+        access_scope=_scope(),
     )
 
     with pytest.raises(PermissionError):
         await sink.persist(transcript)
 
     assert messages.messages == []
-    assert recorder.calls == []
+    assert recorder.calls == [("get:training-6", 1)]
     assert room.last_message_at is None
 
 

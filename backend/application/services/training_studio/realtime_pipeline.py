@@ -19,6 +19,7 @@ from application.services.stakeholder.dto import MessageDTO
 from application.services.training_studio.session_service import TrainingSessionService
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 
 FINAL_TRANSCRIPT_EVENT_TYPES = {
@@ -185,11 +186,13 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
         uow_factory: Callable[..., AbstractUnitOfWork],
         session_service: TrainingSessionService | None = None,
         publish_message: RoomMessagePublisher | None = None,
+        access_scope: TrainingSessionAccessScope,
         record_training_turns: bool = True,
     ) -> None:
         self._uow_factory = uow_factory
         self._session_service = session_service
         self._publish_message = publish_message
+        self._access_scope = access_scope
         self._record_training_turns = record_training_turns
 
     async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
@@ -219,7 +222,10 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
             await self._publish_message(room_id, message)
 
         if self._record_training_turns and self._session_service is not None:
-            await self._session_service.record_turns(transcript.binding.training_session_id)
+            await self._session_service.record_turns(
+                transcript.binding.training_session_id,
+                access_scope=self._require_access_scope(),
+            )
 
         payload = {
             "trainingSessionId": transcript.binding.training_session_id,
@@ -238,10 +244,16 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
         get_session = getattr(self._session_service, "get_session", None)
         if get_session is None:
             return
-        session = await get_session(transcript.binding.training_session_id)
+        session = await get_session(
+            transcript.binding.training_session_id,
+            access_scope=self._require_access_scope(),
+        )
         session_room_id = str(getattr(session, "room_id", "") or "").strip()
         if session_room_id != str(transcript.binding.room_id):
             raise PermissionError("Realtime transcript binding does not match training session room")
+
+    def _require_access_scope(self) -> TrainingSessionAccessScope:
+        return self._access_scope
 
 
 def _sender_for_transcript(transcript: RealtimeTranscript) -> tuple[str, str]:
