@@ -571,7 +571,7 @@ def test_admin_single_resource_routes_use_explicit_metadata_scope() -> None:
         assert scope.user_id == "user-admin-001"
         assert scope.team_id == "team-ops"
         assert scope.include_team_scope is True
-    assert conversation_service.get_scope_calls[0].allow_unscoped is True
+    assert conversation_service.get_scope_calls[0].allow_unscoped is False
     assert conversation_service.update_scope_calls[0].allow_unscoped is False
     assert conversation_service.delete_scope_calls[0].allow_unscoped is False
     assert {scope.allow_unscoped for scope in agent_config_scopes} == {False}
@@ -782,7 +782,7 @@ def test_conversation_child_routes_pass_metadata_scope_to_service_calls() -> Non
     for call in read_calls:
         scope = call[-1]["metadata_scope"]
         assert scope.user_id == "user-sales-001"
-        assert scope.allow_unscoped is True
+        assert scope.allow_unscoped is False
     for call in write_calls:
         scope = call[-1]["metadata_scope"]
         assert scope.user_id == "user-sales-001"

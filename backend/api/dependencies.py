@@ -177,9 +177,11 @@ def training_scope_for(
     requested_team_id: str | None = None,
 ) -> TrainingScope:
     user_id = _coerce_optional_text(requested_user_id)
-    team_id = _coerce_optional_text(requested_team_id)
     if current_user.is_admin:
-        return TrainingScope(user_id=user_id, team_id=team_id)
+        return TrainingScope(
+            user_id=user_id,
+            team_id=current_user.team_id,
+        )
     if current_user.is_leader:
         return TrainingScope(user_id=user_id, team_id=current_user.team_id)
     return TrainingScope(user_id=current_user.user_id, team_id=current_user.team_id)

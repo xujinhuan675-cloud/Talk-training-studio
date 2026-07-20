@@ -155,7 +155,7 @@ def test_search_messages_route_returns_branch_context() -> None:
     data = response.json()["data"]
     assert data[0]["message"]["public_id"] == "msg_search"
     assert data[0]["path"][0]["content"] == "Pilot metric discussion"
-    _pop_scope(service.search_call[2], allow_unscoped=True)
+    _pop_scope(service.search_call[2], allow_unscoped=False)
     assert service.search_call == (
         7,
         "pilot",
@@ -190,7 +190,7 @@ def test_get_message_path_route_passes_tree_filters() -> None:
     assert response.status_code == 200
     data = response.json()["data"]
     assert data[0]["public_id"] == "msg_selected"
-    _pop_scope(service.path_call[2], allow_unscoped=True)
+    _pop_scope(service.path_call[2], allow_unscoped=False)
     assert service.path_call == (
         7,
         "msg_selected",
@@ -217,7 +217,7 @@ def test_list_message_children_route_passes_tree_filters() -> None:
     assert response.status_code == 200
     data = response.json()["data"]
     assert data[0]["public_id"] == "msg_child"
-    _pop_scope(service.children_call[2], allow_unscoped=True)
+    _pop_scope(service.children_call[2], allow_unscoped=False)
     assert service.children_call == (
         7,
         "msg_parent",
@@ -238,7 +238,7 @@ def test_locate_message_route_returns_message_location() -> None:
     data = response.json()["data"]
     assert data["message"]["public_id"] == "msg_selected"
     assert data["context"][0]["content"] == "Selected branch turn"
-    _pop_scope(service.locate_call[2], allow_unscoped=True)
+    _pop_scope(service.locate_call[2], allow_unscoped=False)
     assert service.locate_call == (7, "msg_selected", {"before": 1, "after": 4})
 
 
@@ -269,7 +269,7 @@ def test_message_action_route_returns_controlled_tree_context() -> None:
     assert service.action_call[2].include_deleted is True
     assert service.action_call[2].statuses == ["active", "superseded"]
     assert service.action_call[2].metadata == {"source": "training_room"}
-    _pop_scope(service.action_call[3], allow_unscoped=True)
+    _pop_scope(service.action_call[3], allow_unscoped=False)
 
 
 def test_fork_conversation_route_creates_copied_tree() -> None:

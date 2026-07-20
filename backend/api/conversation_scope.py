@@ -77,7 +77,7 @@ def user_can_access_owned_metadata(
     metadata: dict[str, Any] | None,
     current_user: CurrentUser,
     *,
-    allow_unscoped: bool = True,
+    allow_unscoped: bool = False,
 ) -> bool:
     metadata = _as_mapping(metadata)
     owner_user_id = _conversation_owner_user_id(metadata)
@@ -116,7 +116,7 @@ def require_owned_metadata_access(
     current_user: CurrentUser,
     *,
     resource_name: str,
-    allow_unscoped: bool = True,
+    allow_unscoped: bool = False,
 ) -> None:
     if not user_can_access_owned_metadata(
         metadata,
@@ -133,7 +133,7 @@ def user_can_access_conversation(conversation: ConversationDTO, current_user: Cu
     return user_can_access_owned_metadata(
         conversation.metadata,
         current_user,
-        allow_unscoped=True,
+        allow_unscoped=False,
     )
 
 

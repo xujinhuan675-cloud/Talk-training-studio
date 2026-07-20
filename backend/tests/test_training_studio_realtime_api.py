@@ -164,7 +164,12 @@ def _make_bound_app(
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     session_service = TrainingSessionService(id_factory=lambda: "session-1")
-    session = asyncio.run(session_service.create_session(session_payload or _session_payload()))
+    session = asyncio.run(
+        session_service.create_session(
+            session_payload
+            or _session_payload(user_id="user-admin-001", team_id="team-ops")
+        )
+    )
     if active:
         asyncio.run(session_service.start_session(session.session_id, room_id="42"))
     state = _RealtimeRoomState(

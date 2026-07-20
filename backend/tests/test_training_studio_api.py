@@ -493,6 +493,14 @@ def parse_sse_events(text: str) -> list[tuple[str, dict]]:
     return events
 
 
+def admin_team_headers(team_id: str) -> dict[str, str]:
+    return {
+        "X-User-Id": "user-admin-001",
+        "X-System-Role": "admin",
+        "X-Team-Id": team_id,
+    }
+
+
 def test_training_guidance_turn_preserves_message_metadata() -> None:
     from api.routes.training_studio import _message_to_guidance_turn
 
@@ -550,6 +558,7 @@ async def test_scenario_training_progress_aggregates_sessions(
     client: AsyncClient,
     app: FastAPI,
 ) -> None:
+    revenue_admin = admin_team_headers("team-revenue")
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload(
@@ -564,6 +573,7 @@ async def test_scenario_training_progress_aggregates_sessions(
             user_id="user-sales-001",
             team_id="team-revenue",
         ),
+        headers=revenue_admin,
     )
     created = create_resp.json()["data"]
     session_id = created["session_id"]
@@ -573,11 +583,13 @@ async def test_scenario_training_progress_aggregates_sessions(
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
         json={"room_id": 42},
+        headers=revenue_admin,
     )
     app.state.analysis_reader_service.reports[9001] = FakeReport(id=9001, room_id=42)
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/complete",
         json={"report_id": "9001", "score_id": "score-9001", "generate_report": False},
+        headers=revenue_admin,
     )
     other_resp = await client.post(
         "/api/v1/training-studio/sessions",
@@ -587,12 +599,14 @@ async def test_scenario_training_progress_aggregates_sessions(
             user_id="admin",
             team_id="team-revenue",
         ),
+        headers=revenue_admin,
     )
     other_session_id = other_resp.json()["data"]["session_id"]
 
     progress_resp = await client.get(
         "/api/v1/training-studio/scenario-progress",
         params={"user_id": "user-sales-001", "team_id": "team-revenue"},
+        headers=revenue_admin,
     )
 
     assert progress_resp.status_code == 200
@@ -619,6 +633,7 @@ async def test_scenario_training_progress_aggregates_sessions(
     admin_progress_resp = await client.get(
         "/api/v1/training-studio/scenario-progress",
         params={"user_id": "admin", "team_id": "team-revenue"},
+        headers=revenue_admin,
     )
     assert admin_progress_resp.status_code == 200
     assert admin_progress_resp.json()["data"][0]["training_session_id"] == other_session_id
@@ -626,6 +641,7 @@ async def test_scenario_training_progress_aggregates_sessions(
 
 @pytest.mark.asyncio
 async def test_scenario_training_progress_reports_failed_session_reason(client: AsyncClient) -> None:
+    revenue_admin = admin_team_headers("team-revenue")
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload(
@@ -634,21 +650,25 @@ async def test_scenario_training_progress_reports_failed_session_reason(client: 
             user_id="user-sales-001",
             team_id="team-revenue",
         ),
+        headers=revenue_admin,
     )
     session_id = create_resp.json()["data"]["session_id"]
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
         json={"room_id": 42},
+        headers=revenue_admin,
     )
     fail_resp = await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/fail",
         json={"reason": "analysis service unavailable"},
+        headers=revenue_admin,
     )
     assert fail_resp.status_code == 200
 
     progress_resp = await client.get(
         "/api/v1/training-studio/scenario-progress",
         params={"user_id": "user-sales-001", "team_id": "team-revenue"},
+        headers=revenue_admin,
     )
 
     assert progress_resp.status_code == 200
@@ -677,10 +697,12 @@ async def test_staff_session_list_ignores_forged_user_filter(client: AsyncClient
     await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload("text", user_id="user-sales-001", team_id="team-revenue"),
+        headers={"X-Mock-User": "sales"},
     )
     await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+        headers={"X-Mock-User": "customer_service"},
     )
 
     resp = await client.get(
@@ -696,6 +718,8 @@ async def test_staff_session_list_ignores_forged_user_filter(client: AsyncClient
 
 @pytest.mark.asyncio
 async def test_leader_scenario_progress_is_limited_to_own_team(client: AsyncClient) -> None:
+    revenue_admin = admin_team_headers("team-revenue")
+    service_admin = admin_team_headers("team-service")
     revenue_resp = await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload(
@@ -704,6 +728,7 @@ async def test_leader_scenario_progress_is_limited_to_own_team(client: AsyncClie
             user_id="user-sales-001",
             team_id="team-revenue",
         ),
+        headers=revenue_admin,
     )
     service_resp = await client.post(
         "/api/v1/training-studio/sessions",
@@ -713,14 +738,17 @@ async def test_leader_scenario_progress_is_limited_to_own_team(client: AsyncClie
             user_id="user-cs-001",
             team_id="team-service",
         ),
+        headers=service_admin,
     )
     await client.post(
         f"/api/v1/training-studio/sessions/{revenue_resp.json()['data']['session_id']}/start",
         json={"room_id": 201},
+        headers=revenue_admin,
     )
     await client.post(
         f"/api/v1/training-studio/sessions/{service_resp.json()['data']['session_id']}/start",
         json={"room_id": 202},
+        headers=service_admin,
     )
 
     resp = await client.get(
@@ -737,24 +765,38 @@ async def test_leader_scenario_progress_is_limited_to_own_team(client: AsyncClie
 
 @pytest.mark.asyncio
 async def test_admin_session_list_can_filter_by_user_and_team(client: AsyncClient) -> None:
+    ops_admin = admin_team_headers("team-ops")
+    service_admin = admin_team_headers("team-service")
     await client.post(
         "/api/v1/training-studio/sessions",
-        json=session_payload("text", user_id="user-sales-001", team_id="team-revenue"),
+        json=session_payload("text", user_id="user-admin-001", team_id="team-ops"),
+        headers=ops_admin,
     )
     await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
+        headers=service_admin,
     )
 
     resp = await client.get(
         "/api/v1/training-studio/sessions",
-        params={"user_id": "user-cs-001", "team_id": "team-service"},
-        headers={"X-Mock-User": "admin"},
+        params={"user_id": "user-admin-001", "team_id": "team-service"},
+        headers=ops_admin,
     )
 
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert [item["user_id"] for item in data] == ["user-cs-001"]
+    assert [item["user_id"] for item in data] == ["user-admin-001"]
+    assert [item["team_id"] for item in data] == ["team-ops"]
+
+    outside_resp = await client.get(
+        "/api/v1/training-studio/sessions",
+        params={"user_id": "user-cs-001", "team_id": "team-service"},
+        headers=ops_admin,
+    )
+
+    assert outside_resp.status_code == 200
+    assert outside_resp.json()["data"] == []
 
 
 @pytest.mark.asyncio

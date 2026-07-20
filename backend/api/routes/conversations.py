@@ -49,7 +49,7 @@ _agent_config_user = require_system_roles("admin", "leader", "staff")
 def _conversation_read_scope(current_user: CurrentUser):
     return owned_metadata_scope_for_current_user(
         current_user,
-        allow_unscoped=True,
+        allow_unscoped=False,
     )
 
 
@@ -136,7 +136,7 @@ async def list_conversations(
         limit=size,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=True,
+            allow_unscoped=False,
         ),
     )
     return paginated_response(items=items, total=total, page=page, size=size)

@@ -719,13 +719,11 @@ def _not_found_if_missing(exc: ValueError) -> HTTPException:
 
 def _training_session_access_scope_for_current_user(
     current_user: CurrentUser,
-) -> TrainingSessionAccessScope | None:
-    if current_user.is_admin:
-        return None
+) -> TrainingSessionAccessScope:
     return TrainingSessionAccessScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        include_team_scope=current_user.is_leader,
+        include_team_scope=current_user.is_admin or current_user.is_leader,
     )
 
 
