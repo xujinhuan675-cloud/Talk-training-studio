@@ -1743,24 +1743,30 @@
   }
 
   /* Mobile pill buttons */
-  .chat-mobile-pills {
+  .chat-mobile-pills.ui-segmented-control {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
+    min-height: 0;
     padding: 6px 12px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     flex-shrink: 0;
+    box-sizing: border-box;
     background: var(--bg-card, #fff);
     border-top: 1px solid var(--border, #e5e7eb);
+    border-radius: 0;
+    box-shadow: none;
   }
 
-  .chat-mobile-pills::-webkit-scrollbar {
+  .chat-mobile-pills.ui-segmented-control::-webkit-scrollbar {
     display: none;
   }
 
-  .chat-mobile-pill-btn {
+  .chat-mobile-pills .ui-segmented-control-button {
     flex-shrink: 0;
+    min-width: 0;
     padding: 5px 14px;
     font-size: 12px;
     font-weight: 500;
@@ -1770,10 +1776,14 @@
     border-radius: 99px;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.15s;
+    transition:
+      background 0.15s,
+      border-color 0.15s,
+      color 0.15s,
+      opacity 0.15s;
   }
 
-  .chat-mobile-pill-btn.active {
+  .chat-mobile-pills .ui-segmented-control-button[data-state='on'] {
     color: var(--green);
     background: var(--green-soft);
     border-color: var(--green);

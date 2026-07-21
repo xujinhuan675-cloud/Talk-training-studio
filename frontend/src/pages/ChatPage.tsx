@@ -50,6 +50,7 @@ import {
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
 import { Select } from '../components/ui/form'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import {
   exportRoom,
   exportRoomHtml,
@@ -442,6 +443,8 @@ type RefreshGuidanceOptions = {
   minIntervalMs?: number
 }
 
+type MobileSheetKey = 'cheatsheet' | 'coaching' | 'analysis' | 'emotion'
+
 /* ------------------------------------------------------------------ */
 /*  Inner chat area — must be inside ChatProvider                      */
 /* ------------------------------------------------------------------ */
@@ -491,7 +494,7 @@ function ChatArea() {
   const [showEmotionCurve, setShowEmotionCurve] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showContextPanel, setShowContextPanel] = useState(false)
-  const [mobileSheet, setMobileSheet] = useState<string | null>(null)
+  const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null)
   const [lastVoiceTranscript, setLastVoiceTranscript] = useState<string | null>(null)
   const [voiceRecorderState, setVoiceRecorderState] = useState<VoiceRecorderState>('idle')
   const [voiceRecorderError, setVoiceRecorderError] = useState<string | null>(null)
@@ -1526,6 +1529,17 @@ function ChatArea() {
     }
   }, [chat, isDrillFeedbackMode, isLiveCoachSession, isVideoBattlePrep, scheduleGuidanceRefresh, trainingFeedbackMetadata, trainingFeedbackMode, tr])
 
+  const mobileSheetOptions = [
+    { value: 'cheatsheet', label: tr('锦囊', 'Tips') },
+    { value: 'coaching', label: tr('教练', 'Coach') },
+    { value: 'analysis', label: tr('评分', 'Score') },
+    { value: 'emotion', label: tr('情绪', 'Emotion') },
+  ] as const
+
+  const handleMobileSheetChange = (sheet: MobileSheetKey) => {
+    setMobileSheet((current) => (current === sheet ? null : sheet))
+  }
+
   return (
     <>
       <div className={`chat-page-center${isTrainingSession ? ' training-session' : ''}`}>
@@ -2090,26 +2104,15 @@ function ChatArea() {
             onClick={() => showExportMenu && setShowExportMenu(false)}
           />
 
-          {/* Mobile pill buttons above input */}
-          <div className="chat-mobile-pills">
-            {[
-              { key: 'cheatsheet', label: tr('锦囊', 'Tips') },
-              { key: 'coaching', label: tr('教练', 'Coach') },
-              { key: 'analysis', label: tr('评分', 'Score') },
-              { key: 'emotion', label: tr('情绪', 'Emotion') },
-            ].map((pill) => (
-              <Button
-                variant="ghost"
-                size="sm"
-                key={pill.key}
-                className={`chat-mobile-pill-btn${mobileSheet === pill.key ? ' active' : ''}`}
-                aria-pressed={mobileSheet === pill.key}
-                onClick={() => setMobileSheet(mobileSheet === pill.key ? null : pill.key)}
-              >
-                {pill.label}
-              </Button>
-            ))}
-          </div>
+          {/* Mobile panel switcher above input */}
+          <SegmentedControl
+            ariaLabel={tr('移动端面板切换', 'Mobile panel switcher')}
+            className="chat-mobile-pills"
+            options={mobileSheetOptions}
+            size="sm"
+            value={mobileSheet}
+            onValueChange={handleMobileSheetChange}
+          />
 
           <ChatInput
             value={chat.inputValue}
