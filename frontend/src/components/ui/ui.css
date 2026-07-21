@@ -129,6 +129,24 @@
   height: 1px;
 }
 
+.ui-checkbox {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--ui-checkbox-accent, var(--green));
+  cursor: pointer;
+}
+
+.ui-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.ui-checkbox:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
 .ui-page-shell {
   width: min(var(--page-max-width), calc(100% - (var(--page-gutter) * 2)));
   margin: 0 auto;

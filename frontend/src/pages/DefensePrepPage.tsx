@@ -6,6 +6,7 @@ import { useAppContext } from '../contexts/AppContext'
 import { useI18n, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { Button } from '../components/ui/button'
+import { Checkbox } from '../components/ui/checkbox'
 import { Input } from '../components/ui/form'
 import './DefensePrepPage.css'
 
@@ -232,8 +233,7 @@ export default function DefensePrepPage() {
                   <div className="dp-multi-select">
                     {personas.map((p) => (
                       <label key={p.id} className={`dp-multi-option ${selectedPersonaIds.includes(p.id) ? 'selected' : ''}`}>
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={selectedPersonaIds.includes(p.id)}
                           onChange={() => {
                             setState((s) => {

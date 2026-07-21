@@ -14,6 +14,7 @@ import {
   DialogContent,
   DialogTitle,
 } from './ui/dialog'
+import { Checkbox } from './ui/checkbox'
 import { Field, Input, Textarea } from './ui/form'
 import './ScenarioDialog.css'
 
@@ -208,8 +209,7 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
               <div className="persona-checkbox-list">
                 {personas.map((p) => (
                   <label key={p.id} className="persona-checkbox-item">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={suggestedPersonaIds.includes(p.id)}
                       onChange={() => togglePersona(p.id)}
                     />

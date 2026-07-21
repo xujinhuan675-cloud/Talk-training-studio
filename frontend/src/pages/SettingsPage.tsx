@@ -51,6 +51,7 @@ import {
 } from '../services/voiceConfig'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
 import { Button } from '../components/ui/button'
+import { Checkbox } from '../components/ui/checkbox'
 import { Field, Input, Select, Textarea } from '../components/ui/form'
 import { SegmentedControl } from '../components/ui/segmented-control'
 import { useI18n, type TranslationKey } from '../i18n'
@@ -503,8 +504,7 @@ function ScenariosTab() {
           <div className="settings-checkbox-list">
             {allPersonas.map((p) => (
               <label key={p.id} className="settings-checkbox-item">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={suggestedPersonaIds.includes(p.id)}
                   onChange={() => togglePersona(p.id)}
                 />
@@ -1209,8 +1209,7 @@ function ConfigTab() {
             <Input value={form.sttModel} onChange={(e) => updateForm({ sttModel: e.target.value })} />
           </Field>
           <label className="settings-checkbox-item settings-voice-check">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={form.sttUseTtsApiKey}
               onChange={(e) => updateForm({ sttUseTtsApiKey: e.target.checked })}
             />

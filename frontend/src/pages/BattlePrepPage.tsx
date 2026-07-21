@@ -12,6 +12,7 @@ import {
 import { useI18n, type Translate } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { Button } from '../components/ui/button'
+import { Checkbox } from '../components/ui/checkbox'
 import { Input, Textarea } from '../components/ui/form'
 import './BattlePrepPage.css'
 
@@ -240,8 +241,7 @@ export default function BattlePrepPage() {
                 <div className="bpp-training-list">
                   {prepResult.training_points.map((point) => (
                     <label key={point} className={`bpp-training-item ${selectedPoints.includes(point) ? 'checked' : ''}`}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedPoints.includes(point)}
                         onChange={() => togglePoint(point)}
                       />
