@@ -11,6 +11,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.common.exceptions import DomainValidationException
 from domain.conversation.entity import Conversation
 from domain.conversation.exceptions import ConversationNotFoundException
 from domain.conversation.repository import ConversationRepository, OwnedMetadataScope
@@ -23,6 +24,16 @@ class SQLAlchemyConversationRepository(ConversationRepository):
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    @staticmethod
+    def _require_metadata_scope(metadata_scope: OwnedMetadataScope | None) -> OwnedMetadataScope:
+        if metadata_scope is None:
+            raise DomainValidationException(
+                "metadata_scope is required for conversation repository access",
+                field="metadata_scope",
+                message_key="conversation.repository.scope.required",
+            )
+        return metadata_scope
 
     def _to_entity(self, model: ConversationModel) -> Conversation:
         return Conversation(
@@ -42,7 +53,7 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         query,
         *,
         status: Optional[str],
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ):
         # Exclude soft-deleted by default
         query = query.where(ConversationModel.deleted_at.is_(None))
@@ -71,8 +82,9 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         self,
         conversation: Conversation,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Conversation:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(ConversationModel).where(ConversationModel.id == conversation.id)
         query = apply_owned_metadata_scope(
             query,
@@ -100,8 +112,9 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         self,
         conversation_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[Conversation]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(ConversationModel).where(ConversationModel.id == conversation_id)
         query = apply_owned_metadata_scope(
             query,
@@ -112,14 +125,24 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_by_id_for_maintenance(
+        self,
+        conversation_id: int,
+    ) -> Optional[Conversation]:
+        query = select(ConversationModel).where(ConversationModel.id == conversation_id)
+        result = await self.session.execute(query)
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def list(
         self,
         *,
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[Conversation]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(ConversationModel)
         query = self._apply_filters(query, status=status, metadata_scope=metadata_scope)
         query = query.order_by(
@@ -134,8 +157,9 @@ class SQLAlchemyConversationRepository(ConversationRepository):
         self,
         *,
         status: Optional[str] = None,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> int:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(func.count()).select_from(ConversationModel)
         query = self._apply_filters(query, status=status, metadata_scope=metadata_scope)
         result = await self.session.execute(query)

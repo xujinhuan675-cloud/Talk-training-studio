@@ -48,7 +48,7 @@ async def list_files(
     service: FileAssetApplicationService = Depends(get_file_asset_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     skip = (page - 1) * size
     assets, total = await service.list_assets(
         owner_id=None,
@@ -97,7 +97,7 @@ async def get_file_detail(
     service: FileAssetApplicationService = Depends(get_file_asset_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     asset = await service.get_asset_raw(asset_id, metadata_scope=metadata_scope)
     dto = FileAssetDTO.model_validate(asset)
     if signed:
@@ -127,7 +127,7 @@ async def generate_preview_url(
     service: FileAssetApplicationService = Depends(get_file_asset_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     asset = await service.get_asset_raw(asset_id, metadata_scope=metadata_scope)
     data = await service.generate_access_url_for_asset(
         asset=asset,
@@ -149,7 +149,7 @@ async def generate_download_url(
     service: FileAssetApplicationService = Depends(get_file_asset_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     asset = await service.get_asset_raw(asset_id, metadata_scope=metadata_scope)
     data = await service.generate_access_url_for_asset(
         asset=asset,
@@ -170,7 +170,7 @@ async def delete_file(
     service: FileAssetApplicationService = Depends(get_file_asset_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     updated = await service.soft_delete(asset_id, metadata_scope=metadata_scope)
     return success_response(
         {"deleted": True, "status": updated.status}, message=t("file.delete.soft.success")

@@ -11,6 +11,7 @@ from domain.conversation.exceptions import (
     AgentConfigNotFoundException,
     ConversationNotFoundException,
 )
+from domain.common.exceptions import DomainValidationException
 from domain.conversation.repository import OwnedMetadataScope
 from infrastructure.models.base import Base
 from infrastructure.repositories.agent_config_repository import SQLAlchemyAgentConfigRepository
@@ -180,9 +181,34 @@ async def test_conversation_repository_rejects_unscoped_update_when_allow_unscop
     with pytest.raises(ConversationNotFoundException):
         await repo.update(unscoped, metadata_scope=scope)
 
-    persisted = await repo.get_by_id(unscoped.id or 0)
+    persisted = await repo.get_by_id_for_maintenance(unscoped.id or 0)
     assert persisted is not None
     assert persisted.title == "legacy-unscoped"
+
+
+@pytest.mark.asyncio
+async def test_conversation_repository_requires_explicit_metadata_scope(session) -> None:
+    repo = SQLAlchemyConversationRepository(session)
+    conversation = await repo.create(
+        _conversation(
+            "explicit-scope",
+            1,
+            {"ownerUserId": "user-sales-001", "teamId": "team-revenue"},
+        )
+    )
+
+    with pytest.raises(DomainValidationException):
+        await repo.get_by_id(conversation.id, metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.list(metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.count(metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.update(conversation, metadata_scope=None)
+
+    loaded = await repo.get_by_id_for_maintenance(conversation.id or 0)
+    assert loaded is not None
+    assert loaded.title == "explicit-scope"
 
 
 @pytest.mark.asyncio
@@ -283,7 +309,7 @@ async def test_agent_config_repository_applies_metadata_scope_to_single_resource
     with pytest.raises(AgentConfigNotFoundException):
         await repo.delete(hidden.id, metadata_scope=scope)
     await repo.delete(visible.id, metadata_scope=scope)
-    assert await repo.get_by_id(visible.id) is None
+    assert await repo.get_by_id_for_maintenance(visible.id) is None
 
 
 @pytest.mark.asyncio
@@ -309,6 +335,35 @@ async def test_agent_config_repository_get_by_name_applies_metadata_scope(sessio
 
 
 @pytest.mark.asyncio
+async def test_agent_config_repository_requires_explicit_metadata_scope(session) -> None:
+    repo = SQLAlchemyAgentConfigRepository(session)
+    config = await repo.create(
+        _agent_config(
+            "explicit-scope",
+            1,
+            {"ownerUserId": "user-sales-001", "teamId": "team-revenue"},
+        )
+    )
+
+    with pytest.raises(DomainValidationException):
+        await repo.get_by_id(config.id, metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.get_by_name(config.name, metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.list(metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.count(metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.update(config, metadata_scope=None)
+    with pytest.raises(DomainValidationException):
+        await repo.delete(config.id, metadata_scope=None)
+
+    loaded = await repo.get_by_id_for_maintenance(config.id or 0)
+    assert loaded is not None
+    assert loaded.name == "explicit-scope"
+
+
+@pytest.mark.asyncio
 async def test_agent_config_repository_round_trips_resource_bindings(session) -> None:
     repo = SQLAlchemyAgentConfigRepository(session)
     created = await repo.create(
@@ -326,7 +381,13 @@ async def test_agent_config_repository_round_trips_resource_bindings(session) ->
     )
     assert created.id is not None
 
-    loaded = await repo.get_by_id(created.id)
+    scope = OwnedMetadataScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        include_team_scope=False,
+        allow_unscoped=False,
+    )
+    loaded = await repo.get_by_id(created.id, metadata_scope=scope)
 
     assert loaded is not None
     assert loaded.tool_ids == ("crm.lookup", "report.generate")
@@ -334,7 +395,7 @@ async def test_agent_config_repository_round_trips_resource_bindings(session) ->
 
     loaded.tool_ids = ("calendar.lookup", "calendar.lookup")
     loaded.mcp_server_ids = (" calendar ",)
-    updated = await repo.update(loaded)
+    updated = await repo.update(loaded, metadata_scope=scope)
 
     assert updated.tool_ids == ("calendar.lookup",)
     assert updated.mcp_server_ids == ("calendar",)

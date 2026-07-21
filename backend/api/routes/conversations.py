@@ -49,14 +49,12 @@ _agent_config_user = require_system_roles("admin", "leader", "staff")
 def _conversation_read_scope(current_user: CurrentUser):
     return owned_metadata_scope_for_current_user(
         current_user,
-        allow_unscoped=False,
     )
 
 
 def _conversation_mutation_scope(current_user: CurrentUser):
     return owned_metadata_scope_for_current_user(
         current_user,
-        allow_unscoped=False,
     )
 
 
@@ -91,7 +89,6 @@ async def _get_accessible_agent_config(
         config_id,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
 
@@ -136,7 +133,6 @@ async def list_conversations(
         limit=size,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
     return paginated_response(items=items, total=total, page=page, size=size)
@@ -172,7 +168,6 @@ async def update_conversation(
         payload,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
     return success_response(conv, message=t("ok"))
@@ -192,7 +187,6 @@ async def delete_conversation(
         conversation_id,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
     return success_response(conv, message=t("ok"))
@@ -502,7 +496,6 @@ async def create_agent_config(
         payload,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
     return success_response(config, message=t("ok"))
@@ -525,7 +518,6 @@ async def list_agent_configs(
         limit=size,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
     return paginated_response(items=items, total=total, page=page, size=size)
@@ -572,7 +564,6 @@ async def update_agent_config(
         payload,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
     return success_response(config, message=t("ok"))
@@ -592,7 +583,6 @@ async def delete_agent_config(
         config_id,
         metadata_scope=owned_metadata_scope_for_current_user(
             current_user,
-            allow_unscoped=False,
         ),
     )
     return success_response({"deleted": True}, message=t("ok"))

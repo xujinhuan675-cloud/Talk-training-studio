@@ -505,7 +505,6 @@ async def _agent_config_inventory_for_user(
     page_size = max(1, min(int(settings.MAX_PAGE_SIZE), scan_limit))
     metadata_scope = owned_metadata_scope_for_current_user(
         current_user,
-        allow_unscoped=False,
     )
     items: list[object] = []
     skip = 0
@@ -1824,7 +1823,7 @@ def _build_video_answer_url(
 
 
 def _training_material_tool_scope_for_current_user(current_user: CurrentUser) -> OwnedMetadataScope:
-    return owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    return owned_metadata_scope_for_current_user(current_user)
 
 
 def _training_material_tool_consumer(

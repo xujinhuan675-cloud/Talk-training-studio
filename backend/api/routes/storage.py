@@ -141,7 +141,7 @@ async def presign_upload(
         if decision is not None and not decision.execute and decision.payload:
             return await _build_response_from_pending(decision.payload)
 
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     try:
         file_summary, presigned = await service.presign_upload(
             user_id=None,  # No user tracking
@@ -203,7 +203,7 @@ async def confirm_presigned_upload(
     except ValueError as exc:  # pragma: no cover - defensive guard
         raise HTTPException(status_code=400, detail=t("file.identifier.missing")) from exc
 
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     if payload.id is not None:
         asset = await service.get_asset_raw(payload.id, metadata_scope=metadata_scope)
     elif payload.key:
@@ -238,7 +238,7 @@ async def upload_file(
                 break
             yield chunk
 
-    metadata_scope = owned_metadata_scope_for_current_user(current_user, allow_unscoped=False)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
     resp = await service.relay_upload_stream(
         user_id=None,  # No user tracking
         file_stream=_iter_chunks(file),

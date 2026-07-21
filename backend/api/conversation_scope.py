@@ -76,15 +76,13 @@ def conversation_create_payload_for_user(
 def user_can_access_owned_metadata(
     metadata: dict[str, Any] | None,
     current_user: CurrentUser,
-    *,
-    allow_unscoped: bool = False,
 ) -> bool:
     metadata = _as_mapping(metadata)
     owner_user_id = _conversation_owner_user_id(metadata)
     owner_team_id = _conversation_owner_team_id(metadata)
 
     if not owner_user_id and not owner_team_id:
-        return allow_unscoped
+        return False
     if owner_user_id and owner_user_id == current_user.user_id:
         return True
     if (
@@ -100,14 +98,12 @@ def user_can_access_owned_metadata(
 
 def owned_metadata_scope_for_current_user(
     current_user: CurrentUser,
-    *,
-    allow_unscoped: bool,
 ) -> OwnedMetadataScope:
     return OwnedMetadataScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
         include_team_scope=current_user.is_admin or current_user.is_leader,
-        allow_unscoped=allow_unscoped,
+        allow_unscoped=False,
     )
 
 
@@ -116,12 +112,10 @@ def require_owned_metadata_access(
     current_user: CurrentUser,
     *,
     resource_name: str,
-    allow_unscoped: bool = False,
 ) -> None:
     if not user_can_access_owned_metadata(
         metadata,
         current_user,
-        allow_unscoped=allow_unscoped,
     ):
         raise HTTPException(
             status_code=403,
@@ -133,7 +127,6 @@ def user_can_access_conversation(conversation: ConversationDTO, current_user: Cu
     return user_can_access_owned_metadata(
         conversation.metadata,
         current_user,
-        allow_unscoped=False,
     )
 
 

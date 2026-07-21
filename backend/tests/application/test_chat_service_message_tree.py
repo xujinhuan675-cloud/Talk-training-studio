@@ -1103,7 +1103,7 @@ async def test_conversation_service_fork_remaps_selected_path_metadata(session_f
                 "affectsCompletion": False,
             },
         }
-        await uow.conversation_repository.update(conversation)
+        await uow.conversation_repository.update(conversation, metadata_scope=_scope())
 
     service = ConversationApplicationService(
         lambda **kwargs: SQLAlchemyUnitOfWork(

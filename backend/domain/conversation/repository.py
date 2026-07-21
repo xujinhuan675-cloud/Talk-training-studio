@@ -20,11 +20,17 @@ class OwnedMetadataScope:
     user_id: str
     team_id: str | None = None
     include_team_scope: bool = False
-    allow_unscoped: bool = True
+    allow_unscoped: bool = False
 
 
 class ConversationRepository(ABC):
-    """Contract for persisting and querying conversations."""
+    """Contract for persisting and querying conversations.
+
+    Application-service callers must pass ``metadata_scope`` explicitly for
+    scoped read/write access. Full-access repository helpers must be narrow and
+    named for their maintenance purpose rather than hidden behind
+    ``metadata_scope=None``.
+    """
 
     @abstractmethod
     async def create(self, conversation: Conversation) -> Conversation: ...
@@ -34,7 +40,7 @@ class ConversationRepository(ABC):
         self,
         conversation: Conversation,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Conversation: ...
 
     @abstractmethod
@@ -42,7 +48,13 @@ class ConversationRepository(ABC):
         self,
         conversation_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
+    ) -> Optional[Conversation]: ...
+
+    @abstractmethod
+    async def get_by_id_for_maintenance(
+        self,
+        conversation_id: int,
     ) -> Optional[Conversation]: ...
 
     @abstractmethod
@@ -52,7 +64,7 @@ class ConversationRepository(ABC):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[Conversation]: ...
 
     @abstractmethod
@@ -60,7 +72,7 @@ class ConversationRepository(ABC):
         self,
         *,
         status: Optional[str] = None,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> int: ...
 
 
@@ -185,7 +197,13 @@ class RunRepository(ABC):
 
 
 class AgentConfigRepository(ABC):
-    """Contract for persisting and querying agent configurations."""
+    """Contract for persisting and querying agent configurations.
+
+    Application-service callers must pass ``metadata_scope`` explicitly for
+    scoped read/write access. Full-access repository helpers must be narrow and
+    named for their maintenance purpose rather than hidden behind
+    ``metadata_scope=None``.
+    """
 
     @abstractmethod
     async def create(self, config: AgentConfig) -> AgentConfig: ...
@@ -195,7 +213,7 @@ class AgentConfigRepository(ABC):
         self,
         config: AgentConfig,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> AgentConfig: ...
 
     @abstractmethod
@@ -203,7 +221,7 @@ class AgentConfigRepository(ABC):
         self,
         config_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> None: ...
 
     @abstractmethod
@@ -211,7 +229,13 @@ class AgentConfigRepository(ABC):
         self,
         config_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
+    ) -> Optional[AgentConfig]: ...
+
+    @abstractmethod
+    async def get_by_id_for_maintenance(
+        self,
+        config_id: int,
     ) -> Optional[AgentConfig]: ...
 
     @abstractmethod
@@ -219,7 +243,7 @@ class AgentConfigRepository(ABC):
         self,
         name: str,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[AgentConfig]: ...
 
     @abstractmethod
@@ -228,8 +252,8 @@ class AgentConfigRepository(ABC):
         *,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[AgentConfig]: ...
 
     @abstractmethod
-    async def count(self, *, metadata_scope: OwnedMetadataScope | None = None) -> int: ...
+    async def count(self, *, metadata_scope: OwnedMetadataScope) -> int: ...

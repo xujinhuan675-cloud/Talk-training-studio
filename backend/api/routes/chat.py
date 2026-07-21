@@ -44,7 +44,6 @@ async def chat(
 ):
     metadata_scope = owned_metadata_scope_for_current_user(
         current_user,
-        allow_unscoped=False,
     )
     await conversation_service.get_conversation(
         conversation_id,

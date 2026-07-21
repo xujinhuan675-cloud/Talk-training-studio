@@ -11,6 +11,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.common.exceptions import DomainValidationException
 from domain.conversation.entity import AgentConfig, normalize_agent_resource_ids
 from domain.conversation.exceptions import AgentConfigNotFoundException
 from domain.conversation.repository import AgentConfigRepository, OwnedMetadataScope
@@ -23,6 +24,16 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    @staticmethod
+    def _require_metadata_scope(metadata_scope: OwnedMetadataScope | None) -> OwnedMetadataScope:
+        if metadata_scope is None:
+            raise DomainValidationException(
+                "metadata_scope is required for agent config repository access",
+                field="metadata_scope",
+                message_key="agent_config.repository.scope.required",
+            )
+        return metadata_scope
 
     def _to_entity(self, model: AgentConfigModel) -> AgentConfig:
         return AgentConfig(
@@ -61,8 +72,9 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         self,
         config: AgentConfig,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> AgentConfig:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(AgentConfigModel).where(AgentConfigModel.id == config.id)
         query = apply_owned_metadata_scope(
             query,
@@ -92,8 +104,9 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         self,
         config_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> None:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(AgentConfigModel).where(AgentConfigModel.id == config_id)
         query = apply_owned_metadata_scope(
             query,
@@ -111,8 +124,9 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         self,
         config_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[AgentConfig]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(AgentConfigModel).where(AgentConfigModel.id == config_id)
         query = apply_owned_metadata_scope(
             query,
@@ -123,12 +137,22 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_by_id_for_maintenance(
+        self,
+        config_id: int,
+    ) -> Optional[AgentConfig]:
+        query = select(AgentConfigModel).where(AgentConfigModel.id == config_id)
+        result = await self.session.execute(query)
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def get_by_name(
         self,
         name: str,
         *,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[AgentConfig]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(AgentConfigModel).where(AgentConfigModel.name == name)
         query = apply_owned_metadata_scope(
             query,
@@ -144,8 +168,9 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         *,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None = None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[AgentConfig]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = (
             select(AgentConfigModel)
             .order_by(AgentConfigModel.created_at.desc(), AgentConfigModel.id.desc())
@@ -155,7 +180,8 @@ class SQLAlchemyAgentConfigRepository(AgentConfigRepository):
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
 
-    async def count(self, *, metadata_scope: OwnedMetadataScope | None = None) -> int:
+    async def count(self, *, metadata_scope: OwnedMetadataScope) -> int:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(func.count()).select_from(AgentConfigModel)
         query = apply_owned_metadata_scope(query, AgentConfigModel.extra_metadata, metadata_scope)
         result = await self.session.execute(query)
