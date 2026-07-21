@@ -403,6 +403,25 @@
   opacity: 0.45;
 }
 
+.bpp-back.ui-button,
+.bpp-btn-primary.ui-button,
+.bpp-btn-secondary.ui-button {
+  white-space: normal;
+}
+
+.bpp-input.ui-form-control,
+.bpp-textarea.ui-form-control {
+  font: inherit;
+}
+
+.bpp-btn-primary.ui-button--primary:hover:not(:disabled) {
+  background: var(--amber);
+}
+
+.bpp-btn-secondary.ui-button--secondary:hover:not(:disabled) {
+  background: var(--bg-base);
+}
+
 @media (max-width: 1080px) {
   .bpp-header {
     align-items: flex-start;

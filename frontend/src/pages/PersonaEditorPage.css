@@ -116,6 +116,12 @@
   border-color: var(--green);
 }
 
+.user-context-textarea.ui-form-control,
+.enhance-textarea.ui-form-control {
+  font-family: inherit;
+  line-height: 1.6;
+}
+
 /* Enhancement panel */
 .enhance-panel {
   margin-top: 20px;
@@ -201,6 +207,20 @@
   background: var(--bg-base);
 }
 
+.enhance-actions .btn-primary.ui-button,
+.enhance-actions .btn-ghost.ui-button,
+.enhance-diff-actions .btn-primary.ui-button,
+.enhance-diff-actions .btn-ghost.ui-button {
+  white-space: normal;
+}
+
+.enhance-actions .btn-primary.ui-button--primary,
+.enhance-actions .btn-primary.ui-button--primary:hover:not(:disabled),
+.enhance-diff-actions .btn-primary.ui-button--primary,
+.enhance-diff-actions .btn-primary.ui-button--primary:hover:not(:disabled) {
+  background: var(--primary-gradient);
+}
+
 /* Enhancement diff dialog */
 .enhance-diff-dialog {
   max-width: 560px;
@@ -208,6 +228,11 @@
   max-height: 70vh;
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
 }
 
 .enhance-diff-dialog h3 {

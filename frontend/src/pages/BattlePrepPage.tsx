@@ -11,6 +11,8 @@ import {
 } from '../services/trainingStudio'
 import { useI18n, type Translate } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from '../components/ui/button'
+import { Input, Textarea } from '../components/ui/form'
 import './BattlePrepPage.css'
 
 function initialState(t: Translate) {
@@ -106,10 +108,10 @@ export default function BattlePrepPage() {
       <div className="bpp-container">
         <header className="bpp-header">
           <div className="bpp-heading">
-            <button className="bpp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
+            <Button className="bpp-back" variant="ghost" size="sm" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
               <ArrowLeft size={16} />
               <span>{t('common.backToTrainingCatalog')}</span>
-            </button>
+            </Button>
             <div className="bpp-title-row">
               <Zap size={22} className="bpp-title-icon" />
               <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
@@ -139,7 +141,7 @@ export default function BattlePrepPage() {
             <div className="bpp-setup-grid">
               <label className="bpp-brief-panel">
                 <span className="bpp-field-label">{tr('训练情境', 'Training brief')}</span>
-                <textarea
+                <Textarea
                   className="bpp-textarea"
                   value={description}
                   onChange={(e) => setState((s) => ({ ...s, description: e.target.value }))}
@@ -165,8 +167,9 @@ export default function BattlePrepPage() {
             {error && <div className="bpp-error">{error}</div>}
 
             <div className="bpp-actions">
-              <button
+              <Button
                 className="bpp-btn-primary"
+                variant="primary"
                 onClick={handleGenerate}
                 disabled={description.trim().length < 10 || loading}
               >
@@ -181,7 +184,7 @@ export default function BattlePrepPage() {
                     <ArrowRight size={14} />
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -198,7 +201,7 @@ export default function BattlePrepPage() {
                 <div className="bpp-fields">
                   <label className="bpp-field">
                     <span className="bpp-field-label">{tr('角色名称', 'Persona Name')}</span>
-                    <input
+                    <Input
                       type="text"
                       className="bpp-input"
                       value={personaName}
@@ -207,7 +210,7 @@ export default function BattlePrepPage() {
                   </label>
                   <label className="bpp-field">
                     <span className="bpp-field-label">{tr('职位 / 角色', 'Position / Role')}</span>
-                    <input
+                    <Input
                       type="text"
                       className="bpp-input"
                       value={personaRole}
@@ -216,7 +219,7 @@ export default function BattlePrepPage() {
                   </label>
                   <label className="bpp-field bpp-field--span-2">
                     <span className="bpp-field-label">{tr('互动风格', 'Interaction style')}</span>
-                    <textarea
+                    <Textarea
                       className="bpp-textarea bpp-textarea--sm"
                       value={personaStyle}
                       onChange={(e) => setState((s) => ({ ...s, personaStyle: e.target.value }))}
@@ -252,15 +255,17 @@ export default function BattlePrepPage() {
             {error && <div className="bpp-error">{error}</div>}
 
             <div className="bpp-actions bpp-actions--split">
-              <button
+              <Button
                 className="bpp-btn-secondary"
+                variant="secondary"
                 onClick={() => setState((s) => ({ ...s, step: 1, error: null }))}
               >
                 <ArrowLeft size={14} />
                 {t('common.previous')}
-              </button>
-              <button
+              </Button>
+              <Button
                 className="bpp-btn-primary"
+                variant="primary"
                 onClick={handleStartBattle}
                 disabled={
                   !personaName.trim() ||
@@ -280,7 +285,7 @@ export default function BattlePrepPage() {
                     <ArrowRight size={14} />
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         )}

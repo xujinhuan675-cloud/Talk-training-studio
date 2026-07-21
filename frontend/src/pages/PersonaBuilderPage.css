@@ -266,6 +266,57 @@
   color: var(--success);
 }
 
+.type-tag.ui-button,
+.segment-remove.ui-button,
+.add-segment-btn.ui-button,
+.btn-start.ui-button,
+.btn-detect.ui-button,
+.btn-retry.ui-button,
+.btn-goto.ui-button,
+.builder-footer .btn-ghost.ui-button {
+  white-space: normal;
+}
+
+.type-tag.ui-button {
+  min-height: 24px;
+  padding: 3px 10px;
+}
+
+.segment-remove.ui-button {
+  min-height: 24px;
+  padding: 0;
+}
+
+.segment-remove.ui-button--ghost:hover:not(:disabled) {
+  background: var(--rose-soft);
+  color: var(--rose);
+}
+
+.segment-textarea.ui-form-control {
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+.btn-start.ui-button--primary,
+.btn-start.ui-button--primary:hover:not(:disabled) {
+  background: var(--primary-gradient);
+}
+
+.btn-detect.ui-button--secondary:hover:not(:disabled) {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.btn-retry.ui-button--secondary {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.btn-goto.ui-button--primary {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
 .builder-toast {
   position: fixed;
   bottom: 24px;

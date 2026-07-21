@@ -31,6 +31,7 @@ import { useAuthContext } from '../contexts/AuthContext'
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useI18n, type Locale, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from '../components/ui/button'
 import { PageShell } from '../components/ui/page'
 import {
   getScenarioTrainingCardById,
@@ -808,9 +809,9 @@ export default function TrainingResultPage() {
     <PageShell width="wide" className="training-result-page">
       <header className="training-result-topbar">
         <div className="training-result-title">
-          <button type="button" onClick={() => navigate(-1)} aria-label={tr('返回', 'Go back')}>
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label={tr('返回', 'Go back')}>
             <ArrowLeft size={17} />
-          </button>
+          </Button>
           <div>
             <span>{isLiveCoachSession ? tr('实时陪跑复盘', 'Live coach review') : tr('训练结果', 'Training result')}</span>
             <h1>{scenarioTitle}</h1>
@@ -1072,9 +1073,9 @@ export default function TrainingResultPage() {
                 const selected = selectedMaterial?.id === material.id
                 const tags = materialTags(material)
                 return (
-                  <button
+                  <Button
                     key={material.id}
-                    type="button"
+                    variant="ghost"
                     className={`training-result-material-option${selected ? ' selected' : ''}`}
                     onClick={() => setSelectedMaterialId(material.id)}
                     aria-pressed={selected}
@@ -1088,7 +1089,7 @@ export default function TrainingResultPage() {
                         ))}
                       </em>
                     )}
-                  </button>
+                  </Button>
                 )
               })}
             </div>

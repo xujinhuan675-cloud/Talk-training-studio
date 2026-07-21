@@ -331,21 +331,21 @@ export default function PersonaBuilderPage() {
               })}
             </span>
             {status === 'error' && (
-              <button type="button" className="btn-retry retry" onClick={handleRetry}>
+              <Button className="btn-retry retry" variant="secondary" size="sm" onClick={handleRetry}>
                 <RotateCcw size={14} />
                 {tr('重试', 'Retry')}
-              </button>
+              </Button>
             )}
             {status === 'done' && personaId && (
-              <button type="button" className="btn-goto" onClick={handleManualGoto}>
+              <Button className="btn-goto" variant="primary" size="sm" onClick={handleManualGoto}>
                 {tr('查看结果', 'View Result')}
                 <ArrowRight size={14} />
-              </button>
+              </Button>
             )}
             {phase === 'speaker-select' && (
-              <button type="button" className="btn-ghost" onClick={handleBackToInput}>
+              <Button className="btn-ghost" variant="secondary" size="sm" onClick={handleBackToInput}>
                 {tr('返回修改素材', 'Back to Edit Materials')}
-              </button>
+              </Button>
             )}
             {phase === 'building' && buildQueue.length > 1 && (
               <span className="build-progress-label">
@@ -358,9 +358,10 @@ export default function PersonaBuilderPage() {
             )}
             {phase === 'input' && (
               <>
-                <button
-                  type="button"
+                <Button
                   className="btn-detect"
+                  variant="secondary"
+                  size="sm"
                   onClick={handleDetect}
                   disabled={!canSubmit || detection.status === 'detecting'}
                 >
@@ -369,16 +370,17 @@ export default function PersonaBuilderPage() {
                   ) : (
                     <><Users size={14} /> {tr('检测人物', 'Detect People')}</>
                   )}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
                   className="btn-start"
+                  variant="primary"
+                  size="sm"
                   onClick={handleStart}
                   disabled={!canSubmit}
                 >
                   <Sparkles size={14} />
                   {status === 'running' ? tr('分析中…', 'Analyzing...') : tr('开始分析', 'Start Analysis')}
-                </button>
+                </Button>
               </>
             )}
           </div>

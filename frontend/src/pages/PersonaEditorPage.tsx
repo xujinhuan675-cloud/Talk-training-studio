@@ -26,6 +26,13 @@ import FloatingCTA from '../components/persona-editor/FloatingCTA'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
 import { useI18n } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from '../components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from '../components/ui/dialog'
+import { Textarea } from '../components/ui/form'
 import '../components/persona-editor/personaEditor.css'
 import './PersonaEditorPage.css'
 
@@ -437,9 +444,9 @@ export default function PersonaEditorPage() {
     return (
       <div className="editor-status error">
         <p>{tr('加载失败：{error}', 'Failed to load: {error}', { error: error || tr('persona 不存在', 'persona does not exist') })}</p>
-        <button type="button" onClick={() => navigate(APP_ROUTES.config)}>
+        <Button variant="secondary" onClick={() => navigate(APP_ROUTES.config)}>
           {tr('返回配置', 'Back to Config')}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -710,7 +717,7 @@ export default function PersonaEditorPage() {
       <div className="user-context-section">
         <h3>{tr('与当前对话者的关系', 'Relationship to Current Speaker')}</h3>
         <p className="user-context-hint">{tr('描述这个角色对你的期待、你们的汇报关系、他关心你负责的哪些领域', 'Describe this persona’s expectations, reporting relationship, and which areas they care about in your work.')}</p>
-        <textarea
+        <Textarea
           className="user-context-textarea"
           value={draft.user_context || ''}
           onChange={(e) => setDraft((d) => d ? { ...d, user_context: e.target.value || null } : d)}
@@ -729,7 +736,7 @@ export default function PersonaEditorPage() {
       {showEnhance && (
         <div className="enhance-panel">
           <h3>{tr('追加素材增强画像', 'Enhance Profile with More Materials')}</h3>
-          <textarea
+          <Textarea
             className="enhance-textarea"
             value={enhanceText}
             onChange={(e) => setEnhanceText(e.target.value)}
@@ -741,31 +748,38 @@ export default function PersonaEditorPage() {
             <PersonaBuildProgress events={enhance.events} status={enhance.status} error={enhance.error} />
           )}
           <div className="enhance-actions">
-            <button
-              type="button"
+            <Button
               className="btn-primary"
+              variant="primary"
               onClick={handleStartEnhance}
               disabled={!enhanceText.trim() || enhance.status === 'running'}
             >
               {enhance.status === 'running' ? tr('增强中…', 'Enhancing...') : tr('开始增强', 'Start Enhancement')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               className="btn-ghost"
+              variant="secondary"
               onClick={() => { setShowEnhance(false); setEnhanceText(''); enhance.reset() }}
               disabled={enhance.status === 'running'}
             >
               {tr('取消', 'Cancel')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       {/* Enhancement diff summary dialog */}
       {enhanceDiff && (
-        <div className="dialog-overlay" onClick={handleRejectEnhance}>
-          <div className="dialog enhance-diff-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>{tr('增强完成 — 变更摘要', 'Enhancement Complete — Change Summary')}</h3>
+        <Dialog
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) handleRejectEnhance()
+          }}
+        >
+          <DialogContent className="enhance-diff-dialog" aria-describedby={undefined}>
+            <DialogTitle asChild>
+              <h3>{tr('增强完成 — 变更摘要', 'Enhancement Complete — Change Summary')}</h3>
+            </DialogTitle>
             <div className="enhance-diff-stats">
               {enhanceDiff.added > 0 && <span className="diff-badge diff-added">{tr('+{count} 新增', '+{count} added', { count: enhanceDiff.added })}</span>}
               {enhanceDiff.changed > 0 && <span className="diff-badge diff-changed">{tr('{count} 修改', '{count} changed', { count: enhanceDiff.changed })}</span>}
@@ -791,17 +805,17 @@ export default function PersonaEditorPage() {
               </div>
             )}
             <div className="enhance-diff-actions">
-              <button type="button" className="btn-primary" onClick={handleAcceptEnhance}>
+              <Button className="btn-primary" variant="primary" onClick={handleAcceptEnhance}>
                 {enhanceDiff.items.length > 0 ? tr('应用变更', 'Apply Changes') : tr('确定', 'OK')}
-              </button>
+              </Button>
               {enhanceDiff.items.length > 0 && (
-                <button type="button" className="btn-ghost" onClick={handleRejectEnhance}>
+                <Button className="btn-ghost" variant="secondary" onClick={handleRejectEnhance}>
                   {tr('放弃', 'Discard')}
-                </button>
+                </Button>
               )}
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       <FloatingCTA

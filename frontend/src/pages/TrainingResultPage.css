@@ -34,9 +34,12 @@
   gap: 12px;
 }
 
-.training-result-title button {
+.training-result-title button,
+.training-result-title .ui-button {
   width: 36px;
   height: 36px;
+  min-height: 36px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -47,9 +50,11 @@
   cursor: pointer;
 }
 
-.training-result-title button:hover {
+.training-result-title button:hover,
+.training-result-title .ui-button:hover:not(:disabled) {
   color: var(--green);
   border-color: var(--green);
+  background: var(--bg-card);
 }
 
 .training-result-title span {
@@ -394,20 +399,26 @@
   min-width: 0;
   min-height: 74px;
   display: grid;
+  justify-content: stretch;
   gap: 5px;
   border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--bg-base);
   color: var(--text-primary);
+  line-height: normal;
   text-align: left;
+  white-space: normal;
   cursor: pointer;
 }
 
 .training-result-material-option:hover,
-.training-result-material-option.selected {
+.training-result-material-option.selected,
+.training-result-material-option.ui-button--ghost:hover:not(:disabled),
+.training-result-material-option.ui-button--ghost.selected {
   border-color: var(--green);
   background: var(--green-soft);
+  color: var(--text-primary);
 }
 
 .training-result-material-option strong {
