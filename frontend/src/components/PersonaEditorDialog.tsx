@@ -17,7 +17,7 @@ import {
   DialogContent,
   DialogTitle,
 } from './ui/dialog'
-import { Input, Select, Textarea } from './ui/form'
+import { Field, Input, Select, Textarea } from './ui/form'
 import './PersonaEditorDialog.css'
 
 interface PersonaEditorDialogProps {
@@ -159,8 +159,7 @@ export default function PersonaEditorDialog({
             <Avatar name={name || '?'} color={avatarColor} size={48} />
           </div>
 
-          <label className="field-label">
-            ID
+          <Field className="field-label" label="ID">
             <Input
               type="text"
               value={id}
@@ -169,43 +168,40 @@ export default function PersonaEditorDialog({
               disabled={isEdit}
               autoFocus={!isEdit}
             />
-          </label>
+          </Field>
 
-          <label className="field-label">
-            {tr('名称', 'Name')}
+          <Field className="field-label" label={tr('名称', 'Name')}>
             <Input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={tr('角色显示名称', 'Persona display name')}
             />
-          </label>
+          </Field>
 
-          <label className="field-label">
-            {tr('角色', 'Role')}
+          <Field className="field-label" label={tr('角色', 'Role')}>
             <Input
               type="text"
               value={role}
               onChange={(e) => setRole(e.target.value)}
               placeholder={tr('如：CEO、产品经理', 'Example: CEO, Product Manager')}
             />
-          </label>
+          </Field>
 
-          <label className="field-label">
-            {tr('头像颜色', 'Avatar Color')}
+          <Field className="field-label" label={tr('头像颜色', 'Avatar Color')}>
             <div className="color-field">
-              <input
+              <Input
+                className="persona-color-input"
                 type="color"
                 value={avatarColor}
                 onChange={(e) => setAvatarColor(e.target.value)}
               />
               <span className="color-value">{avatarColor}</span>
             </div>
-          </label>
+          </Field>
 
           {teams.length > 0 && (
-            <label className="field-label">
-              {tr('所属团队', 'Team')}
+            <Field className="field-label" label={tr('所属团队', 'Team')}>
               <Select
                 value={teamId ?? ''}
                 onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : null)}
@@ -215,18 +211,17 @@ export default function PersonaEditorDialog({
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </Select>
-            </label>
+            </Field>
           )}
 
-          <label className="field-label">
-            {tr('内容（Markdown）', 'Content (Markdown)')}
+          <Field className="field-label" label={tr('内容（Markdown）', 'Content (Markdown)')}>
             <Textarea
               value={loading ? tr('加载中...', 'Loading...') : content}
               onChange={(e) => setContent(e.target.value)}
               placeholder={tr('角色画像的详细内容...', 'Detailed persona profile...')}
               disabled={loading}
             />
-          </label>
+          </Field>
 
           {error && <div className="dialog-error">{error}</div>}
         </div>

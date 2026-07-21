@@ -270,17 +270,17 @@ export default function TrainingStudioLauncher({
         </div>
         <div className="tsl-preset-strip" role="group" aria-label={t('training.launcher.presets')}>
           {LAUNCHER_PRESETS.map((item) => (
-            <button
+            <Button
               key={item.value}
               className={`tsl-preset-option ${activePreset === item.value ? 'selected' : ''}`}
-              type="button"
+              variant="ghost"
               onClick={() => applyLauncherPreset(item.value)}
               disabled={disabled}
               aria-pressed={activePreset === item.value}
             >
               <span>{t(item.labelKey)}</span>
               <small>{t(item.descKey)}</small>
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -365,9 +365,9 @@ export default function TrainingStudioLauncher({
       </div>
 
       <div className="tsl-advanced-shell">
-        <button
+        <Button
           className="tsl-advanced-toggle"
-          type="button"
+          variant="ghost"
           onClick={() => setAdvancedOpen((open) => !open)}
           aria-expanded={advancedOpen}
         >
@@ -376,7 +376,7 @@ export default function TrainingStudioLauncher({
             <small>{t('training.launcher.advancedSummary')}</small>
           </span>
           <em>{advancedOpen ? t('training.launcher.collapse') : t('training.launcher.expand')}</em>
-        </button>
+        </Button>
 
         {advancedOpen && (
           <div className="tsl-advanced-content">
@@ -482,7 +482,8 @@ export default function TrainingStudioLauncher({
               <div className="tsl-mix-grid">
                 <label className="tsl-range">
                   <span>{t('training.launcher.behavioral')}</span>
-                  <input
+                  <Input
+                    className="tsl-range-input"
                     type="range"
                     min="0"
                     max="100"
@@ -496,7 +497,8 @@ export default function TrainingStudioLauncher({
 
                 <label className="tsl-range">
                   <span>{t('training.launcher.technical')}</span>
-                  <input
+                  <Input
+                    className="tsl-range-input"
                     type="range"
                     min="0"
                     max="100"
@@ -510,7 +512,8 @@ export default function TrainingStudioLauncher({
 
                 <label className="tsl-range">
                   <span>{t('training.launcher.pressure')}</span>
-                  <input
+                  <Input
+                    className="tsl-range-input"
                     type="range"
                     min="0"
                     max="100"

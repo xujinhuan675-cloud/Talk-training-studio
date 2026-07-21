@@ -159,13 +159,21 @@
   grid-template-columns: auto 1fr;
   gap: 6px 10px;
   align-items: center;
+  justify-content: stretch;
   border: 0;
   padding: 0;
   background: transparent;
   color: inherit;
   font: inherit;
+  line-height: normal;
   text-align: left;
+  white-space: normal;
   cursor: pointer;
+}
+
+.training-studio-mode-main.ui-button--ghost:hover:not(:disabled) {
+  background: transparent;
+  color: inherit;
 }
 
 .training-studio-mode-main:disabled {
@@ -200,22 +208,27 @@
   min-height: 72px;
   display: grid;
   gap: 6px;
+  align-items: stretch;
   align-content: start;
+  justify-content: stretch;
   border: 1px solid var(--training-workbench-border);
   border-radius: 8px;
   padding: 10px;
   background: var(--training-workbench-bg);
   color: var(--text-primary);
   font: inherit;
+  line-height: normal;
   text-align: left;
+  white-space: normal;
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.training-studio-interaction:hover:not(:disabled),
-.training-studio-interaction.selected {
+.training-studio-interaction.ui-button--ghost:hover:not(:disabled),
+.training-studio-interaction.ui-button--ghost.selected {
   border-color: var(--training-workbench-border-accent);
   background: var(--training-workbench-primary-soft);
+  color: var(--text-primary);
 }
 
 .training-studio-interaction:disabled {
@@ -299,10 +312,12 @@
   gap: 10px;
 }
 
-.training-studio-feedback-options button {
+.training-studio-feedback-option {
   min-height: 78px;
   display: grid;
   align-content: start;
+  align-items: stretch;
+  justify-content: stretch;
   gap: 7px;
   border: 1px solid var(--training-workbench-border);
   border-radius: 8px;
@@ -311,27 +326,30 @@
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
+  line-height: normal;
   text-align: left;
+  white-space: normal;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.training-studio-feedback-options button:hover:not(:disabled),
-.training-studio-feedback-options button.selected {
+.training-studio-feedback-option.ui-button--ghost:hover:not(:disabled),
+.training-studio-feedback-option.ui-button--ghost.selected {
   border-color: var(--training-workbench-border-accent);
   background: var(--training-workbench-primary-soft);
+  color: var(--text-primary);
 }
 
-.training-studio-feedback-options button:disabled {
+.training-studio-feedback-option:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
 
-.training-studio-feedback-options button:focus-visible {
+.training-studio-feedback-option:focus-visible {
   outline: 2px solid var(--training-workbench-primary);
   outline-offset: 3px;
 }
 
-.training-studio-feedback-options button > span {
+.training-studio-feedback-option > span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -340,7 +358,7 @@
   font-weight: 800;
 }
 
-.training-studio-feedback-options button > span svg {
+.training-studio-feedback-option > span svg {
   color: var(--training-workbench-primary);
   flex-shrink: 0;
 }

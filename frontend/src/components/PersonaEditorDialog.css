@@ -43,6 +43,11 @@
   font-weight: 600;
 }
 
+.persona-editor-dialog .field-label .ui-form-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
 .persona-editor-dialog .field-label .ui-form-control {
   margin-top: 5px;
 }
@@ -58,9 +63,13 @@
   margin-top: 5px;
 }
 
-.persona-editor-dialog .color-field input[type="color"] {
+.persona-editor-dialog .color-field .persona-color-input.ui-form-control {
+  flex: 0 0 auto;
   width: 40px;
+  min-width: 40px;
   height: 32px;
+  min-height: 32px;
+  margin-top: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 2px;

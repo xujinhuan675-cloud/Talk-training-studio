@@ -502,9 +502,9 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 key={item.value}
                 className={`training-studio-mode ${selected ? 'selected' : ''}`}
               >
-                <button
+                <Button
                   className="training-studio-mode-main"
-                  type="button"
+                  variant="ghost"
                   onClick={() => setMode(item.defaultMode)}
                   disabled={starting !== null}
                   aria-pressed={selected}
@@ -512,7 +512,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                   <Icon size={20} />
                   <span>{t(item.labelKey)}</span>
                   <small>{t(item.descriptionKey)}</small>
-                </button>
+                </Button>
                 {item.interactions && (
                   <div
                     className="training-studio-interaction-options"
@@ -524,10 +524,10 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                       const optionSelected = option.value === mode
                       const disabled = starting !== null || option.disabled || !option.value
                       return (
-                        <button
+                        <Button
                           key={option.id}
                           className={`training-studio-interaction ${optionSelected ? 'selected' : ''}`}
-                          type="button"
+                          variant="ghost"
                           onClick={() => {
                             if (option.value) {
                               setMode(option.value)
@@ -542,7 +542,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                             {option.badgeKey && <em>{t(option.badgeKey)}</em>}
                           </span>
                           <small>{t(option.descriptionKey)}</small>
-                        </button>
+                        </Button>
                       )
                     })}
                   </div>
@@ -568,10 +568,10 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               const selected = effectiveFeedbackMode === item.value
               const disabled = starting !== null || mode === 'live_coach'
               return (
-                <button
+                <Button
                   key={item.value}
-                  className={selected ? 'selected' : ''}
-                  type="button"
+                  className={`training-studio-feedback-option ${selected ? 'selected' : ''}`}
+                  variant="ghost"
                   onClick={() => setFeedbackMode(item.value)}
                   disabled={disabled}
                   aria-pressed={selected}
@@ -581,7 +581,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                     {t(item.labelKey)}
                   </span>
                   <small>{t(item.descriptionKey)}</small>
-                </button>
+                </Button>
               )
             })}
           </div>

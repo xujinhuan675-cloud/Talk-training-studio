@@ -9,6 +9,8 @@ import { usePersonaBuild } from '../hooks/usePersonaBuild'
 import { useSpeakerDetection } from '../hooks/useSpeakerDetection'
 import PersonaBuildProgress from '../components/PersonaBuildProgress'
 import SpeakerSelector from '../components/SpeakerSelector'
+import { Button } from '../components/ui/button'
+import { Input, Textarea } from '../components/ui/form'
 import type { DetectedSpeaker } from '../services/api'
 import { useI18n, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
@@ -228,7 +230,8 @@ export default function PersonaBuilderPage() {
           <div className="builder-meta">
             <label className="meta-field">
               <span>{tr('角色名（可选）', 'Persona Name (optional)')}</span>
-              <input
+              <Input
+                className="meta-input"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -238,7 +241,8 @@ export default function PersonaBuilderPage() {
             </label>
             <label className="meta-field">
               <span>{tr('职位（可选）', 'Role (optional)')}</span>
-              <input
+              <Input
+                className="meta-input"
                 type="text"
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
@@ -255,30 +259,33 @@ export default function PersonaBuilderPage() {
                   <span className="segment-index">{tr('素材 #{index}', 'Material #{index}', { index: idx + 1 })}</span>
                   <div className="segment-tags">
                     {SEGMENT_TAGS.map((segmentTag) => (
-                      <button
+                      <Button
                         key={segmentTag.type}
-                        type="button"
+                        variant="secondary"
+                        size="sm"
                         className={`type-tag ${segmentTag.klass} ${seg.type === segmentTag.type ? 'active' : ''}`}
                         onClick={() => updateSegment(seg.id, { type: segmentTag.type })}
                         disabled={status === 'running'}
+                        aria-pressed={seg.type === segmentTag.type}
                       >
                         {t(segmentTag.labelKey)}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                   {segments.length > 1 && (
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       className="segment-remove"
                       onClick={() => removeSegment(seg.id)}
                       disabled={status === 'running'}
                       title={tr('删除这段', 'Remove this segment')}
                     >
                       <X size={14} />
-                    </button>
+                    </Button>
                   )}
                 </div>
-                <textarea
+                <Textarea
                   className="segment-textarea"
                   value={seg.text}
                   onChange={(e) => updateSegment(seg.id, { text: e.target.value })}
@@ -290,8 +297,9 @@ export default function PersonaBuilderPage() {
             ))}
           </div>
 
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             className="add-segment-btn"
             onClick={addSegment}
             disabled={segments.length >= MAX_SEGMENTS || status === 'running'}
@@ -301,7 +309,7 @@ export default function PersonaBuilderPage() {
               count: segments.length,
               max: MAX_SEGMENTS,
             })}
-          </button>
+          </Button>
 
           {/* Speaker selector (shown after detection) */}
           {phase === 'speaker-select' && detection.speakers.length > 1 && (

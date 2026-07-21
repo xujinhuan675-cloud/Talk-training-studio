@@ -5,6 +5,8 @@ import { createDefenseSession, startDefenseSession, type DefenseSession, type Pe
 import { useAppContext } from '../contexts/AppContext'
 import { useI18n, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/form'
 import './DefensePrepPage.css'
 
 interface DefenseScenarioOption {
@@ -145,10 +147,16 @@ export default function DefensePrepPage() {
       <div className="dp-container">
         <header className="dp-header">
           <div className="dp-heading">
-            <button className="dp-back" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="dp-back"
+              onClick={() => navigate(APP_ROUTES.practiceScenarios)}
+            >
               <ArrowLeft size={16} />
               <span>{t('common.backToTrainingCatalog')}</span>
-            </button>
+            </Button>
             <div className="dp-title-row">
               <FileText size={22} className="dp-title-icon" />
               <h1 className="dp-title">{tr('答辩准备', 'Defense Prep')}</h1>
@@ -195,15 +203,18 @@ export default function DefensePrepPage() {
                   <div className="dp-file-selected">
                     <FileText size={20} className="dp-file-icon" />
                     <span className="dp-file-name">{file.name}</span>
-                    <button
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
                       className="dp-file-remove"
                       onClick={() => setState((s) => ({ ...s, file: null }))}
                     >
                       {t('common.remove')}
-                    </button>
+                    </Button>
                   </div>
                 )}
-                <input
+                <Input
                   ref={fileInputRef}
                   type="file"
                   className="dp-file-input"
@@ -252,16 +263,19 @@ export default function DefensePrepPage() {
 
                 <div className="dp-scenario-grid">
                   {SCENARIO_OPTIONS.map((opt) => (
-                    <button
+                    <Button
                       key={opt.value}
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       className={`dp-scenario-card ${scenarioType === opt.value ? 'selected' : ''}`}
                       onClick={() => setState((s) => ({ ...s, scenarioType: opt.value }))}
+                      aria-pressed={scenarioType === opt.value}
                       aria-label={`${t(opt.labelKey)}. ${t(opt.descKey)}`}
                       title={t(opt.descKey)}
                     >
                       <span className="dp-scenario-label">{t(opt.labelKey)}</span>
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </section>
@@ -270,7 +284,9 @@ export default function DefensePrepPage() {
             {error && <div className="dp-error">{error}</div>}
 
             <div className="dp-actions">
-              <button
+              <Button
+                type="button"
+                variant="primary"
                 className="dp-btn-primary"
                 onClick={handleUpload}
                 disabled={!file || selectedPersonaIds.length === 0 || !scenarioType || loading}
@@ -286,7 +302,7 @@ export default function DefensePrepPage() {
                     {tr('上传并准备', 'Upload and Prepare')}
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -348,14 +364,18 @@ export default function DefensePrepPage() {
             {error && <div className="dp-error">{error}</div>}
 
             <div className="dp-actions dp-actions--split">
-              <button
+              <Button
+                type="button"
+                variant="secondary"
                 className="dp-btn-secondary"
                 onClick={() => setState((s) => ({ ...s, step: 1, error: null }))}
               >
                 <ArrowLeft size={14} />
                 {t('common.previous')}
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
                 className="dp-btn-primary"
                 onClick={handleStart}
                 disabled={submitting}
@@ -371,7 +391,7 @@ export default function DefensePrepPage() {
                     {tr('开始模拟答辩', 'Start mock defense')}
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         )}

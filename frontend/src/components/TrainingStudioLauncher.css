@@ -114,6 +114,7 @@
   min-height: 64px;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   justify-content: center;
   gap: 3px;
   padding: 10px 12px;
@@ -122,18 +123,22 @@
   background: var(--tsl-bg-input);
   color: var(--text-primary);
   cursor: pointer;
+  line-height: normal;
   text-align: left;
+  white-space: normal;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
-.tsl-preset-option:hover:not(:disabled) {
+.tsl-preset-option.ui-button--ghost:hover:not(:disabled) {
   border-color: var(--tsl-border-accent);
   background: var(--tsl-primary-soft);
+  color: var(--text-primary);
 }
 
-.tsl-preset-option.selected {
+.tsl-preset-option.ui-button--ghost.selected {
   border-color: var(--tsl-border-accent);
   background: var(--tsl-primary-soft);
+  color: var(--text-primary);
 }
 
 .tsl-preset-option span {
@@ -188,12 +193,15 @@
   background: var(--tsl-bg-input);
   color: var(--text-primary);
   cursor: pointer;
+  line-height: normal;
+  white-space: normal;
   transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
-.tsl-advanced-toggle:hover {
+.tsl-advanced-toggle.ui-button--ghost:hover:not(:disabled) {
   border-color: var(--tsl-primary);
   background: var(--tsl-primary-soft);
+  color: var(--text-primary);
 }
 
 .tsl-advanced-toggle span {
@@ -279,10 +287,22 @@
   font-weight: 700;
 }
 
-.tsl-range input {
+.tsl-range-input.ui-form-input {
   grid-column: 1 / -1;
   width: 100%;
+  min-height: 0;
+  height: 22px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
   accent-color: var(--tsl-primary);
+}
+
+.tsl-range-input.ui-form-input:focus-visible {
+  box-shadow: none;
+  outline: 2px solid var(--tsl-focus);
+  outline-offset: 2px;
 }
 
 .tsl-range output {
@@ -294,7 +314,7 @@
 .tsl-preset-option:disabled,
 .tsl-reset:disabled,
 .tsl-field .ui-form-control:disabled,
-.tsl-range input:disabled {
+.tsl-range-input.ui-form-input:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
