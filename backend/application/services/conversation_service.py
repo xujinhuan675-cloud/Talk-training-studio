@@ -117,6 +117,10 @@ _MESSAGE_TREE_REPLAY_METADATA_KEYS = (
 )
 _MESSAGE_TREE_TAIL_METADATA_KEYS = ("currentBranchTail", "current_branch_tail")
 _SCORING_GROWTH_COMPLETION_METADATA_KEYS = {
+    "affects_scoring",
+    "affectsscoring",
+    "affects_completion",
+    "affectscompletion",
     "score",
     "score_id",
     "scoreid",
@@ -136,9 +140,23 @@ _SCORING_GROWTH_COMPLETION_METADATA_KEYS = {
     "completion",
     "completion_status",
     "completionstatus",
+    "training_completion",
+    "trainingcompletion",
+    "training_completion_status",
+    "trainingcompletionstatus",
+    "training_completed",
+    "trainingcompleted",
+    "training_completed_at",
+    "trainingcompletedat",
+    "is_complete",
+    "iscomplete",
     "completed",
     "completed_at",
     "completedat",
+}
+_FORK_SOURCE_TRAINING_SEMANTIC_KEYS = {
+    "evaluation",
+    "growthreport",
 }
 
 
@@ -287,6 +305,24 @@ def _sanitize_message_tree_action_metadata(
     for key, value in dict(metadata or {}).items():
         text_key = str(key).strip()
         if not text_key or _is_scoring_growth_completion_key(text_key):
+            continue
+        sanitized[text_key] = deepcopy(value)
+    return _normalize_message_tree_replay_metadata(sanitized)
+
+
+def _sanitize_fork_source_conversation_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        text_key = str(key).strip()
+        if not text_key:
+            continue
+        token = _metadata_key_token(text_key)
+        if (
+            token not in _FORK_SOURCE_TRAINING_SEMANTIC_KEYS
+            and token in _SCORING_GROWTH_COMPLETION_METADATA_KEYS
+        ):
             continue
         sanitized[text_key] = deepcopy(value)
     return _normalize_message_tree_replay_metadata(sanitized)
@@ -965,9 +1001,10 @@ class ConversationApplicationService:
                 raise MessageNotFoundException()
 
             now = _utcnow()
+            source_metadata = _sanitize_fork_source_conversation_metadata(conv.metadata)
             metadata = _normalize_message_tree_replay_metadata({
                 **_merge_metadata_preserving_acl(
-                    conv.metadata,
+                    source_metadata,
                     _sanitize_message_tree_action_metadata(dto.metadata),
                 ),
                 "forked_from_conversation_id": conversation_id,

@@ -701,6 +701,71 @@ def test_pipecat_realtime_readiness_reports_missing_openai_runtime_settings():
     ]
 
 
+def test_pipecat_realtime_smoke_contract_blocks_production_until_browser_e2e():
+    smoke = pipecat_adapter.pipecat_realtime_smoke_contract(
+        ready_for_call=True,
+        require_websocket=True,
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+    )
+
+    assert smoke["localRuntimeReady"] is True
+    assert smoke["browserE2EVerified"] is False
+    assert smoke["productionReady"] is False
+    assert smoke["productionReadiness"] == {
+        "readyForProduction": False,
+        "status": "browser_e2e_verification_required",
+        "localRuntimeReady": True,
+        "browserAudioE2EVerified": False,
+        "requiredVerifications": ["browser_audio_e2e"],
+        "blockingReasons": [
+            {
+                "code": "BROWSER_AUDIO_E2E_NOT_VERIFIED",
+                "message": (
+                    "Browser microphone capture, websocket transport, audio output playback, "
+                    "turn events, metrics, and provider errors need E2E verification before "
+                    "production readiness"
+                ),
+                "phase": "browser_audio_e2e",
+                "provider": "pipecat",
+                "runtime": REALTIME_RUNTIME_PIPECAT,
+                "requiredSignals": [
+                    "microphone_permission_and_capture",
+                    "websocket_audio_input",
+                    "provider_neutral_audio_output_playback",
+                    "turn_interruption_silence_events",
+                    "realtime_metrics_and_error_taxonomy",
+                ],
+            }
+        ],
+    }
+    assert smoke["readinessAssertions"]["readyForCallImpliesProductionReady"] is False
+    assert smoke["eventOrder"]["assistantAudioThenTranscript"] == [
+        "audio.output",
+        "transcript.done",
+        "transcript.persisted",
+    ]
+    coverage = smoke["contractCoverage"]
+    assert coverage["browserAudioE2E"]["verified"] is False
+    assert coverage["browserAudioE2E"]["requiredForProduction"] is True
+    assert coverage["providerNeutralAudioOutput"]["eventType"] == "audio.output"
+    assert coverage["metrics"]["metadataKey"] == "realtimeMetrics"
+    assert coverage["turnInterruptionSilence"]["eventTypes"] == [
+        "user_turn.started",
+        "user_turn.stopped",
+        "assistant_speaking.started",
+        "assistant_speaking.stopped",
+        "interrupted",
+        "silence_timeout",
+    ]
+    assert smoke["errorTaxonomy"][0] == {
+        "errorCategory": "authentication",
+        "code": "REALTIME_PROVIDER_AUTHENTICATION",
+        "retryable": False,
+        "fatal": True,
+    }
+
+
 def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
     capability = pipecat_adapter.PipecatCapability(
         available=True,
@@ -739,6 +804,17 @@ def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
     assert response["provider"] == "pipecat"
     assert response["readyForCall"] is True
     assert response["readiness"]["status"] == "ready"
+    assert response["productionReady"] is False
+    assert response["productionReadiness"]["status"] == "browser_e2e_verification_required"
+    assert response["productionReadiness"]["blockingReasons"][0]["code"] == (
+        "BROWSER_AUDIO_E2E_NOT_VERIFIED"
+    )
+    assert response["smoke"]["productionReady"] is False
+    assert response["smoke"]["contractCoverage"]["browserAudioE2E"]["verified"] is False
+    assert (
+        response["smoke"]["contractCoverage"]["providerNeutralAudioOutput"]["eventType"]
+        == "audio.output"
+    )
     assert response["errors"] == []
     assert response["sourceSnapshot"]["coreEntrypoints"] == ["pipecat.pipeline.pipeline.Pipeline"]
     assert response["sourceSnapshot"]["nested"] == {"label": "safe"}
@@ -1418,6 +1494,13 @@ def test_pipecat_pipeline_capability_declares_voice_boundary(monkeypatch):
         "vad": "silero",
         "turnDetection": "pipecat",
     }
+    assert capability.metadata["productionReady"] is False
+    assert capability.metadata["productionReadiness"]["status"] == "runtime_blocked"
+    production_blockers = capability.metadata["productionReadiness"]["blockingReasons"]
+    assert [error["code"] for error in production_blockers] == [
+        "LOCAL_REALTIME_RUNTIME_NOT_READY",
+        "BROWSER_AUDIO_E2E_NOT_VERIFIED",
+    ]
     assert capability.ready_for_call is False
     assert capability.readiness_payload()["status"] == "blocked"
     assert capability.readiness_payload()["runtime"] == REALTIME_RUNTIME_PIPECAT

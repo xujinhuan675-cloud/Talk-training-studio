@@ -26,7 +26,7 @@ class FileAssetRepository(ABC):
         self,
         asset: FileAsset,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> FileAsset: ...
 
     @abstractmethod
@@ -34,7 +34,7 @@ class FileAssetRepository(ABC):
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> None: ...
 
     @abstractmethod
@@ -42,7 +42,7 @@ class FileAssetRepository(ABC):
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> None: ...
 
     @abstractmethod
@@ -50,16 +50,22 @@ class FileAssetRepository(ABC):
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[FileAsset]: ...
+
+    @abstractmethod
+    async def get_by_id_for_maintenance(self, asset_id: int) -> Optional[FileAsset]: ...
 
     @abstractmethod
     async def get_by_key(
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[FileAsset]: ...
+
+    @abstractmethod
+    async def get_by_key_for_maintenance(self, key: str) -> Optional[FileAsset]: ...
 
     @abstractmethod
     async def key_exists_outside_metadata_scope(
@@ -78,7 +84,7 @@ class FileAssetRepository(ABC):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[FileAsset]: ...
 
     @abstractmethod
@@ -88,5 +94,5 @@ class FileAssetRepository(ABC):
         owner_id: Optional[int] = None,
         kind: Optional[str] = None,
         status: Optional[str] = None,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> int: ...

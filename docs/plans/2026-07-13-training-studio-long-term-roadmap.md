@@ -210,9 +210,9 @@ Training Studio 的长期形态是：
 下一阶段优先顺序：
 
 1. 训练素材窄 tool consumer 已接入复盘助手前端，并落地素材对照卡片和可替换 LLM adapter；下一步只做素材对照质量评估、提示词微调、异常观测和真实配置 smoke，继续保留 deterministic fallback。
-2. auth / ACL 已开始核心切片：共享 `OwnedMetadataScope` 对 admin 改为显式 user/team scope，conversation/chat 写路径禁止 legacy unscoped mutation；下一步继续处理服务层 `metadata_scope=None` full-access footgun、真实用户/团队 auth 和 TrainingSession admin scope 产品语义。
+2. auth / ACL 已进入核心切片：共享 `OwnedMetadataScope` 对 admin 改为显式 user/team scope，conversation/chat 写路径禁止 legacy unscoped mutation；file asset repository 普通访问也已拒绝 `metadata_scope=None`，full-access 读取改为显式 maintenance helper。下一步转向真实用户/团队 auth、TrainingSession admin scope 产品语义和 legacy stakeholder scope 审计。
 3. text runtime / message-tree 的真实 UI reload/fork 操作验收单独排期靠后；当前先保留服务契约和测试矩阵，不阻塞复盘助手接入。
-4. Pipecat 下一步只做 metrics/tracing、provider error taxonomy、turn latency 统计；真实浏览器麦克风 E2E 单独排期靠后。
+4. Pipecat 已区分 local readiness 与 production readiness；下一步只做真实浏览器麦克风 E2E、metrics/tracing 观测面和 turn latency 统计，不再把 `readyForCall=true` 当作生产可用。
 5. 视频模式先保持用户视频回答上传和后续分析，不进入会议式虚拟人实现。
 
 这样可以避免过早投入高成本视频虚拟人，同时持续增强真实训练价值。

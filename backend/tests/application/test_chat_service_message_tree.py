@@ -912,6 +912,185 @@ async def test_conversation_service_creates_edit_and_retry_branches(session_fact
 
 
 @pytest.mark.asyncio
+async def test_message_tree_actions_strip_result_metadata_to_replay_context(
+    session_factory,
+):
+    conversation, first_user, first_assistant, _off_path_user = await _seed_conversation(
+        session_factory
+    )
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        conversation.metadata = {
+            **_metadata(),
+            "runtime": "conversation_message_tree",
+            "trainingSessionId": "training-result-boundary",
+            "mode": "text",
+            "category": "sales",
+            "personaIds": ["customer-1"],
+            "scenarioId": 9,
+            "dispatcher": {"strategy": "stakeholder_turns"},
+            "evaluation": {"rubric_id": "sales-v1"},
+            "growthReport": {"report_id": "growth-1"},
+            "score": 99,
+            "scoreId": "score-shadow",
+            "reportId": "report-shadow",
+            "completed": True,
+            "trainingCompletionStatus": "completed",
+            "affectsScoring": True,
+            "selectedPath": {
+                "branchId": first_assistant.branch_id,
+                "tailMessageId": first_assistant.public_id,
+                "messageIds": [first_user.public_id, first_assistant.public_id],
+                "score": 100,
+                "growthReport": {"report_id": "selected-shadow"},
+                "completionStatus": "completed",
+                "affectsScoring": True,
+                "affectsCompletion": True,
+            },
+            "currentBranchTail": {
+                "branchId": first_assistant.branch_id,
+                "messageId": first_assistant.public_id,
+                "score": 100,
+                "affectsScoring": True,
+            },
+        }
+        first_user.metadata = {
+            "score": 80,
+            "reportId": "message-report-shadow",
+            "selectedPath": {
+                "branchId": first_user.branch_id,
+                "tailMessageId": first_user.public_id,
+                "messageIds": [first_user.public_id],
+                "score": 80,
+                "affectsScoring": True,
+            },
+        }
+        first_assistant.metadata = {
+            "trainingCompletionStatus": "completed",
+            "currentBranchTail": {
+                "branchId": first_assistant.branch_id,
+                "messageId": first_assistant.public_id,
+                "affectsCompletion": True,
+            },
+        }
+        await uow.conversation_repository.update(conversation, metadata_scope=_scope())
+        await uow.message_repository.update(first_user)
+        await uow.message_repository.update(first_assistant)
+        await uow.commit()
+
+    service = ConversationApplicationService(
+        lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        )
+    )
+    action_metadata = {
+        "review_mode": "branch-review",
+        "score": 100,
+        "scoreId": "score-action",
+        "reportId": "report-action",
+        "completed": True,
+        "trainingCompletionStatus": "completed",
+        "isComplete": True,
+        "affectsScoring": True,
+        "affectsCompletion": True,
+        "selectedPath": {
+            "branchId": "metadata-shadow-branch",
+            "tailMessageId": "metadata-shadow-tail",
+            "messageIds": ["metadata-shadow-root", "metadata-shadow-tail"],
+            "score": 100,
+            "growthReport": {"report_id": "metadata-shadow-growth"},
+            "completionStatus": "completed",
+            "affectsScoring": True,
+            "affectsCompletion": True,
+        },
+        "currentBranchTail": {
+            "branchId": "metadata-shadow-branch",
+            "messageId": "metadata-shadow-tail",
+            "score": 100,
+            "affectsScoring": True,
+        },
+        "messageTreeSelection": {
+            "selectedMessageId": first_assistant.public_id,
+            "path": [
+                {
+                    "publicId": first_user.public_id,
+                    "score": 100,
+                    "completed": True,
+                }
+            ],
+            "affectsScoring": True,
+            "affectsCompletion": True,
+        },
+    }
+
+    edited = await service.edit_message(
+        conversation.id,
+        first_user.public_id,
+        EditMessageDTO(
+            content="Edited root user turn.",
+            metadata=action_metadata,
+        ),
+    )
+    retry = await service.retry_message(
+        conversation.id,
+        first_assistant.public_id,
+        RetryMessageDTO(
+            content="Retry assistant turn.",
+            metadata=action_metadata,
+        ),
+    )
+    forked = await service.fork_conversation(
+        conversation.id,
+        retry.public_id,
+        ForkConversationDTO(
+            option="directPath",
+            statuses=["active", "superseded"],
+            metadata=action_metadata,
+        ),
+    )
+
+    forbidden_keys = {
+        "score",
+        "scoreId",
+        "reportId",
+        "completed",
+        "trainingCompletionStatus",
+        "isComplete",
+        "affectsScoring",
+        "affectsCompletion",
+    }
+    for metadata in (edited.metadata, retry.metadata):
+        assert forbidden_keys.isdisjoint(metadata)
+        assert metadata["review_mode"] == "branch-review"
+        assert metadata["selectedPath"]["purpose"] == "training_replay_context"
+        assert metadata["selectedPath"]["affectsScoring"] is False
+        assert metadata["selectedPath"]["affectsCompletion"] is False
+        assert "score" not in metadata["selectedPath"]
+        assert "growthReport" not in metadata["selectedPath"]
+        assert "completionStatus" not in metadata["selectedPath"]
+        assert "score" not in metadata["currentBranchTail"]
+        assert "affectsScoring" not in metadata["currentBranchTail"]
+        assert metadata["messageTreeSelection"]["affectsScoring"] is False
+        assert metadata["messageTreeSelection"]["affectsCompletion"] is False
+        assert "score" not in metadata["messageTreeSelection"]["path"][0]
+        assert "completed" not in metadata["messageTreeSelection"]["path"][0]
+
+    fork_metadata = forked.conversation.metadata
+    assert forbidden_keys.isdisjoint(fork_metadata)
+    assert fork_metadata["evaluation"] == {"rubric_id": "sales-v1"}
+    assert fork_metadata["growthReport"] == {"report_id": "growth-1"}
+    assert fork_metadata["review_mode"] == "branch-review"
+    assert fork_metadata["selectedPath"]["purpose"] == "training_replay_context"
+    assert fork_metadata["selectedPath"]["affectsScoring"] is False
+    assert fork_metadata["selectedPath"]["affectsCompletion"] is False
+    assert "score" not in fork_metadata["selectedPath"]
+    assert "growthReport" not in fork_metadata["selectedPath"]
+    assert forked.conversation.status == "active"
+    for message in forked.messages:
+        assert forbidden_keys.isdisjoint(message.metadata)
+
+
+@pytest.mark.asyncio
 async def test_conversation_service_message_action_returns_tree_context_and_runtime_metadata(
     session_factory,
 ):

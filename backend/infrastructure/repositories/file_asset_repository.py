@@ -7,9 +7,9 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.common.exceptions import DomainValidationException, FileAssetNotFoundException
 from domain.conversation.repository import OwnedMetadataScope
 from domain.file_asset import FileAsset, FileAssetRepository
-from domain.common.exceptions import FileAssetNotFoundException
 from infrastructure.models.file_asset import FileAssetModel
 from infrastructure.repositories.metadata_scope import (
     apply_owned_metadata_scope,
@@ -51,6 +51,16 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         raw = f"{storage_type}|{bucket or ''}|{key}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _require_metadata_scope(metadata_scope: OwnedMetadataScope | None) -> OwnedMetadataScope:
+        if metadata_scope is None:
+            raise DomainValidationException(
+                "metadata_scope is required for file asset repository access",
+                field="metadata_scope",
+                message_key="file_asset.repository.scope.required",
+            )
+        return metadata_scope
+
     def _apply_filters(
         self,
         query,
@@ -58,7 +68,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         owner_id: Optional[int],
         kind: Optional[str],
         status: Optional[str],
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ):
         if owner_id is not None:
             query = query.where(FileAssetModel.owner_id == owner_id)
@@ -99,8 +109,9 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         self,
         asset: FileAsset,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> FileAsset:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(FileAssetModel).where(FileAssetModel.id == asset.id)
         query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
         result = await self.session.execute(query)
@@ -135,8 +146,9 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> None:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(FileAssetModel).where(FileAssetModel.id == asset_id)
         query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
         result = await self.session.execute(query)
@@ -150,8 +162,9 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> None:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(FileAssetModel).where(FileAssetModel.key == key)
         query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
         result = await self.session.execute(query)
@@ -165,10 +178,17 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         self,
         asset_id: int,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[FileAsset]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(FileAssetModel).where(FileAssetModel.id == asset_id)
         query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
+        result = await self.session.execute(query)
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_id_for_maintenance(self, asset_id: int) -> Optional[FileAsset]:
+        query = select(FileAssetModel).where(FileAssetModel.id == asset_id)
         result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
@@ -177,10 +197,17 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         self,
         key: str,
         *,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> Optional[FileAsset]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(FileAssetModel).where(FileAssetModel.key == key)
         query = apply_owned_metadata_scope(query, FileAssetModel.extra_metadata, metadata_scope)
+        result = await self.session.execute(query)
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_key_for_maintenance(self, key: str) -> Optional[FileAsset]:
+        query = select(FileAssetModel).where(FileAssetModel.key == key)
         result = await self.session.execute(query)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
@@ -191,6 +218,7 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         *,
         metadata_scope: OwnedMetadataScope,
     ) -> bool:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         visible_condition = owned_metadata_scope_condition(
             FileAssetModel.extra_metadata,
             metadata_scope,
@@ -217,8 +245,9 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> list[FileAsset]:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(FileAssetModel)
         query = self._apply_filters(
             query,
@@ -242,8 +271,9 @@ class SQLAlchemyFileAssetRepository(FileAssetRepository):
         owner_id: Optional[int] = None,
         kind: Optional[str] = None,
         status: Optional[str] = None,
-        metadata_scope: OwnedMetadataScope | None,
+        metadata_scope: OwnedMetadataScope,
     ) -> int:
+        metadata_scope = self._require_metadata_scope(metadata_scope)
         query = select(func.count()).select_from(FileAssetModel)
         query = self._apply_filters(
             query,

@@ -85,6 +85,57 @@ PIPECAT_REALTIME_SMOKE_CONTRACT_EVENTS = (
     "interrupted",
     "silence_timeout",
 )
+PIPECAT_REALTIME_SMOKE_EVENT_ORDER = {
+    "finalTranscript": (
+        "transcript.done",
+        "transcript.persisted",
+        "training.live_guidance.triggered",
+    ),
+    "assistantAudioThenTranscript": (
+        "audio.output",
+        "transcript.done",
+        "transcript.persisted",
+    ),
+}
+PIPECAT_REALTIME_SMOKE_ERROR_TAXONOMY = (
+    {
+        "errorCategory": "authentication",
+        "code": "REALTIME_PROVIDER_AUTHENTICATION",
+        "retryable": False,
+        "fatal": True,
+    },
+    {
+        "errorCategory": "rate_limit",
+        "code": "REALTIME_PROVIDER_RATE_LIMIT",
+        "retryable": True,
+        "fatal": False,
+    },
+    {
+        "errorCategory": "provider_unavailable",
+        "code": "REALTIME_PROVIDER_UNAVAILABLE",
+        "retryable": True,
+        "fatal": True,
+    },
+    {
+        "errorCategory": "bad_request",
+        "code": "REALTIME_PROVIDER_BAD_REQUEST",
+        "retryable": False,
+        "fatal": True,
+    },
+    {
+        "errorCategory": "provider_error",
+        "code": "REALTIME_PROVIDER_ERROR",
+        "retryable": False,
+        "fatal": True,
+    },
+)
+PIPECAT_REALTIME_BROWSER_AUDIO_E2E_SIGNALS = (
+    "microphone_permission_and_capture",
+    "websocket_audio_input",
+    "provider_neutral_audio_output_playback",
+    "turn_interruption_silence_events",
+    "realtime_metrics_and_error_taxonomy",
+)
 PIPECAT_REALTIME_FEATURE_REQUIREMENTS = {
     "stt": {
         "code": "PIPECAT_FEATURE_UNAVAILABLE",
@@ -445,12 +496,17 @@ def pipecat_realtime_capability_response(
     data["readyForCall"] = readiness["ready"]
     data["readiness"] = readiness
     data["errors"] = readiness["blockingReasons"]
-    data["smoke"] = pipecat_realtime_smoke_contract(
+    smoke = pipecat_realtime_smoke_contract(
         ready_for_call=bool(readiness["ready"]),
         require_websocket=require_websocket,
         input_audio_format=openai_requirements["inputAudioFormat"],
         output_audio_format=openai_requirements["outputAudioFormat"],
     )
+    data["smoke"] = smoke
+    production_readiness = smoke["productionReadiness"]
+    if isinstance(production_readiness, Mapping):
+        data["productionReady"] = bool(production_readiness["readyForProduction"])
+        data["productionReadiness"] = dict(production_readiness)
     if include_source_snapshot:
         with suppress(Exception):
             source_snapshot = sanitize_realtime_public_value(dict(pipecat_source_snapshot()))
@@ -468,16 +524,128 @@ def pipecat_realtime_smoke_contract(
 ) -> dict[str, object]:
     """Return the deterministic local smoke contract for Pipecat realtime calls."""
 
+    production_readiness = _pipecat_realtime_production_readiness(
+        local_runtime_ready=bool(ready_for_call),
+    )
     return {
         "verificationLevel": "dependency_and_event_contract",
         "localRuntimeReady": bool(ready_for_call),
         "browserE2EVerified": False,
         "requiresExplicitMediaPermission": True,
+        "productionReady": bool(production_readiness["readyForProduction"]),
+        "productionReadiness": production_readiness,
         "transport": "websocket" if require_websocket else "audio_chunks",
         "inputAudioFormat": input_audio_format or "pcm16",
         "outputAudioFormat": output_audio_format or input_audio_format or "pcm16",
         "defaultInputSampleRate": 16000,
         "contractEvents": list(PIPECAT_REALTIME_SMOKE_CONTRACT_EVENTS),
+        "eventOrder": {
+            key: list(events) for key, events in PIPECAT_REALTIME_SMOKE_EVENT_ORDER.items()
+        },
+        "contractCoverage": _pipecat_realtime_smoke_contract_coverage(),
+        "errorTaxonomy": [dict(item) for item in PIPECAT_REALTIME_SMOKE_ERROR_TAXONOMY],
+        "readinessAssertions": {
+            "readyForCallImpliesLocalRuntimeReady": True,
+            "readyForCallImpliesProductionReady": False,
+            "browserE2EVerified": False,
+            "requiresExplicitMediaPermission": True,
+        },
+    }
+
+
+def _pipecat_realtime_production_readiness(
+    *,
+    local_runtime_ready: bool,
+    browser_audio_e2e_verified: bool = False,
+) -> dict[str, object]:
+    blockers: list[dict[str, object]] = []
+    if not local_runtime_ready:
+        blockers.append(
+            {
+                "code": "LOCAL_REALTIME_RUNTIME_NOT_READY",
+                "message": "Pipecat dependencies and realtime configuration are not ready",
+                "phase": "capability_check",
+                "provider": "pipecat",
+                "runtime": REALTIME_RUNTIME_PIPECAT,
+            }
+        )
+    if not browser_audio_e2e_verified:
+        blockers.append(
+            {
+                "code": "BROWSER_AUDIO_E2E_NOT_VERIFIED",
+                "message": (
+                    "Browser microphone capture, websocket transport, audio output playback, "
+                    "turn events, metrics, and provider errors need E2E verification before "
+                    "production readiness"
+                ),
+                "phase": "browser_audio_e2e",
+                "provider": "pipecat",
+                "runtime": REALTIME_RUNTIME_PIPECAT,
+                "requiredSignals": list(PIPECAT_REALTIME_BROWSER_AUDIO_E2E_SIGNALS),
+            }
+        )
+
+    ready_for_production = bool(local_runtime_ready and browser_audio_e2e_verified)
+    return {
+        "readyForProduction": ready_for_production,
+        "status": (
+            "ready"
+            if ready_for_production
+            else "browser_e2e_verification_required"
+            if local_runtime_ready
+            else "runtime_blocked"
+        ),
+        "localRuntimeReady": bool(local_runtime_ready),
+        "browserAudioE2EVerified": bool(browser_audio_e2e_verified),
+        "requiredVerifications": ["browser_audio_e2e"],
+        "blockingReasons": blockers,
+    }
+
+
+def _pipecat_realtime_smoke_contract_coverage() -> dict[str, object]:
+    return {
+        "browserAudioE2E": {
+            "verified": False,
+            "requiredForProduction": True,
+            "requiredSignals": list(PIPECAT_REALTIME_BROWSER_AUDIO_E2E_SIGNALS),
+        },
+        "providerNeutralAudioOutput": {
+            "contracted": True,
+            "eventType": "audio.output",
+            "payloadFields": [
+                "audio",
+                "encoding",
+                "mimeType",
+                "sampleRate",
+                "channels",
+                "sequence",
+                "bytes",
+                "runtime",
+                "provider",
+            ],
+        },
+        "turnInterruptionSilence": {
+            "contracted": True,
+            "eventTypes": [
+                "user_turn.started",
+                "user_turn.stopped",
+                "assistant_speaking.started",
+                "assistant_speaking.stopped",
+                "interrupted",
+                "silence_timeout",
+            ],
+        },
+        "metrics": {
+            "contracted": True,
+            "metadataKey": "realtimeMetrics",
+            "latencyEndEvents": ["assistant_speaking.started", "audio.output"],
+        },
+        "errorTaxonomy": {
+            "contracted": True,
+            "categories": [
+                str(item["errorCategory"]) for item in PIPECAT_REALTIME_SMOKE_ERROR_TAXONOMY
+            ],
+        },
     }
 
 
@@ -1725,6 +1893,9 @@ def pipecat_pipeline_capability(
         openai_requirements=openai_requirements,
     )
     readiness_payload = readiness.to_dict()
+    production_readiness = _pipecat_realtime_production_readiness(
+        local_runtime_ready=readiness.ready,
+    )
 
     return RealtimePipelineCapability(
         provider=config.provider,
@@ -1750,6 +1921,8 @@ def pipecat_pipeline_capability(
             "turnDetectionAvailable": capability.turn_detection_available,
             "requestedFeatures": requested_features,
             "openaiRuntime": dict(openai_requirements),
+            "productionReady": bool(production_readiness["readyForProduction"]),
+            "productionReadiness": production_readiness,
             "dependencyProbe": _pipecat_dependency_probe(
                 capability,
                 require_websocket=websocket is not None,

@@ -262,10 +262,15 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
         data["readyForCall"] = readiness["ready"]
         data["readiness"] = readiness
         data["errors"] = readiness["blockingReasons"]
-        data["smoke"] = pipecat_adapter.pipecat_realtime_smoke_contract(
+        smoke = pipecat_adapter.pipecat_realtime_smoke_contract(
             ready_for_call=readiness["ready"],
             require_websocket=require_websocket,
         )
+        data["smoke"] = smoke
+        production_readiness = smoke["productionReadiness"]
+        if isinstance(production_readiness, Mapping):
+            data["productionReady"] = bool(production_readiness["readyForProduction"])
+            data["productionReadiness"] = dict(production_readiness)
         if include_source_snapshot:
             try:
                 data["sourceSnapshot"] = dict(adapter.pipecat_source_snapshot())
@@ -335,9 +340,20 @@ def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> No
     assert data["pipecat"]["optionalMissingModules"] == []
     assert data["pipecat"]["error"] is None
     assert data["pipecat"]["readyForCall"] is True
+    assert data["pipecat"]["productionReady"] is False
+    assert data["pipecat"]["productionReadiness"]["status"] == (
+        "browser_e2e_verification_required"
+    )
+    assert data["pipecat"]["productionReadiness"]["blockingReasons"][0]["code"] == (
+        "BROWSER_AUDIO_E2E_NOT_VERIFIED"
+    )
     assert data["pipecat"]["smoke"]["verificationLevel"] == "dependency_and_event_contract"
     assert data["pipecat"]["smoke"]["localRuntimeReady"] is True
     assert data["pipecat"]["smoke"]["browserE2EVerified"] is False
+    assert data["pipecat"]["smoke"]["productionReady"] is False
+    assert data["pipecat"]["smoke"]["productionReadiness"]["status"] == (
+        "browser_e2e_verification_required"
+    )
     assert data["pipecat"]["smoke"]["requiresExplicitMediaPermission"] is True
     assert data["pipecat"]["smoke"]["transport"] == "websocket"
     assert data["pipecat"]["smoke"]["inputAudioFormat"] == "pcm16"
@@ -367,6 +383,14 @@ def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> No
         "transcript.persisted",
         "training.live_guidance.triggered",
     ]
+    assert (
+        data["pipecat"]["smoke"]["contractCoverage"]["providerNeutralAudioOutput"]["eventType"]
+        == "audio.output"
+    )
+    assert data["pipecat"]["smoke"]["contractCoverage"]["browserAudioE2E"]["verified"] is False
+    assert data["pipecat"]["smoke"]["contractCoverage"]["metrics"]["metadataKey"] == (
+        "realtimeMetrics"
+    )
     assert data["pipecat"]["smoke"]["errorTaxonomy"][0] == {
         "code": "REALTIME_PROVIDER_AUTHENTICATION",
         "errorCategory": "authentication",
