@@ -81,12 +81,12 @@
   gap: 9px;
 }
 
-.scenario-config-header-actions button,
+.scenario-config-header-actions .ui-button,
 .scenario-config-save,
-.scenario-config-tabs button,
-.scenario-config-weight-head button,
-.scenario-config-switch-row button,
-.scenario-config-dimension-footer button {
+.scenario-config-tabs .ui-button,
+.scenario-config-weight-head .ui-button,
+.scenario-config-switch-row .ui-button,
+.scenario-config-dimension-footer .ui-button {
   min-height: 38px;
   display: inline-flex;
   align-items: center;
@@ -104,12 +104,16 @@
   transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.scenario-config-header-actions button:hover,
-.scenario-config-save:hover,
-.scenario-config-tabs button:hover,
-.scenario-config-weight-head button:hover:not(:disabled),
-.scenario-config-switch-row button:hover,
-.scenario-config-dimension-footer button:hover {
+.scenario-config-page .ui-button {
+  white-space: normal;
+}
+
+.scenario-config-header-actions .ui-button:hover:not(:disabled),
+.scenario-config-save:hover:not(:disabled),
+.scenario-config-tabs .ui-button:hover:not(:disabled),
+.scenario-config-weight-head .ui-button:hover:not(:disabled),
+.scenario-config-switch-row .ui-button:hover:not(:disabled),
+.scenario-config-dimension-footer .ui-button:hover:not(:disabled) {
   border-color: var(--config-primary);
   background: var(--config-primary-soft);
   color: var(--config-primary);
@@ -122,16 +126,16 @@
   color: var(--config-on-primary);
 }
 
-.scenario-config-header-actions .primary:hover,
-.scenario-config-save:hover {
+.scenario-config-header-actions .primary:hover:not(:disabled),
+.scenario-config-save:hover:not(:disabled) {
   border-color: var(--config-primary-hover);
   background: var(--config-primary-hover);
   color: var(--config-on-primary);
 }
 
-.scenario-config-header-actions button:disabled,
+.scenario-config-header-actions .ui-button:disabled,
 .scenario-config-save:disabled,
-.scenario-config-dimension-footer button:disabled {
+.scenario-config-dimension-footer .ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
@@ -236,7 +240,7 @@
   box-shadow: var(--config-shadow-soft);
 }
 
-.scenario-config-tabs button {
+.scenario-config-tabs .ui-button {
   min-width: 0;
   border-color: transparent;
   min-height: 34px;
@@ -244,7 +248,7 @@
   color: var(--text-secondary);
 }
 
-.scenario-config-tabs button span {
+.scenario-config-tabs .ui-button > span {
   min-width: 22px;
   min-height: 20px;
   display: inline-grid;
@@ -258,14 +262,14 @@
   line-height: 1;
 }
 
-.scenario-config-tabs button.selected {
+.scenario-config-tabs .ui-button.selected {
   border-color: var(--config-surface);
   background: var(--config-surface);
   color: var(--config-primary);
   box-shadow: var(--config-shadow-soft);
 }
 
-.scenario-config-tabs button.selected span {
+.scenario-config-tabs .ui-button.selected > span {
   background: var(--config-surface);
   color: var(--config-primary);
 }
@@ -304,15 +308,27 @@
   color: var(--text-secondary);
 }
 
-.scenario-config-search input {
+.scenario-config-search:focus-within {
+  border-color: var(--config-primary);
+  box-shadow: 0 0 0 3px var(--config-focus);
+}
+
+.scenario-config-search .ui-form-input {
   width: 100%;
   min-width: 0;
   border: 0;
   outline: 0;
+  min-height: auto;
+  padding: 0;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
   font-size: 13px;
+}
+
+.scenario-config-search .ui-form-input:focus-visible {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .scenario-config-list-items {
@@ -324,9 +340,11 @@
   overflow: auto;
 }
 
-.scenario-config-list-items > button {
+.scenario-config-list-items > .ui-button {
   min-width: 0;
   display: grid;
+  align-items: stretch;
+  justify-content: stretch;
   gap: 4px;
   border: 1px solid var(--config-border-soft);
   border-radius: 8px;
@@ -338,8 +356,8 @@
   text-align: left;
 }
 
-.scenario-config-list-items > button:hover,
-.scenario-config-list-items > button.selected {
+.scenario-config-list-items > .ui-button:hover,
+.scenario-config-list-items > .ui-button.selected {
   border-color: var(--config-primary);
   background: var(--config-primary-soft);
 }
@@ -395,7 +413,7 @@
 
 .scenario-config-editor-head p,
 .scenario-config-weight-head p,
-.scenario-config-dimension-footer span {
+.scenario-config-dimension-footer > span {
   margin: 4px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
@@ -423,17 +441,17 @@
   min-width: 0;
 }
 
-.scenario-config-form-grid span,
-.scenario-config-field span {
+.scenario-config-form-grid label > span,
+.scenario-config-field > span {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 800;
 }
 
-.scenario-config-form-grid input,
-.scenario-config-form-grid select,
-.scenario-config-field textarea,
-.scenario-config-weight-table input {
+.scenario-config-form-grid .ui-form-input,
+.scenario-config-form-grid .ui-form-select,
+.scenario-config-field .ui-form-textarea,
+.scenario-config-weight-table .ui-form-input {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--config-border);
@@ -445,28 +463,28 @@
   outline: 0;
 }
 
-.scenario-config-form-grid input,
-.scenario-config-form-grid select,
-.scenario-config-weight-table input {
+.scenario-config-form-grid .ui-form-input,
+.scenario-config-form-grid .ui-form-select,
+.scenario-config-weight-table .ui-form-input {
   min-height: 38px;
   padding: 0 10px;
 }
 
-.scenario-config-form-grid input:focus,
-.scenario-config-form-grid select:focus,
-.scenario-config-field textarea:focus,
-.scenario-config-weight-table input:focus {
+.scenario-config-form-grid .ui-form-input:focus-visible,
+.scenario-config-form-grid .ui-form-select:focus-visible,
+.scenario-config-field .ui-form-textarea:focus-visible,
+.scenario-config-weight-table .ui-form-input:focus-visible {
   border-color: var(--config-primary);
   box-shadow: 0 0 0 3px var(--config-focus);
 }
 
-.scenario-config-form-grid input:disabled {
+.scenario-config-form-grid .ui-form-input:disabled {
   color: var(--text-muted);
   cursor: not-allowed;
   opacity: 0.72;
 }
 
-.scenario-config-field textarea {
+.scenario-config-field .ui-form-textarea {
   min-height: 78px;
   resize: vertical;
   padding: 10px 11px;
@@ -479,12 +497,12 @@
   gap: 8px;
 }
 
-.scenario-config-switch-row button {
+.scenario-config-switch-row .ui-button {
   min-height: 38px;
   flex: 1 1 110px;
 }
 
-.scenario-config-switch-row button.selected {
+.scenario-config-switch-row .ui-button.selected {
   border-color: var(--config-accent);
   background: var(--config-accent-soft);
   color: var(--config-accent);
@@ -506,7 +524,7 @@
   gap: 8px;
 }
 
-.scenario-config-weight-head button:disabled {
+.scenario-config-weight-head .ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.54;
 }
@@ -546,7 +564,7 @@
   opacity: 0.66;
 }
 
-.scenario-config-weight-table button {
+.scenario-config-weight-table .ui-button {
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -561,15 +579,16 @@
   font: inherit;
   font-size: 12px;
   font-weight: 800;
+  line-height: 1.2;
 }
 
-.scenario-config-weight-table button.selected {
+.scenario-config-weight-table .ui-button.selected {
   border-color: var(--config-border-accent);
   background: var(--config-primary-soft);
   color: var(--config-primary);
 }
 
-.scenario-config-weight-table button:disabled {
+.scenario-config-weight-table .ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.56;
 }
@@ -588,12 +607,12 @@
   gap: 5px;
 }
 
-.scenario-config-weight-table input {
+.scenario-config-weight-table .ui-form-input {
   padding: 0 7px;
   text-align: right;
 }
 
-.scenario-config-weight-table label span {
+.scenario-config-weight-table label > span {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 800;
@@ -604,7 +623,7 @@
   padding-top: 12px;
 }
 
-.scenario-config-dimension-footer button {
+.scenario-config-dimension-footer .ui-button {
   flex: 0 0 auto;
 }
 
@@ -623,7 +642,7 @@
     justify-content: stretch;
   }
 
-  .scenario-config-header-actions button {
+  .scenario-config-header-actions .ui-button {
     flex: 1;
   }
 
@@ -668,8 +687,8 @@
   }
 
   .scenario-config-save,
-  .scenario-config-weight-head button,
-  .scenario-config-dimension-footer button {
+  .scenario-config-weight-head .ui-button,
+  .scenario-config-dimension-footer .ui-button {
     width: 100%;
   }
 }

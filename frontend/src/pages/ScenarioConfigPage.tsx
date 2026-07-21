@@ -45,6 +45,8 @@ import {
   saveScenarioConfig as saveRemoteScenarioConfig,
 } from '../services/scenarioConfig'
 import { SettingsShell } from './SettingsPage'
+import { Button } from '../components/ui/button'
+import { Input, Select, Textarea } from '../components/ui/form'
 import './ScenarioConfigPage.css'
 
 type ScenarioConfigTab = 'scenarios' | 'dimensions'
@@ -441,14 +443,14 @@ export default function ScenarioConfigPage() {
           <p>{tr('统一管理可练习场景、评分维度与权重。', 'Manage practice scenarios, scoring dimensions, and weights.')}</p>
         </div>
         <div className="scenario-config-header-actions">
-          <button type="button" onClick={createDimensionDraft} disabled={isRemoteSaving}>
+          <Button variant="secondary" onClick={createDimensionDraft} disabled={isRemoteSaving}>
             <Library size={16} />
             {tr('新建维度', 'New dimension')}
-          </button>
-          <button type="button" className="primary" onClick={createScenarioDraft} disabled={isRemoteSaving}>
+          </Button>
+          <Button className="primary" variant="primary" onClick={createScenarioDraft} disabled={isRemoteSaving}>
             <Plus size={16} />
             {tr('新建场景', 'New scenario')}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -480,22 +482,22 @@ export default function ScenarioConfigPage() {
 
       <div className="scenario-config-tabbar">
         <div className="scenario-config-tabs" role="tablist" aria-label={tr('配置区域', 'Configuration areas')}>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             className={activeTab === 'scenarios' ? 'selected' : ''}
             onClick={() => setActiveTab('scenarios')}
           >
             {tr('场景草稿', 'Scenario drafts')}
             <span>{state.scenarios.length}</span>
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="ghost"
             className={activeTab === 'dimensions' ? 'selected' : ''}
             onClick={() => setActiveTab('dimensions')}
           >
             {tr('维度库', 'Dimension library')}
             <span>{state.dimensions.length}</span>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -504,7 +506,7 @@ export default function ScenarioConfigPage() {
           <aside className="scenario-config-list" aria-label={tr('场景草稿', 'Scenario drafts')}>
             <label className="scenario-config-search">
               <Search size={15} />
-              <input
+              <Input
                 value={scenarioQuery}
                 onChange={(event) => setScenarioQuery(event.target.value)}
                 placeholder={tr('搜索场景草稿', 'Search scenario drafts')}
@@ -515,8 +517,8 @@ export default function ScenarioConfigPage() {
               {filteredScenarios.map((scenario) => {
                 const validation = validateScenarioWeightTotal(scenario.dimensionWeights)
                 return (
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     key={scenario.id}
                     className={scenario.id === draft.id ? 'selected' : ''}
                     onClick={() => selectScenario(scenario.id)}
@@ -526,7 +528,7 @@ export default function ScenarioConfigPage() {
                       {getScenarioCategoryLabel(scenario.category, tr)} · {getScenarioDifficultyLabel(scenario.difficulty, tr)} · {validation.total}%
                     </span>
                     {!validation.valid && <span className="scenario-config-row-alert">{tr('需为 100%', 'Needs 100%')}</span>}
-                  </button>
+                  </Button>
                 )
               })}
             </div>
@@ -538,78 +540,80 @@ export default function ScenarioConfigPage() {
                 <h2>{draft.title || tr('未命名场景', 'Untitled scenario')}</h2>
                 <p>{draft.id} · {getFrameworkLabel(draft.framework, tr)}</p>
               </div>
-              <button type="button" className="scenario-config-save" onClick={saveScenarioDraft} disabled={isRemoteSaving}>
+              <Button className="scenario-config-save" variant="primary" onClick={saveScenarioDraft} disabled={isRemoteSaving}>
                 <Save size={16} />
                 {isRemoteSaving ? tr('保存中', 'Saving') : tr('保存草稿', 'Save draft')}
-              </button>
+              </Button>
             </div>
 
             <div className="scenario-config-form-grid">
               <label>
                 <span>{tr('场景名称', 'Scenario name')}</span>
-                <input value={draft.title} onChange={(event) => patchDraft({ title: event.target.value })} />
+                <Input value={draft.title} onChange={(event) => patchDraft({ title: event.target.value })} />
               </label>
               <label>
                 <span>{tr('分类', 'Category')}</span>
-                <select
+                <Select
                   value={draft.category}
                   onChange={(event) => patchDraft({ category: event.target.value as ScenarioTrainingCategory })}
                 >
                   {scenarioCategoryOptions.map((option) => (
                     <option key={option} value={option}>{getScenarioCategoryLabel(option, tr)}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label>
                 <span>{tr('难度', 'Difficulty')}</span>
-                <select
+                <Select
                   value={draft.difficulty}
                   onChange={(event) => patchDraft({ difficulty: event.target.value as ScenarioTrainingDifficulty })}
                 >
                   {scenarioDifficultyOptions.map((option) => (
                     <option key={option} value={option}>{getScenarioDifficultyLabel(option, tr)}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label>
                 <span>{tr('表达框架', 'Framework')}</span>
-                <select
+                <Select
                   value={draft.framework}
                   onChange={(event) => patchDraft({ framework: event.target.value as ScenarioConfigFramework })}
                 >
                   {frameworkOptions.map((option) => (
                     <option key={option.value} value={option.value}>{translateLabel(option.label, tr)}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label>
                 <span>{tr('练习者角色', 'Learner role')}</span>
-                <input value={draft.learnerRole} onChange={(event) => patchDraft({ learnerRole: event.target.value })} />
+                <Input value={draft.learnerRole} onChange={(event) => patchDraft({ learnerRole: event.target.value })} />
               </label>
               <label className="scenario-config-switch-row">
                 <span>{tr('标记', 'Flags')}</span>
                 <div>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     className={draft.required ? 'selected' : ''}
                     onClick={() => patchDraft({ required: !draft.required })}
                   >
                     {tr('必练', 'Required')}
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     className={draft.enabled ? 'selected' : ''}
                     onClick={() => patchDraft({ enabled: !draft.enabled })}
                   >
                     {tr('启用', 'Enabled')}
-                  </button>
+                  </Button>
                 </div>
               </label>
             </div>
 
             <label className="scenario-config-field">
               <span>{tr('场景描述', 'Scenario description')}</span>
-              <textarea
+              <Textarea
                 value={draft.description}
                 onChange={(event) => patchDraft({ description: event.target.value })}
                 rows={3}
@@ -618,7 +622,7 @@ export default function ScenarioConfigPage() {
 
             <label className="scenario-config-field">
               <span>{tr('客户画像', 'Customer profile')}</span>
-              <textarea
+              <Textarea
                 value={draft.customerProfile}
                 onChange={(event) => patchDraft({ customerProfile: event.target.value })}
                 rows={3}
@@ -627,7 +631,7 @@ export default function ScenarioConfigPage() {
 
             <label className="scenario-config-field">
               <span>{tr('对手开场白', 'Counterpart opening line')}</span>
-              <textarea
+              <Textarea
                 value={draft.openingLine}
                 onChange={(event) => patchDraft({ openingLine: event.target.value })}
                 rows={2}
@@ -637,17 +641,17 @@ export default function ScenarioConfigPage() {
             <div className="scenario-config-form-grid">
               <label>
                 <span>{tr('角色名称', 'Persona name')}</span>
-                <input value={draft.persona.name} onChange={(event) => updatePersona('name', event.target.value)} />
+                <Input value={draft.persona.name} onChange={(event) => updatePersona('name', event.target.value)} />
               </label>
               <label>
                 <span>{tr('角色身份', 'Persona role')}</span>
-                <input value={draft.persona.role} onChange={(event) => updatePersona('role', event.target.value)} />
+                <Input value={draft.persona.role} onChange={(event) => updatePersona('role', event.target.value)} />
               </label>
             </div>
 
             <label className="scenario-config-field">
               <span>{tr('角色风格', 'Persona style')}</span>
-              <textarea
+              <Textarea
                 value={draft.persona.style}
                 onChange={(event) => updatePersona('style', event.target.value)}
                 rows={2}
@@ -656,7 +660,7 @@ export default function ScenarioConfigPage() {
 
             <label className="scenario-config-field">
               <span>{tr('训练要点', 'Training points')}</span>
-              <textarea
+              <Textarea
                 value={draft.trainingPoints.join('\n')}
                 onChange={(event) => patchDraft({ trainingPoints: splitLines(event.target.value) })}
                 rows={4}
@@ -673,14 +677,14 @@ export default function ScenarioConfigPage() {
                   </p>
                 </div>
                 <div>
-                  <button type="button" onClick={applyCategoryDefaults}>
+                  <Button variant="secondary" size="sm" onClick={applyCategoryDefaults}>
                     <RotateCcw size={15} />
                     {tr('分类默认值', 'Category defaults')}
-                  </button>
-                  <button type="button" onClick={applyEvenWeights} disabled={draft.dimensionWeights.length === 0}>
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={applyEvenWeights} disabled={draft.dimensionWeights.length === 0}>
                     <SlidersHorizontal size={15} />
                     {tr('平均分配', 'Even split')}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -696,18 +700,19 @@ export default function ScenarioConfigPage() {
                   const displayDescription = getDimensionDisplayDescription(dimension, tr)
                   return (
                     <div key={dimension.id} className={!dimension.enabled ? 'disabled' : ''}>
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className={selected ? 'selected' : ''}
                         onClick={() => toggleScenarioDimension(dimension.id)}
                         disabled={!dimension.enabled && !selected}
                       >
                         {selected ? <CheckCircle2 size={15} /> : <Plus size={15} />}
                         <span>{displayName}</span>
-                      </button>
+                      </Button>
                       <p>{displayDescription || tr('暂无评分标准。', 'No scoring criteria yet.')}</p>
                       <label>
-                        <input
+                        <Input
                           type="number"
                           min="0"
                           max="100"
@@ -731,7 +736,7 @@ export default function ScenarioConfigPage() {
           <aside className="scenario-config-list" aria-label={tr('维度库', 'Dimension library')}>
             <label className="scenario-config-search">
               <Search size={15} />
-              <input
+              <Input
                 value={dimensionQuery}
                 onChange={(event) => setDimensionQuery(event.target.value)}
                 placeholder={tr('搜索维度', 'Search dimensions')}
@@ -742,19 +747,19 @@ export default function ScenarioConfigPage() {
               {filteredDimensions.map((dimension) => {
                 const displayName = getDimensionDisplayName(dimension, tr)
                 return (
-                <button
-                  type="button"
-                  key={dimension.id}
-                  className={dimension.id === dimensionDraft.id ? 'selected' : ''}
-                  onClick={() => selectDimension(dimension.id)}
-                >
-                  <span className="scenario-config-row-title">{displayName}</span>
-                  <span className="scenario-config-row-meta">
-                    {dimension.enabled ? tr('已启用', 'Enabled') : tr('已禁用', 'Disabled')} · {tr('{count} 个引用', '{count} refs', {
-                      count: dimensionRefs.get(dimension.id) ?? 0,
-                    })}
-                  </span>
-                </button>
+                  <Button
+                    variant="ghost"
+                    key={dimension.id}
+                    className={dimension.id === dimensionDraft.id ? 'selected' : ''}
+                    onClick={() => selectDimension(dimension.id)}
+                  >
+                    <span className="scenario-config-row-title">{displayName}</span>
+                    <span className="scenario-config-row-meta">
+                      {dimension.enabled ? tr('已启用', 'Enabled') : tr('已禁用', 'Disabled')} · {tr('{count} 个引用', '{count} refs', {
+                        count: dimensionRefs.get(dimension.id) ?? 0,
+                      })}
+                    </span>
+                  </Button>
                 )
               })}
             </div>
@@ -766,16 +771,16 @@ export default function ScenarioConfigPage() {
                 <h2>{getDimensionDisplayName(dimensionDraft, tr) || tr('未命名维度', 'Untitled dimension')}</h2>
                 <p>{dimensionDraft.id}</p>
               </div>
-              <button type="button" className="scenario-config-save" onClick={saveDimensionDraft} disabled={isRemoteSaving}>
+              <Button className="scenario-config-save" variant="primary" onClick={saveDimensionDraft} disabled={isRemoteSaving}>
                 <Save size={16} />
                 {isRemoteSaving ? tr('保存中', 'Saving') : tr('保存维度', 'Save dimension')}
-              </button>
+              </Button>
             </div>
 
             <div className="scenario-config-form-grid">
               <label>
                 <span>{tr('维度 ID', 'Dimension id')}</span>
-                <input
+                <Input
                   value={dimensionDraft.id}
                   disabled={Boolean(dimensionById.get(dimensionDraft.id))}
                   onChange={(event) => setDimensionDraft((current) => ({ ...current, id: event.target.value }))}
@@ -783,7 +788,7 @@ export default function ScenarioConfigPage() {
               </label>
               <label>
                 <span>{tr('维度名称', 'Dimension name')}</span>
-                <input
+                <Input
                   value={dimensionDraft.name}
                   onChange={(event) => setDimensionDraft((current) => ({ ...current, name: event.target.value }))}
                 />
@@ -792,7 +797,7 @@ export default function ScenarioConfigPage() {
 
             <label className="scenario-config-field">
               <span>{tr('评分标准', 'Scoring criteria')}</span>
-              <textarea
+              <Textarea
                 value={dimensionDraft.description}
                 onChange={(event) => setDimensionDraft((current) => ({ ...current, description: event.target.value }))}
                 rows={6}
@@ -800,10 +805,10 @@ export default function ScenarioConfigPage() {
             </label>
 
             <div className="scenario-config-dimension-footer">
-              <button type="button" onClick={() => toggleDimensionEnabled(dimensionDraft)} disabled={isRemoteSaving}>
+              <Button variant="secondary" onClick={() => toggleDimensionEnabled(dimensionDraft)} disabled={isRemoteSaving}>
                 {dimensionDraft.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                 {dimensionDraft.enabled ? tr('对新场景禁用', 'Disable for new scenarios') : tr('启用维度', 'Enable dimension')}
-              </button>
+              </Button>
               <span>
                 {tr(
                   '已被 {count} 个本地场景草稿引用。已禁用维度仍会显示在已使用它的草稿中。',
