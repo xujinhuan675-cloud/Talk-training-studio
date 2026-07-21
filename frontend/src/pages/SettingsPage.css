@@ -65,7 +65,7 @@
   margin: 0;
 }
 
-.settings-create-btn {
+.settings-create-btn.ui-button {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -80,7 +80,7 @@
   transition: background var(--transition-fast);
 }
 
-.settings-create-btn:hover {
+.settings-create-btn.ui-button:hover:not(:disabled) {
   background: var(--green-hover);
 }
 
@@ -149,7 +149,7 @@
   flex-shrink: 0;
 }
 
-.settings-item-btn {
+.settings-item-btn.ui-button {
   width: 32px;
   height: 32px;
   border: 1px solid var(--border);
@@ -163,12 +163,12 @@
   transition: all var(--transition-fast);
 }
 
-.settings-item-btn:hover {
+.settings-item-btn.ui-button:hover:not(:disabled) {
   background: var(--bg-base);
   color: var(--text-primary);
 }
 
-.settings-item-btn.danger:hover {
+.settings-item-btn.danger.ui-button:hover:not(:disabled) {
   background: var(--rose-soft);
   color: var(--rose);
   border-color: rgba(185, 28, 28, 0.3);
@@ -211,18 +211,22 @@
 }
 
 .settings-form-panel .field-label {
-  display: block;
+  display: grid;
+  gap: 5px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 14px;
 }
 
-.settings-form-panel .field-label input,
-.settings-form-panel .field-label select {
-  display: block;
+.settings-form-panel .field-label .ui-form-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-form-panel .field-label .ui-form-input,
+.settings-form-panel .field-label .ui-form-select {
   width: 100%;
-  margin-top: 5px;
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -234,16 +238,14 @@
   background: var(--bg-base);
 }
 
-.settings-form-panel .field-label input:focus,
-.settings-form-panel .field-label select:focus {
+.settings-form-panel .field-label .ui-form-input:focus-visible,
+.settings-form-panel .field-label .ui-form-select:focus-visible {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.settings-form-panel .field-label textarea {
-  display: block;
+.settings-form-panel .field-label .ui-form-textarea {
   width: 100%;
-  margin-top: 5px;
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -258,7 +260,7 @@
   background: var(--bg-base);
 }
 
-.settings-form-panel .field-label textarea:focus {
+.settings-form-panel .field-label .ui-form-textarea:focus-visible {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
@@ -294,7 +296,7 @@
   border-top: 1px solid var(--border);
 }
 
-.settings-form-actions .btn-delete {
+.settings-form-actions .btn-delete.ui-button {
   padding: 8px 18px;
   border: 1px solid rgba(199, 91, 91, 0.3);
   border-radius: var(--radius-sm);
@@ -306,12 +308,12 @@
   transition: all var(--transition-fast);
 }
 
-.settings-form-actions .btn-delete:hover {
+.settings-form-actions .btn-delete.ui-button:hover:not(:disabled) {
   background: var(--rose-soft);
   border-color: rgba(199, 91, 91, 0.5);
 }
 
-.settings-form-actions .btn-cancel {
+.settings-form-actions .btn-cancel.ui-button {
   padding: 8px 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -322,12 +324,12 @@
   transition: all var(--transition-fast);
 }
 
-.settings-form-actions .btn-cancel:hover {
+.settings-form-actions .btn-cancel.ui-button:hover:not(:disabled) {
   background: var(--bg-base);
   color: var(--text-primary);
 }
 
-.settings-form-actions .btn-submit {
+.settings-form-actions .btn-submit.ui-button {
   padding: 8px 22px;
   border: none;
   border-radius: var(--radius-sm);
@@ -339,12 +341,12 @@
   transition: background var(--transition-fast);
 }
 
-.settings-form-actions .btn-submit:hover {
+.settings-form-actions .btn-submit.ui-button:hover:not(:disabled) {
   background: var(--green-hover);
 }
 
-.settings-form-actions .btn-submit:disabled,
-.settings-form-actions .btn-delete:disabled {
+.settings-form-actions .btn-submit.ui-button:disabled,
+.settings-form-actions .btn-delete.ui-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -569,7 +571,7 @@
   gap: 16px;
 }
 
-.settings-org-selector {
+.settings-org-selector.ui-form-select {
   width: 100%;
   padding: 9px 12px;
   border: 1px solid var(--border);
@@ -580,40 +582,18 @@
   outline: none;
 }
 
-.settings-org-selector:focus {
+.settings-org-selector.ui-form-select:focus-visible {
   border-color: var(--green);
 }
 
-.settings-org-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
+.settings-org-tabs.ui-segmented-control {
+  width: 100%;
+  justify-content: flex-start;
+  background: var(--bg-card);
 }
 
-.settings-org-tab {
-  padding: 8px 16px;
-  border: none;
-  background: none;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all var(--transition-fast);
-}
-
-.settings-org-tab:hover:not(:disabled) {
-  color: var(--text-primary);
-}
-
-.settings-org-tab:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.settings-org-tab.active {
-  color: var(--green);
-  border-bottom-color: var(--green);
+.settings-org-tabs .ui-segmented-control-button {
+  flex: 1 1 0;
 }
 
 .settings-org-content {
@@ -639,11 +619,172 @@
   border-bottom: none;
 }
 
+.settings-form-panel .team-delete-btn.ui-button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-form-panel .team-delete-btn.ui-button:hover:not(:disabled) {
+  background: var(--rose-soft);
+  border-color: rgba(185, 28, 28, 0.2);
+  color: var(--rose);
+}
+
+.team-members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-base);
+}
+
+.team-member-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.team-member-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.team-member-remove.ui-button {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  gap: 0;
+  line-height: 1;
+}
+
+.team-member-remove.ui-button:hover:not(:disabled) {
+  background: var(--rose-soft);
+  color: var(--rose);
+}
+
+.team-members-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.team-add-member-select.ui-form-select {
+  width: auto;
+  min-height: 26px;
+  padding: 4px 28px 4px 10px;
+  border-style: dashed;
+  border-radius: 14px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.team-add-member-select.ui-form-select:hover,
+.team-add-member-select.ui-form-select:focus-visible {
+  border-color: var(--green);
+  color: var(--green);
+}
+
 .settings-form-panel .empty-hint {
   padding: 16px;
   text-align: center;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.add-team-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.add-team-form .ui-form-input {
+  flex: 1;
+  font-size: 13px;
+}
+
+.add-team-form .ui-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.rel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.add-rel-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.add-rel-form .ui-form-control {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.add-rel-form .ui-form-select {
+  flex: 1 1 112px;
+  width: auto;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.add-rel-form .ui-form-input {
+  flex: 2 1 140px;
+  width: auto;
+  min-width: 80px;
+}
+
+.add-rel-form .ui-button {
+  min-height: 34px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .settings-error {
