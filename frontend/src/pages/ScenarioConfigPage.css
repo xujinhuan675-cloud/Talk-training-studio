@@ -83,9 +83,7 @@
 
 .scenario-config-header-actions .ui-button,
 .scenario-config-save,
-.scenario-config-tabs .ui-button,
 .scenario-config-weight-head .ui-button,
-.scenario-config-switch-row .ui-button,
 .scenario-config-dimension-footer .ui-button {
   min-height: 38px;
   display: inline-flex;
@@ -110,9 +108,7 @@
 
 .scenario-config-header-actions .ui-button:hover:not(:disabled),
 .scenario-config-save:hover:not(:disabled),
-.scenario-config-tabs .ui-button:hover:not(:disabled),
 .scenario-config-weight-head .ui-button:hover:not(:disabled),
-.scenario-config-switch-row .ui-button:hover:not(:disabled),
 .scenario-config-dimension-footer .ui-button:hover:not(:disabled) {
   border-color: var(--config-primary);
   background: var(--config-primary-soft);
@@ -228,7 +224,7 @@
   margin-bottom: 10px;
 }
 
-.scenario-config-tabs {
+.scenario-config-tabs.ui-segmented-control {
   width: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -240,15 +236,31 @@
   box-shadow: var(--config-shadow-soft);
 }
 
-.scenario-config-tabs .ui-button {
+.scenario-config-tabs .ui-segmented-control-button {
   min-width: 0;
   border-color: transparent;
   min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   background: transparent;
   color: var(--text-secondary);
 }
 
-.scenario-config-tabs .ui-button > span {
+.scenario-config-tabs .ui-segmented-control-button:hover:not(:disabled),
+.scenario-config-tabs .ui-segmented-control-button[data-state='on'] {
+  border-color: var(--config-surface);
+  background: var(--config-surface);
+  color: var(--config-primary);
+  box-shadow: var(--config-shadow-soft);
+}
+
+.scenario-config-tab-label {
+  min-width: 0;
+}
+
+.scenario-config-tab-count {
   min-width: 22px;
   min-height: 20px;
   display: inline-grid;
@@ -262,14 +274,7 @@
   line-height: 1;
 }
 
-.scenario-config-tabs .ui-button.selected {
-  border-color: var(--config-surface);
-  background: var(--config-surface);
-  color: var(--config-primary);
-  box-shadow: var(--config-shadow-soft);
-}
-
-.scenario-config-tabs .ui-button.selected > span {
+.scenario-config-tabs .ui-segmented-control-button[data-state='on'] .scenario-config-tab-count {
   background: var(--config-surface);
   color: var(--config-primary);
 }
@@ -435,6 +440,7 @@
 }
 
 .scenario-config-form-grid label,
+.scenario-config-switch-row,
 .scenario-config-field {
   display: grid;
   gap: 7px;
@@ -442,6 +448,7 @@
 }
 
 .scenario-config-form-grid label > span,
+.scenario-config-switch-row > span,
 .scenario-config-field > span {
   color: var(--text-muted);
   font-size: 12px;
@@ -497,15 +504,42 @@
   gap: 8px;
 }
 
-.scenario-config-switch-row .ui-button {
+.scenario-config-check-option {
   min-height: 38px;
   flex: 1 1 110px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 1px solid var(--config-border);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--config-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.scenario-config-switch-row .ui-button.selected {
+.scenario-config-check-option:hover,
+.scenario-config-check-option.selected {
   border-color: var(--config-accent);
   background: var(--config-accent-soft);
   color: var(--config-accent);
+}
+
+.scenario-config-check-option .ui-checkbox {
+  width: 16px;
+  height: 16px;
+  --ui-checkbox-accent: var(--config-accent);
+}
+
+.scenario-config-check-option > span,
+.scenario-config-weight-option > span {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .scenario-config-weight-editor {
@@ -564,7 +598,7 @@
   opacity: 0.66;
 }
 
-.scenario-config-weight-table .ui-button {
+.scenario-config-weight-option {
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -582,15 +616,22 @@
   line-height: 1.2;
 }
 
-.scenario-config-weight-table .ui-button.selected {
+.scenario-config-weight-option:hover:not(.disabled),
+.scenario-config-weight-option.selected {
   border-color: var(--config-border-accent);
   background: var(--config-primary-soft);
   color: var(--config-primary);
 }
 
-.scenario-config-weight-table .ui-button:disabled {
+.scenario-config-weight-option.disabled {
   cursor: not-allowed;
   opacity: 0.56;
+}
+
+.scenario-config-weight-option .ui-checkbox {
+  width: 16px;
+  height: 16px;
+  --ui-checkbox-accent: var(--config-primary);
 }
 
 .scenario-config-weight-table p {
@@ -612,7 +653,7 @@
   text-align: right;
 }
 
-.scenario-config-weight-table label > span {
+.scenario-config-weight-table label:not(.scenario-config-weight-option) > span {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 800;
@@ -674,7 +715,7 @@
     align-items: stretch;
   }
 
-  .scenario-config-tabs {
+  .scenario-config-tabs.ui-segmented-control {
     display: grid;
     grid-template-columns: 1fr;
     width: 100%;

@@ -46,7 +46,9 @@ import {
 } from '../services/scenarioConfig'
 import { SettingsShell } from './SettingsPage'
 import { Button } from '../components/ui/button'
+import { Checkbox } from '../components/ui/checkbox'
 import { Input, Select, Textarea } from '../components/ui/form'
+import { SegmentedControl, type SegmentedControlOption } from '../components/ui/segmented-control'
 import './ScenarioConfigPage.css'
 
 type ScenarioConfigTab = 'scenarios' | 'dimensions'
@@ -249,6 +251,29 @@ export default function ScenarioConfigPage() {
   const invalidScenarioCount = useMemo(
     () => state.scenarios.filter((scenario) => !validateScenarioWeightTotal(scenario.dimensionWeights).valid).length,
     [state.scenarios],
+  )
+  const tabOptions = useMemo<SegmentedControlOption<ScenarioConfigTab>[]>(
+    () => [
+      {
+        value: 'scenarios',
+        label: (
+          <>
+            <span className="scenario-config-tab-label">{tr('场景草稿', 'Scenario drafts')}</span>
+            <span className="scenario-config-tab-count">{state.scenarios.length}</span>
+          </>
+        ),
+      },
+      {
+        value: 'dimensions',
+        label: (
+          <>
+            <span className="scenario-config-tab-label">{tr('维度库', 'Dimension library')}</span>
+            <span className="scenario-config-tab-count">{state.dimensions.length}</span>
+          </>
+        ),
+      },
+    ],
+    [state.dimensions.length, state.scenarios.length, tr],
   )
   const selectedWeightValidation = validateScenarioWeightTotal(draft.dimensionWeights)
   const selectedWeightTotal = calculateScenarioWeightTotal(draft.dimensionWeights)
@@ -481,24 +506,13 @@ export default function ScenarioConfigPage() {
       )}
 
       <div className="scenario-config-tabbar">
-        <div className="scenario-config-tabs" role="tablist" aria-label={tr('配置区域', 'Configuration areas')}>
-          <Button
-            variant="ghost"
-            className={activeTab === 'scenarios' ? 'selected' : ''}
-            onClick={() => setActiveTab('scenarios')}
-          >
-            {tr('场景草稿', 'Scenario drafts')}
-            <span>{state.scenarios.length}</span>
-          </Button>
-          <Button
-            variant="ghost"
-            className={activeTab === 'dimensions' ? 'selected' : ''}
-            onClick={() => setActiveTab('dimensions')}
-          >
-            {tr('维度库', 'Dimension library')}
-            <span>{state.dimensions.length}</span>
-          </Button>
-        </div>
+        <SegmentedControl
+          ariaLabel={tr('配置区域', 'Configuration areas')}
+          className="scenario-config-tabs"
+          onValueChange={setActiveTab}
+          options={tabOptions}
+          value={activeTab}
+        />
       </div>
 
       {activeTab === 'scenarios' && (
@@ -588,27 +602,25 @@ export default function ScenarioConfigPage() {
                 <span>{tr('练习者角色', 'Learner role')}</span>
                 <Input value={draft.learnerRole} onChange={(event) => patchDraft({ learnerRole: event.target.value })} />
               </label>
-              <label className="scenario-config-switch-row">
+              <div className="scenario-config-switch-row">
                 <span>{tr('标记', 'Flags')}</span>
                 <div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={draft.required ? 'selected' : ''}
-                    onClick={() => patchDraft({ required: !draft.required })}
-                  >
-                    {tr('必练', 'Required')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={draft.enabled ? 'selected' : ''}
-                    onClick={() => patchDraft({ enabled: !draft.enabled })}
-                  >
-                    {tr('启用', 'Enabled')}
-                  </Button>
+                  <label className={`scenario-config-check-option${draft.required ? ' selected' : ''}`}>
+                    <Checkbox
+                      checked={draft.required}
+                      onChange={(event) => patchDraft({ required: event.target.checked })}
+                    />
+                    <span>{tr('必练', 'Required')}</span>
+                  </label>
+                  <label className={`scenario-config-check-option${draft.enabled ? ' selected' : ''}`}>
+                    <Checkbox
+                      checked={draft.enabled}
+                      onChange={(event) => patchDraft({ enabled: event.target.checked })}
+                    />
+                    <span>{tr('启用', 'Enabled')}</span>
+                  </label>
                 </div>
-              </label>
+              </div>
             </div>
 
             <label className="scenario-config-field">
@@ -698,18 +710,19 @@ export default function ScenarioConfigPage() {
                   const weight = draft.dimensionWeights.find((item) => item.dimensionId === dimension.id)?.weight ?? 0
                   const displayName = getDimensionDisplayName(dimension, tr)
                   const displayDescription = getDimensionDisplayDescription(dimension, tr)
+                  const disabled = !dimension.enabled && !selected
                   return (
                     <div key={dimension.id} className={!dimension.enabled ? 'disabled' : ''}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={selected ? 'selected' : ''}
-                        onClick={() => toggleScenarioDimension(dimension.id)}
-                        disabled={!dimension.enabled && !selected}
+                      <label
+                        className={`scenario-config-weight-option${selected ? ' selected' : ''}${disabled ? ' disabled' : ''}`}
                       >
-                        {selected ? <CheckCircle2 size={15} /> : <Plus size={15} />}
+                        <Checkbox
+                          checked={selected}
+                          disabled={disabled}
+                          onChange={() => toggleScenarioDimension(dimension.id)}
+                        />
                         <span>{displayName}</span>
-                      </Button>
+                      </label>
                       <p>{displayDescription || tr('暂无评分标准。', 'No scoring criteria yet.')}</p>
                       <label>
                         <Input
