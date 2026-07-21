@@ -5,7 +5,6 @@ import {
   ClipboardList,
   Play,
   SlidersHorizontal,
-  Target,
   TrendingUp,
 } from 'lucide-react'
 import { useAuthContext } from '../contexts/AuthContext'
@@ -220,9 +219,7 @@ const HomePage: React.FC = () => {
   return (
     <PageShell className="home-page" width="wide">
       <PageHeader
-        icon={<Target size={16} />}
-        eyebrow={t('nav.home')}
-        title={tr('训练工作台', 'Training workbench')}
+        title={t('nav.home')}
         description={tr(
           '从训练目录进入场景演练，也可以继续最近训练、查看复盘和成长进度。',
           'Start from the catalog, continue recent sessions, and track reviews and growth.',

@@ -27,7 +27,7 @@ import { generateProfileCard, type ProfileCard as ProfileCardData } from '../ser
 import ProfileCard from '../components/ProfileCard'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
-import { PageShell } from '../components/ui/page'
+import { PageHeader, PageShell } from '../components/ui/page'
 import { GROWTH_DIMENSIONS, getGrowthDimensionLabel, growthSkillKey } from '../utils/growthLabels'
 import './GrowthPage.css'
 
@@ -162,6 +162,15 @@ const GrowthPage: React.FC = () => {
   const [profileCardLoading, setProfileCardLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
+  const pageHeader = (
+    <PageHeader
+      title={t('nav.growth')}
+      description={tr(
+        '完成训练复盘后，查看能力趋势、技能路径和近期表现。',
+        'Review ability trends, skill path, and recent performance after evaluations.',
+      )}
+    />
+  )
 
   const handleGenerateCard = async () => {
     setProfileCardLoading(true)
@@ -194,6 +203,7 @@ const GrowthPage: React.FC = () => {
   if (loading) {
     return (
       <PageShell width="wide" className="growth-page">
+        {pageHeader}
         <div className="gp-loading">
           <Loader2 size={24} className="gp-spin" />
           <span>{tr('加载成长数据...', 'Loading growth data...')}</span>
@@ -206,6 +216,7 @@ const GrowthPage: React.FC = () => {
   if (error) {
     return (
       <PageShell width="wide" className="growth-page">
+        {pageHeader}
         <div className="gp-empty">
           <p>{tr('加载失败: {error}', 'Failed to load: {error}', { error })}</p>
         </div>
@@ -217,6 +228,7 @@ const GrowthPage: React.FC = () => {
   if (!dashboard || dashboard.overview.total_evaluations === 0) {
     return (
       <PageShell width="wide" className="growth-page">
+        {pageHeader}
         <div className="gp-empty">
           <div className="gp-empty-icon">
             <Sparkles size={48} strokeWidth={1.5} />
@@ -238,6 +250,7 @@ const GrowthPage: React.FC = () => {
 
   return (
     <PageShell width="wide" className="growth-page">
+      {pageHeader}
       {/* 1. Overall Score Header */}
       <section className="gp-score-header">
         <div className="gp-score-header-top">

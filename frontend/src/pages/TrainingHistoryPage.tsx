@@ -513,11 +513,13 @@ export default function TrainingHistoryPage() {
   }
 
   return (
-    <PageShell width="wide" className="training-history-page">
+    <PageShell className="training-history-page">
       <PageHeader
-        eyebrow={tr('训练记录', 'Training history')}
-        icon={<History size={16} />}
         title={tr('训练记录', 'Training records')}
+        description={tr(
+          '按场景、状态和分支上下文筛选训练复盘记录。',
+          'Filter training review records by scenario, status, and branch context.',
+        )}
       />
 
       <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>

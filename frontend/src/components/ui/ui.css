@@ -9,6 +9,7 @@
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
+  text-decoration: none;
   cursor: pointer;
   transition:
     background var(--transition-fast),
@@ -144,10 +145,14 @@
 
 .ui-page-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 420px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   align-items: end;
   margin-bottom: 18px;
+}
+
+.ui-page-header--with-stats {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 420px);
 }
 
 .ui-page-header-main {

@@ -302,7 +302,7 @@ export default function ScenarioTrainingPage() {
   }
 
   return (
-    <PageShell width="wide" className="scenario-training-page">
+    <PageShell className="scenario-training-page">
       <PageHeader
         title={tr('训练目录', 'Training catalog')}
         description={tr('筛选场景，选择模式，然后进入训练。', 'Filter scenarios, choose a mode, and start training.')}

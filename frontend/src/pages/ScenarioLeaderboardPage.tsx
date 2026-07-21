@@ -8,7 +8,6 @@ import {
   ClipboardList,
   Medal,
   Target,
-  Trophy,
   Users,
 } from 'lucide-react'
 import { useAuthContext } from '../contexts/AuthContext'
@@ -25,6 +24,7 @@ import {
   getScenarioStatusLabel,
 } from '../utils/scenarioLabels'
 import { APP_ROUTES } from '../appRoutes'
+import { PageHeader, PageShell } from '../components/ui/page'
 import './ScenarioLeaderboardPage.css'
 
 const PROGRESS_STORAGE_PREFIX = 'talkwise.scenarioTraining.progress.v1'
@@ -68,7 +68,7 @@ function buildProgressUsers(users: AuthUser[], currentUser: AuthUser | null): Sc
 }
 
 export default function ScenarioLeaderboardPage() {
-  const { tr, locale } = useI18n()
+  const { t, tr, locale } = useI18n()
   const { currentUser, users } = useAuthContext()
   const [progressVersion, setProgressVersion] = useState(0)
   const [selectedUserId, setSelectedUserId] = useState(currentUser?.userId ?? '')
@@ -114,38 +114,42 @@ export default function ScenarioLeaderboardPage() {
   const teamLabel = currentUser?.systemRole === 'admin'
     ? tr('全部团队', 'All teams')
     : currentUser?.teamName ?? selectedUser?.teamName ?? tr('当前团队', 'Current team')
+  const pageTitle = isManagementView ? t('common.teamBoard') : tr('我的进度', 'My progress')
+  const pageDescription = isManagementView
+    ? tr(
+      '追踪 {team} 的必练完成、排行和薄弱维度。',
+      'Track required completion, ranking, and weak dimensions for {team}.',
+      { team: teamLabel },
+    )
+    : tr('查看你的必练完成、团队差距和后续练习方向。', 'Review your required completion, team gaps, and next practice focus.')
 
   return (
-    <main className="scenario-leaderboard-page">
-      <section className="scenario-leaderboard-head">
-        <div>
-          <span className="scenario-leaderboard-kicker">
-            <Trophy size={16} />
-            {isManagementView ? tr('训练看板', 'Training board') : tr('我的训练', 'My training')}
-            <span className="scenario-leaderboard-kicker-scope">{teamLabel}</span>
-          </span>
-          <h1>{isManagementView ? tr('团队进度', 'Team progress') : tr('我的进度', 'My progress')}</h1>
-        </div>
-        <div className="scenario-leaderboard-actions">
-          {isManagementView && visibleAuthUsers.length > 1 && (
-            <label className="scenario-leaderboard-select">
-              <span>{tr('成员', 'Member')}</span>
-              <select value={selectedUser?.userId ?? ''} onChange={(event) => setSelectedUserId(event.target.value)}>
-                {visibleAuthUsers.map((user) => (
-                  <option key={user.userId} value={user.userId}>
-                    {user.name} · {user.teamName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <Link to={APP_ROUTES.practiceScenarios} className="scenario-leaderboard-link">
-            <ClipboardList size={16} />
-            {tr('场景训练', 'Scenario training')}
-            <ArrowRight size={15} />
-          </Link>
-        </div>
-      </section>
+    <PageShell className="scenario-leaderboard-page">
+      <PageHeader
+        title={pageTitle}
+        description={pageDescription}
+        actions={(
+          <div className="scenario-leaderboard-actions">
+            {isManagementView && visibleAuthUsers.length > 1 && (
+              <label className="scenario-leaderboard-select">
+                <span>{tr('成员', 'Member')}</span>
+                <select value={selectedUser?.userId ?? ''} onChange={(event) => setSelectedUserId(event.target.value)}>
+                  {visibleAuthUsers.map((user) => (
+                    <option key={user.userId} value={user.userId}>
+                      {user.name} · {user.teamName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <Link to={APP_ROUTES.practiceScenarios} className="scenario-leaderboard-link">
+              <ClipboardList size={16} />
+              {tr('场景训练', 'Scenario training')}
+              <ArrowRight size={15} />
+            </Link>
+          </div>
+        )}
+      />
 
       {isManagementView ? (
         <>
@@ -428,7 +432,7 @@ export default function ScenarioLeaderboardPage() {
           <p className="scenario-leaderboard-empty">{tr('暂无成员', 'No member')}</p>
         )}
       </section>
-    </main>
+    </PageShell>
   )
 }
 

@@ -49,7 +49,10 @@ function PageHeader({
   ...props
 }: PageHeaderProps) {
   return (
-    <header className={cn('ui-page-header', className)} {...props}>
+    <header
+      className={cn('ui-page-header', stats ? 'ui-page-header--with-stats' : undefined, className)}
+      {...props}
+    >
       <div className="ui-page-header-main">
         {eyebrow ? (
           <div className="ui-page-eyebrow">
