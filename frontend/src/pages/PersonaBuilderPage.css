@@ -104,34 +104,71 @@
   font-weight: 600;
   color: var(--text-muted);
 }
-.segment-tags {
-  display: flex;
-  gap: 4px;
-  flex: 1;
+.segment-tags.ui-segmented-control {
+  flex: 1 1 auto;
+  min-width: 0;
 }
-.type-tag {
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  font-size: 11px;
-  font-weight: 500;
+
+.persona-builder-segment-types .ui-segmented-control-button {
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.persona-builder-segment-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.persona-builder-segment-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.persona-builder-segment-label.tag-chat {
+  color: var(--green);
+}
+
+.persona-builder-segment-label.tag-email {
+  color: var(--violet);
+}
+
+.persona-builder-segment-label.tag-meeting {
+  color: var(--amber);
+}
+
+.persona-builder-segment-label.tag-other {
   color: var(--text-muted);
-  cursor: pointer;
-  transition: all var(--transition-fast);
 }
-.type-tag:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(1):hover:not(:disabled),
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(1)[data-state='on'] {
+  border-color: var(--green);
+  background: var(--green-soft);
 }
-.type-tag.active {
-  border-color: transparent;
-  color: white;
+
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(2):hover:not(:disabled),
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(2)[data-state='on'] {
+  border-color: var(--violet);
+  background: var(--violet-soft);
 }
-.type-tag.tag-chat.active   { background: var(--green); }
-.type-tag.tag-email.active  { background: var(--violet); }
-.type-tag.tag-meeting.active{ background: var(--amber); }
-.type-tag.tag-other.active  { background: var(--text-muted); }
+
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(3):hover:not(:disabled),
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(3)[data-state='on'] {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(4):hover:not(:disabled),
+.persona-builder-segment-types .ui-segmented-control-button:nth-child(4)[data-state='on'] {
+  border-color: var(--border-accent);
+  background: var(--bg-soft);
+}
 
 .segment-remove {
   width: 24px;
@@ -266,7 +303,6 @@
   color: var(--success);
 }
 
-.type-tag.ui-button,
 .segment-remove.ui-button,
 .add-segment-btn.ui-button,
 .btn-start.ui-button,
@@ -275,11 +311,6 @@
 .btn-goto.ui-button,
 .builder-footer .btn-ghost.ui-button {
   white-space: normal;
-}
-
-.type-tag.ui-button {
-  min-height: 24px;
-  padding: 3px 10px;
 }
 
 .segment-remove.ui-button {

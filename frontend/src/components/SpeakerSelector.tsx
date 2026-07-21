@@ -1,7 +1,8 @@
-import { Check, Users, MessageSquare, ChevronRight } from 'lucide-react'
+import { Users, MessageSquare, ChevronRight } from 'lucide-react'
 import type { DetectedSpeaker } from '../services/api'
 import { useI18n, type TranslationKey } from '../i18n'
 import { Button } from './ui/button'
+import { Checkbox } from './ui/checkbox'
 import './SpeakerSelector.css'
 
 interface Props {
@@ -42,17 +43,17 @@ export default function SpeakerSelector({
           const isSelected = selected.has(s.name)
           const badge = DOMINANCE_BADGE[s.dominance_level] || DOMINANCE_BADGE.medium
           return (
-            <Button
+            <label
               key={s.name}
-              variant="secondary"
-              className={`speaker-card ${isSelected ? 'selected' : ''}`}
-              onClick={() => onToggle(s.name)}
-              disabled={disabled}
-              aria-pressed={isSelected}
+              className={`speaker-card${isSelected ? ' selected' : ''}${disabled ? ' disabled' : ''}`}
             >
-              <div className="speaker-check">
-                {isSelected && <Check size={14} />}
-              </div>
+              <Checkbox
+                className="speaker-checkbox"
+                checked={isSelected}
+                onChange={() => onToggle(s.name)}
+                disabled={disabled}
+                aria-label={tr('选择 {name}', 'Select {name}', { name: s.name })}
+              />
               <div className="speaker-info">
                 <div className="speaker-name-row">
                   <span className="speaker-name">{s.name}</span>
@@ -67,7 +68,7 @@ export default function SpeakerSelector({
                   <div className="speaker-quote">"{s.sample_quote}"</div>
                 )}
               </div>
-            </Button>
+            </label>
           )
         })}
       </div>

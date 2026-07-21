@@ -34,22 +34,27 @@
   align-items: flex-start;
   gap: 10px;
   padding: 12px;
-  border: 1.5px solid var(--border-light, #e0e0e0);
-  border-radius: 12px;
+  border: 1px solid var(--border-light, #e0e0e0);
+  border-radius: 8px;
   background: var(--bg-card, #fff);
+  box-sizing: border-box;
   cursor: pointer;
   font-weight: inherit;
   line-height: 1.4;
   white-space: normal;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   text-align: left;
   width: 100%;
 }
 
-.speaker-card:hover {
+.speaker-card:not(.disabled):hover {
   border-color: var(--primary, #4ade80);
-  transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.speaker-card:focus-within {
+  border-color: var(--primary, #4ade80);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.16);
 }
 
 .speaker-card.selected {
@@ -57,24 +62,17 @@
   background: var(--primary-light, #f0fdf4);
 }
 
-.speaker-check {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  border: 1.5px solid var(--border-light, #d0d0d0);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--primary, #4ade80);
-  transition: all 0.15s ease;
+.speaker-card.disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
-.speaker-card.selected .speaker-check {
-  background: var(--primary, #4ade80);
-  border-color: var(--primary, #4ade80);
-  color: #fff;
+.speaker-checkbox {
+  --ui-checkbox-accent: var(--primary, #4ade80);
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
 }
 
 .speaker-info {

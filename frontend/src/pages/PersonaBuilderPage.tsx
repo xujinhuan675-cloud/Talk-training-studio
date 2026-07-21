@@ -11,17 +11,18 @@ import PersonaBuildProgress from '../components/PersonaBuildProgress'
 import SpeakerSelector from '../components/SpeakerSelector'
 import { Button } from '../components/ui/button'
 import { Input, Textarea } from '../components/ui/form'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import type { DetectedSpeaker } from '../services/api'
 import { useI18n, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './PersonaBuilderPage.css'
 
 type SegmentType = 'chat' | 'email' | 'meeting' | 'other'
-const SEGMENT_TAGS: { type: SegmentType; labelKey: TranslationKey; klass: string }[] = [
-  { type: 'chat', labelKey: 'personaBuilder.segment.chat', klass: 'tag-chat' },
-  { type: 'email', labelKey: 'personaBuilder.segment.email', klass: 'tag-email' },
-  { type: 'meeting', labelKey: 'personaBuilder.segment.meeting', klass: 'tag-meeting' },
-  { type: 'other', labelKey: 'personaBuilder.segment.other', klass: 'tag-other' },
+const SEGMENT_TAGS: { type: SegmentType; labelKey: TranslationKey; dotClass: string }[] = [
+  { type: 'chat', labelKey: 'personaBuilder.segment.chat', dotClass: 'tag-chat' },
+  { type: 'email', labelKey: 'personaBuilder.segment.email', dotClass: 'tag-email' },
+  { type: 'meeting', labelKey: 'personaBuilder.segment.meeting', dotClass: 'tag-meeting' },
+  { type: 'other', labelKey: 'personaBuilder.segment.other', dotClass: 'tag-other' },
 ]
 
 interface Segment {
@@ -257,21 +258,25 @@ export default function PersonaBuilderPage() {
               <div key={seg.id} className="input-segment">
                 <div className="segment-head">
                   <span className="segment-index">{tr('素材 #{index}', 'Material #{index}', { index: idx + 1 })}</span>
-                  <div className="segment-tags">
-                    {SEGMENT_TAGS.map((segmentTag) => (
-                      <Button
-                        key={segmentTag.type}
-                        variant="secondary"
-                        size="sm"
-                        className={`type-tag ${segmentTag.klass} ${seg.type === segmentTag.type ? 'active' : ''}`}
-                        onClick={() => updateSegment(seg.id, { type: segmentTag.type })}
-                        disabled={status === 'running'}
-                        aria-pressed={seg.type === segmentTag.type}
-                      >
-                        {t(segmentTag.labelKey)}
-                      </Button>
-                    ))}
-                  </div>
+                  <SegmentedControl
+                    ariaLabel={tr('素材段类型', 'Material type')}
+                    className="segment-tags persona-builder-segment-types"
+                    onValueChange={(value) => updateSegment(seg.id, { type: value })}
+                    options={SEGMENT_TAGS.map((segmentTag) => ({
+                      value: segmentTag.type,
+                      ariaLabel: t(segmentTag.labelKey),
+                      title: t(segmentTag.labelKey),
+                      disabled: status === 'running',
+                      label: (
+                        <span className={`persona-builder-segment-label ${segmentTag.dotClass}`}>
+                          <span className="persona-builder-segment-dot" aria-hidden="true" />
+                          <span>{t(segmentTag.labelKey)}</span>
+                        </span>
+                      ),
+                    }))}
+                    size="sm"
+                    value={seg.type}
+                  />
                   {segments.length > 1 && (
                     <Button
                       variant="ghost"
