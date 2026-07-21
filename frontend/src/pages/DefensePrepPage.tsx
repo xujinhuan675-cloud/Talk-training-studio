@@ -8,6 +8,7 @@ import { APP_ROUTES } from '../appRoutes'
 import { Button } from '../components/ui/button'
 import { Checkbox } from '../components/ui/checkbox'
 import { Input } from '../components/ui/form'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import './DefensePrepPage.css'
 
 interface DefenseScenarioOption {
@@ -261,23 +262,18 @@ export default function DefensePrepPage() {
                   <div className="dp-section-label">{tr('答辩场景', 'Defense Scenario')}</div>
                 </div>
 
-                <div className="dp-scenario-grid">
-                  {SCENARIO_OPTIONS.map((opt) => (
-                    <Button
-                      key={opt.value}
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className={`dp-scenario-card ${scenarioType === opt.value ? 'selected' : ''}`}
-                      onClick={() => setState((s) => ({ ...s, scenarioType: opt.value }))}
-                      aria-pressed={scenarioType === opt.value}
-                      aria-label={`${t(opt.labelKey)}. ${t(opt.descKey)}`}
-                      title={t(opt.descKey)}
-                    >
-                      <span className="dp-scenario-label">{t(opt.labelKey)}</span>
-                    </Button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  ariaLabel={tr('答辩场景', 'Defense Scenario')}
+                  className="dp-scenario-grid"
+                  onValueChange={(value) => setState((s) => ({ ...s, scenarioType: value }))}
+                  options={SCENARIO_OPTIONS.map((opt) => ({
+                    value: opt.value,
+                    ariaLabel: `${t(opt.labelKey)}. ${t(opt.descKey)}`,
+                    title: t(opt.descKey),
+                    label: <span className="dp-scenario-label">{t(opt.labelKey)}</span>,
+                  }))}
+                  value={scenarioType}
+                />
               </section>
             </div>
 

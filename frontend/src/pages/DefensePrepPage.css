@@ -345,13 +345,19 @@
   white-space: nowrap;
 }
 
-.dp-scenario-grid {
+.dp-scenario-grid.ui-segmented-control {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  min-height: 0;
   gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
-.dp-scenario-card {
+.dp-scenario-grid .ui-segmented-control-button {
+  min-width: 0;
   min-height: 42px;
   display: flex;
   align-items: center;
@@ -368,15 +374,27 @@
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
-.dp-scenario-card:hover {
+.dp-scenario-grid .ui-segmented-control-button:hover:not(:disabled):not([data-state='on']) {
   border-color: var(--violet);
   background: var(--violet-soft);
+  color: var(--violet);
 }
 
-.dp-scenario-card.selected {
+.dp-scenario-grid .ui-segmented-control-button[data-state='on'] {
   border-color: var(--violet);
   background: var(--violet);
   color: #fff;
+}
+
+.dp-scenario-grid .ui-segmented-control-button[data-state='on']:hover:not(:disabled) {
+  border-color: var(--violet);
+  background: var(--violet);
+  color: #fff;
+}
+
+.dp-scenario-grid .ui-segmented-control-button:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
 }
 
 .dp-scenario-label {
@@ -584,7 +602,7 @@
     grid-column: auto;
   }
 
-  .dp-scenario-grid {
+  .dp-scenario-grid.ui-segmented-control {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -608,7 +626,7 @@
     padding: 14px;
   }
 
-  .dp-scenario-grid {
+  .dp-scenario-grid.ui-segmented-control {
     grid-template-columns: 1fr;
   }
 

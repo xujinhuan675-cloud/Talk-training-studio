@@ -3,6 +3,7 @@ import { cn } from '../../utils/cn'
 import './ui.css'
 
 interface SegmentedControlOption<Value extends string> {
+  ariaLabel?: string
   disabled?: boolean
   label: React.ReactNode
   title?: string
@@ -44,6 +45,7 @@ function SegmentedControl<Value extends string>({
             key={option.value}
             type="button"
             className="ui-segmented-control-button"
+            aria-label={option.ariaLabel}
             aria-pressed={selected}
             data-state={selected ? 'on' : 'off'}
             disabled={option.disabled}
