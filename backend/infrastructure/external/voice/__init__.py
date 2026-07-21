@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from typing import Optional
+from urllib.parse import urlsplit
 
 from application.ports.stt import STTPort
 from application.ports.tts import TTSPort
@@ -17,6 +18,59 @@ logger = get_logger(__name__)
 
 _tts_client: Optional[TTSPort] = None
 _stt_client: Optional[STTPort] = None
+
+
+_OPENROUTER_PROVIDER_ALIASES = {
+    "openrouter",
+    "open_router",
+    "openrouter_ai",
+    "openrouter_compatible",
+}
+
+
+def _normalized_provider(value: object | None) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _is_openrouter_base_url(value: object | None) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    parsed = urlsplit(text if "://" in text else f"https://{text}")
+    hostname = (parsed.hostname or "").lower()
+    return hostname == "openrouter.ai" or hostname.endswith(".openrouter.ai")
+
+
+def _llm_settings_are_openrouter() -> bool:
+    llm_cfg = settings.llm
+    return (
+        _normalized_provider(getattr(llm_cfg, "provider", None)) in _OPENROUTER_PROVIDER_ALIASES
+        or _is_openrouter_base_url(getattr(llm_cfg, "base_url", None))
+    )
+
+
+def _effective_tts_api_key() -> str | None:
+    voice_cfg = settings.voice
+    if voice_cfg.tts_api_key:
+        return voice_cfg.tts_api_key
+    if (
+        _normalized_provider(voice_cfg.tts_provider) == "openrouter"
+        and _llm_settings_are_openrouter()
+    ):
+        return settings.llm.api_key
+    return None
+
+
+def _effective_tts_base_url() -> str | None:
+    voice_cfg = settings.voice
+    if voice_cfg.tts_base_url:
+        return voice_cfg.tts_base_url
+    if (
+        _normalized_provider(voice_cfg.tts_provider) == "openrouter"
+        and _llm_settings_are_openrouter()
+    ):
+        return settings.llm.base_url
+    return None
 
 
 # ---- TTS ----
@@ -31,37 +85,43 @@ async def init_tts_client() -> None:
         return
 
     voice_cfg = settings.voice
-    if not voice_cfg.tts_api_key:
+    tts_api_key = _effective_tts_api_key()
+    tts_base_url = _effective_tts_base_url()
+    if not tts_api_key:
         logger.warning(
             "tts_client_skipped",
-            reason="VOICE__TTS_API_KEY not configured; TTS features will be unavailable",
+            reason=(
+                "VOICE__TTS_API_KEY not configured; OpenRouter TTS can reuse "
+                "LLM__API_KEY only when LLM is configured for OpenRouter"
+            ),
         )
         return
 
     try:
-        if voice_cfg.tts_provider == "minimax":
+        tts_provider = _normalized_provider(voice_cfg.tts_provider)
+        if tts_provider == "minimax":
             from .minimax_tts import MinimaxTTSProvider
 
             _tts_client = MinimaxTTSProvider(
-                api_key=voice_cfg.tts_api_key,
+                api_key=tts_api_key,
                 model=voice_cfg.tts_model,
-                **({"base_url": voice_cfg.tts_base_url} if voice_cfg.tts_base_url else {}),
+                **({"base_url": tts_base_url} if tts_base_url else {}),
             )
-        elif voice_cfg.tts_provider == "elevenlabs":
+        elif tts_provider == "elevenlabs":
             from .elevenlabs_tts import ElevenLabsTTSProvider
 
             _tts_client = ElevenLabsTTSProvider(
-                api_key=voice_cfg.tts_api_key,
+                api_key=tts_api_key,
                 model=voice_cfg.tts_model or "eleven_multilingual_v2",
-                **({"base_url": voice_cfg.tts_base_url} if voice_cfg.tts_base_url else {}),
+                **({"base_url": tts_base_url} if tts_base_url else {}),
             )
-        elif voice_cfg.tts_provider == "openrouter":
+        elif tts_provider == "openrouter":
             from .openrouter_tts import OpenRouterTTSProvider
 
             _tts_client = OpenRouterTTSProvider(
-                api_key=voice_cfg.tts_api_key,
+                api_key=tts_api_key,
                 model=voice_cfg.tts_model,
-                **({"base_url": voice_cfg.tts_base_url} if voice_cfg.tts_base_url else {}),
+                **({"base_url": tts_base_url} if tts_base_url else {}),
             )
         else:
             raise ValueError(f"Unknown TTS provider: {voice_cfg.tts_provider}")

@@ -393,7 +393,8 @@ def _write_env_file_values(updates: dict[str, str | None]) -> None:
 def _voice_config_response() -> VoicePreferenceConfigDTO:
     env_values = _read_env_file_values()
     llm_key = settings.llm.api_key
-    tts_key = settings.voice.tts_api_key
+    explicit_tts_key = settings.voice.tts_api_key
+    tts_key = _effective_voice_tts_key()
     stt_key = settings.voice.stt_api_key
     realtime_key = settings.REALTIME_OPENAI_API_KEY
     effective_realtime_key = _openai_realtime_api_key()
@@ -401,7 +402,7 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
     explicit_stt_key = _explicit_config_value("VOICE__STT_API_KEY", env_values)
     if explicit_stt_key:
         stt_key_source = "stt"
-    elif tts_key:
+    elif explicit_tts_key:
         stt_key_source = "tts"
     elif settings.llm.api_key:
         stt_key_source = "llm"
@@ -443,6 +444,22 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
         realtime_transcription_model=settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
         updated_at=datetime.now(UTC).isoformat(),
     )
+
+
+def _effective_voice_tts_key() -> str | None:
+    if settings.voice.tts_api_key:
+        return settings.voice.tts_api_key
+    if (
+        settings.voice.tts_provider == _OPENROUTER_LLM_PROVIDER
+        and settings.llm.api_key
+        and (
+            _normalized_realtime_llm_provider(settings.llm.provider)
+            in _OPENROUTER_LLM_PROVIDER_ALIASES
+            or _is_openrouter_base_url(settings.llm.base_url)
+        )
+    ):
+        return settings.llm.api_key
+    return None
 
 
 def _settings_llm_provider_metadata() -> LLMProviderMetadata:

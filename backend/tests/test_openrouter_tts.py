@@ -4,6 +4,8 @@ import httpx
 import pytest
 
 from application.ports.tts import TTSConfig
+from core.config import LLMSettings, VoiceSettings, settings
+import infrastructure.external.voice as voice_lifecycle
 from infrastructure.external.voice.openrouter_tts import OpenRouterTTSProvider
 
 
@@ -56,6 +58,18 @@ class _FakeOpenRouterErrorAsyncClient(_FakeOpenRouterAsyncClient):
             request=httpx.Request(method, url),
         )
         return _FakeOpenRouterStream(response)
+
+
+class _FakeOpenRouterTTSProvider:
+    instances: list["_FakeOpenRouterTTSProvider"] = []
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.closed = False
+        self.instances.append(self)
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 @pytest.mark.asyncio
@@ -134,3 +148,78 @@ async def test_openrouter_tts_falls_back_from_openai_voice_names(
 
     assert chunks == [b"mp3-audio-bytes"]
     assert fake_client.captured["json"]["voice"] == "en_paul_neutral"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_tts_lifecycle_reuses_openrouter_llm_key(monkeypatch) -> None:
+    original_llm = settings.llm
+    original_voice = settings.voice
+    voice_lifecycle._tts_client = None
+    _FakeOpenRouterTTSProvider.instances = []
+    monkeypatch.setattr(
+        "infrastructure.external.voice.openrouter_tts.OpenRouterTTSProvider",
+        _FakeOpenRouterTTSProvider,
+    )
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-openrouter-llm",
+        base_url="https://openrouter.ai/api/v1",
+        default_model="openai/gpt-4o-mini",
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="openrouter",
+        tts_api_key=None,
+        tts_base_url=None,
+        tts_model="mistralai/voxtral-mini-tts-2603",
+    )
+
+    try:
+        await voice_lifecycle.init_tts_client()
+
+        provider = voice_lifecycle.get_tts_client()
+        assert isinstance(provider, _FakeOpenRouterTTSProvider)
+        assert provider.kwargs == {
+            "api_key": "sk-openrouter-llm",
+            "model": "mistralai/voxtral-mini-tts-2603",
+            "base_url": "https://openrouter.ai/api/v1",
+        }
+    finally:
+        await voice_lifecycle.shutdown_tts_client()
+        settings.llm = original_llm
+        settings.voice = original_voice
+
+
+@pytest.mark.asyncio
+async def test_openrouter_tts_lifecycle_does_not_reuse_non_openrouter_llm_key(
+    monkeypatch,
+) -> None:
+    original_llm = settings.llm
+    original_voice = settings.voice
+    voice_lifecycle._tts_client = None
+    _FakeOpenRouterTTSProvider.instances = []
+    monkeypatch.setattr(
+        "infrastructure.external.voice.openrouter_tts.OpenRouterTTSProvider",
+        _FakeOpenRouterTTSProvider,
+    )
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-flowguide-llm",
+        base_url="https://ai.flowguide.cc/v1",
+        default_model="gpt-5.5",
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="openrouter",
+        tts_api_key=None,
+        tts_base_url="https://openrouter.ai/api/v1",
+        tts_model="mistralai/voxtral-mini-tts-2603",
+    )
+
+    try:
+        await voice_lifecycle.init_tts_client()
+
+        assert voice_lifecycle.get_tts_client() is None
+        assert _FakeOpenRouterTTSProvider.instances == []
+    finally:
+        await voice_lifecycle.shutdown_tts_client()
+        settings.llm = original_llm
+        settings.voice = original_voice

@@ -36,7 +36,7 @@ from application.services.training_studio.scenario_config_service import (
     TrainingScenarioConfigService,
 )
 from application.services.training_studio.session_service import TrainingSessionService
-from core.config import VoiceSettings, settings
+from core.config import LLMSettings, VoiceSettings, settings
 from core.exceptions import register_exception_handlers
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 from domain.training_studio.storybank import StoryBankService
@@ -428,6 +428,37 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_voice_config_reports_openrouter_tts_reusing_openrouter_llm_key() -> None:
+    original_llm = settings.llm
+    original_voice = settings.voice
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-openrouter-reused",
+        base_url="https://openrouter.ai/api/v1",
+        default_model="openai/gpt-4o-mini",
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="openrouter",
+        tts_api_key=None,
+        tts_base_url="https://openrouter.ai/api/v1",
+        tts_model="mistralai/voxtral-mini-tts-2603",
+        stt_provider="whisper",
+        stt_api_key=None,
+        stt_base_url="https://openrouter.ai/api/v1",
+        stt_model="openai/whisper-1",
+    )
+
+    try:
+        dto = training_studio_routes._voice_config_response()
+
+        assert dto.tts_api_key_configured is True
+        assert dto.tts_api_key_preview == "***used"
+        assert dto.stt_api_key_source == "llm"
+    finally:
+        settings.llm = original_llm
+        settings.voice = original_voice
 
 
 @pytest.mark.asyncio
