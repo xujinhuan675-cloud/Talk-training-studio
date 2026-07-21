@@ -17,7 +17,7 @@ interface SegmentedControlProps<Value extends string>
   onValueChange: (value: Value) => void
   options: readonly SegmentedControlOption<Value>[]
   size?: 'sm' | 'md'
-  value: Value
+  value: Value | null
 }
 
 function SegmentedControl<Value extends string>({

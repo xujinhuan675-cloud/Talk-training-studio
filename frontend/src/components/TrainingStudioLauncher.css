@@ -104,18 +104,24 @@
   text-transform: uppercase;
 }
 
-.tsl-preset-strip {
+.tsl-preset-strip.ui-segmented-control {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.tsl-preset-option {
+.tsl-preset-strip .ui-segmented-control-button {
+  min-width: 0;
   min-height: 64px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  align-content: start;
   align-items: stretch;
-  justify-content: center;
+  justify-content: stretch;
   gap: 3px;
   padding: 10px 12px;
   border: 1px solid var(--tsl-border);
@@ -123,31 +129,32 @@
   background: var(--tsl-bg-input);
   color: var(--text-primary);
   cursor: pointer;
+  font: inherit;
   line-height: normal;
   text-align: left;
   white-space: normal;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.tsl-preset-option.ui-button--ghost:hover:not(:disabled) {
+.tsl-preset-strip .ui-segmented-control-button:hover:not(:disabled):not([data-state='on']) {
   border-color: var(--tsl-border-accent);
   background: var(--tsl-primary-soft);
   color: var(--text-primary);
 }
 
-.tsl-preset-option.ui-button--ghost.selected {
+.tsl-preset-strip .ui-segmented-control-button[data-state='on'] {
   border-color: var(--tsl-border-accent);
   background: var(--tsl-primary-soft);
   color: var(--text-primary);
 }
 
-.tsl-preset-option span {
+.tsl-preset-strip .ui-segmented-control-button span {
   font-size: 13px;
   font-weight: 800;
   line-height: 1.2;
 }
 
-.tsl-preset-option small {
+.tsl-preset-strip .ui-segmented-control-button small {
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.35;
@@ -311,7 +318,7 @@
   font-weight: 700;
 }
 
-.tsl-preset-option:disabled,
+.tsl-preset-strip .ui-segmented-control-button:disabled,
 .tsl-reset:disabled,
 .tsl-field .ui-form-control:disabled,
 .tsl-range-input.ui-form-input:disabled {

@@ -20,6 +20,7 @@ import {
 } from '../services/trainingStudio'
 import { Button } from './ui/button'
 import { Field, Input, Select } from './ui/form'
+import { SegmentedControl } from './ui/segmented-control'
 import { useI18n, type TranslationKey } from '../i18n'
 import './TrainingStudioLauncher.css'
 
@@ -268,21 +269,25 @@ export default function TrainingStudioLauncher({
             {activePreset === 'custom' ? t('training.launcher.customStatus') : t('training.launcher.presetsHint')}
           </span>
         </div>
-        <div className="tsl-preset-strip" role="group" aria-label={t('training.launcher.presets')}>
-          {LAUNCHER_PRESETS.map((item) => (
-            <Button
-              key={item.value}
-              className={`tsl-preset-option ${activePreset === item.value ? 'selected' : ''}`}
-              variant="ghost"
-              onClick={() => applyLauncherPreset(item.value)}
-              disabled={disabled}
-              aria-pressed={activePreset === item.value}
-            >
-              <span>{t(item.labelKey)}</span>
-              <small>{t(item.descKey)}</small>
-            </Button>
-          ))}
-        </div>
+        <SegmentedControl
+          ariaLabel={t('training.launcher.presets')}
+          className="tsl-preset-strip"
+          onValueChange={applyLauncherPreset}
+          options={LAUNCHER_PRESETS.map((item) => ({
+            value: item.value,
+            ariaLabel: `${t(item.labelKey)}. ${t(item.descKey)}`,
+            title: t(item.descKey),
+            disabled,
+            label: (
+              <>
+                <span>{t(item.labelKey)}</span>
+                <small>{t(item.descKey)}</small>
+              </>
+            ),
+          }))}
+          size="sm"
+          value={activePreset === 'custom' ? null : activePreset}
+        />
       </div>
 
       <div className="tsl-section">
