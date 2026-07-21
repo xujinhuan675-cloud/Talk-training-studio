@@ -52,6 +52,8 @@ import {
 } from '../utils/scenarioLabels'
 import { APP_ROUTES } from '../appRoutes'
 import { Button } from '../components/ui/button'
+import { Input, Select } from '../components/ui/form'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import './ScenarioTrainingPage.css'
 
 type DifficultyFilter = ScenarioDifficultyFilter
@@ -319,7 +321,7 @@ export default function ScenarioTrainingPage() {
       <section className="scenario-training-toolbar" aria-label={tr('筛选与模式', 'Filters and mode')}>
         <label className="scenario-training-search">
           <Search size={16} />
-          <input
+          <Input
             aria-label={tr('搜索场景', 'Search scenarios')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -329,7 +331,7 @@ export default function ScenarioTrainingPage() {
 
         <label className="scenario-training-select">
           <SlidersHorizontal size={15} />
-          <select
+          <Select
             aria-label={tr('难度筛选', 'Difficulty filter')}
             value={difficulty}
             onChange={(event) => setDifficulty(event.target.value as DifficultyFilter)}
@@ -339,12 +341,12 @@ export default function ScenarioTrainingPage() {
                 {getScenarioDifficultyFilterLabel(option, tr)}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
 
         <label className="scenario-training-select">
           <ClipboardList size={15} />
-          <select
+          <Select
             aria-label={tr('类型筛选', 'Category filter')}
             value={category}
             onChange={(event) => setCategory(event.target.value as CategoryFilter)}
@@ -354,39 +356,33 @@ export default function ScenarioTrainingPage() {
                 {getScenarioCategoryFilterLabel(option, tr)}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
 
-        <div className="scenario-training-mode" role="group" aria-label={tr('训练模式', 'Training mode')}>
-          <span className="scenario-training-mode-label">{tr('形式', 'Channel')}</span>
-          {modeOptions.map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={mode === option}
-              className={mode === option ? 'selected' : ''}
-              onClick={() => setMode(option)}
-            >
-              {getModeLabel(option, t)}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          ariaLabel={tr('训练模式', 'Training mode')}
+          className="scenario-training-mode"
+          label={tr('形式', 'Channel')}
+          value={mode}
+          onValueChange={setMode}
+          options={modeOptions.map((option) => ({
+            label: getModeLabel(option, t),
+            value: option,
+          }))}
+        />
 
-        <div className="scenario-training-mode feedback" role="group" aria-label={tr('反馈模式', 'Feedback mode')}>
-          <span className="scenario-training-mode-label">{tr('练法', 'Practice')}</span>
-          {feedbackModeOptions.map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={feedbackMode === option}
-              className={feedbackMode === option ? 'selected' : ''}
-              onClick={() => setFeedbackMode(option)}
-              title={getFeedbackModeDescription(option, tr)}
-            >
-              {getFeedbackModeLabel(option, tr)}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          ariaLabel={tr('反馈模式', 'Feedback mode')}
+          className="scenario-training-mode feedback"
+          label={tr('练法', 'Practice')}
+          value={feedbackMode}
+          onValueChange={setFeedbackMode}
+          options={feedbackModeOptions.map((option) => ({
+            label: getFeedbackModeLabel(option, tr),
+            title: getFeedbackModeDescription(option, tr),
+            value: option,
+          }))}
+        />
       </section>
 
       {error && (
@@ -446,15 +442,16 @@ export default function ScenarioTrainingPage() {
               )}
 
               <div className="scenario-training-actions">
-                <button
+                <Button
                   type="button"
+                  variant="primary"
                   className="scenario-training-start"
                   onClick={() => void startScenario(scenario)}
                   disabled={startingScenarioId !== null}
                 >
                   {starting ? <Loader2 size={16} className="scenario-training-spin" /> : <Play size={16} />}
                   {starting ? t('common.starting') : t('common.startPractice')}
-                </button>
+                </Button>
               </div>
             </article>
           )

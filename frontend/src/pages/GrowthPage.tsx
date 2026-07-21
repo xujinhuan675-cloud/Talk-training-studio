@@ -27,6 +27,7 @@ import { generateProfileCard, type ProfileCard as ProfileCardData } from '../ser
 import ProfileCard from '../components/ProfileCard'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from '../components/ui/button'
 import { PageHeader, PageShell } from '../components/ui/page'
 import { GROWTH_DIMENSIONS, getGrowthDimensionLabel, growthSkillKey } from '../utils/growthLabels'
 import './GrowthPage.css'
@@ -235,9 +236,9 @@ const GrowthPage: React.FC = () => {
           </div>
           <h2>{tr('暂无评估数据', 'No evaluation data yet')}</h2>
           <p>{tr('完成一次练习并生成评估后，这里会显示总览和趋势。', 'Complete one practice and generate an evaluation to see the overview and trends.')}</p>
-          <button className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
+          <Button variant="primary" className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
             {t('common.startPractice')}
-          </button>
+          </Button>
         </div>
       </PageShell>
     )
@@ -439,7 +440,9 @@ const GrowthPage: React.FC = () => {
         <div className="gp-profile-header">
           <h3 className="gp-profile-title">{tr('沟通力名片', 'Communication Profile Card')}</h3>
           {profileCard && (
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               className="gp-download-btn"
               onClick={handleDownload}
               disabled={downloading}
@@ -450,13 +453,14 @@ const GrowthPage: React.FC = () => {
                 <Download size={14} />
               )}
               {downloading ? t('common.generating') : t('common.downloadImage')}
-            </button>
+            </Button>
           )}
         </div>
 
         {!profileCard ? (
           <div className="gp-profile-placeholder">
-            <button
+            <Button
+              variant="primary"
               className="gp-generate-card-btn"
               onClick={handleGenerateCard}
               disabled={profileCardLoading || overview.total_evaluations < 2}
@@ -474,7 +478,7 @@ const GrowthPage: React.FC = () => {
                 <Share2 size={14} />
               )}
               {profileCardLoading ? t('common.generating') : tr('生成我的名片', 'Generate My Card')}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="gp-profile-card-wrapper">

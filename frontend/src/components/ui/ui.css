@@ -24,7 +24,8 @@
 }
 
 .ui-button:focus-visible,
-.ui-dropdown-item:focus-visible {
+.ui-dropdown-item:focus-visible,
+.ui-segmented-control-button:focus-visible {
   outline: 2px solid var(--green);
   outline-offset: 2px;
 }
@@ -364,6 +365,71 @@
 .ui-badge--violet {
   background: var(--violet-soft);
   color: var(--violet);
+}
+
+.ui-segmented-control {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.ui-segmented-control--sm {
+  min-height: 38px;
+}
+
+.ui-segmented-control-label {
+  flex: 0 0 auto;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ui-segmented-control-button {
+  box-sizing: border-box;
+  min-width: 54px;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.ui-segmented-control--sm .ui-segmented-control-button {
+  min-height: 28px;
+}
+
+.ui-segmented-control-button:hover:not(:disabled),
+.ui-segmented-control-button[data-state='on'] {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.ui-segmented-control-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 :where(.ui-form-field, .ui-form-control) {

@@ -24,6 +24,8 @@ import {
   getScenarioStatusLabel,
 } from '../utils/scenarioLabels'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from '../components/ui/button'
+import { Select } from '../components/ui/form'
 import { PageHeader, PageShell } from '../components/ui/page'
 import './ScenarioLeaderboardPage.css'
 
@@ -133,20 +135,26 @@ export default function ScenarioLeaderboardPage() {
             {isManagementView && visibleAuthUsers.length > 1 && (
               <label className="scenario-leaderboard-select">
                 <span>{tr('成员', 'Member')}</span>
-                <select value={selectedUser?.userId ?? ''} onChange={(event) => setSelectedUserId(event.target.value)}>
+                <Select
+                  aria-label={tr('成员', 'Member')}
+                  value={selectedUser?.userId ?? ''}
+                  onChange={(event) => setSelectedUserId(event.target.value)}
+                >
                   {visibleAuthUsers.map((user) => (
                     <option key={user.userId} value={user.userId}>
                       {user.name} · {user.teamName}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
             )}
-            <Link to={APP_ROUTES.practiceScenarios} className="scenario-leaderboard-link">
-              <ClipboardList size={16} />
-              {tr('场景训练', 'Scenario training')}
-              <ArrowRight size={15} />
-            </Link>
+            <Button asChild variant="secondary" className="scenario-leaderboard-link">
+              <Link to={APP_ROUTES.practiceScenarios}>
+                <ClipboardList size={16} />
+                {tr('场景训练', 'Scenario training')}
+                <ArrowRight size={15} />
+              </Link>
+            </Button>
           </div>
         )}
       />

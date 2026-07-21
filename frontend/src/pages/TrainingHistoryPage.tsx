@@ -47,6 +47,8 @@ import {
   scenarioStatusOptions,
   type ScenarioStatusFilter,
 } from '../utils/scenarioLabels'
+import { Button } from '../components/ui/button'
+import { Input, Select } from '../components/ui/form'
 import './TrainingHistoryPage.css'
 
 type HistoryStatus = ScenarioTrainingStatus
@@ -525,7 +527,8 @@ export default function TrainingHistoryPage() {
       <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>
         <label className="training-history-search">
           <Search size={16} />
-          <input
+          <Input
+            aria-label={tr('搜索训练记录', 'Search training history')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={tr('搜索场景、会话、分类...', 'Search scenario, session, category...')}
@@ -534,7 +537,8 @@ export default function TrainingHistoryPage() {
 
         <label className="training-history-select">
           <FileText size={15} />
-          <select
+          <Select
+            aria-label={tr('场景筛选', 'Scenario filter')}
             value={scenarioFilter}
             onChange={(event) => setScenarioFilter(event.target.value)}
           >
@@ -544,12 +548,13 @@ export default function TrainingHistoryPage() {
                 {option.label}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
 
         <label className="training-history-select">
           <CheckCircle2 size={15} />
-          <select
+          <Select
+            aria-label={tr('状态筛选', 'Status filter')}
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
           >
@@ -558,7 +563,7 @@ export default function TrainingHistoryPage() {
                 {getScenarioStatusFilterLabel(option, tr)}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </section>
 
@@ -570,9 +575,9 @@ export default function TrainingHistoryPage() {
           {query.trim() && <strong>{query.trim()}</strong>}
         </div>
         {hasActiveFilters && (
-          <button type="button" onClick={resetFilters}>
+          <Button type="button" variant="secondary" size="sm" onClick={resetFilters}>
             {tr('清空筛选', 'Clear filters')}
-          </button>
+          </Button>
         )}
       </section>
 
@@ -619,14 +624,16 @@ export default function TrainingHistoryPage() {
             </p>
             <div className="training-history-empty-actions">
               {entries.length === 0 ? (
-                <Link to={APP_ROUTES.practiceScenarios}>
-                  <RotateCcw size={14} />
-                  {tr('回到训练', 'Back to training')}
-                </Link>
+                <Button asChild variant="secondary" size="sm">
+                  <Link to={APP_ROUTES.practiceScenarios}>
+                    <RotateCcw size={14} />
+                    {tr('回到训练', 'Back to training')}
+                  </Link>
+                </Button>
               ) : hasActiveFilters ? (
-                <button type="button" onClick={resetFilters}>
+                <Button type="button" variant="secondary" size="sm" onClick={resetFilters}>
                   {tr('清空筛选', 'Clear filters')}
-                </button>
+                </Button>
               ) : null}
             </div>
           </div>
@@ -707,25 +714,30 @@ export default function TrainingHistoryPage() {
 
               <div className="training-history-actions">
                 {entry.sessionId ? (
-                  <Link className="training-history-review-link" to={APP_ROUTES.reviewSession(entry.sessionId)}>
-                    <FileText size={14} />
-                    {tr('查看结果', 'View result')}
-                  </Link>
+                  <Button asChild variant="secondary" size="sm" className="training-history-review-link">
+                    <Link to={APP_ROUTES.reviewSession(entry.sessionId)}>
+                      <FileText size={14} />
+                      {tr('查看结果', 'View result')}
+                    </Link>
+                  </Button>
                 ) : (
-                  <Link className="training-history-review-link" to={APP_ROUTES.practiceScenarios}>
-                    <RotateCcw size={14} />
-                    {tr('回到训练', 'Back to training')}
-                  </Link>
+                  <Button asChild variant="secondary" size="sm" className="training-history-review-link">
+                    <Link to={APP_ROUTES.practiceScenarios}>
+                      <RotateCcw size={14} />
+                      {tr('回到训练', 'Back to training')}
+                    </Link>
+                  </Button>
                 )}
                 {chatPath && (
-                  <Link
-                    className="training-history-icon-link"
-                    to={chatPath}
-                    title={tr('打开聊天回放', 'Open chat replay')}
-                    aria-label={tr('打开聊天回放', 'Open chat replay')}
-                  >
-                    <ExternalLink size={14} />
-                  </Link>
+                  <Button asChild variant="secondary" size="icon" className="training-history-icon-link">
+                    <Link
+                      to={chatPath}
+                      title={tr('打开聊天回放', 'Open chat replay')}
+                      aria-label={tr('打开聊天回放', 'Open chat replay')}
+                    >
+                      <ExternalLink size={14} />
+                    </Link>
+                  </Button>
                 )}
               </div>
             </article>

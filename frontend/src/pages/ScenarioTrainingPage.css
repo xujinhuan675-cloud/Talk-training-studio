@@ -22,79 +22,34 @@
 }
 
 .scenario-training-search,
-.scenario-training-select,
-.scenario-training-mode {
+.scenario-training-select {
+  position: relative;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.scenario-training-search svg,
+.scenario-training-select svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  z-index: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.scenario-training-search .ui-form-control,
+.scenario-training-select .ui-form-control {
   min-height: 42px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding-left: 38px;
   background: var(--bg-card);
 }
 
-.scenario-training-search,
-.scenario-training-select {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  color: var(--text-secondary);
-}
-
-.scenario-training-search input,
-.scenario-training-select select {
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-}
-
-.scenario-training-search input {
+.scenario-training-mode {
   width: 100%;
 }
 
-.scenario-training-select select {
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.scenario-training-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-}
-
-.scenario-training-mode-label {
-  padding: 0 8px;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.scenario-training-mode button {
-  min-width: 54px;
-  min-height: 32px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.scenario-training-mode button:hover,
-.scenario-training-mode button.selected {
-  border-color: var(--green);
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.scenario-training-mode.feedback button {
+.scenario-training-mode.feedback .ui-segmented-control-button {
   min-width: 72px;
 }
 
@@ -280,32 +235,16 @@
 }
 
 .scenario-training-start {
-  min-height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid var(--green);
   border-radius: 8px;
-  padding: 0 13px;
-  background: var(--green);
-  color: #fff;
-  cursor: pointer;
-  font: inherit;
   font-size: 13px;
-  font-weight: 800;
-  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .scenario-training-start:hover:not(:disabled) {
-  border-color: var(--green-hover);
-  background: var(--green-hover);
   transform: translateY(-1px);
-}
-
-.scenario-training-start:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
 }
 
 .scenario-training-empty {
@@ -351,7 +290,7 @@
     width: 100%;
   }
 
-  .scenario-training-mode button {
+  .scenario-training-mode .ui-segmented-control-button {
     flex: 1;
   }
 

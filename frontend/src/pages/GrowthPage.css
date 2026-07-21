@@ -47,25 +47,6 @@
   font-size: 14px;
 }
 
-.gp-empty-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 24px;
-  background: var(--green);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: opacity var(--transition-normal);
-}
-
-.gp-empty-btn:hover {
-  opacity: 0.9;
-}
-
 /* ---------- 1. Overall Score Header ---------- */
 
 .gp-score-header {
@@ -540,54 +521,6 @@
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
-}
-
-.gp-download-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-sm, 6px);
-  background: var(--green);
-  color: white;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity var(--transition-normal);
-}
-
-.gp-download-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.gp-download-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.gp-generate-card-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--green);
-  color: white;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity var(--transition-normal);
-}
-
-.gp-generate-card-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.gp-generate-card-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .gp-profile-card-wrapper {

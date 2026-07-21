@@ -12,7 +12,6 @@
   margin-right: auto;
 }
 
-.scenario-leaderboard-link,
 .scenario-leaderboard-panel h2,
 .scenario-leaderboard-personal h2,
 .scenario-leaderboard-personal h3 {
@@ -28,44 +27,25 @@
   flex: 0 0 auto;
 }
 
-.scenario-leaderboard-select,
-.scenario-leaderboard-link {
-  min-height: 38px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-card);
-}
-
 .scenario-leaderboard-select {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 11px;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 800;
 }
 
-.scenario-leaderboard-select select {
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
+.scenario-leaderboard-select .ui-form-select {
+  min-width: 220px;
+  min-height: 38px;
+  background: var(--bg-card);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .scenario-leaderboard-link {
-  justify-content: center;
-  padding: 0 12px;
-  color: var(--text-primary);
   font-size: 13px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.scenario-leaderboard-link:hover {
-  border-color: var(--green);
-  color: var(--green);
 }
 
 .scenario-leaderboard-metrics {
@@ -486,7 +466,8 @@
 
   .scenario-leaderboard-actions,
   .scenario-leaderboard-link,
-  .scenario-leaderboard-select {
+  .scenario-leaderboard-select,
+  .scenario-leaderboard-select .ui-form-select {
     width: 100%;
   }
 }
