@@ -20,6 +20,10 @@
   position: relative;
 }
 
+.create-room-dialog {
+  --ui-form-bg-token: var(--bg-elevated);
+}
+
 .dialog::before {
   content: '';
   display: block;
@@ -48,8 +52,17 @@
   font-weight: 600;
 }
 
-.field-label input,
-.field-label select {
+.create-room-dialog .field-label .ui-form-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.create-room-dialog .field-label .ui-form-control {
+  margin-top: 5px;
+}
+
+.field-label input:not(.ui-form-control),
+.field-label select:not(.ui-form-control) {
   display: block;
   width: 100%;
   margin-top: 5px;
@@ -64,8 +77,8 @@
   color: var(--text-primary);
 }
 
-.field-label input:focus,
-.field-label select:focus {
+.field-label input:not(.ui-form-control):focus,
+.field-label select:not(.ui-form-control):focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
@@ -93,6 +106,20 @@
 
 .persona-select-item.selected {
   background: var(--green-soft);
+}
+
+.persona-recommendations {
+  margin-top: 8px;
+}
+
+.persona-recommendations-label {
+  margin-bottom: 4px;
+}
+
+.persona-recommendation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .persona-color {

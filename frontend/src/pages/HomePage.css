@@ -6,7 +6,6 @@
 
 .home-main-stack {
   width: 100%;
-  max-width: 1040px;
 }
 
 .home-workflow-stack {
@@ -36,7 +35,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 6px;
 }
 
 .home-start-copy h2 {
@@ -45,6 +44,15 @@
   font-size: 20px;
   font-weight: 800;
   line-height: 1.2;
+}
+
+.home-start-copy p {
+  max-width: 560px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .home-start-actions {

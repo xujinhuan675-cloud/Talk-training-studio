@@ -179,6 +179,7 @@ export async function createPersona(data: {
   content: string
   organization_id?: number | null
   team_id?: number | null
+  temporary?: boolean
 }): Promise<void> {
   const resp = await fetch(`${API_BASE}/personas`, {
     method: 'POST',

@@ -50,6 +50,7 @@ import {
   type CheatSheet as CheatSheetData,
   type Message as ChatMessage,
 } from '../services/api'
+import { ensureDefaultConversation } from '../services/defaultConversation'
 import {
   completeTrainingSession,
   buildTrainingCompletionBranchMetadata,
@@ -2201,18 +2202,100 @@ function ChatArea() {
 /*  ChatPage — top-level page component                                */
 /* ------------------------------------------------------------------ */
 
+type DefaultRouteState =
+  | { status: 'idle' | 'loading' }
+  | { status: 'error'; message: string }
+
+function DefaultConversationRouteState({
+  state,
+  onCreate,
+}: {
+  state: DefaultRouteState
+  onCreate: () => void
+}) {
+  const { tr } = useI18n()
+  const isLoading = state.status === 'idle' || state.status === 'loading'
+  const isError = state.status === 'error'
+
+  return (
+    <div className="chat-page-empty chat-page-default-state" aria-live="polite">
+      <div className="chat-page-empty-icon">
+        {isLoading ? (
+          <Loader2 size={24} strokeWidth={1.7} className="spin" />
+        ) : (
+          <MessageCircle size={24} strokeWidth={1.7} />
+        )}
+      </div>
+      <h2>
+        {isLoading
+          ? tr('正在准备默认对话...', 'Preparing a default conversation...')
+          : tr('无法准备默认对话', 'Could not prepare a default conversation')}
+      </h2>
+      <p>
+        {isError && state.message
+          ? state.message
+          : tr('如果已有普通会话，会直接打开最近一个；如果没有，会先创建默认角色和默认私聊房间。', 'If a regular room exists, the latest one opens. Otherwise a default persona and private room are created first.')}
+      </p>
+      {!isLoading && (
+        <button
+          type="button"
+          className="chat-page-empty-cta"
+          onClick={onCreate}
+        >
+          <Plus size={16} />
+          {tr('重试默认对话', 'Retry default conversation')}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function ChatPage() {
   const { roomId: roomIdParam } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const { tr } = useI18n()
 
   const roomId = roomIdParam ? Number(roomIdParam) : null
+  const hasRoomIdParam = roomIdParam !== undefined
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [defaultRouteState, setDefaultRouteState] = useState<DefaultRouteState>({ status: 'idle' })
+  const defaultRouteRunIdRef = React.useRef(0)
+  const showDefaultRouteState = !roomId && !hasRoomIdParam
+
+  const openDefaultConversation = React.useCallback(async () => {
+    const runId = defaultRouteRunIdRef.current + 1
+    defaultRouteRunIdRef.current = runId
+    setDefaultRouteState({ status: 'loading' })
+
+    try {
+      const room = await ensureDefaultConversation()
+      if (defaultRouteRunIdRef.current !== runId) return
+      setRefreshKey((k) => k + 1)
+      navigate(APP_ROUTES.conversation(room.id), { replace: true })
+    } catch (error: unknown) {
+      if (defaultRouteRunIdRef.current !== runId) return
+      setDefaultRouteState({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [navigate])
+
+  useEffect(() => {
+    if (hasRoomIdParam) {
+      defaultRouteRunIdRef.current += 1
+      setDefaultRouteState({ status: 'idle' })
+      return
+    }
+
+    void openDefaultConversation()
+
+    return () => {
+      defaultRouteRunIdRef.current += 1
+    }
+  }, [hasRoomIdParam, openDefaultConversation])
 
   return (
-    <div className={`chat-page${roomId ? ' has-room' : ''}`}>
+    <div className={`chat-page${roomId || showDefaultRouteState ? ' has-room' : ''}`}>
       {/* Left column: room list */}
       <div className="chat-page-left">
         <RoomList
@@ -2237,7 +2320,7 @@ export default function ChatPage() {
             onRefresh={() => setRefreshKey((k) => k + 1)}
           />
         </ChatProvider>
-      ) : (
+      ) : hasRoomIdParam ? (
         <div className="chat-page-empty">
           <div className="chat-page-empty-icon">
             <MessageCircle size={32} strokeWidth={1.5} />
@@ -2252,6 +2335,11 @@ export default function ChatPage() {
             {tr('新建对话房间', 'New conversation room')}
           </button>
         </div>
+      ) : (
+        <DefaultConversationRouteState
+          state={defaultRouteState}
+          onCreate={openDefaultConversation}
+        />
       )}
 
       <CreateRoomDialog

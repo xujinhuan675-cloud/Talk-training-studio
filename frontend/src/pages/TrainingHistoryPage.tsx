@@ -134,6 +134,14 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function legacyChatRoomId(value: unknown): string | null {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value > 0 ? String(value) : null
+  }
+  const text = asString(value)
+  return /^[1-9]\d*$/.test(text) ? text : null
+}
+
 function normalizeSessionStatus(status: TrainingSessionStatus): HistoryStatus {
   if (status === 'completed') return 'completed'
   if (status === 'failed') return 'failed'
@@ -642,8 +650,8 @@ export default function TrainingHistoryPage() {
         {!loading && filteredEntries.map((entry) => {
           const scoreClass = gradeKey(entry.score)
           const practicedAt = entry.completedAt || entry.lastPracticedAt || entry.startedAt
-          const roomId = Number(entry.roomId)
-          const chatPath = entry.sessionId && entry.mode && Number.isFinite(roomId) && roomId > 0
+          const roomId = legacyChatRoomId(entry.roomId)
+          const chatPath = entry.sessionId && entry.mode && roomId
             ? buildTrainingModeChatPath(roomId, entry.mode, entry.sessionId)
             : null
           const branchSummary = entry.branchInfo ? historyBranchSummaryText(entry.branchInfo, tr) : ''

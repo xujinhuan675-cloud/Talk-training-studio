@@ -482,6 +482,10 @@
   transform: translateY(-1px);
 }
 
+.chat-page-default-state {
+  display: flex;
+}
+
 /* Battle prep progress bar */
 .chat-page-battle-bar {
   display: flex;
@@ -1708,6 +1712,10 @@
   /* Empty state on mobile */
   .chat-page-empty {
     display: none;
+  }
+
+  .chat-page-default-state {
+    display: flex;
   }
 
   /* Battle bar compact on mobile */

@@ -23,7 +23,6 @@ import {
   type TrainingProfile,
 } from '../services/trainingMode'
 import { useGrowth } from '../hooks/useGrowth'
-import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageSection, PageShell } from '../components/ui/page'
 import { Surface } from '../components/ui/surface'
@@ -217,7 +216,7 @@ const HomePage: React.FC = () => {
   const growthProgress = growthLoading ? 0 : Math.round(levelInfo.progress * 100)
 
   return (
-    <PageShell className="home-page" width="wide">
+    <PageShell className="home-page">
       <PageHeader
         title={t('nav.home')}
         description={tr(
@@ -231,8 +230,13 @@ const HomePage: React.FC = () => {
           <Surface className="home-start-panel" variant="accent" padding="lg">
             <div className="home-start-header">
               <div className="home-start-copy">
-                <Badge tone="success">{tr('主流程', 'Primary flow')}</Badge>
                 <h2>{t('common.startTraining')}</h2>
+                <p>
+                  {tr(
+                    '选择场景或工作台配置开始练习，每次结束后回到复盘和成长追踪。',
+                    'Choose a scenario or studio setup, then return to review and growth after each session.',
+                  )}
+                </p>
               </div>
 
               <Link to={APP_ROUTES.growth} className="home-start-growth" aria-label={t('nav.growth')}>
