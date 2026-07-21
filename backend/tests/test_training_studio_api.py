@@ -9,7 +9,7 @@ from itertools import count
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel, Field
 
@@ -52,9 +52,11 @@ class FakeReport(BaseModel):
 class FakeAnalysisService:
     def __init__(self) -> None:
         self.generated_for: list[int] = []
+        self.generated_scopes: list[object] = []
 
     async def generate_report(self, room_id: int, *, access_scope) -> FakeReport:
         self.generated_for.append(room_id)
+        self.generated_scopes.append(access_scope)
         return FakeReport(id=501, room_id=room_id)
 
 
@@ -62,9 +64,11 @@ class FakeAnalysisReaderService:
     def __init__(self) -> None:
         self.reports: dict[int, FakeReport] = {}
         self.requested_ids: list[int] = []
+        self.requested_scopes: list[object] = []
 
     async def get_report(self, report_id: int, *, room_id: int, access_scope) -> FakeReport | None:
         self.requested_ids.append(report_id)
+        self.requested_scopes.append(access_scope)
         return self.reports.get(report_id)
 
 
@@ -81,6 +85,7 @@ class FakeChatroomService:
         self.created_rooms: list[object] = []
         self.details: dict[int, ChatRoomDetailDTO] = {}
         self.detail_calls: list[tuple[int, int]] = []
+        self.detail_scopes: list[object] = []
 
     async def create_room(self, dto):
         self.created_rooms.append(dto)
@@ -94,6 +99,7 @@ class FakeChatroomService:
         access_scope=None,
     ) -> ChatRoomDetailDTO:
         self.detail_calls.append((room_id, message_limit))
+        self.detail_scopes.append(access_scope)
         return self.details[room_id]
 
 
@@ -519,6 +525,69 @@ def training_session_scope(
         team_id=team_id,
         include_team_scope=include_team_scope,
     )
+
+
+def assert_training_session_legacy_room_scope(
+    scope: object,
+    *,
+    session_id: str,
+    room_id: int,
+    operation: str,
+) -> None:
+    assert getattr(scope, "unrestricted", False) is True
+    assert getattr(scope, "unrestricted_reason", None) == f"training_session:{operation}"
+    assert getattr(scope, "guarded_by_training_session_id", None) == session_id
+    assert getattr(scope, "guarded_room_id", None) == str(room_id)
+
+
+def test_legacy_training_room_scope_requires_current_user_session_access() -> None:
+    session = SimpleNamespace(
+        session_id="session-guarded",
+        user_id="user-cs-001",
+        team_id="team-service",
+        room_id="42",
+    )
+    current_user = training_studio_routes.CurrentUser(
+        user_id="user-sales-001",
+        system_role="staff",
+        team_id="team-revenue",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        training_studio_routes._legacy_room_scope_for_accessible_training_session(
+            session,
+            current_user,
+            room_id=42,
+            operation="unit_guard",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert "outside current user scope" in exc_info.value.detail
+
+
+def test_legacy_training_room_scope_requires_bound_room_id() -> None:
+    session = SimpleNamespace(
+        session_id="session-guarded",
+        user_id="user-sales-001",
+        team_id="team-revenue",
+        room_id="42",
+    )
+    current_user = training_studio_routes.CurrentUser(
+        user_id="user-sales-001",
+        system_role="staff",
+        team_id="team-revenue",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        training_studio_routes._legacy_room_scope_for_accessible_training_session(
+            session,
+            current_user,
+            room_id=43,
+            operation="unit_guard",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert "room_id does not match" in exc_info.value.detail
 
 
 def test_training_guidance_turn_preserves_message_metadata() -> None:
@@ -1097,11 +1166,24 @@ async def test_training_session_complete_and_report(client: AsyncClient, app: Fa
     completed = complete_resp.json()["data"]
     assert completed["status"] == "completed"
     assert completed["report_id"] == "501"
+    assert app.state.analysis_service.generated_for == [42]
+    assert_training_session_legacy_room_scope(
+        app.state.analysis_service.generated_scopes[0],
+        session_id=session_id,
+        room_id=42,
+        operation="generate_report",
+    )
 
     app.state.analysis_reader_service.reports[501] = FakeReport(id=501, room_id=42)
     report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
     assert report_resp.status_code == 200
     assert report_resp.json()["data"]["id"] == 501
+    assert_training_session_legacy_room_scope(
+        app.state.analysis_reader_service.requested_scopes[-1],
+        session_id=session_id,
+        room_id=42,
+        operation="session_report",
+    )
 
 
 @pytest.mark.asyncio
@@ -1128,6 +1210,12 @@ async def test_training_session_complete_with_explicit_report_id_skips_generatio
     assert completed["report_id"] == "777"
     assert app.state.analysis_service.generated_for == []
     assert app.state.growth_service.evaluated == []
+    assert_training_session_legacy_room_scope(
+        app.state.analysis_reader_service.requested_scopes[0],
+        session_id=session_id,
+        room_id=42,
+        operation="explicit_report_lookup",
+    )
 
     report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
     assert report_resp.status_code == 200
@@ -1323,6 +1411,12 @@ async def test_training_session_guidance_reads_bound_room_messages(
     assert data["total_turn_count"] == 2
     assert {"risk", "next_reply"}.issubset(event_types)
     assert app.state.chatroom_service.detail_calls == [(42, 12)]
+    assert_training_session_legacy_room_scope(
+        app.state.chatroom_service.detail_scopes[0],
+        session_id=session_id,
+        room_id=42,
+        operation="guidance_context",
+    )
 
 
 @pytest.mark.asyncio

@@ -400,10 +400,17 @@ def test_llm_registry_resolves_agent_bindings_from_settings_inventory(monkeypatc
     assert "authorization" not in serialized
 
     capability_registry = response.json()["data"]["capability_registry"]
-    assert capability_registry["readiness"]["status"] == "ready"
+    assert capability_registry["readiness"]["status"] == "warning"
     agent_capability = capability_registry["by_kind"]["agent"][0]
-    assert agent_capability["status"] == "ready"
-    assert agent_capability["ready"] is True
+    assert agent_capability["status"] == "warning"
+    assert agent_capability["configured"] is True
+    assert agent_capability["ready"] is False
+    assert agent_capability["metadata"]["descriptor_only"] is True
+    assert agent_capability["metadata"]["runtime_started"] is False
+    assert agent_capability["metadata"]["dispatcher_boundary"] == "no_generic_agent_dispatcher"
+    assert agent_capability["readiness"]["warnings"][0]["code"] == (
+        "AGENT_DESCRIPTOR_ONLY_NO_DISPATCHER"
+    )
     assert agent_capability["metadata"]["tool_ids"] == ["crm.lookup"]
     assert agent_capability["metadata"]["mcp_server_ids"] == ["crm"]
 
@@ -411,7 +418,13 @@ def test_llm_registry_resolves_agent_bindings_from_settings_inventory(monkeypatc
         capability["id"]: capability
         for capability in capability_registry["by_kind"]["tool"]
     }
-    assert tool_capabilities["tool:crm_lookup"]["status"] == "ready"
+    assert tool_capabilities["tool:crm_lookup"]["status"] == "warning"
+    assert tool_capabilities["tool:crm_lookup"]["ready"] is False
+    assert tool_capabilities["tool:crm_lookup"]["metadata"]["descriptor_only"] is True
+    assert tool_capabilities["tool:crm_lookup"]["metadata"]["tool_consumer_gated"] is True
+    assert tool_capabilities["tool:crm_lookup"]["readiness"]["warnings"][0]["code"] == (
+        "TOOL_DESCRIPTOR_ONLY_CONSUMER_GATED"
+    )
     assert tool_capabilities["tool:crm_lookup"]["metadata"]["mcp_server"] == "crm"
     assert tool_capabilities["tool:crm_lookup"]["metadata"]["config"]["metadata"] == {
         "owner": "training"
@@ -419,8 +432,12 @@ def test_llm_registry_resolves_agent_bindings_from_settings_inventory(monkeypatc
 
     mcp_capability = capability_registry["by_kind"]["mcp_server"][0]
     assert mcp_capability["id"] == "mcp_server:crm"
-    assert mcp_capability["status"] == "ready"
+    assert mcp_capability["status"] == "warning"
+    assert mcp_capability["ready"] is False
+    assert mcp_capability["metadata"]["descriptor_only"] is True
     assert mcp_capability["metadata"]["runtime_started"] is False
+    assert mcp_capability["metadata"]["execution_boundary"] == "descriptor_only_no_mcp_runtime"
+    assert mcp_capability["readiness"]["warnings"][0]["code"] == "MCP_DESCRIPTOR_ONLY_NO_RUNTIME"
     assert mcp_capability["metadata"]["config"]["env"] == {"MODE": "test"}
     assert mcp_capability["metadata"]["config"]["headers"] == {"X-Safe": "kept"}
 

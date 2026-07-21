@@ -11,6 +11,7 @@ from application.services.training_studio.training_core import (
     TrainingTurn,
     training_branch_metadata,
     training_core_metadata_for_session,
+    text_conversation_runtime_contract_metadata,
 )
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import Conversation as ConversationEntity
@@ -32,6 +33,25 @@ _CONVERSATION_AUTH_METADATA_KEYS = frozenset(
         "team_id",
         "ownerTeamId",
         "owner_team_id",
+    }
+)
+_CONVERSATION_RUNTIME_OWNED_METADATA_KEYS = frozenset(
+    {
+        "conversationRuntimeContract",
+        "messageBody",
+        "message_body",
+        "branchId",
+        "branch_id",
+        "branchPolicy",
+        "branch_policy",
+        "branchState",
+        "branch_state",
+        "selectedPath",
+        "selected_path",
+        "currentBranchTail",
+        "current_branch_tail",
+        "sourcePath",
+        "source_path",
     }
 )
 
@@ -363,7 +383,8 @@ def _conversation_title_for_session(session: TrainingSession) -> str:
 
 def _conversation_metadata_for_session(session: TrainingSession) -> dict[str, object]:
     return {
-        **_task_metadata_without_auth_scope(session),
+        **_task_metadata_without_adapter_owned_state(session),
+        **text_conversation_runtime_contract_metadata(),
         **_training_conversation_metadata_for_session(
             session,
             branch_id="main",
@@ -372,11 +393,12 @@ def _conversation_metadata_for_session(session: TrainingSession) -> dict[str, ob
     }
 
 
-def _task_metadata_without_auth_scope(session: TrainingSession) -> dict[str, object]:
+def _task_metadata_without_adapter_owned_state(session: TrainingSession) -> dict[str, object]:
     return {
         key: value
         for key, value in dict(session.task_config.metadata or {}).items()
         if key not in _CONVERSATION_AUTH_METADATA_KEYS
+        and key not in _CONVERSATION_RUNTIME_OWNED_METADATA_KEYS
     }
 
 
@@ -388,6 +410,7 @@ def _training_conversation_metadata_for_session(
     selected_message_ids: Sequence[object] | None = None,
 ) -> dict[str, object]:
     extra_metadata = {
+        **text_conversation_runtime_contract_metadata(),
         **training_branch_metadata(
             branch_id=branch_id,
             branch_tail_message_id=branch_tail_message_id,
@@ -466,6 +489,7 @@ def _conversation_metadata_with_branch_state(
 ) -> dict[str, object]:
     return {
         **dict(metadata or {}),
+        **text_conversation_runtime_contract_metadata(),
         **training_branch_metadata(
             branch_id=branch_id,
             branch_tail_message_id=branch_tail_message_id,

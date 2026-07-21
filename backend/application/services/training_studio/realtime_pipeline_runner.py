@@ -65,6 +65,139 @@ _ERROR_TAXONOMY_BY_CATEGORY = {
 }
 
 
+class _RealtimePipelineTelemetry:
+    def __init__(self) -> None:
+        self.total_events = 0
+        self.event_categories: dict[str, int] = {}
+        self.audio_output_events = 0
+        self.audio_output_bytes = 0
+        self.turn_started = 0
+        self.turn_completed = 0
+        self.interruption_events = 0
+        self.silence_events = 0
+        self.provider_error_events = 0
+        self.provider_error_fatal = 0
+        self.provider_error_retryable = 0
+        self.provider_error_categories: dict[str, int] = {}
+        self._active_turn_started_at_ms: dict[str, float] = {}
+        self._recorded_latency_turn_keys: set[str] = set()
+        self._turn_latency_count = 0
+        self._turn_latency_total_ms = 0.0
+        self._turn_latency_min_ms: float | None = None
+        self._turn_latency_max_ms: float | None = None
+
+    def record_event(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        provider_error: RealtimePipelineProviderError | None = None,
+    ) -> None:
+        category = _telemetry_event_category(payload)
+        self.total_events += 1
+        _increment_count(self.event_categories, category)
+
+        if _is_audio_output_event(payload):
+            self.audio_output_events += 1
+            self.audio_output_bytes += _extract_audio_output_bytes(payload)
+
+        if _is_turn_event(payload):
+            self._record_turn_event(payload)
+        else:
+            latency_ms = _extract_turn_latency_ms(payload)
+            if latency_ms is not None:
+                self._record_turn_latency(payload, latency_ms)
+
+        if _is_interruption_event(payload):
+            self.interruption_events += 1
+        if _is_silence_event(payload):
+            self.silence_events += 1
+        if provider_error is not None:
+            self._record_provider_error(provider_error)
+
+    def to_summary(self) -> dict[str, Any]:
+        return {
+            "events": {
+                "total": self.total_events,
+                "byCategory": dict(sorted(self.event_categories.items())),
+            },
+            "audioOutput": {
+                "events": self.audio_output_events,
+                "bytes": self.audio_output_bytes,
+            },
+            "turns": {
+                "started": self.turn_started,
+                "completed": self.turn_completed,
+                "latencyMs": self._latency_summary(),
+            },
+            "interruptions": {"events": self.interruption_events},
+            "silence": {"events": self.silence_events},
+            "providerErrors": {
+                "total": self.provider_error_events,
+                "fatal": self.provider_error_fatal,
+                "retryable": self.provider_error_retryable,
+                "byCategory": dict(sorted(self.provider_error_categories.items())),
+            },
+        }
+
+    def _record_turn_event(self, payload: Mapping[str, Any]) -> None:
+        turn_key = _turn_identity(payload) or "_current"
+        timestamp_ms = _extract_event_timestamp_ms(payload)
+        latency_ms = _extract_turn_latency_ms(payload)
+
+        if _is_turn_started_event(payload):
+            self.turn_started += 1
+            if timestamp_ms is not None:
+                self._active_turn_started_at_ms[turn_key] = timestamp_ms
+
+        if _is_turn_completed_event(payload):
+            self.turn_completed += 1
+            if latency_ms is None and timestamp_ms is not None:
+                started_at_ms = self._active_turn_started_at_ms.pop(turn_key, None)
+                if started_at_ms is not None and timestamp_ms >= started_at_ms:
+                    latency_ms = timestamp_ms - started_at_ms
+
+        if latency_ms is not None:
+            self._record_turn_latency(payload, latency_ms)
+
+    def _record_turn_latency(self, payload: Mapping[str, Any], latency_ms: float) -> None:
+        turn_key = _turn_identity(payload)
+        if turn_key is not None:
+            if turn_key in self._recorded_latency_turn_keys:
+                return
+            self._recorded_latency_turn_keys.add(turn_key)
+
+        self._turn_latency_count += 1
+        self._turn_latency_total_ms += latency_ms
+        self._turn_latency_min_ms = (
+            latency_ms
+            if self._turn_latency_min_ms is None
+            else min(self._turn_latency_min_ms, latency_ms)
+        )
+        self._turn_latency_max_ms = (
+            latency_ms
+            if self._turn_latency_max_ms is None
+            else max(self._turn_latency_max_ms, latency_ms)
+        )
+
+    def _record_provider_error(self, error: RealtimePipelineProviderError) -> None:
+        self.provider_error_events += 1
+        _increment_count(self.provider_error_categories, error.error_category)
+        if error.fatal:
+            self.provider_error_fatal += 1
+        if error.retryable:
+            self.provider_error_retryable += 1
+
+    def _latency_summary(self) -> dict[str, Any]:
+        if self._turn_latency_count == 0:
+            return {"count": 0}
+        return {
+            "count": self._turn_latency_count,
+            "min": _public_millis(self._turn_latency_min_ms or 0.0),
+            "max": _public_millis(self._turn_latency_max_ms or 0.0),
+            "avg": _public_millis(self._turn_latency_total_ms / self._turn_latency_count),
+        }
+
+
 class RealtimePipelineRunnerStateError(ValueError):
     """Raised when a runner command is called before the pipeline is ready."""
 
@@ -182,6 +315,7 @@ class RealtimePipelineSessionRunner:
         self._realtime_session_id: str | None = None
         self._events_task: asyncio.Task[None] | None = None
         self._events_error: BaseException | None = None
+        self._telemetry = _RealtimePipelineTelemetry()
         self._closed = True
 
     @property
@@ -199,6 +333,28 @@ class RealtimePipelineSessionRunner:
     @property
     def events_error(self) -> BaseException | None:
         return self._events_error
+
+    @property
+    def telemetry_summary(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": "realtime.telemetry.summary",
+            "schemaVersion": 1,
+            "source": "realtime_pipeline_runner",
+            **self._telemetry.to_summary(),
+        }
+        if self._config is not None:
+            runtime = normalize_realtime_runtime(self._config.runtime, provider=self._config.provider)
+            payload["provider"] = _safe_telemetry_text(self._config.provider)
+            payload["runtime"] = _safe_telemetry_text(runtime)
+            payload["realtimeRuntime"] = _safe_telemetry_text(runtime)
+        if self._context is not None:
+            payload["trainingSessionId"] = _safe_telemetry_text(
+                self._context.binding.training_session_id
+            )
+            payload["roomId"] = self._context.binding.room_id
+        if self._realtime_session_id is not None:
+            payload["realtimeSessionId"] = _safe_telemetry_text(self._realtime_session_id)
+        return payload
 
     async def start(
         self,
@@ -245,6 +401,7 @@ class RealtimePipelineSessionRunner:
         self._config = config
         self._realtime_session_id = realtime_session_id or str(uuid4())
         self._events_error = None
+        self._telemetry = _RealtimePipelineTelemetry()
         try:
             await self._adapter.start(context, config)
         except Exception as exc:
@@ -306,6 +463,7 @@ class RealtimePipelineSessionRunner:
                         payload,
                         provider=config.provider,
                     )
+                    self._telemetry.record_event(payload, provider_error=provider_error)
                     if not provider_error.fatal:
                         await self._forward_event(
                             _provider_error_event(
@@ -317,6 +475,7 @@ class RealtimePipelineSessionRunner:
                         )
                         continue
                     raise provider_error
+                self._telemetry.record_event(payload)
                 persisted = await self._persist_final_transcript(
                     payload,
                     context,
@@ -419,6 +578,190 @@ def _is_provider_error(payload: Mapping[str, object]) -> bool:
     return event_type in {"error", "pipeline.error", "realtime.error"} or event_type.endswith(
         ".error"
     )
+
+
+def _telemetry_event_category(payload: Mapping[str, Any]) -> str:
+    if _is_provider_error(payload):
+        return "provider_error"
+    if _is_audio_output_event(payload):
+        return "audio_output"
+    if _is_interruption_event(payload):
+        return "interruption"
+    if _is_silence_event(payload):
+        return "silence"
+    if _is_turn_event(payload):
+        return "turn"
+    if _is_transcript_event(payload):
+        return "transcript"
+    return "other"
+
+
+def _is_audio_output_event(payload: Mapping[str, Any]) -> bool:
+    event_type = _event_type(payload)
+    return event_type == "audio.output" or event_type.endswith(".audio.output")
+
+
+def _is_turn_event(payload: Mapping[str, Any]) -> bool:
+    event_type = _event_type(payload)
+    if "turn" in event_type:
+        return True
+    if _extract_realtime_metrics(payload):
+        return True
+    signal = _public_text_field(payload, ("signal",))
+    return signal is not None and "turn" in signal.lower()
+
+
+def _is_turn_started_event(payload: Mapping[str, Any]) -> bool:
+    event_type = _event_type(payload)
+    return "turn" in event_type and (
+        event_type.endswith(".started")
+        or event_type.endswith("_started")
+        or event_type.endswith(".start")
+        or event_type.endswith("_start")
+    )
+
+
+def _is_turn_completed_event(payload: Mapping[str, Any]) -> bool:
+    event_type = _event_type(payload)
+    return "turn" in event_type and any(
+        event_type.endswith(suffix)
+        for suffix in (
+            ".stopped",
+            "_stopped",
+            ".completed",
+            "_completed",
+            ".complete",
+            "_complete",
+            ".ended",
+            "_ended",
+            ".done",
+            "_done",
+        )
+    )
+
+
+def _is_interruption_event(payload: Mapping[str, Any]) -> bool:
+    event_type = _event_type(payload)
+    return any(token in event_type for token in ("interrupt", "interrupted", "interruption"))
+
+
+def _is_silence_event(payload: Mapping[str, Any]) -> bool:
+    event_type = _event_type(payload)
+    signal = _public_text_field(payload, ("signal",))
+    return "silence" in event_type or (signal is not None and "silence" in signal.lower())
+
+
+def _extract_audio_output_bytes(payload: Mapping[str, Any]) -> int:
+    value = _numeric_telemetry_value(
+        payload,
+        ("bytes", "byteLength", "byte_length", "audioBytes", "audio_bytes"),
+    )
+    if value is None:
+        return 0
+    return max(0, int(value))
+
+
+def _extract_turn_latency_ms(payload: Mapping[str, Any]) -> float | None:
+    return _numeric_telemetry_value(
+        payload,
+        ("turnLatencyMs", "turn_latency_ms", "latencyMs", "latency_ms"),
+    )
+
+
+def _extract_event_timestamp_ms(payload: Mapping[str, Any]) -> float | None:
+    milliseconds = _numeric_telemetry_value(
+        payload,
+        ("timestampMs", "timestamp_ms", "timeMs", "time_ms", "createdAtMs", "created_at_ms"),
+    )
+    if milliseconds is not None:
+        return milliseconds
+    seconds = _numeric_telemetry_value(payload, ("timestampSeconds", "timestamp_seconds", "timestamp"))
+    if seconds is None:
+        return None
+    return seconds * 1000
+
+
+def _turn_identity(payload: Mapping[str, Any]) -> str | None:
+    for item in _iter_telemetry_mappings(payload):
+        for key in ("turnId", "turn_id", "turnSequence", "turn_sequence"):
+            value = item.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, int | float):
+                return str(value)
+    return None
+
+
+def _extract_realtime_metrics(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    for item in _iter_telemetry_mappings(payload):
+        value = item.get("realtimeMetrics")
+        if isinstance(value, Mapping):
+            return value
+    return None
+
+
+def _numeric_telemetry_value(payload: Mapping[str, Any], keys: Sequence[str]) -> float | None:
+    for item in _iter_telemetry_mappings(payload):
+        for key in keys:
+            value = _coerce_non_negative_float(item.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _coerce_non_negative_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value) if value >= 0 else None
+    if isinstance(value, str) and value.strip():
+        with suppress(ValueError):
+            parsed = float(value.strip())
+            return parsed if parsed >= 0 else None
+    return None
+
+
+def _public_text_field(payload: Mapping[str, Any], keys: Sequence[str]) -> str | None:
+    for item in _iter_telemetry_mappings(payload):
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _iter_telemetry_mappings(payload: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
+    items: list[Mapping[str, Any]] = [payload]
+    nested_payload = payload.get("payload")
+    if isinstance(nested_payload, Mapping):
+        items.append(nested_payload)
+    for item in tuple(items):
+        metadata = item.get("metadata")
+        if isinstance(metadata, Mapping):
+            items.append(metadata)
+            metrics = metadata.get("realtimeMetrics")
+            if isinstance(metrics, Mapping):
+                items.append(metrics)
+    return items
+
+
+def _event_type(payload: Mapping[str, Any]) -> str:
+    return str(payload.get("type") or "").lower()
+
+
+def _increment_count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def _public_millis(value: float) -> int | float:
+    rounded = round(value, 3)
+    return int(rounded) if rounded.is_integer() else rounded
+
+
+def _safe_telemetry_text(value: object) -> str:
+    return redact_realtime_secret_text(str(value))
 
 
 def _provider_error_event(

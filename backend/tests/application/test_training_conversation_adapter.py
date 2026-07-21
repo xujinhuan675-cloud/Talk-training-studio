@@ -16,6 +16,7 @@ from application.services.training_studio.training_core import (
     ConversationRef,
     TrainingCoreOrchestrator,
     TrainingTurn,
+    text_conversation_runtime_contract_metadata,
 )
 from domain.conversation.entity import Conversation as ConversationEntity
 from domain.conversation.entity import Message as ConversationMessage
@@ -360,6 +361,12 @@ def _training_semantics(metadata: dict[str, object]) -> dict[str, object]:
     return {key: metadata[key] for key in keys}
 
 
+def _text_runtime_contract(metadata: dict[str, object]) -> dict[str, object]:
+    contract = metadata["conversationRuntimeContract"]
+    assert isinstance(contract, dict)
+    return contract
+
+
 @pytest.mark.asyncio
 async def test_stakeholder_room_adapter_binds_training_core_to_current_room_runtime() -> None:
     state = _State()
@@ -478,6 +485,9 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
     assert state.conversations[1].title == "Renewal practice"
     assert state.conversations[1].model == "gpt-training"
     assert state.conversations[1].metadata["runtime"] == "conversation_message_tree"
+    assert _text_runtime_contract(state.conversations[1].metadata) == (
+        text_conversation_runtime_contract_metadata()["conversationRuntimeContract"]
+    )
     assert state.conversations[1].metadata["trainingSessionId"] == "training-text-1"
     assert state.conversations[1].metadata["personaIds"] == ["customer-1"]
     assert state.conversations[1].metadata["scenarioId"] == 9
@@ -506,6 +516,9 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
         "messageId": state.messages[1].public_id,
     }
     assert started.conversation.metadata["runtime"] == "conversation_message_tree"
+    assert _text_runtime_contract(started.conversation.metadata)["sourceOfTruth"] == (
+        "conversation_runtime_adapter"
+    )
     assert started.conversation.metadata["personaIds"] == ["customer-1"]
     assert started.conversation.metadata["branchId"] == "main"
     assert started.conversation.metadata["selectedPath"]["tailMessageId"] is None
@@ -518,6 +531,12 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
     assert state.messages[1].parent_message_id == state.messages[0].public_id
     assert second_ref.provider == "talkwise-conversation"
     assert second_ref.branch_tail_message_id == state.messages[1].public_id
+    assert _text_runtime_contract(second_ref.metadata)["runtimeOwns"] == [
+        "message_body",
+        "branch_state",
+        "selected_path",
+        "source_path",
+    ]
     assert second_ref.metadata["selectedPath"]["purpose"] == "training_replay_context"
     assert second_ref.metadata["selectedPath"]["affectsScoring"] is False
     assert second_ref.metadata["currentBranchTail"]["messageId"] == state.messages[1].public_id
@@ -658,9 +677,22 @@ async def test_conversation_adapter_model_selection_metadata_cannot_shadow_train
             "growthReport": {"report_id": "generic-chat-growth"},
             "liveGuidance": {"enabled": False},
             "branchId": "generic-chat-branch",
+            "branch_id": "generic-chat-branch-snake",
             "branchPolicy": {"owner": "generic-chat"},
+            "branch_policy": {"owner": "generic-chat-snake"},
+            "branchState": {"branchId": "generic-chat-branch"},
+            "branch_state": {"branch_id": "generic-chat-branch-snake"},
             "selectedPath": {"branchId": "generic-chat-branch", "affectsScoring": True},
+            "selected_path": {"branch_id": "generic-chat-branch-snake"},
             "currentBranchTail": {"branchId": "generic-chat-branch", "messageId": "shadow"},
+            "current_branch_tail": {
+                "branch_id": "generic-chat-branch-snake",
+                "message_id": "shadow-snake",
+            },
+            "sourcePath": ["generic-source-path"],
+            "source_path": ["generic-source-path-snake"],
+            "messageBody": "This body belongs to the runtime.",
+            "message_body": "This snake-case body belongs to the runtime.",
             "provider": "openai",
             "model": "gpt-selected",
             "model_registry": {"default": "openai"},
@@ -698,6 +730,20 @@ async def test_conversation_adapter_model_selection_metadata_cannot_shadow_train
     assert started.conversation.metadata["liveGuidance"] == {"enabled": True}
     assert started.conversation.metadata["branchId"] == "main"
     assert started.conversation.metadata["branchPolicy"]["owner"] == "training_core"
+    for runtime_owned_key in (
+        "branch_id",
+        "branch_policy",
+        "branchState",
+        "branch_state",
+        "selected_path",
+        "current_branch_tail",
+        "sourcePath",
+        "source_path",
+        "messageBody",
+        "message_body",
+    ):
+        assert runtime_owned_key not in state.conversations[1].metadata
+        assert runtime_owned_key not in started.conversation.metadata
 
 
 @pytest.mark.asyncio

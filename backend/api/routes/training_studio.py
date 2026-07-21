@@ -74,7 +74,8 @@ from application.services.stakeholder.analysis_service import AnalysisReaderServ
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.dto import CreateChatRoomDTO, MessageDTO
 from application.services.stakeholder.room_access_policy import (
-    unrestricted_stakeholder_room_scope,
+    StakeholderRoomAccessScope,
+    legacy_training_session_room_scope,
 )
 from application.services.stakeholder.sse import room_event_bus
 from application.services.conversation_service import ConversationApplicationService
@@ -139,7 +140,10 @@ from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
 from domain.training_studio.catalog import ScenarioCategory
 from domain.training_studio.session import TrainingSessionStatus
-from domain.training_studio.session_repository import TrainingSessionAccessScope
+from domain.training_studio.session_repository import (
+    TrainingSessionAccessScope,
+    training_session_matches_access_scope,
+)
 from domain.training_studio.storybank import JsonFileStoryBankStore, StoryBankService
 from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
 from infrastructure.external.pipecat.realtime_pipeline import (
@@ -757,11 +761,39 @@ async def _require_accessible_training_session(
         raise _not_found_if_missing(exc) from exc
 
 
+def _legacy_room_scope_for_accessible_training_session(
+    session,
+    current_user: CurrentUser,
+    *,
+    room_id: int,
+    operation: str,
+) -> StakeholderRoomAccessScope:
+    """Name the legacy room escape hatch and bind it back to session ACL."""
+
+    session_scope = _training_session_access_scope_for_current_user(current_user)
+    if not training_session_matches_access_scope(session, session_scope):
+        raise _session_access_denied(
+            PermissionError("Training session is outside current user scope")
+        )
+    session_room_id = _stakeholder_room_id_for_training_session(session)
+    if room_id != session_room_id:
+        raise HTTPException(
+            status_code=403,
+            detail="room_id does not match the accessible training session",
+        )
+    return legacy_training_session_room_scope(
+        training_session_id=getattr(session, "session_id", None),
+        room_id=session_room_id,
+        operation=operation,
+    )
+
+
 async def _require_report_id_for_training_session(
     report_id: str,
     *,
     session,
     reader_svc: AnalysisReaderService,
+    current_user: CurrentUser,
 ) -> str:
     try:
         report_lookup_id = int(report_id)
@@ -774,7 +806,12 @@ async def _require_report_id_for_training_session(
     report = await reader_svc.get_report(
         report_lookup_id,
         room_id=room_lookup_id,
-        access_scope=unrestricted_stakeholder_room_scope(),
+        access_scope=_legacy_room_scope_for_accessible_training_session(
+            session,
+            current_user,
+            room_id=room_lookup_id,
+            operation="explicit_report_lookup",
+        ),
     )
     if report is None or str(report.room_id) != str(room_lookup_id):
         raise HTTPException(status_code=404, detail="Training session report not found")
@@ -1114,7 +1151,12 @@ async def _generate_training_guidance(
         detail = await chatroom_svc.get_room_detail(
             room_id,
             message_limit=body.message_limit,
-            access_scope=unrestricted_stakeholder_room_scope(),
+            access_scope=_legacy_room_scope_for_accessible_training_session(
+                session,
+                current_user,
+                room_id=room_id,
+                operation="guidance_context",
+            ),
         )
         recent_turns = [
             _message_to_guidance_turn(message)
@@ -1863,6 +1905,7 @@ async def _material_review_report_context(
     session,
     *,
     reader_svc: AnalysisReaderService,
+    current_user: CurrentUser,
 ) -> MaterialReviewReportContext:
     if not session.report_id:
         return MaterialReviewReportContext()
@@ -1878,7 +1921,12 @@ async def _material_review_report_context(
         report = await reader_svc.get_report(
             report_lookup_id,
             room_id=room_lookup_id,
-            access_scope=unrestricted_stakeholder_room_scope(),
+            access_scope=_legacy_room_scope_for_accessible_training_session(
+                session,
+                current_user,
+                room_id=room_lookup_id,
+                operation="material_review_report_context",
+            ),
         )
         if report is None or str(report.room_id) != str(room_lookup_id):
             return MaterialReviewReportContext()
@@ -1900,6 +1948,7 @@ async def _material_review_replay_context(
     session,
     *,
     chatroom_svc: ChatRoomApplicationService,
+    current_user: CurrentUser,
 ) -> MaterialReviewReplayContext:
     try:
         room_id = int(session.room_id) if session.room_id is not None else None
@@ -1913,7 +1962,12 @@ async def _material_review_replay_context(
         detail = await chatroom_svc.get_room_detail(
             room_id,
             message_limit=replay_limit,
-            access_scope=unrestricted_stakeholder_room_scope(),
+            access_scope=_legacy_room_scope_for_accessible_training_session(
+                session,
+                current_user,
+                room_id=room_id,
+                operation="material_review_replay_context",
+            ),
         )
         if not _material_review_room_matches_session(detail, session):
             return MaterialReviewReplayContext(turns=[])
@@ -2163,7 +2217,12 @@ async def complete_training_session(
         try:
             report = await analysis_svc.generate_report(
                 room_id,
-                access_scope=unrestricted_stakeholder_room_scope(),
+                access_scope=_legacy_room_scope_for_accessible_training_session(
+                    session,
+                    current_user,
+                    room_id=room_id,
+                    operation="generate_report",
+                ),
             )
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -2174,6 +2233,7 @@ async def complete_training_session(
             report_id,
             session=session,
             reader_svc=reader_svc,
+            current_user=current_user,
         )
 
     score_id = str(body.score_id).strip() if body.score_id is not None else None
@@ -2244,7 +2304,12 @@ async def get_training_session_report(
     report = await reader_svc.get_report(
         report_lookup_id,
         room_id=room_lookup_id,
-        access_scope=unrestricted_stakeholder_room_scope(),
+        access_scope=_legacy_room_scope_for_accessible_training_session(
+            session,
+            current_user,
+            room_id=room_lookup_id,
+            operation="session_report",
+        ),
     )
     if report is None or str(report.room_id) != str(room_lookup_id):
         raise HTTPException(status_code=404, detail="Training session report not found")
@@ -2510,8 +2575,16 @@ async def create_review_assistant_material_review(
         raise HTTPException(status_code=422, detail=exc.message) from exc
 
     report_context, replay_context = await asyncio.gather(
-        _material_review_report_context(session, reader_svc=reader_svc),
-        _material_review_replay_context(session, chatroom_svc=chatroom_svc),
+        _material_review_report_context(
+            session,
+            reader_svc=reader_svc,
+            current_user=current_user,
+        ),
+        _material_review_replay_context(
+            session,
+            chatroom_svc=chatroom_svc,
+            current_user=current_user,
+        ),
     )
     review = await TrainingMaterialReviewService().build_review_async(
         session=session,

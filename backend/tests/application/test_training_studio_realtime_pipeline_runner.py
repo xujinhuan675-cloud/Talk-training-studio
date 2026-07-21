@@ -293,6 +293,119 @@ async def test_runner_forwards_non_transcript_adapter_events_to_event_sink():
 
 
 @pytest.mark.asyncio
+async def test_runner_collects_provider_neutral_telemetry_summary_for_observable_events():
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, _sink = await _started_runner(event_sink=event_sink)
+
+    await adapter.emit({"type": "user_turn.started", "payload": {"signal": "user_turn"}})
+    await adapter.emit(
+        {
+            "type": "user_turn.stopped",
+            "payload": {"signal": "vad", "silenceSeconds": 0.8},
+        }
+    )
+    await adapter.emit(
+        {
+            "type": "audio.output",
+            "audio": "base64-pcm-should-not-be-in-summary",
+            "bytes": 4,
+            "payload": {
+                "bytes": 4,
+                "metadata": {
+                    "realtimeMetrics": {
+                        "schemaVersion": 1,
+                        "turnSequence": 1,
+                        "latencyEndEvent": "audio.output",
+                        "turnLatencyMs": 150,
+                    }
+                },
+            },
+        }
+    )
+    await adapter.emit({"type": "interrupted", "metadata": {"reason": "barge_in"}})
+    await adapter.emit({"type": "silence_timeout", "payload": {"timeoutSeconds": 6.5}})
+    await event_sink.wait_for_events(5)
+
+    summary = runner.telemetry_summary
+    assert summary["type"] == "realtime.telemetry.summary"
+    assert summary["schemaVersion"] == 1
+    assert summary["source"] == "realtime_pipeline_runner"
+    assert summary["provider"] == "pipecat"
+    assert summary["runtime"] == REALTIME_RUNTIME_PIPECAT
+    assert summary["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
+    assert summary["trainingSessionId"] == "training-1"
+    assert summary["roomId"] == 42
+    assert summary["realtimeSessionId"] == "rt-1"
+    assert summary["events"] == {
+        "total": 5,
+        "byCategory": {
+            "audio_output": 1,
+            "interruption": 1,
+            "silence": 1,
+            "turn": 2,
+        },
+    }
+    assert summary["audioOutput"] == {"events": 1, "bytes": 4}
+    assert summary["turns"] == {
+        "started": 1,
+        "completed": 1,
+        "latencyMs": {"count": 1, "min": 150, "max": 150, "avg": 150},
+    }
+    assert summary["interruptions"] == {"events": 1}
+    assert summary["silence"] == {"events": 1}
+    assert summary["providerErrors"] == {
+        "total": 0,
+        "fatal": 0,
+        "retryable": 0,
+        "byCategory": {},
+    }
+    assert "base64-pcm-should-not-be-in-summary" not in json.dumps(summary)
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_collects_secret_safe_provider_error_telemetry_summary():
+    runner, adapter, _sink = await _started_runner()
+
+    await adapter.emit(
+        {
+            "type": "pipeline.error",
+            "status": 401,
+            "error": {
+                "message": "invalid api key sk-secret-should-not-appear",
+                "code": "unauthorized",
+            },
+            "metadata": {
+                "apiKey": "sk-secret-should-not-appear",
+                "Authorization": "Bearer secret-should-not-appear",
+            },
+        }
+    )
+
+    async def _wait_for_error() -> None:
+        while runner.events_error is None:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_wait_for_error(), timeout=1)
+
+    summary = runner.telemetry_summary
+    assert summary["events"] == {"total": 1, "byCategory": {"provider_error": 1}}
+    assert summary["providerErrors"] == {
+        "total": 1,
+        "fatal": 1,
+        "retryable": 0,
+        "byCategory": {"authentication": 1},
+    }
+    serialized = json.dumps(summary)
+    assert "secret-should-not-appear" not in serialized
+    assert "apiKey" not in serialized
+    assert "Authorization" not in serialized
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_runner_does_not_forward_non_final_transcript_events_to_event_sink():
     event_sink = FakeRealtimeEventSink()
     runner, adapter, sink = await _started_runner(event_sink=event_sink)

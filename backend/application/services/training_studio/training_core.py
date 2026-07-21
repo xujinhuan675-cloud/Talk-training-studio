@@ -24,6 +24,8 @@ from application.services.training_studio.session_service import (
 
 _DEFAULT_TRAINING_BRANCH_ID = "main"
 _TRAINING_REPLAY_CONTEXT = "training_replay_context"
+_TEXT_CONVERSATION_RUNTIME_CONTRACT_MARKER = "text_conversation_runtime_source_of_truth.v1"
+_TEXT_CONVERSATION_RUNTIME_CONTRACT_VERSION = 1
 _TRAINING_SEMANTIC_EXTRA_RESERVED_KEYS = {
     "runtime",
     "trainingSessionId",
@@ -49,7 +51,11 @@ _TRAINING_SEMANTIC_EXTRA_RESERVED_KEYS = {
 
 @dataclass(frozen=True)
 class ConversationRef:
-    """Stable reference to whichever runtime owns the visible conversation."""
+    """Stable reference to whichever runtime owns the visible conversation.
+
+    TrainingCore stores this reference and metadata only. Message bodies,
+    branch state, selected paths, and source paths stay behind the adapter.
+    """
 
     provider: str
     conversation_id: str
@@ -151,6 +157,27 @@ def training_core_metadata_for_session(
         if key not in metadata and key not in _TRAINING_SEMANTIC_EXTRA_RESERVED_KEYS:
             metadata[key] = _copy_metadata_value(value)
     return {key: value for key, value in metadata.items() if _metadata_value_present(value)}
+
+
+def text_conversation_runtime_contract_metadata() -> dict[str, object]:
+    """Mark text runtime state as adapter-owned and future schema-adapter-replaceable."""
+
+    return {
+        "conversationRuntimeContract": {
+            "marker": _TEXT_CONVERSATION_RUNTIME_CONTRACT_MARKER,
+            "version": _TEXT_CONVERSATION_RUNTIME_CONTRACT_VERSION,
+            "channel": "text",
+            "sourceOfTruth": "conversation_runtime_adapter",
+            "trainingCoreStores": ["conversation_ref", "metadata"],
+            "runtimeOwns": [
+                "message_body",
+                "branch_state",
+                "selected_path",
+                "source_path",
+            ],
+            "replacementTarget": "external_chat_schema_adapter",
+        }
+    }
 
 
 def training_branch_metadata(

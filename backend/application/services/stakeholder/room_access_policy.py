@@ -27,6 +27,9 @@ class StakeholderRoomAccessScope:
     allowed_team_ids: frozenset[str] = field(default_factory=frozenset)
     allowed_organization_ids: frozenset[str] = field(default_factory=frozenset)
     unrestricted: bool = False
+    unrestricted_reason: str | None = None
+    guarded_by_training_session_id: str | None = None
+    guarded_room_id: str | None = None
 
 
 class StakeholderRoomAction(str, Enum):
@@ -44,6 +47,51 @@ class ResolvedStakeholderRoom:
 
 def unrestricted_stakeholder_room_scope() -> StakeholderRoomAccessScope:
     return StakeholderRoomAccessScope(unrestricted=True)
+
+
+def legacy_training_session_room_scope(
+    *,
+    training_session_id: object | None,
+    room_id: object | None,
+    operation: str,
+) -> StakeholderRoomAccessScope:
+    """Explicit legacy room scope after TrainingSessionAccessScope was enforced.
+
+    Stakeholder rooms do not yet carry owner/team fields, so Training Studio
+    can only read them through an unrestricted legacy scope after the caller's
+    training session access and bound room id have both been checked.
+    """
+
+    session_id_text = _normalized_scope_value(training_session_id)
+    room_id_text = _normalized_scope_value(room_id)
+    operation_text = _normalized_scope_value(operation)
+    if session_id_text is None:
+        raise DomainValidationException(
+            "training_session_id is required for legacy training room access",
+            field="training_session_id",
+            details={"operation": operation_text or "training_session_room"},
+            message_key="stakeholder_room.training_session_id.required",
+        )
+    if room_id_text is None:
+        raise DomainValidationException(
+            "room_id is required for legacy training room access",
+            field="room_id",
+            details={"operation": operation_text or "training_session_room"},
+            message_key="stakeholder_room.room_id.required",
+        )
+    if operation_text is None:
+        raise DomainValidationException(
+            "operation is required for legacy training room access",
+            field="operation",
+            details={"training_session_id": session_id_text, "room_id": room_id_text},
+            message_key="stakeholder_room.operation.required",
+        )
+    return StakeholderRoomAccessScope(
+        unrestricted=True,
+        unrestricted_reason=f"training_session:{operation_text}",
+        guarded_by_training_session_id=session_id_text,
+        guarded_room_id=room_id_text,
+    )
 
 
 def require_stakeholder_room_access_scope(

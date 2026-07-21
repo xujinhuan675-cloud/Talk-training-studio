@@ -45,12 +45,12 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | 维度 | 当前完成度 | 判断 |
 |:---|:---:|:---|
 | 产品目标对齐 | 85% | `AGENTS.md` 已写入成熟底座优先规则，长期路线已明确。 |
-| TalkWise 训练语义 | 70% | TrainingCore、session、scenario、report、live guidance 已有，训练闭环基本清晰，但还没有完全统一文本/语音/视频。 |
-| 文本分支体验 | 70% | 已有 message tree action、edit/retry/fork、path/tail/fork point UI，离 LibreChat 的长期分支稳定性还有一点距离。 |
+| TalkWise 训练语义 | 75% | TrainingCore、session、scenario、report、live guidance 已有；文本 runtime contract 已明确 TrainingCore 只保存 conversation ref/metadata，正文和路径状态由 adapter/runtime 持有。 |
+| 文本分支体验 | 75-80% | 已有 message tree action、edit/retry/fork、path/tail/fork point UI；文本 source-of-truth 已先定为 adapter-owned 过渡契约，离完整 LibreChat-style schema 迁移仍有距离。 |
 | 训练复盘/历史 | 70% | 已展示 session/report/progress 来源、当前路径、最后回复和空状态，数据契约仍需继续收紧。 |
-| Pipecat/realtime | 65-70% | 已切到 Pipecat-only runtime，独立 OpenAI realtime 路径已移除；仍缺真实浏览器音频链路验收和更完整 turn/interruption 事件。 |
-| 认证/隔离 | 60% | conversation / session / report / guidance / realtime 的边界开始统一收口，但完整 ACL 形状还未迁完。 |
-| MCP/Agent/Tool | 15% | 当前项目没有系统性 Agent/MCP 基底，应从 LibreChat 迁移或适配。 |
+| Pipecat/realtime | 70-75% | 已切到 Pipecat-only runtime，独立 OpenAI realtime 路径已移除；runner 已有 provider-neutral telemetry summary，但仍缺真实浏览器音频链路验收和聚合 tracing。 |
+| 认证/隔离 | 75-80% | conversation / session / report / guidance / realtime 的边界开始统一收口；legacy stakeholder room escape hatch 已绑定 TrainingSession ACL 和 room_id。完整真实 auth/ACL 形状还未迁完。 |
+| MCP/Agent/Tool | 45-50% | capability registry 已区分 descriptor-only 与真实 dispatcher/runtime：Agent/Tool/MCP descriptor 可 configured，但 ready=false 并带 warning；仍未实现通用 dispatcher。 |
 | 成熟部署/运维 | 25% | 本地开发和测试可用，管理面板、权限覆盖、token/usage、审计不足。 |
 
 ## 成熟底座迁移进度仪表盘
@@ -72,11 +72,11 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 
 | 当前缺口 | 为什么现在做 | 交付边界 |
 |:---|:---|:---|
-| Pipecat realtime 本机链路验收 | `readyForCall=true` 只能证明依赖和配置具备，还需要可重复 smoke/事件契约，才能判断真实语音链路是否值得进入浏览器 E2E。 | 已把 smoke contract 扩展为 `productionReadiness`、`contractCoverage`、事件顺序和错误分类；`readyForCall=true` 不再等同 production ready。真实浏览器麦克风权限验证仍单独排期。 |
-| Text runtime / message-tree UI 验收 | 文字训练复盘依赖 selected path；edit/retry/fork/reload/search 不能污染评分和成长。 | 服务层 edit/retry/fork 已补测试矩阵，继续过滤 scoring/growth/report/completion metadata，只保留 replay/review context；真实 UI reload/fork 操作 E2E 单独排期。 |
-| Auth / ACL / resource scope 遗漏点 | 训练 session、report、guidance、file/material、agent config 不能跨用户/团队泄漏。 | conversation/chat 写路径、agent config、file asset repository 普通访问都要求显式 `OwnedMetadataScope`；file asset 的 full-access 读取改为显式 maintenance helper。下一步是更完整真实 auth 和 legacy stakeholder scope 审计。 |
+| Pipecat realtime 本机链路验收 | `readyForCall=true` 只能证明依赖和配置具备，还需要可重复 smoke/事件契约，才能判断真实语音链路是否值得进入浏览器 E2E。 | 已把 smoke contract 扩展为 `productionReadiness`、`contractCoverage`、事件顺序和错误分类；runner 新增 secret-safe telemetry summary，覆盖 `audio.output`、turn latency、interruption/silence、provider error taxonomy。真实浏览器麦克风权限验证仍单独排期。 |
+| Text runtime / message-tree UI 验收 | 文字训练复盘依赖 selected path；edit/retry/fork/reload/search 不能污染评分和成长。 | 服务层 edit/retry/fork 已补测试矩阵，继续过滤 scoring/growth/report/completion metadata；本轮新增 text conversation runtime contract，明确正文、branch state、selected path、source path 由 adapter/runtime 持有。真实 UI reload/fork 操作 E2E 单独排期。 |
+| Auth / ACL / resource scope 遗漏点 | 训练 session、report、guidance、file/material、agent config 不能跨用户/团队泄漏。 | conversation/chat 写路径、agent config、file asset repository 普通访问都要求显式 `OwnedMetadataScope`；legacy stakeholder room 读取已改为 `legacy_training_session_room_scope`，先验证当前用户可访问 session，再验证 bound `room_id`。下一步是真实 auth/ACL 迁移和 admin override 产品语义。 |
 | Files / training material ownership | 素材进入 persona builder、复盘或 tool consumer 前必须先有权限边界。 | file asset 服务层和 repository 层都已收紧 scope；`key_exists_outside_metadata_scope` 也拒绝 `metadata_scope=None`。继续不先做通用 RAG。 |
-| 训练相关窄 tool consumer | MCP/Agent 只有 inventory 还不能产生训练价值，但不能先做完整 marketplace/dispatcher。 | 已接入复盘助手前端，并新增只读素材对照接口；只展示有权限素材的安全摘要、受控正文片段和 deterministic 对照结果。当前素材对照已接可替换 LLM adapter，但仍保留 fallback、source_state/limits 和后端受控引用，不做通用 dispatcher、RAG 正文检索或 Agent marketplace。 |
+| 训练相关窄 tool consumer | MCP/Agent 只有 inventory 还不能产生训练价值，但不能先做完整 marketplace/dispatcher。 | 已接入复盘助手前端，并新增只读素材对照接口；本轮 readiness registry 进一步声明 Agent/Tool/MCP 仍是 descriptor-only：`configured=true` 不代表 `ready=true`，不会启动 dispatcher、tool executor 或 MCP server。不做通用 dispatcher、RAG 正文检索或 Agent marketplace。 |
 
 当前暂不做、只放路线图的能力：
 
@@ -106,29 +106,33 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 - File asset repository 对齐 conversation / agent config 的 ACL 口径：普通 `get/update/delete/list/count` 不再接受 `metadata_scope=None`，全量读取只能走显式命名的 `get_by_id_for_maintenance` / `get_by_key_for_maintenance`。`key_exists_outside_metadata_scope` 也先拒绝空 scope，避免 scope-sensitive helper 变成新的 full-access 入口。
 - LibreChat-style message tree 边界继续固化：edit/retry/fork 会过滤 `score`、report、completion、`affectsScoring` / `affectsCompletion` 及常见别名；fork 从源 conversation 复制 metadata 前先清理结果类字段，保留 TalkWise 训练语义中的 `evaluation` / `growthReport`，但不让通用分支 metadata 改写 scoring/growth/completion。
 - Pipecat realtime capability 增加生产就绪分层：`readyForCall` 只代表本机依赖和配置可发起调用；`productionReady=false` 和 `productionReadiness.blockingReasons[]=BROWSER_AUDIO_E2E_NOT_VERIFIED` 明确保留真实浏览器麦克风、WebSocket 输入、音频播放、turn/interruption/silence、metrics/error taxonomy 的 E2E 验收缺口。
-- 后端 focused tests 已覆盖三条线：file/material scope、LibreChat-style conversation boundary、Pipecat realtime capability contract。真实浏览器 E2E、LibreChat schema/source-of-truth 决策、完整 MCP/Agent dispatcher 仍未进入本轮。
+- Text runtime source-of-truth 缺口先以过渡 contract 收口：`conversationRuntimeContract` 标记当前 source of truth 是 conversation runtime adapter，TrainingCore 只保存 `conversation_ref` / `metadata`，message body、branch state、selected path、source path 不进入 TrainingCore 持久语义；`ConversationTrainingConversationAdapter` 会过滤 task metadata 里的 runtime-owned shadow keys。
+- Training Studio legacy stakeholder room scope 缺口继续收口：report/guidance/material review 读取 room 时不再直接裸用 unrestricted scope，而是先校验当前用户可访问的 TrainingSession，再校验 session 绑定 room_id，最后生成带 `guarded_by_training_session_id` / `guarded_room_id` 的 legacy scope。
+- MCP / Agent / Tool readiness 缺口从“容易误读为可运行”改为 descriptor-only contract：已注册的 Agent/Tool/MCP 可以是 `configured=true`，但 readiness 为 `warning` / `ready=false`，metadata 明确 `dispatcher_started=false`、`runtime_started=false`、无 tool executor、无 MCP runtime。
+- Pipecat realtime observability 从事件透传推进到 session-level telemetry summary：runner 聚合 `audio.output` 次数/字节、turn started/completed/latency、interruption、silence 和 provider error taxonomy，并在摘要中继续做 secret redaction。
+- 后端验证已从 focused tests 扩展到完整 suite：`..\\.venv-backend\\Scripts\\python.exe -m pytest tests` 通过 778 个测试。真实浏览器 E2E、完整 LibreChat schema 迁移、完整 MCP/Agent dispatcher 仍保留为后续架构切片。
 
 ### 当前项目核心部分对齐程度
 
 | 核心域 | 对齐底座 | 当前程度 | 状态判断 |
 |:---|:---|:---:|:---|
-| TrainingCore / 训练语义 | TalkWise 自有 | 70-75% | 已有 session、scenario、persona/stakeholder、report、progress、live guidance。这里不迁给 LibreChat/Pipecat，只作为上层产品语义保留。 |
-| 文本 conversation / message tree | LibreChat | 78% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search/search path context 验收；分支动作继续过滤结果类 metadata，正文侧正在向 LibreChat-style runtime 靠拢。 |
+| TrainingCore / 训练语义 | TalkWise 自有 | 75% | 已有 session、scenario、persona/stakeholder、report、progress、live guidance。TrainingCore 已通过 text runtime contract 明确只保存 ref/metadata，不接管正文、路径和分支状态。 |
+| 文本 conversation / message tree | LibreChat | 80% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search/search path context 验收；分支动作继续过滤结果类 metadata，正文和 selected path 已由 adapter/runtime 作为 source of truth。完整 LibreChat-style schema 仍未迁入。 |
 | branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 78% | 已有当前路径、tail、fork metadata remap、结果/历史展示和 replay-only metadata 验收；还缺真实 UI reload/fork 操作 E2E。 |
-| model/provider registry | LibreChat | 45-55% | 已有 LLM registry、model specs、capability readiness。还不是完整 provider/preset/runtime registry。 |
-| auth / ACL / resource scope | LibreChat | 75% | conversation / file asset / agent config 的普通 repository 访问都要求显式 user/team scope；file asset maintenance 入口已显式命名，admin 已从共享 `OwnedMetadataScope` unscoped 语义切到显式 scope，conversation/chat 写路径禁止 legacy unscoped mutation。仍需真实 auth 和 legacy stakeholder scope 产品语义审计。 |
-| MCP / Agent / Tool | LibreChat | 45% | 已有 capability inventory、Agent config 绑定扫描、具体 MCP server readiness 校验，以及复盘助手前端接入的训练素材窄 tool consumer、素材对照只读接口和可替换 LLM adapter。仍不做通用 dispatcher/marketplace。 |
-| realtime websocket / transcript | Pipecat | 75% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、turn/interruption/silence 事件、live guidance trigger，并公开 smoke event order、contract coverage、error taxonomy；独立 OpenAI realtime 和客户端转写持久化入口已删除。 |
-| Pipecat runtime source of truth | Pipecat | 75% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；本机 capability 可返回 `readyForCall=true`，但生产就绪单独由 `productionReadiness` 标记。仍缺真实浏览器麦克风 E2E。 |
+| model/provider registry | LibreChat | 50-60% | 已有 LLM registry、model specs、capability readiness。Agent/Tool/MCP descriptor 与真实 runtime readiness 已分开，但还不是完整 provider/preset/runtime registry。 |
+| auth / ACL / resource scope | LibreChat | 75-80% | conversation / file asset / agent config 的普通 repository 访问都要求显式 user/team scope；legacy stakeholder room escape hatch 已绑定 TrainingSession ACL 和 room_id。仍需真实 auth、admin override 和 legacy stakeholder scope 产品语义继续审计。 |
+| MCP / Agent / Tool | LibreChat | 45-50% | 已有 capability inventory、Agent config 绑定扫描、具体 MCP server readiness 校验，以及复盘助手训练素材窄 tool consumer。descriptor-only 已明确为 warning/ready=false；仍不做通用 dispatcher/marketplace。 |
+| realtime websocket / transcript | Pipecat | 78% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、turn/interruption/silence 事件、live guidance trigger、smoke contract、error taxonomy 和 runner telemetry summary；独立 OpenAI realtime 和客户端转写持久化入口已删除。 |
+| Pipecat runtime source of truth | Pipecat | 78% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；本机 capability 可返回 `readyForCall=true`，生产就绪仍由 `productionReadiness` 标记。仍缺真实浏览器麦克风 E2E 和聚合 tracing。 |
 | files / RAG / training materials | LibreChat | 60% | file asset ownership、服务层 scope、repository scope 和 training material 安全摘要/受控片段已补强；复盘素材对照卡片和素材对照 LLM adapter 已接入。素材全文/RAG/persona builder 自动接入仍不进入当前切片。 |
 | usage / moderation / admin ops | LibreChat | 10-20% | 当前不是重点，只适合 auth/ACL 稳定后再迁。 |
 
 第一部分结论：
 
-- TalkWise 自己的训练产品层已经有 65% 左右的形状。
-- LibreChat 文本底座约 45-55%，已经开始落到 conversation、capability、resource scope、message-tree action contract，但还不是统一 runtime。
-- Pipecat realtime 底座约 70-75%，Pipecat-only runtime 已落地并区分 local readiness 与 production readiness；剩余主要是真实浏览器音频 E2E 和更完整 metrics/tracing。
-- MCP/Agent 和生产级 auth/ACL 还明显处在早期；当前 ACL 已开始补核心资源 scope，但还不是完整 OAuth/LDAP/admin panel/permission override。
+- TalkWise 自己的训练产品层已经有 70% 以上的形状。
+- LibreChat 文本底座约 55-60%，已经开始落到 conversation、capability、resource scope、message-tree action contract 和 text runtime source-of-truth contract，但还不是统一 LibreChat-style schema runtime。
+- Pipecat realtime 底座约 75-80%，Pipecat-only runtime 已落地并区分 local readiness 与 production readiness；runner 已有基础 telemetry summary，剩余主要是真实浏览器音频 E2E 和更完整 metrics/tracing。
+- MCP/Agent 已从早期 inventory 推进到 descriptor-only readiness contract；生产级 auth/ACL 仍未完整迁入 OAuth/LDAP/admin panel/permission override。
 
 当前已经落地的方向是“先修边界，再迁 runtime”：
 
@@ -142,17 +146,17 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 
 | 成熟项目能力 | 未来用途 | 当前可迁移状态 | 下一步 |
 |:---|:---|:---:|:---|
-| LibreChat conversation/message schema | 文本训练底座 | 可迁移，但还没选 source of truth | 决定保留当前 schema + adapter，还是逐步迁 LibreChat-style schema。 |
+| LibreChat conversation/message schema | 文本训练底座 | 已先选 adapter-owned 过渡契约 | 当前保留现有 conversation schema，并用 adapter 声明正文/路径/分支状态的 source of truth；后续再决定是否迁到 LibreChat-style schema。 |
 | LibreChat message tree 行为 | edit/retry/fork/branch review | 高价值，可作为验收标准 | 把 LibreChat message-tree E2E 行为转成 TalkWise 测试矩阵。 |
-| LibreChat auth / ACL | 用户、团队、资源权限 | 概念已开始落地 | 把 `OwnedMetadataScope` 扩展到 get/update/delete、training session/report/guidance。 |
-| LibreChat MCP / Agent / tools | 教练工具、素材检索、企业系统接入 | 还在 inventory 阶段 | 先迁 registry/discovery/readiness，再接一个窄 tool consumer，不先造通用 dispatcher。 |
+| LibreChat auth / ACL | 用户、团队、资源权限 | 概念已进入核心资源和 legacy room scope | 下一步迁真实 auth、admin override 和 resource action matrix；继续减少 legacy unrestricted helper。 |
+| LibreChat MCP / Agent / tools | 教练工具、素材检索、企业系统接入 | descriptor-only readiness 已落地 | registry/discovery/readiness 先保持 secret-free warning contract；继续接训练相关窄 consumer，不先造通用 dispatcher。 |
 | LibreChat files/RAG/uploads | 训练材料、会议纪要、案例导入 | 可用但未迁 | 先统一 file resource ownership，再接 RAG/tool。 |
 | LibreChat import/export/share | 训练复盘导入导出、团队分享 | 后置 | auth/ACL 和 report contract 稳定后做。 |
 | Pipecat frame pipeline | 实时语音主 runtime | 高价值，部分接入 | 让 `RealtimePipelineAdapter` 变成 Pipecat adapter 主路径。 |
 | Pipecat STT/TTS/LLM services | 多 provider 语音训练 | 可迁，但需收敛 | 先稳定 OpenAI/Pipecat 一条链，再扩 provider。 |
-| Pipecat VAD/turn/interruption | 打断、沉默、轮次检测 | 已有事件映射，待真实音频验收 | 已产出 TalkWise 可读事件：user turn started/stopped、assistant speaking、interrupted、silence timeout；下一步接真实浏览器 E2E 和训练压力/复盘指标。 |
+| Pipecat VAD/turn/interruption | 打断、沉默、轮次检测 | 已有事件映射和 telemetry summary，待真实音频验收 | 已产出 TalkWise 可读事件：user turn started/stopped、assistant speaking、interrupted、silence timeout，并在 runner summary 中聚合 turn/interruption/silence；下一步接真实浏览器 E2E 和训练压力/复盘指标。 |
 | Pipecat transport / WebRTC | 视频/会议式训练 | 后置 | WebSocket 稳定后再考虑 WebRTC/LiveKit/Daily。 |
-| Pipecat observability | latency、turn、provider error | 中高价值 | realtime 路径稳定后补 metrics/tracing。 |
+| Pipecat observability | latency、turn、provider error | 基础 session summary 已落地 | 下一步补跨 session 聚合 tracing、真实配置 smoke 和前端/后端联动诊断。 |
 
 第二部分结论：
 
@@ -262,7 +266,7 @@ LibreChat auth/ACL/MCP/Agent
 
 ### P0: 迁移边界和契约
 
-1. 决定文本 runtime 的 source of truth：继续增强当前 conversation 表，还是迁到 LibreChat-style schema。
+1. 文本 runtime 的当前 source of truth 先落在 `TrainingConversationAdapter` / conversation runtime：TrainingCore 只保存 ref/metadata；后续再评估是否把底层 schema 迁到 LibreChat-style schema。
 2. 固化 `TrainingConversationAdapter`：create conversation、append turn、recent turns、selected path、branch tail、fork metadata。
 3. 固化 `RealtimePipelineAdapter`：Pipecat start/append/commit/events/close、audio output、final transcript、provider error。
 4. 固化 resource scope：conversation/session/report/progress/guidance 都必须带 user/team scope。
@@ -280,7 +284,7 @@ LibreChat auth/ACL/MCP/Agent
 1. 当前 `/realtime/capabilities` 保留，前端按 capability / auth / runtime state 视情况展示；readiness 来源应优先来自 Pipecat adapter capability。
 2. OpenAI realtime 独立 websocket/SDP 路径不再保留；OpenAI 只作为 Pipecat service/config 能力，旧 provider alias 返回不支持。
 3. 接入 Pipecat VAD/turn/interruption，产生 TalkWise 可读事件：user_turn.started/stopped、assistant_speaking、interrupted、silence_timeout。
-4. audio output、transcript.done、guidance trigger 必须都落到同一 Training Session。
+4. audio output、transcript.done、guidance trigger 必须都落到同一 Training Session，并能在 runner telemetry summary 中聚合。
 
 ### P1: API 鉴权/隔离
 
@@ -290,7 +294,7 @@ LibreChat auth/ACL/MCP/Agent
 
 ### P2: Agent/MCP/工具层
 
-1. 迁 LibreChat MCP server registry、OAuth flow、tool discovery/call 的最小子集。
+1. 继续迁 LibreChat MCP server registry、OAuth flow、tool discovery/call 的最小子集；当前 readiness 仍只声明 descriptor-only，不启动 dispatcher/runtime。
 2. 先落地训练相关工具：素材检索、会议纪要分析、persona builder、复盘报告生成、企业知识查询。
 3. Agent marketplace、skills/subagents 作为后续扩展，不进入第一轮训练闭环，也不先暴露独立产品入口。
 

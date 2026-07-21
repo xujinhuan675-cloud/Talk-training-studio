@@ -56,7 +56,7 @@ def test_runtime_capability_registry_sanitizes_secret_metadata() -> None:
     ]
 
 
-def test_text_runtime_capability_registry_projects_real_agent_tool_and_mcp_inventory() -> None:
+def test_text_runtime_capability_registry_projects_descriptor_only_agent_tool_and_mcp_inventory() -> None:
     model = LLMModelMetadata(
         name="gpt-registry",
         provider="openai",
@@ -149,8 +149,9 @@ def test_text_runtime_capability_registry_projects_real_agent_tool_and_mcp_inven
     assert "authorization" not in serialized
     assert capability_registry["provider"] == "talkwise"
     assert capability_registry["version"] == 2
-    assert capability_registry["readiness"]["status"] == "ready"
-    assert capability_registry["inventory"]["by_status"]["ready"] == 6
+    assert capability_registry["readiness"]["status"] == "warning"
+    assert capability_registry["inventory"]["by_status"]["ready"] == 2
+    assert capability_registry["inventory"]["by_status"]["warning"] == 4
     assert set(capability_registry["by_kind"]) == {
         "provider",
         "model",
@@ -176,26 +177,47 @@ def test_text_runtime_capability_registry_projects_real_agent_tool_and_mcp_inven
     agent_capability = capability_registry["by_kind"]["agent"][0]
     assert agent_capability["id"] == "agent:coach"
     assert agent_capability["enabled"] is True
-    assert agent_capability["ready"] is True
+    assert agent_capability["configured"] is True
+    assert agent_capability["ready"] is False
+    assert agent_capability["status"] == "warning"
     assert agent_capability["required_roles"] == ["admin", "leader", "staff"]
+    assert agent_capability["metadata"]["descriptor_only"] is True
+    assert agent_capability["metadata"]["runtime_started"] is False
+    assert agent_capability["metadata"]["dispatcher_boundary"] == "no_generic_agent_dispatcher"
+    assert agent_capability["metadata"]["auth_required"] is True
+    assert agent_capability["readiness"]["warnings"][0]["code"] == (
+        "AGENT_DESCRIPTOR_ONLY_NO_DISPATCHER"
+    )
     assert agent_capability["metadata"]["model"] == "gpt-registry"
     assert agent_capability["metadata"]["tool_ids"] == ["crm.lookup"]
     assert agent_capability["metadata"]["mcp_server_ids"] == ["crm"]
     assert agent_capability["metadata"]["config"]["metadata"] == {"scenario": "sales"}
 
     tool_capabilities = capability_registry["by_kind"]["tool"]
-    assert [capability["status"] for capability in tool_capabilities] == ["ready", "ready"]
+    assert [capability["status"] for capability in tool_capabilities] == ["warning", "warning"]
     assert tool_capabilities[0]["id"] == "tool:llm_tool_calling"
+    assert tool_capabilities[0]["ready"] is False
+    assert tool_capabilities[0]["metadata"]["descriptor_only"] is True
+    assert tool_capabilities[0]["metadata"]["tool_consumer_gated"] is True
     assert tool_capabilities[0]["metadata"]["tool_capable_model_count"] == 1
     assert tool_capabilities[1]["id"] == "tool:crm_lookup"
+    assert tool_capabilities[1]["configured"] is True
+    assert tool_capabilities[1]["ready"] is False
+    assert tool_capabilities[1]["readiness"]["warnings"][0]["code"] == (
+        "TOOL_DESCRIPTOR_ONLY_CONSUMER_GATED"
+    )
     assert tool_capabilities[1]["metadata"]["mcp_server"] == "crm"
 
     mcp_capability = capability_registry["by_kind"]["mcp_server"][0]
     assert mcp_capability["id"] == "mcp_server:crm"
-    assert mcp_capability["status"] == "ready"
+    assert mcp_capability["status"] == "warning"
     assert mcp_capability["enabled"] is True
-    assert mcp_capability["ready"] is True
+    assert mcp_capability["configured"] is True
+    assert mcp_capability["ready"] is False
+    assert mcp_capability["metadata"]["descriptor_only"] is True
     assert mcp_capability["metadata"]["runtime_started"] is False
+    assert mcp_capability["metadata"]["execution_boundary"] == "descriptor_only_no_mcp_runtime"
+    assert mcp_capability["readiness"]["warnings"][0]["code"] == "MCP_DESCRIPTOR_ONLY_NO_RUNTIME"
     assert mcp_capability["metadata"]["config"]["env"] == {"MODE": "test"}
     assert mcp_capability["metadata"]["config"]["headers"] == {"X-Safe": "kept"}
 
@@ -241,6 +263,7 @@ def test_text_runtime_capability_registry_reports_missing_mcp_server_as_tool_onl
     assert payload["readiness"]["ready"] is False
     assert [warning["code"] for warning in payload["readiness"]["warnings"]] == [
         "TOOL_RUNTIME_INVENTORY_PENDING",
+        "TOOL_DESCRIPTOR_ONLY_CONSUMER_GATED",
         "MISSING_MCP_SERVER_CONFIG",
     ]
 
@@ -317,7 +340,7 @@ def test_text_runtime_capability_registry_requires_specific_mcp_server_match_for
     assert payload["readiness"]["status"] == "warning"
     tool_capabilities = payload["by_kind"]["tool"]
     assert [capability["status"] for capability in tool_capabilities] == [
-        "ready",
+        "warning",
         "missingDependency",
     ]
     assert tool_capabilities[1]["metadata"]["mcp_server"] == "crm"
@@ -325,7 +348,7 @@ def test_text_runtime_capability_registry_requires_specific_mcp_server_match_for
         "MISSING_READY_MCP_SERVER"
     )
     assert [capability["status"] for capability in payload["by_kind"]["mcp_server"]] == [
-        "ready",
+        "warning",
         "disabled",
     ]
 
@@ -443,8 +466,10 @@ def test_text_runtime_capability_registry_ignores_agent_binding_metadata_for_rea
     ).to_dict()
 
     agent_capability = payload["by_kind"]["agent"][0]
-    assert agent_capability["status"] == "ready"
-    assert agent_capability["ready"] is True
+    assert agent_capability["status"] == "warning"
+    assert agent_capability["ready"] is False
+    assert agent_capability["metadata"]["descriptor_only"] is True
+    assert agent_capability["metadata"]["dispatcher_boundary"] == "no_generic_agent_dispatcher"
     assert agent_capability["metadata"]["tool_ids"] == []
     assert agent_capability["metadata"]["mcp_server_ids"] == []
     assert agent_capability["metadata"]["config"]["metadata"]["tool_ids"] == [

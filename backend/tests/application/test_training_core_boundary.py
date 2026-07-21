@@ -20,6 +20,7 @@ from application.services.training_studio.training_core import (
     TrainingTurn,
     training_branch_metadata,
     training_core_metadata_for_session,
+    text_conversation_runtime_contract_metadata,
 )
 from domain.training_studio.session import TrainingSession
 from domain.training_studio.session_repository import TrainingSessionAccessScope
@@ -105,6 +106,59 @@ class InvalidAppendConversationAdapter(FakeConversationAdapter):
 class InvalidRecentTurnsConversationAdapter(FakeConversationAdapter):
     async def recent_turns(self, conversation: ConversationRef, *, limit: int):
         return [{"speaker": "user", "text": "not-a-training-turn"}]
+
+
+class RuntimeOwnedPathAdapter(FakeConversationAdapter):
+    async def create_conversation(self, session: TrainingSession) -> ConversationRef:
+        base = await super().create_conversation(session)
+        return ConversationRef(
+            provider=base.provider,
+            conversation_id=base.conversation_id,
+            legacy_room_id=base.legacy_room_id,
+            metadata={
+                **text_conversation_runtime_contract_metadata(),
+                "runtime": "conversation_message_tree",
+                "selectedPath": {
+                    "branchId": "runtime-start",
+                    "tailMessageId": None,
+                    "messageIds": [],
+                    "purpose": "training_replay_context",
+                },
+                "currentBranchTail": {
+                    "branchId": "runtime-start",
+                    "messageId": None,
+                },
+            },
+        )
+
+    async def append_turn(
+        self,
+        conversation: ConversationRef,
+        turn: TrainingTurn,
+    ) -> ConversationRef:
+        self.appended_conversations.append(conversation)
+        self.turns.append(turn)
+        branch_id = str(dict(turn.metadata).get("branch_id") or "runtime-start")
+        return ConversationRef(
+            provider=conversation.provider,
+            conversation_id=conversation.conversation_id,
+            branch_tail_message_id=turn.turn_id,
+            legacy_room_id=conversation.legacy_room_id,
+            metadata={
+                **conversation.metadata,
+                "selectedPath": {
+                    "branchId": branch_id,
+                    "tailMessageId": turn.turn_id,
+                    "messageIds": [turn.turn_id] if turn.turn_id else [],
+                    "purpose": "training_replay_context",
+                },
+                "currentBranchTail": {
+                    "branchId": branch_id,
+                    "messageId": turn.turn_id,
+                },
+                "sourcePath": [turn.turn_id, "runtime-owned-source"],
+            },
+        )
 
 
 def _task_config() -> TrainingTaskConfigDTO:
@@ -386,6 +440,27 @@ def test_training_branch_metadata_marks_selected_path_as_replay_context_only():
     }
 
 
+def test_text_conversation_runtime_contract_marks_adapter_as_source_of_truth():
+    metadata = text_conversation_runtime_contract_metadata()
+
+    assert metadata == {
+        "conversationRuntimeContract": {
+            "marker": "text_conversation_runtime_source_of_truth.v1",
+            "version": 1,
+            "channel": "text",
+            "sourceOfTruth": "conversation_runtime_adapter",
+            "trainingCoreStores": ["conversation_ref", "metadata"],
+            "runtimeOwns": [
+                "message_body",
+                "branch_state",
+                "selected_path",
+                "source_path",
+            ],
+            "replacementTarget": "external_chat_schema_adapter",
+        }
+    }
+
+
 @pytest.mark.asyncio
 async def test_training_core_starts_session_with_runtime_conversation_binding():
     adapter = FakeConversationAdapter()
@@ -529,6 +604,46 @@ async def test_training_core_records_turns_and_preserves_branch_tail():
     session = await session_service.get_session("session-1", access_scope=_scope())
     assert session.message_count == 1
     assert updated.branch_tail_message_id == "msg-user-1"
+
+
+@pytest.mark.asyncio
+async def test_training_core_does_not_persist_turn_body_or_runtime_path_state():
+    adapter = RuntimeOwnedPathAdapter(provider="talkwise-conversation", legacy_room_id=None)
+    session_service = TrainingSessionService(id_factory=lambda: "session-1")
+    orchestrator = TrainingCoreOrchestrator(
+        session_service=session_service,
+        conversation_adapter=adapter,
+    )
+    started = await orchestrator.start_session(_session_payload())
+
+    updated = await orchestrator.record_turn(
+        training_session_id="session-1",
+        conversation=started.conversation,
+        turn=TrainingTurn(
+            speaker="user",
+            text="This message body belongs to the conversation runtime.",
+            turn_id="msg-runtime-1",
+            metadata={
+                "branch_id": "runtime-branch",
+                "selectedPath": {"branchId": "turn-shadow"},
+                "sourcePath": ["turn-shadow-source"],
+            },
+        ),
+        access_scope=_scope(),
+    )
+
+    session = await session_service.get_session("session-1", access_scope=_scope())
+    persisted_metadata = session.task_config.metadata
+    assert adapter.turns[0].text == "This message body belongs to the conversation runtime."
+    assert updated.metadata["selectedPath"]["branchId"] == "runtime-branch"
+    assert updated.metadata["sourcePath"] == ["msg-runtime-1", "runtime-owned-source"]
+    assert persisted_metadata["selectedPath"]["branchId"] == "runtime-start"
+    assert persisted_metadata["currentBranchTail"]["branchId"] == "runtime-start"
+    assert session.message_count == 1
+    persisted_blob = repr(persisted_metadata)
+    assert "This message body belongs to the conversation runtime." not in persisted_blob
+    assert "runtime-branch" not in persisted_blob
+    assert "turn-shadow-source" not in persisted_blob
 
 
 @pytest.mark.asyncio

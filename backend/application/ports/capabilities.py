@@ -150,6 +150,8 @@ _PUBLIC_DESCRIPTOR_EXCLUDE_KEYS = {
     "updated_at",
 }
 _DEFAULT_AGENT_ROLES = ("admin", "leader", "staff")
+_DESCRIPTOR_RUNTIME_CONTRACT = "discovery_readiness_descriptor_only"
+_TOOL_CONSUMER_GATE = "authenticated_tool_consumer"
 
 
 @dataclass(frozen=True)
@@ -493,12 +495,11 @@ def _agent_capabilities(
     descriptors = _descriptor_items(agent_configs, _AGENT_CONFIG_COLLECTION_KEYS)
     ready_model_count = int(model_summary.get("ready_model_count") or 0)
     available_model_keys = set(_string_list(model_summary.get("available_model_keys")))
-    ready_tool_capabilities = [
-        capability
-        for capability in tool_capabilities
-        if capability.ready and capability.id != "tool:llm_tool_calling"
-    ]
-    ready_mcp_capabilities = [capability for capability in mcp_capabilities if capability.ready]
+    available_tool_capabilities = _dependency_available_capabilities(
+        tool_capabilities,
+        exclude_ids=("tool:llm_tool_calling",),
+    )
+    available_mcp_capabilities = _dependency_available_capabilities(mcp_capabilities)
     if not descriptors:
         status = "ready" if ready_model_count else "blocked"
         reasons: list[dict[str, object]] = []
@@ -527,6 +528,11 @@ def _agent_capabilities(
                     "runtime": "conversation_message_tree",
                     "model_dependency": "llm_registry",
                     "migration_boundary": "future external chat-runtime agent adapter",
+                    "auth_required": True,
+                    "generic_agent_runtime_started": False,
+                    "dispatcher_started": False,
+                    "dispatcher_boundary": "no_generic_agent_dispatcher",
+                    "execution_boundary": "talkwise_conversation_service_not_mcp_agent_runtime",
                     "ready_model_count": ready_model_count,
                     "tool_capable_model_count": model_summary.get(
                         "tool_capable_model_count", 0
@@ -552,6 +558,7 @@ def _agent_capabilities(
         enabled = _enabled_from(descriptor, default=True)
         status = "ready"
         reasons: list[dict[str, object]] = []
+        warnings: list[dict[str, object]] = []
         if not enabled:
             status = "disabled"
         elif not ready_model_count:
@@ -577,10 +584,10 @@ def _agent_capabilities(
                 )
             )
         else:
-            missing_tool_ids = _missing_tool_ids(tool_ids, ready_tool_capabilities)
+            missing_tool_ids = _missing_tool_ids(tool_ids, available_tool_capabilities)
             missing_mcp_server_ids = _missing_mcp_server_ids(
                 mcp_server_ids,
-                ready_mcp_capabilities,
+                available_mcp_capabilities,
             )
             if missing_tool_ids:
                 status = "missingDependency"
@@ -614,6 +621,9 @@ def _agent_capabilities(
                         },
                     )
                 )
+            if status == "ready":
+                status = "warning"
+                warnings.append(_agent_descriptor_only_warning(name))
         capabilities.append(
             RuntimeCapability(
                 id=f"agent:{_slug(agent_id)}",
@@ -622,7 +632,7 @@ def _agent_capabilities(
                 source=_descriptor_text(descriptor, ("source",)) or "agent_config",
                 status=status,
                 enabled=enabled,
-                configured=enabled and status == "ready",
+                configured=enabled and status in {"ready", "warning"},
                 scopes=tuple(
                     _string_list(_descriptor_value(descriptor, ("scopes",)))
                     or ("chat", "training")
@@ -638,6 +648,10 @@ def _agent_capabilities(
                     or ("agent", "config")
                 ),
                 metadata={
+                    **_descriptor_runtime_metadata(
+                        execution_boundary="descriptor_only_no_agent_dispatcher_runtime",
+                        tool_consumer_gated=bool(tool_ids or mcp_server_ids),
+                    ),
                     "model": model,
                     "tool_ids": tool_ids,
                     "mcp_server_ids": mcp_server_ids,
@@ -645,6 +659,7 @@ def _agent_capabilities(
                     "config": _public_descriptor_metadata(descriptor),
                 },
                 blocking_reasons=tuple(reasons),
+                warnings=tuple(warnings),
             )
         )
     return capabilities
@@ -658,8 +673,8 @@ def _tool_capabilities(
 ) -> list[RuntimeCapability]:
     descriptors = _descriptor_items(tool_configs, _TOOL_CONFIG_COLLECTION_KEYS)
     tool_model_ids = _string_list(model_summary.get("tool_capable_model_ids"))
-    ready_mcp_capabilities = [capability for capability in mcp_capabilities if capability.ready]
-    has_ready_mcp = bool(ready_mcp_capabilities)
+    available_mcp_capabilities = _dependency_available_capabilities(mcp_capabilities)
+    has_ready_mcp = bool(available_mcp_capabilities)
     capabilities: list[RuntimeCapability] = [
         _model_tool_capability(
             tool_model_ids=tool_model_ids,
@@ -677,15 +692,16 @@ def _tool_capabilities(
             default=bool(_descriptor_text(descriptor, ("mcp_server", "mcpServer", "server"))),
         )
         mcp_server = _descriptor_text(descriptor, ("mcp_server", "mcpServer", "server"))
-        matching_ready_mcp = ready_mcp_capabilities
+        matching_ready_mcp = available_mcp_capabilities
         if mcp_server:
             matching_ready_mcp = [
                 capability
-                for capability in ready_mcp_capabilities
+                for capability in available_mcp_capabilities
                 if _mcp_server_matches(capability, mcp_server)
             ]
         status = "ready"
         reasons: list[dict[str, object]] = []
+        warnings: list[dict[str, object]] = []
         if not enabled:
             status = "disabled"
         elif not tool_model_ids:
@@ -712,6 +728,9 @@ def _tool_capabilities(
                     metadata={"tool": name, "mcp_server": mcp_server},
                 )
             )
+        if status == "ready":
+            status = "warning"
+            warnings.append(_tool_descriptor_only_warning(name))
         capabilities.append(
             RuntimeCapability(
                 id=f"tool:{_slug(tool_id)}",
@@ -720,7 +739,7 @@ def _tool_capabilities(
                 source=_descriptor_text(descriptor, ("source",)) or "tool_config",
                 status=status,
                 enabled=enabled,
-                configured=enabled and status == "ready",
+                configured=enabled and status in {"ready", "warning"},
                 scopes=tuple(_string_list(_descriptor_value(descriptor, ("scopes",))) or ("agent", "mcp")),
                 required_roles=tuple(
                     _string_list(_descriptor_value(descriptor, ("required_roles", "requiredRoles")))
@@ -728,14 +747,85 @@ def _tool_capabilities(
                 ),
                 tags=tuple(_string_list(_descriptor_value(descriptor, ("tags",))) or ("tool",)),
                 metadata={
+                    **_descriptor_runtime_metadata(
+                        execution_boundary="descriptor_only_no_tool_executor_runtime",
+                    ),
                     "mcp_server": mcp_server,
                     "tool_capable_model_ids": tool_model_ids,
                     "config": _public_descriptor_metadata(descriptor),
                 },
                 blocking_reasons=tuple(reasons),
+                warnings=tuple(warnings),
             )
         )
     return capabilities
+
+
+def _dependency_available_capabilities(
+    capabilities: Sequence[RuntimeCapability],
+    *,
+    exclude_ids: Sequence[str] = (),
+) -> list[RuntimeCapability]:
+    excluded = set(exclude_ids)
+    return [
+        capability
+        for capability in capabilities
+        if capability.id not in excluded
+        and capability.enabled
+        and capability.configured is not False
+        and capability.status in {"ready", "warning"}
+    ]
+
+
+def _descriptor_runtime_metadata(
+    *,
+    execution_boundary: str,
+    tool_consumer_gated: bool = True,
+) -> dict[str, object]:
+    return {
+        "descriptor_only": True,
+        "runtime_contract": _DESCRIPTOR_RUNTIME_CONTRACT,
+        "runtime_started": False,
+        "dispatcher_started": False,
+        "dispatcher_boundary": "no_generic_agent_dispatcher",
+        "auth_required": True,
+        "tool_consumer_gated": tool_consumer_gated,
+        "tool_consumer_gate": _TOOL_CONSUMER_GATE,
+        "execution_boundary": execution_boundary,
+    }
+
+
+def _agent_descriptor_only_warning(name: str) -> dict[str, object]:
+    return _reason(
+        "AGENT_DESCRIPTOR_ONLY_NO_DISPATCHER",
+        "Agent config is a registry descriptor only; no generic agent dispatcher or runtime is started by this readiness catalog.",
+        phase="runtime",
+        feature="agent",
+        severity="warning",
+        metadata={"agent": name, "runtime_contract": _DESCRIPTOR_RUNTIME_CONTRACT},
+    )
+
+
+def _tool_descriptor_only_warning(name: str) -> dict[str, object]:
+    return _reason(
+        "TOOL_DESCRIPTOR_ONLY_CONSUMER_GATED",
+        "Tool config is a registry descriptor only; execution requires an authenticated tool consumer and no tool executor is started by this readiness catalog.",
+        phase="runtime",
+        feature="tool",
+        severity="warning",
+        metadata={"tool": name, "tool_consumer_gate": _TOOL_CONSUMER_GATE},
+    )
+
+
+def _mcp_descriptor_only_warning(name: str) -> dict[str, object]:
+    return _reason(
+        "MCP_DESCRIPTOR_ONLY_NO_RUNTIME",
+        "MCP server config is a registry descriptor only; no MCP server process is started by this readiness catalog.",
+        phase="runtime",
+        feature="mcp_server",
+        severity="warning",
+        metadata={"mcp_server": name, "tool_consumer_gate": _TOOL_CONSUMER_GATE},
+    )
 
 
 def _mcp_server_matches(capability: RuntimeCapability, requested_server: str) -> bool:
@@ -889,14 +979,17 @@ def _model_tool_capability(
             required_roles=_DEFAULT_AGENT_ROLES,
             tags=("tool", "llm"),
             metadata={
+                **_descriptor_runtime_metadata(
+                    execution_boundary="descriptor_only_no_tool_executor_runtime",
+                ),
                 "tool_capable_model_count": 0,
                 "reason": "No ready model advertises tool_calling/function_calling capability.",
             },
         )
 
     warnings: list[dict[str, object]] = []
-    status = "ready" if has_explicit_tools or has_ready_mcp else "warning"
-    if status == "warning":
+    status = "warning"
+    if not has_explicit_tools and not has_ready_mcp:
         warnings.append(
             _reason(
                 "TOOL_RUNTIME_INVENTORY_PENDING",
@@ -906,6 +999,7 @@ def _model_tool_capability(
                 severity="warning",
             )
         )
+    warnings.append(_tool_descriptor_only_warning("LLM Tool Calling"))
     return RuntimeCapability(
         id="tool:llm_tool_calling",
         kind="tool",
@@ -918,9 +1012,11 @@ def _model_tool_capability(
         required_roles=_DEFAULT_AGENT_ROLES,
         tags=("tool", "llm", "tool_calling"),
         metadata={
+            **_descriptor_runtime_metadata(
+                execution_boundary="descriptor_only_no_tool_executor_runtime",
+            ),
             "tool_capable_model_count": len(tool_model_ids),
             "tool_capable_model_ids": list(tool_model_ids),
-            "execution_boundary": "inventory_only_no_tool_executor_runtime",
         },
         warnings=tuple(warnings),
     )
@@ -942,8 +1038,9 @@ def _mcp_server_capabilities(mcp_servers: object | None) -> list[RuntimeCapabili
                 required_roles=_DEFAULT_AGENT_ROLES,
                 tags=("mcp", "registry"),
                 metadata={
-                    "runtime_started": False,
-                    "execution_boundary": "inventory_only_no_mcp_runtime",
+                    **_descriptor_runtime_metadata(
+                        execution_boundary="descriptor_only_no_mcp_runtime",
+                    ),
                 },
                 blocking_reasons=(
                     _reason(
@@ -980,6 +1077,7 @@ def _mcp_server_capabilities(mcp_servers: object | None) -> list[RuntimeCapabili
         )
         status = "ready"
         reasons: list[dict[str, object]] = []
+        warnings: list[dict[str, object]] = []
         if not enabled:
             status = "disabled"
         elif missing_dependencies:
@@ -1019,6 +1117,9 @@ def _mcp_server_capabilities(mcp_servers: object | None) -> list[RuntimeCapabili
                     metadata={"server": name},
                 )
             )
+        if status == "ready":
+            status = "warning"
+            warnings.append(_mcp_descriptor_only_warning(name))
         capabilities.append(
             RuntimeCapability(
                 id=f"mcp_server:{_slug(server_id)}",
@@ -1027,7 +1128,7 @@ def _mcp_server_capabilities(mcp_servers: object | None) -> list[RuntimeCapabili
                 source=_descriptor_text(descriptor, ("source",)) or "mcp_config",
                 status=status,
                 enabled=enabled,
-                configured=enabled and configured,
+                configured=enabled and configured and status in {"ready", "warning"},
                 scopes=tuple(_string_list(_descriptor_value(descriptor, ("scopes",))) or ("agent", "tool")),
                 required_roles=tuple(
                     _string_list(_descriptor_value(descriptor, ("required_roles", "requiredRoles")))
@@ -1035,14 +1136,16 @@ def _mcp_server_capabilities(mcp_servers: object | None) -> list[RuntimeCapabili
                 ),
                 tags=tuple(_string_list(_descriptor_value(descriptor, ("tags",))) or ("mcp", "server")),
                 metadata={
+                    **_descriptor_runtime_metadata(
+                        execution_boundary="descriptor_only_no_mcp_runtime",
+                    ),
                     "transport": _descriptor_text(descriptor, ("transport",)),
                     "command": _descriptor_text(descriptor, ("command",)),
                     "url": _descriptor_text(descriptor, ("url", "endpoint", "server_url", "serverUrl")),
-                    "runtime_started": False,
-                    "execution_boundary": "inventory_only_no_mcp_runtime",
                     "config": _public_descriptor_metadata(descriptor),
                 },
                 blocking_reasons=tuple(reasons),
+                warnings=tuple(warnings),
             )
         )
     return capabilities
@@ -1120,16 +1223,6 @@ def _registry_readiness(items: Sequence[Mapping[str, object]]) -> dict[str, obje
                 feature="model",
             )
         )
-    if "agent" not in ready_kinds:
-        blockers.append(
-            _reason(
-                "NO_READY_AGENT",
-                "No ready agent capability is available.",
-                phase="configuration",
-                feature="agent",
-            )
-        )
-
     for item in items:
         kind = str(item.get("kind") or "")
         status = str(item.get("status") or "")
@@ -1144,7 +1237,7 @@ def _registry_readiness(items: Sequence[Mapping[str, object]]) -> dict[str, obje
             for warning in readiness.get("warnings", [])  # type: ignore[union-attr]
             if isinstance(warning, Mapping)
         ]
-        if kind in {"provider", "model", "agent"} and status in {"blocked", "missingDependency"}:
+        if kind in {"provider", "model"} and status in {"blocked", "missingDependency"}:
             blockers.extend(item_reasons)
         elif status in {"warning", "missingDependency"}:
             for reason in item_reasons:
