@@ -11,6 +11,13 @@ import {
 } from 'recharts'
 import type { Message, PersonaSummary } from '../services/api'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from './ui/dialog'
+import { SegmentedControl, type SegmentedControlOption } from './ui/segmented-control'
 import './EmotionCurve.css'
 
 interface Props {
@@ -19,6 +26,8 @@ interface Props {
   messages: Message[]
   personaMap: Record<string, PersonaSummary>
 }
+
+type EmotionTab = 'curve' | 'heatmap'
 
 interface DataPoint {
   index: number
@@ -102,8 +111,13 @@ function scoreToColor(score: number | null): string {
 
 export default function EmotionCurve({ open, onClose, messages, personaMap }: Props) {
   const { tr } = useI18n()
-  const [tab, setTab] = useState<'curve' | 'heatmap'>('curve')
+  const [tab, setTab] = useState<EmotionTab>('curve')
   const [hoverCell, setHoverCell] = useState<HeatmapCell | null>(null)
+
+  const tabOptions: SegmentedControlOption<EmotionTab>[] = [
+    { value: 'curve', label: tr('曲线图', 'Curve') },
+    { value: 'heatmap', label: tr('热力图', 'Heatmap') },
+  ]
 
   const { data, personaIds, turningPoints, trendData, heatmapRows, maxIndex } = useMemo(() => {
     const personaMsgs = messages.filter(
@@ -286,18 +300,26 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
   }
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog emotion-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>{tr('角色情绪分析', 'Persona Emotion Analysis')}</h3>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent className="emotion-dialog" aria-describedby={undefined}>
+        <DialogTitle asChild className="emotion-dialog-title">
+          <h3>{tr('角色情绪分析', 'Persona Emotion Analysis')}</h3>
+        </DialogTitle>
 
-        {/* Tab bar */}
-        <div className="emotion-tabs">
-          <button className={`emotion-tab ${tab === 'curve' ? 'active' : ''}`} onClick={() => setTab('curve')}>
-            {tr('曲线图', 'Curve')}
-          </button>
-          <button className={`emotion-tab ${tab === 'heatmap' ? 'active' : ''}`} onClick={() => setTab('heatmap')}>
-            {tr('热力图', 'Heatmap')}
-          </button>
+        <div className="emotion-tabs-row">
+          <SegmentedControl
+            ariaLabel={tr('情绪分析视图', 'Emotion analysis view')}
+            className="emotion-tabs"
+            options={tabOptions}
+            size="sm"
+            value={tab}
+            onValueChange={setTab}
+          />
         </div>
 
         {data.length === 0 ? (
@@ -429,9 +451,9 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
         )}
 
         <div className="dialog-actions">
-          <button className="btn-cancel" onClick={onClose}>{tr('关闭', 'Close')}</button>
+          <Button variant="secondary" onClick={onClose}>{tr('关闭', 'Close')}</Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

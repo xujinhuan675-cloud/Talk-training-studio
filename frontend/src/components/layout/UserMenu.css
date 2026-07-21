@@ -17,10 +17,11 @@
   transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
-.user-menu-trigger:hover,
-.user-menu-trigger[aria-expanded='true'] {
+.user-menu-trigger.ui-button:hover:not(:disabled),
+.user-menu-trigger.ui-button[aria-expanded='true'] {
   border-color: var(--border-accent);
   background: var(--green-soft);
+  color: var(--text-primary);
 }
 
 .user-menu-avatar,

@@ -16,6 +16,14 @@ import {
   type PersonaRelationship,
   type PersonaSummary,
 } from '../services/api'
+import { Button } from './ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from './ui/dialog'
+import { Field, Input, Select, Textarea } from './ui/form'
+import { SegmentedControl, type SegmentedControlOption } from './ui/segmented-control'
 import './OrganizationDialog.css'
 
 interface OrganizationDialogProps {
@@ -24,6 +32,8 @@ interface OrganizationDialogProps {
   onOrgChanged: () => void
   personas: PersonaSummary[]
 }
+
+type OrgDialogTab = 'info' | 'teams' | 'relationships'
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error
@@ -44,7 +54,7 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null)
   const [teams, setTeams] = useState<Team[]>([])
   const [relationships, setRelationships] = useState<PersonaRelationship[]>([])
-  const [tab, setTab] = useState<'info' | 'teams' | 'relationships'>('info')
+  const [tab, setTab] = useState<OrgDialogTab>('info')
 
   // Form state for org info
   const [orgName, setOrgName] = useState('')
@@ -216,17 +226,28 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
 
   const personaName = (pid: string) => personas.find((p) => p.id === pid)?.name || pid
 
-  if (!open) return null
+  const tabOptions: SegmentedControlOption<OrgDialogTab>[] = [
+    { value: 'info', label: '基本信息' },
+    { value: 'teams', label: '团队', disabled: !selectedOrg },
+    { value: 'relationships', label: '角色关系', disabled: !selectedOrg },
+  ]
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog org-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>{selectedOrg ? '编辑组织' : '创建组织'}</h3>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent className="org-dialog" aria-describedby={undefined}>
+        <DialogTitle asChild className="org-dialog-title">
+          <h3>{selectedOrg ? '编辑组织' : '创建组织'}</h3>
+        </DialogTitle>
 
-        <div className="dialog-body" style={{ paddingBottom: 0 }}>
-          {/* Org selector if multiple */}
-          {orgs.length > 1 && (
-            <select
+        {orgs.length > 1 && (
+          <div className="org-selector-panel">
+            <Select
+              aria-label="选择组织"
               className="org-selector"
               value={selectedOrg?.id ?? ''}
               onChange={(e) => e.target.value && loadOrgDetail(Number(e.target.value))}
@@ -234,35 +255,54 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
               {orgs.map((o) => (
                 <option key={o.id} value={o.id}>{o.name}</option>
               ))}
-            </select>
-          )}
-        </div>
+            </Select>
+          </div>
+        )}
 
-        <div className="org-tabs">
-          <button className={`org-tab ${tab === 'info' ? 'active' : ''}`} onClick={() => setTab('info')}>基本信息</button>
-          <button className={`org-tab ${tab === 'teams' ? 'active' : ''}`} onClick={() => setTab('teams')} disabled={!selectedOrg}>团队</button>
-          <button className={`org-tab ${tab === 'relationships' ? 'active' : ''}`} onClick={() => setTab('relationships')} disabled={!selectedOrg}>角色关系</button>
+        <div className="org-tabs-row">
+          <SegmentedControl
+            ariaLabel="组织管理视图"
+            className="org-tabs"
+            options={tabOptions}
+            size="sm"
+            value={tab}
+            onValueChange={setTab}
+          />
         </div>
 
         <div className="dialog-body org-tab-content">
           {tab === 'info' && (
             <>
-              <label className="field-label">
-                组织名称
-                <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="如：Acme Corp" />
-              </label>
-              <label className="field-label">
-                行业
-                <input type="text" value={orgIndustry} onChange={(e) => setOrgIndustry(e.target.value)} placeholder="如：SaaS / 金融 / 制造" />
-              </label>
-              <label className="field-label">
-                组织描述
-                <textarea value={orgDescription} onChange={(e) => setOrgDescription(e.target.value)} placeholder="组织的业务、产品、文化..." style={{ minHeight: 60 }} />
-              </label>
-              <label className="field-label">
-                上下文提示词
-                <textarea value={orgContextPrompt} onChange={(e) => setOrgContextPrompt(e.target.value)} placeholder="注入所有角色 system prompt 的组织背景..." style={{ minHeight: 80 }} />
-              </label>
+              <Field className="field-label" label="组织名称">
+                <Input
+                  type="text"
+                  value={orgName}
+                  onChange={(e) => setOrgName(e.target.value)}
+                  placeholder="如：Acme Corp"
+                />
+              </Field>
+              <Field className="field-label" label="行业">
+                <Input
+                  type="text"
+                  value={orgIndustry}
+                  onChange={(e) => setOrgIndustry(e.target.value)}
+                  placeholder="如：SaaS / 金融 / 制造"
+                />
+              </Field>
+              <Field className="field-label org-description-field" label="组织描述">
+                <Textarea
+                  value={orgDescription}
+                  onChange={(e) => setOrgDescription(e.target.value)}
+                  placeholder="组织的业务、产品、文化..."
+                />
+              </Field>
+              <Field className="field-label org-context-field" label="上下文提示词">
+                <Textarea
+                  value={orgContextPrompt}
+                  onChange={(e) => setOrgContextPrompt(e.target.value)}
+                  placeholder="注入所有角色 system prompt 的组织背景..."
+                />
+              </Field>
             </>
           )}
 
@@ -279,7 +319,14 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
                             <div className="team-item-name">{t.name}</div>
                             {t.description && <div className="team-item-desc">{t.description}</div>}
                           </div>
-                          <button className="team-delete-btn" onClick={() => handleDeleteTeam(t.id)}>删除</button>
+                          <Button
+                            className="team-delete-btn"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteTeam(t.id)}
+                          >
+                            删除
+                          </Button>
                         </div>
                         <div className="team-members">
                           {members.length > 0 ? (
@@ -287,18 +334,22 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
                               <span key={p.id} className="team-member-chip">
                                 <span className="team-member-dot" style={{ background: p.avatar_color || '#999' }} />
                                 {p.name}
-                                <button
+                                <Button
                                   className="team-member-remove"
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => handleRemoveFromTeam(p.id)}
                                   title="移出团队"
-                                >&times;</button>
+                                >
+                                  &times;
+                                </Button>
                               </span>
                             ))
                           ) : (
                             <span className="team-members-empty">暂无成员</span>
                           )}
                           {unassignedPersonas.length > 0 && (
-                            <select
+                            <Select
                               className="team-add-member-select"
                               value=""
                               onChange={(e) => e.target.value && handleAssignToTeam(e.target.value, t.id)}
@@ -307,7 +358,7 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
                               {unassignedPersonas.map((p) => (
                                 <option key={p.id} value={p.id}>{p.name} ({p.role})</option>
                               ))}
-                            </select>
+                            </Select>
                           )}
                         </div>
                       </div>
@@ -327,14 +378,16 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
               )}
 
               <div className="add-team-form" style={{ marginTop: 12 }}>
-                <input
+                <Input
                   type="text"
                   value={newTeamName}
                   onChange={(e) => setNewTeamName(e.target.value)}
                   placeholder="输入团队名称..."
                   onKeyDown={(e) => e.key === 'Enter' && handleAddTeam()}
                 />
-                <button onClick={handleAddTeam} disabled={!newTeamName.trim()}>添加团队</button>
+                <Button variant="primary" onClick={handleAddTeam} disabled={!newTeamName.trim()}>
+                  添加团队
+                </Button>
               </div>
             </>
           )}
@@ -353,7 +406,14 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
                         <span className="rel-item-persona">{personaName(r.to_persona_id)}</span>
                         {r.description && <span className="rel-item-desc">— {r.description}</span>}
                       </div>
-                      <button className="team-delete-btn" onClick={() => handleDeleteRelationship(r.id)}>删除</button>
+                      <Button
+                        className="team-delete-btn"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteRelationship(r.id)}
+                      >
+                        删除
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -361,22 +421,33 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
                 <div className="empty-hint">暂无角色关系</div>
               )}
               <div className="add-rel-form">
-                <select value={relFrom} onChange={(e) => setRelFrom(e.target.value)}>
+                <Select value={relFrom} onChange={(e) => setRelFrom(e.target.value)}>
                   <option value="">选择角色</option>
                   {personas.filter((p) => p.id !== relTo).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <select value={relType} onChange={(e) => setRelType(e.target.value)}>
+                </Select>
+                <Select value={relType} onChange={(e) => setRelType(e.target.value)}>
                   <option value="superior">上级</option>
                   <option value="subordinate">下级</option>
                   <option value="peer">同级</option>
                   <option value="cross_department">跨部门</option>
-                </select>
-                <select value={relTo} onChange={(e) => setRelTo(e.target.value)}>
+                </Select>
+                <Select value={relTo} onChange={(e) => setRelTo(e.target.value)}>
                   <option value="">选择角色</option>
                   {personas.filter((p) => p.id !== relFrom).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <input type="text" value={relDesc} onChange={(e) => setRelDesc(e.target.value)} placeholder="描述（可选）" />
-                <button onClick={handleAddRelationship} disabled={!relFrom || !relTo || relFrom === relTo}>添加</button>
+                </Select>
+                <Input
+                  type="text"
+                  value={relDesc}
+                  onChange={(e) => setRelDesc(e.target.value)}
+                  placeholder="描述（可选）"
+                />
+                <Button
+                  variant="primary"
+                  onClick={handleAddRelationship}
+                  disabled={!relFrom || !relTo || relFrom === relTo}
+                >
+                  添加
+                </Button>
               </div>
             </>
           )}
@@ -386,16 +457,16 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
 
         <div className="dialog-actions">
           {selectedOrg && (
-            <button className="btn-delete" onClick={handleDeleteOrg}>删除组织</button>
+            <Button variant="danger" onClick={handleDeleteOrg}>删除组织</Button>
           )}
-          <button className="btn-cancel" onClick={onClose}>关闭</button>
+          <Button variant="secondary" onClick={onClose}>关闭</Button>
           {tab === 'info' && (
-            <button className="btn-submit" onClick={handleSaveOrg} disabled={saving || !orgName.trim()}>
+            <Button variant="primary" onClick={handleSaveOrg} disabled={saving || !orgName.trim()}>
               {saving ? '保存中...' : '保存'}
-            </button>
+            </Button>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -1,81 +1,82 @@
 .org-dialog {
-  width: 560px;
-  max-height: 80vh;
+  --ui-form-bg-token: var(--bg-elevated);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 0;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
 }
 
-/* Textarea styling — match persona-editor-dialog / scenario-dialog */
-.org-dialog .field-label textarea {
+.org-dialog::before {
+  content: '';
   display: block;
-  width: 100%;
+  height: 3px;
+  background: var(--primary-gradient);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.org-dialog-title {
+  margin: 0;
+  padding: 24px 24px 0;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.org-dialog .dialog-body {
+  padding: 24px;
+}
+
+.org-dialog .field-label {
+  display: block;
+  margin-bottom: 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.org-dialog .field-label .ui-form-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.org-dialog .field-label .ui-form-control {
   margin-top: 5px;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-  transition: all var(--transition-fast);
-  box-sizing: border-box;
-  resize: vertical;
-  min-height: 72px;
-  color: var(--text-primary);
-  background: var(--bg-elevated);
 }
 
-.org-dialog .field-label textarea:focus {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+.org-description-field {
+  --ui-form-textarea-min-height-token: 60px;
 }
 
-/* Org selector dropdown */
+.org-context-field {
+  --ui-form-textarea-min-height-token: 80px;
+}
+
+.org-selector-panel {
+  padding: 18px 24px 0;
+}
+
 .org-dialog .org-selector {
-  width: 100%;
-  padding: 8px 12px;
   margin-bottom: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  outline: none;
 }
 
-.org-dialog .org-selector:focus {
-  border-color: var(--green);
+.org-tabs-row {
+  margin: 16px 24px 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .org-tabs {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-  margin: 0 24px 0;
-  padding: 0;
+  width: 100%;
 }
 
-.org-tab {
-  padding: 8px 16px;
-  border: none;
-  background: none;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all var(--transition-fast);
-}
-
-.org-tab:hover:not(:disabled) {
-  color: var(--text-primary);
-}
-
-.org-tab:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.org-tab.active {
-  color: var(--green);
-  border-bottom-color: var(--green);
+.org-tabs .ui-segmented-control-button {
+  flex: 1;
+  min-width: 0;
 }
 
 .org-tab-content {
@@ -127,19 +128,16 @@
   margin-top: 2px;
 }
 
-.team-delete-btn {
-  padding: 4px 10px;
-  border: 1px solid transparent;
-  background: none;
+.team-delete-btn.ui-button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: transparent;
   color: var(--text-muted);
-  cursor: pointer;
   font-size: 12px;
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-  transition: all var(--transition-fast);
+  font-weight: 600;
 }
 
-.team-delete-btn:hover {
+.team-delete-btn.ui-button:hover:not(:disabled) {
   background: var(--rose-soft);
   border-color: rgba(185, 28, 28, 0.2);
   color: var(--rose);
@@ -180,19 +178,25 @@
   flex-shrink: 0;
 }
 
-.team-member-remove {
-  border: none;
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 2px;
+.team-member-remove.ui-button {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
   margin-left: 2px;
-  transition: color var(--transition-fast);
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  gap: 0;
+  line-height: 1;
 }
 
-.team-member-remove:hover {
+.team-member-remove.ui-button:hover:not(:disabled) {
+  background: var(--rose-soft);
   color: var(--rose);
 }
 
@@ -202,24 +206,21 @@
   font-style: italic;
 }
 
-.team-add-member-select {
+.team-add-member-select.ui-form-select {
+  width: auto;
+  min-height: 26px;
   padding: 4px 10px;
-  border: 1px dashed var(--border);
+  padding-right: 28px;
+  border-style: dashed;
   border-radius: 14px;
-  background: none;
+  background: transparent;
   font-size: 12px;
   color: var(--text-muted);
   cursor: pointer;
-  outline: none;
-  transition: all var(--transition-fast);
 }
 
-.team-add-member-select:hover {
-  border-color: var(--green);
-  color: var(--green);
-}
-
-.team-add-member-select:focus {
+.team-add-member-select.ui-form-select:hover,
+.team-add-member-select.ui-form-select:focus-visible {
   border-color: var(--green);
   color: var(--green);
 }
@@ -231,47 +232,14 @@
   align-items: center;
 }
 
-.add-team-form input {
+.add-team-form .ui-form-input {
   flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
   font-size: 13px;
-  outline: none;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  transition: all var(--transition-fast);
 }
 
-.add-team-form input:focus {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--focus-ring);
-}
-
-.add-team-form input::placeholder {
-  color: var(--text-muted);
-}
-
-.add-team-form button {
-  padding: 8px 16px;
-  border: none;
-  background: var(--green);
-  color: white;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
+.add-team-form .ui-button {
+  flex: 0 0 auto;
   white-space: nowrap;
-  transition: all var(--transition-fast);
-}
-
-.add-team-form button:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-.add-team-form button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 /* ── Unassigned hint ─────────────────────────── */
@@ -354,6 +322,7 @@
 /* ── Add relationship form ───────────────────── */
 .add-rel-form {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 10px 12px;
@@ -362,58 +331,29 @@
   border-radius: var(--radius-md);
 }
 
-.add-rel-form select,
-.add-rel-form input {
+.add-rel-form .ui-form-control {
+  min-height: 34px;
   padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
   font-size: 13px;
-  outline: none;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  transition: all var(--transition-fast);
 }
 
-.add-rel-form select:focus,
-.add-rel-form input:focus {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--focus-ring);
-}
-
-.add-rel-form select {
+.add-rel-form .ui-form-select {
+  flex: 1 1 112px;
+  width: auto;
   min-width: 0;
   cursor: pointer;
 }
 
-.add-rel-form input {
-  flex: 1;
+.add-rel-form .ui-form-input {
+  flex: 2 1 140px;
+  width: auto;
   min-width: 80px;
 }
 
-.add-rel-form input::placeholder {
-  color: var(--text-muted);
-}
-
-.add-rel-form button {
-  padding: 7px 14px;
-  border: none;
-  background: var(--green);
-  color: white;
-  border-radius: var(--radius-sm);
+.add-rel-form .ui-button {
+  min-height: 34px;
   font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
   white-space: nowrap;
-  transition: all var(--transition-fast);
-}
-
-.add-rel-form button:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-.add-rel-form button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 /* ── Relationship form arrow connector ───────── */
@@ -430,6 +370,26 @@
   text-align: center;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.org-dialog .dialog-error {
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--rose-soft);
+  color: var(--rose);
+  font-size: 13px;
+}
+
+.org-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 24px 24px;
+}
+
+.org-dialog .dialog-actions .ui-button--danger {
+  margin-right: auto;
 }
 
 /* ── Org selector in sidebar ─────────────────── */

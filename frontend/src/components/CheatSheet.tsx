@@ -1,7 +1,15 @@
+import { X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import html2canvas from 'html2canvas'
 import { type CheatSheet } from '../services/api'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogTitle,
+} from './ui/dialog'
 import './CheatSheet.css'
 
 interface Props {
@@ -72,21 +80,30 @@ export default function CheatSheetDialog({ open, onClose, data, personaName }: P
   }
 
   return (
-    <div className="cs-overlay" onClick={onClose}>
-      <div className="cs-dialog" onClick={(e) => e.stopPropagation()}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent className="cs-dialog" aria-describedby={undefined}>
         {/* Card area captured by html2canvas */}
         <div className="cs-card" ref={cardRef}>
           {/* Header */}
           <div className="cs-header">
             <div className="cs-header-left">
-              <h2 className="cs-title">{tr('话术纸条', 'Cheat Sheet')}</h2>
+              <DialogTitle asChild>
+                <h2 className="cs-title">{tr('话术纸条', 'Cheat Sheet')}</h2>
+              </DialogTitle>
               {personaName && (
                 <span className="cs-persona-badge">{personaName}</span>
               )}
             </div>
-            <button className="cs-close-btn" onClick={onClose} aria-label={tr('关闭', 'Close')}>
-              ✕
-            </button>
+            <DialogClose asChild>
+              <Button className="cs-close-btn" size="icon" variant="ghost" aria-label={tr('关闭', 'Close')}>
+                <X aria-hidden="true" size={16} />
+              </Button>
+            </DialogClose>
           </div>
 
           {/* Opening */}
@@ -129,14 +146,14 @@ export default function CheatSheetDialog({ open, onClose, data, personaName }: P
 
         {/* Footer buttons — outside cardRef, not captured in PNG */}
         <div className="cs-footer">
-          <button className="cs-btn-copy" onClick={handleCopy}>
+          <Button className="cs-btn-copy" variant="secondary" onClick={handleCopy}>
             {tr('复制全文', 'Copy All')}
-          </button>
-          <button className="cs-btn-download" onClick={handleDownload} disabled={downloading}>
+          </Button>
+          <Button className="cs-btn-download" variant="primary" onClick={handleDownload} disabled={downloading}>
             {downloading ? t('common.generating') : t('common.downloadImage')}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

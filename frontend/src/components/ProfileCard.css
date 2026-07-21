@@ -148,19 +148,8 @@
 }
 
 /* ============================================================
-   ProfileCardDialog overlay and wrapper
+   ProfileCardDialog wrapper
    ============================================================ */
-
-.pc-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-  backdrop-filter: blur(2px);
-}
 
 .pc-dialog {
   width: 420px;
@@ -191,24 +180,7 @@
 }
 
 .pc-close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  color: var(--text-muted, #888);
-  font-size: 16px;
-  transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
-}
-
-.pc-close-btn:hover {
-  background: var(--bg-base);
-  color: var(--text-primary, #111);
 }
 
 .pc-card-wrapper {
@@ -231,24 +203,6 @@
 
 .pc-btn-download {
   flex: 1;
-  padding: 9px 16px;
-  border: none;
-  border-radius: 8px;
-  background: #4f46e5;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.pc-btn-download:hover:not(:disabled) {
-  background: #4338ca;
-}
-
-.pc-btn-download:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 /* Placeholder shown when data is insufficient */

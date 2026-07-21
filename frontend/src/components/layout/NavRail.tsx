@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n'
+import { Button } from '../ui/button'
 import { desktopNavSections, isNavItemActive } from './navigation'
 import './NavRail.css'
 
@@ -69,8 +70,8 @@ const NavRail: React.FC = () => {
         ))}
       </div>
       <div className="navrail-footer">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           className="navrail-toggle"
           aria-label={toggleLabel}
           title={toggleLabel}
@@ -81,7 +82,7 @@ const NavRail: React.FC = () => {
             {collapsed ? <ChevronsRight size={19} /> : <ChevronsLeft size={19} />}
           </span>
           <span className="navrail-toggle-label">{toggleText}</span>
-        </button>
+        </Button>
       </div>
     </nav>
   )

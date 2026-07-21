@@ -16,6 +16,8 @@ import {
 } from 'lucide-react'
 import type { CommandResult } from '../../hooks/useCommandPalette'
 import { useI18n } from '../../i18n'
+import { Button } from '../ui/button'
+import { Input } from '../ui/form'
 import './CommandPalette.css'
 
 interface CommandPaletteProps {
@@ -95,14 +97,11 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   const renderItem = (item: CommandResult) => {
     const idx = globalIdx++
     return (
-      <div
+      <Button
         key={item.id}
         className={`cmd-palette-item${idx === selectedIndex ? ' selected' : ''}`}
+        variant="ghost"
         onClick={() => item.onSelect()}
-        onMouseEnter={() => {
-          // We don't set selectedIndex on hover to keep keyboard nav consistent,
-          // but clicking still works.
-        }}
       >
         <div className="cmd-palette-item-icon">
           {item.icon ? iconMap[item.icon] || <Search size={16} /> : <Search size={16} />}
@@ -116,7 +115,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
         {item.shortcut && (
           <span className="cmd-palette-shortcut">{item.shortcut}</span>
         )}
-      </div>
+      </Button>
     )
   }
 
@@ -130,13 +129,14 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
           <div className="cmd-palette-search-icon">
             <Search size={18} />
           </div>
-          <input
+          <Input
             ref={inputRef}
             className="cmd-palette-input"
             type="text"
             placeholder={t('app.searchPlaceholder')}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
+            aria-label={t('app.searchPlaceholder')}
           />
         </div>
 

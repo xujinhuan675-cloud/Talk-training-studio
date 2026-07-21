@@ -1,8 +1,16 @@
+import { Download, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import html2canvas from 'html2canvas'
 import { type ProfileCard as ProfileCardData } from '../services/api'
 import ProfileCard from './ProfileCard'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogTitle,
+} from './ui/dialog'
 import './ProfileCard.css'
 
 interface Props {
@@ -34,14 +42,28 @@ export default function ProfileCardDialog({ open, onClose, data }: Props) {
   }
 
   return (
-    <div className="pc-overlay" onClick={onClose}>
-      <div className="pc-dialog" onClick={(e) => e.stopPropagation()}>
-        {/* Dialog header — outside cardRef, not captured in PNG */}
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent className="pc-dialog" aria-describedby={undefined}>
+        {/* Dialog header - outside cardRef, not captured in PNG */}
         <div className="pc-dialog-header">
-          <h2 className="pc-dialog-title">{tr('我的沟通力名片', 'My Communication Profile Card')}</h2>
-          <button className="pc-close-btn" onClick={onClose} aria-label={tr('关闭', 'Close')}>
-            ✕
-          </button>
+          <DialogTitle className="pc-dialog-title">
+            {tr('我的沟通力名片', 'My Communication Profile Card')}
+          </DialogTitle>
+          <DialogClose asChild>
+            <Button
+              aria-label={tr('关闭', 'Close')}
+              className="pc-close-btn"
+              size="icon"
+              variant="ghost"
+            >
+              <X aria-hidden="true" size={18} />
+            </Button>
+          </DialogClose>
         </div>
 
         {/* Card area captured by html2canvas */}
@@ -49,13 +71,19 @@ export default function ProfileCardDialog({ open, onClose, data }: Props) {
           <ProfileCard data={data} cardRef={cardRef} />
         </div>
 
-        {/* Footer buttons — outside cardRef, not captured in PNG */}
+        {/* Footer buttons - outside cardRef, not captured in PNG */}
         <div className="pc-footer">
-          <button className="pc-btn-download" onClick={handleDownload} disabled={downloading}>
+          <Button
+            className="pc-btn-download"
+            onClick={handleDownload}
+            disabled={downloading}
+            variant="primary"
+          >
+            <Download aria-hidden="true" size={16} />
             {downloading ? t('common.generating') : t('common.downloadImage')}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

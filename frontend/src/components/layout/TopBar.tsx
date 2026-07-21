@@ -2,6 +2,9 @@ import React from 'react'
 import { Languages, Monitor, Moon, Sun } from 'lucide-react'
 import { useTheme, type ThemePreference } from '../../contexts/ThemeContext'
 import { SUPPORTED_LOCALES, useI18n, type Locale } from '../../i18n'
+import { Button } from '../ui/button'
+import { Select } from '../ui/form'
+import { SegmentedControl, type SegmentedControlOption } from '../ui/segmented-control'
 import UserMenu from './UserMenu'
 import './TopBar.css'
 
@@ -18,11 +21,22 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
   const resolvedThemeLabel = theme === 'dark'
     ? t('app.theme.currentDark')
     : t('app.theme.currentLight')
-  const themeOptions: { mode: ThemePreference; label: string; Icon: typeof Sun }[] = [
-    { mode: 'light', label: t('app.theme.light'), Icon: Sun },
-    { mode: 'dark', label: t('app.theme.dark'), Icon: Moon },
-    { mode: 'system', label: t('app.theme.system'), Icon: Monitor },
+  const themeItems: { value: ThemePreference; label: string; Icon: typeof Sun }[] = [
+    { value: 'light', label: t('app.theme.light'), Icon: Sun },
+    { value: 'dark', label: t('app.theme.dark'), Icon: Moon },
+    { value: 'system', label: t('app.theme.system'), Icon: Monitor },
   ]
+  const themeOptions: SegmentedControlOption<ThemePreference>[] = themeItems.map(({ value, label, Icon }) => ({
+    value,
+    title: `${themeControlLabel}: ${label}`,
+    label: (
+      <>
+        <Icon className="topbar-theme-icon" size={15} aria-hidden="true" />
+        <span>{label}</span>
+      </>
+    ),
+  }))
+  const languageLabel = t('app.languageLabel')
 
   return (
     <header className="topbar">
@@ -32,52 +46,40 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
           <span className="topbar-wordmark">TalkWise</span>
         </div>
       </div>
-      <div
+      <Button
         className="topbar-search"
-        role="button"
-        tabIndex={0}
+        variant="ghost"
         onClick={onSearchClick}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            onSearchClick?.()
-          }
-        }}
+        aria-label={t('app.searchPlaceholder')}
       >
         <span className="topbar-search-text">{t('app.searchPlaceholder')}</span>
         <kbd className="topbar-search-kbd">&#8984;K</kbd>
-      </div>
+      </Button>
       <div className="topbar-right">
-        <div
+        <SegmentedControl
           className="topbar-theme-control"
-          role="group"
-          aria-label={`${themeControlLabel}. ${resolvedThemeLabel}`}
+          ariaLabel={`${themeControlLabel}. ${resolvedThemeLabel}`}
           data-theme-mode={mode}
           data-resolved-theme={theme}
-        >
-          {themeOptions.map(({ mode: optionMode, label, Icon }) => (
-            <button
-              key={optionMode}
-              className="topbar-theme-option"
-              type="button"
-              onClick={() => setMode(optionMode)}
-              aria-pressed={mode === optionMode}
-              title={`${themeControlLabel}: ${label}`}
-            >
-              <Icon size={15} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </div>
-        <label className="topbar-language" aria-label={t('app.languageLabel')} title={t('app.languageLabel')}>
+          onValueChange={setMode}
+          options={themeOptions}
+          size="sm"
+          value={mode}
+        />
+        <label className="topbar-language" aria-label={languageLabel} title={languageLabel}>
           <Languages size={15} />
-          <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
+          <Select
+            className="topbar-language-select"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+            aria-label={languageLabel}
+          >
             {SUPPORTED_LOCALES.map((item) => (
               <option key={item.value} value={item.value}>
                 {t(item.labelKey)}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <UserMenu />
       </div>

@@ -3,6 +3,7 @@ import { Check, ChevronDown, LogOut, UserRound } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { getUserDisplayRoleName } from '../../services/auth'
 import { useI18n } from '../../i18n'
+import { Button } from '../ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,10 +27,13 @@ const UserMenu: React.FC = () => {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="user-menu-trigger"
+      <Button
+        asChild
+        className="user-menu-trigger"
+        variant="secondary"
+        size="sm"
+      >
+        <DropdownMenuTrigger
           aria-label={tr('用户菜单', 'User menu')}
           title={currentUser ? `${userName} · ${roleName}` : tr('用户菜单', 'User menu')}
         >
@@ -37,8 +41,8 @@ const UserMenu: React.FC = () => {
             {avatarInitial}
           </span>
           <ChevronDown className="user-menu-chevron" size={15} aria-hidden="true" />
-        </button>
-      </DropdownMenuTrigger>
+        </DropdownMenuTrigger>
+      </Button>
 
       <DropdownMenuContent className="user-menu-popover" align="end">
         <DropdownMenuLabel className="user-menu-heading">{tr('切换用户', 'Switch user')}</DropdownMenuLabel>
