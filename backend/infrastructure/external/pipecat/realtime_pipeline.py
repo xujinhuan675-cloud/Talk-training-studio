@@ -37,6 +37,11 @@ from application.ports.realtime import (
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
 )
+from infrastructure.external.pipecat.provider_catalog import (
+    pipecat_integrated_provider_modules,
+    pipecat_provider_catalog,
+    pipecat_provider_catalog_summary,
+)
 
 CORE_PIPECAT_MODULES = (
     "pipecat.pipeline.pipeline",
@@ -532,6 +537,9 @@ def pipecat_realtime_capability_response(
     data["readyForCall"] = readiness["ready"]
     data["readiness"] = readiness
     data["errors"] = readiness["blockingReasons"]
+    data["providerCatalogSummary"] = sanitize_realtime_public_value(
+        pipecat_provider_catalog_summary()
+    )
     smoke = pipecat_realtime_smoke_contract(
         ready_for_call=bool(readiness["ready"]),
         require_websocket=require_websocket,
@@ -2027,6 +2035,7 @@ def pipecat_pipeline_capability(
                 capability,
                 require_websocket=websocket is not None,
             ),
+            "providerCatalogSummary": pipecat_provider_catalog_summary(),
             "optionalMissingModules": capability.optional_missing_modules,
             "runtimeLoaded": runtime is not None,
             "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
@@ -3532,6 +3541,8 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
             ),
             "mode": "native_pipecat_llm_service",
         },
+        "providerCatalog": pipecat_provider_catalog(probe_imports=False),
+        "runtimeIntegratedProviderModules": pipecat_integrated_provider_modules(),
         "llmContextEntrypoints": (
             "pipecat.processors.aggregators.llm_context.LLMContext",
             "pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair",
@@ -3577,6 +3588,8 @@ __all__ = [
     "pipecat_realtime_capability_response",
     "pipecat_realtime_readiness",
     "pipecat_realtime_smoke_contract",
+    "pipecat_provider_catalog",
+    "pipecat_provider_catalog_summary",
     "pipecat_source_snapshot",
     "validate_pipecat_voice_config",
 ]

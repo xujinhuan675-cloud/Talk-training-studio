@@ -121,6 +121,14 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 - API websocket 启动 metadata 会根据 `settings.llm.provider=openrouter` 或 OpenRouter base URL，把 `llm.provider` 标记为 `openrouter`，但外层 websocket provider 仍保持 `pipecat`。
 - 不一次性迁入所有 Pipecat 上游 providers：不同 provider 的 STT/TTS/LLM settings、frame shape、sample rate、voice 参数、turn detection 和错误分类并不统一；在真实浏览器音频 E2E 未通过前，全量扩展会放大未验证路径。后续按 STT、TTS、LLM、transport 四类逐个迁移和验收。
 
+2026-07-21 Pipecat provider catalog 本地化迁移：
+
+- 本轮不处理 key 配置，不把 Pipecat 上游 provider 源码整块复制进仓库；先把本地已安装 `pipecat-ai` 包暴露出的 service / transport / VAD / turn 模块扫描为 TalkWise-owned provider catalog 契约。
+- 当前 catalog 覆盖渠道包括：`stt`、`tts`、`llm`、`realtime`、`transport`、`vad`、`vad_support`、`turn_analysis`、`turn_detection`、`image`、`video`、`vision`、`memory`、`service_extension`。
+- `/realtime/capabilities` 现在返回 `providerCatalogSummary`；`pipecat_source_snapshot()` 返回完整 `providerCatalog` 和 `runtimeIntegratedProviderModules`，用于后续逐 provider 验收、文档盘查和前端诊断。
+- 当前真正运行态接入仍是 OpenAI STT/TTS/LLM、OpenRouter LLM、FastAPI WebSocket transport、Silero/VAD processor、Pipecat user turn processor/strategies；其它 Pipecat providers 均标记为 `inventory_only`，不能被误读为可直接发起训练通话。
+- 下一步按 catalog 中 `inventory_only` 的高价值项逐个推进 adapter、readiness、secret-safe error taxonomy、事件契约测试和真实浏览器音频 E2E，而不是直接开放全 provider 下拉。
+
 ### 当前项目核心部分对齐程度
 
 | 核心域 | 对齐底座 | 当前程度 | 状态判断 |
@@ -128,11 +136,11 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | TrainingCore / 训练语义 | TalkWise 自有 | 75% | 已有 session、scenario、persona/stakeholder、report、progress、live guidance。TrainingCore 已通过 text runtime contract 明确只保存 ref/metadata，不接管正文、路径和分支状态。 |
 | 文本 conversation / message tree | LibreChat | 80% | 已有 conversation CRUD、message tree、edit/retry/fork、path/search/search path context 验收；分支动作继续过滤结果类 metadata，正文和 selected path 已由 adapter/runtime 作为 source of truth。完整 LibreChat-style schema 仍未迁入。 |
 | branch-aware review / history | LibreChat 验收标准 + TalkWise 语义 | 78% | 已有当前路径、tail、fork metadata remap、结果/历史展示和 replay-only metadata 验收；还缺真实 UI reload/fork 操作 E2E。 |
-| model/provider registry | LibreChat + Pipecat | 55-60% | 已有 LLM registry、model specs、capability readiness。Pipecat realtime 内部 LLM provider 已开始支持 OpenRouter slice，但 Agent/Tool/MCP descriptor 与真实 runtime readiness 仍未统一成完整 provider/preset/runtime registry。 |
+| model/provider registry | LibreChat + Pipecat | 60-65% | 已有 LLM registry、model specs、capability readiness。Pipecat provider catalog 已本地化扫描 STT/TTS/LLM/realtime/transport/VAD/turn 等渠道，并区分 `runtime_integrated` 与 `inventory_only`；Agent/Tool/MCP descriptor 与真实 runtime readiness 仍未统一成完整 provider/preset/runtime registry。 |
 | auth / ACL / resource scope | LibreChat | 75-80% | conversation / file asset / agent config 的普通 repository 访问都要求显式 user/team scope；legacy stakeholder room escape hatch 已绑定 TrainingSession ACL 和 room_id。仍需真实 auth、admin override 和 legacy stakeholder scope 产品语义继续审计。 |
 | MCP / Agent / Tool | LibreChat | 45-50% | 已有 capability inventory、Agent config 绑定扫描、具体 MCP server readiness 校验，以及复盘助手训练素材窄 tool consumer。descriptor-only 已明确为 warning/ready=false；仍不做通用 dispatcher/marketplace。 |
 | realtime websocket / transcript | Pipecat | 80% | 已有 RealtimePipelineAdapter、provider-neutral transcript、audio output、turn/interruption/silence 事件、live guidance trigger、smoke contract、error taxonomy 和 runner telemetry summary；内部 LLM provider 可切 OpenRouter。独立 OpenAI realtime 和客户端转写持久化入口已删除。 |
-| Pipecat runtime source of truth | Pipecat | 80% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；本机 capability 可返回 `readyForCall=true`，生产就绪仍由 `productionReadiness` 标记。内部 provider 矩阵从 OpenAI-only 推进到 OpenAI STT/TTS + OpenRouter LLM 的第一条可测组合；仍缺真实浏览器麦克风 E2E、聚合 tracing 和更多 Pipecat provider 逐项迁移。 |
+| Pipecat runtime source of truth | Pipecat | 82-85% | `/training-studio/realtime` 默认走 Pipecat，旧 `provider=openai` 返回不支持；本机 capability 可返回 `readyForCall=true`，生产就绪仍由 `productionReadiness` 标记。内部 provider 矩阵已有 OpenAI STT/TTS/LLM + OpenRouter LLM 可测组合，并新增完整 Pipecat provider catalog 作为迁移 inventory；仍缺真实浏览器麦克风 E2E、聚合 tracing 和更多 Pipecat provider 逐项 runtime adapter。 |
 | files / RAG / training materials | LibreChat | 60% | file asset ownership、服务层 scope、repository scope 和 training material 安全摘要/受控片段已补强；复盘素材对照卡片和素材对照 LLM adapter 已接入。素材全文/RAG/persona builder 自动接入仍不进入当前切片。 |
 | usage / moderation / admin ops | LibreChat | 10-20% | 当前不是重点，只适合 auth/ACL 稳定后再迁。 |
 
@@ -140,7 +148,7 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 
 - TalkWise 自己的训练产品层已经有 70% 以上的形状。
 - LibreChat 文本底座约 55-60%，已经开始落到 conversation、capability、resource scope、message-tree action contract 和 text runtime source-of-truth contract，但还不是统一 LibreChat-style schema runtime。
-- Pipecat realtime 底座约 75-80%，Pipecat-only runtime 已落地并区分 local readiness 与 production readiness；runner 已有基础 telemetry summary，剩余主要是真实浏览器音频 E2E 和更完整 metrics/tracing。
+- Pipecat realtime 底座约 80-85%，Pipecat-only runtime 已落地并区分 local readiness 与 production readiness；runner 已有基础 telemetry summary，并已把本地 Pipecat provider catalog 暴露为 source-of-truth inventory。剩余主要是真实浏览器音频 E2E、更完整 metrics/tracing，以及 inventory-only providers 的逐项 runtime adapter。
 - MCP/Agent 已从早期 inventory 推进到 descriptor-only readiness contract；生产级 auth/ACL 仍未完整迁入 OAuth/LDAP/admin panel/permission override。
 
 当前已经落地的方向是“先修边界，再迁 runtime”：
@@ -162,7 +170,7 @@ Talk Training Studio 的目标不是继续扩大自研 MVP，而是把 TalkWise 
 | LibreChat files/RAG/uploads | 训练材料、会议纪要、案例导入 | 可用但未迁 | 先统一 file resource ownership，再接 RAG/tool。 |
 | LibreChat import/export/share | 训练复盘导入导出、团队分享 | 后置 | auth/ACL 和 report contract 稳定后做。 |
 | Pipecat frame pipeline | 实时语音主 runtime | 高价值，部分接入 | 让 `RealtimePipelineAdapter` 变成 Pipecat adapter 主路径。 |
-| Pipecat STT/TTS/LLM services | 多 provider 语音训练 | 已开始迁入 | 当前已从 OpenAI-only 扩到 OpenAI STT/TTS + OpenRouter LLM 的窄切片。下一步按 provider 能力矩阵继续迁 Deepgram/Whisper STT、ElevenLabs/OpenAI TTS、更多 LLM service；每个 provider 必须有 readiness、secret-safe error taxonomy 和事件契约测试。 |
+| Pipecat STT/TTS/LLM services | 多 provider 语音训练 | 已有本地 inventory，运行态有限接入 | 当前已从 OpenAI-only 扩到 OpenAI STT/TTS/LLM + OpenRouter LLM 的可测组合，并用本地 Pipecat provider catalog 标记 Deepgram/Whisper/ElevenLabs/Google/Azure/Ollama 等为后续 `inventory_only` 候选。下一步按 provider 能力矩阵逐项迁 runtime adapter；每个 provider 必须有 readiness、secret-safe error taxonomy 和事件契约测试。 |
 | Pipecat VAD/turn/interruption | 打断、沉默、轮次检测 | 已有事件映射和 telemetry summary，待真实音频验收 | 已产出 TalkWise 可读事件：user turn started/stopped、assistant speaking、interrupted、silence timeout，并在 runner summary 中聚合 turn/interruption/silence；下一步接真实浏览器 E2E 和训练压力/复盘指标。 |
 | Pipecat transport / WebRTC | 视频/会议式训练 | 后置 | WebSocket 稳定后再考虑 WebRTC/LiveKit/Daily。 |
 | Pipecat observability | latency、turn、provider error | 基础 session summary 已落地 | 下一步补跨 session 聚合 tracing、真实配置 smoke 和前端/后端联动诊断。 |

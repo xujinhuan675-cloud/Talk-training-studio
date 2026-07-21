@@ -15,6 +15,11 @@ from infrastructure.external.pipecat.realtime_pipeline import (
     import_pipecat_runtime,
     is_pipecat_available,
     pipecat_pipeline_capability,
+    pipecat_provider_catalog,
+    pipecat_provider_catalog_summary,
+    pipecat_realtime_capability_response,
+    pipecat_realtime_readiness,
+    pipecat_realtime_smoke_contract,
     pipecat_source_snapshot,
     validate_pipecat_voice_config,
 )
@@ -34,6 +39,11 @@ __all__ = [
     "import_pipecat_runtime",
     "is_pipecat_available",
     "pipecat_pipeline_capability",
+    "pipecat_provider_catalog",
+    "pipecat_provider_catalog_summary",
+    "pipecat_realtime_capability_response",
+    "pipecat_realtime_readiness",
+    "pipecat_realtime_smoke_contract",
     "pipecat_source_snapshot",
     "validate_pipecat_voice_config",
 ]
