@@ -10,39 +10,38 @@
 
 /* Tab bar */
 .settings-tab-bar {
-  display: flex;
-  gap: 0;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
-  padding: 0;
+  padding: 6px;
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
-.settings-tab {
+.settings-tabs-control {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.settings-tabs-control.ui-segmented-control {
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.settings-tabs-control .ui-segmented-control-button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.settings-tab-label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 14px 20px;
-  border: none;
-  background: none;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-.settings-tab:hover {
-  color: var(--text-primary);
-}
-
-.settings-tab.active {
-  color: var(--green);
-  border-bottom-color: var(--green);
+  min-width: 0;
 }
 
 /* Tab content area */
@@ -504,6 +503,10 @@
   margin: 0;
 }
 
+.settings-voice-field {
+  margin-bottom: 14px;
+}
+
 .settings-voice-check {
   margin: 0 0 14px;
   padding: 0;
@@ -529,7 +532,8 @@
   justify-content: flex-end;
 }
 
-.settings-voice-actions button,
+.settings-voice-actions .ui-button,
+.settings-section-header .settings-header-button,
 .settings-section-header .settings-create-btn {
   display: inline-flex;
   align-items: center;

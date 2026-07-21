@@ -50,6 +50,9 @@ import {
   type VoicePreferenceConfig,
 } from '../services/voiceConfig'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
+import { Button } from '../components/ui/button'
+import { Field, Input, Select } from '../components/ui/form'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import { useI18n, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './SettingsPage.css'
@@ -114,16 +117,21 @@ export function SettingsShell({
   return (
     <div className="settings-page">
       <div className="settings-tab-bar">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            className={`settings-tab${activeTab === tab.key ? ' active' : ''}`}
-            onClick={() => selectTab(tab.key)}
-          >
-            {tab.icon}
-            {t(tab.labelKey)}
-          </button>
-        ))}
+        <SegmentedControl
+          ariaLabel={t('nav.settings')}
+          className="settings-tabs-control"
+          value={activeTab}
+          onValueChange={selectTab}
+          options={TABS.map((tab) => ({
+            value: tab.key,
+            label: (
+              <span className="settings-tab-label">
+                {tab.icon}
+                <span>{t(tab.labelKey)}</span>
+              </span>
+            ),
+          }))}
+        />
       </div>
 
       <div className="settings-content">
@@ -1082,10 +1090,16 @@ function ConfigTab() {
     <>
       <div className="settings-section-header">
         <h3 className="settings-section-title">{tr('AI 服务', 'AI Services')}</h3>
-        <button className="settings-create-btn" onClick={loadConfig} disabled={loading || saving}>
+        <Button
+          className="settings-header-button"
+          variant="secondary"
+          size="sm"
+          onClick={loadConfig}
+          disabled={loading || saving}
+        >
           <RefreshCw size={14} />
           {loading ? t('common.loading') : t('common.refresh')}
-        </button>
+        </Button>
       </div>
 
       <div className="settings-voice-status">
@@ -1123,31 +1137,27 @@ function ConfigTab() {
             <KeyRound size={18} />
             <h4>{tr('LLM', 'LLM')}</h4>
           </div>
-          <label className="field-label">
-            {tr('基础 URL', 'Base URL')}
-            <input value={form.llmBaseUrl} onChange={(e) => updateForm({ llmBaseUrl: e.target.value })} />
-          </label>
-          <label className="field-label">
-            {tr('模型', 'Model')}
-            <input value={form.llmDefaultModel} onChange={(e) => updateForm({ llmDefaultModel: e.target.value })} />
-          </label>
-          <label className="field-label">
-            {tr('接口', 'API')}
-            <select value={form.llmWireApi} onChange={(e) => updateForm({ llmWireApi: e.target.value })}>
+          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
+            <Input value={form.llmBaseUrl} onChange={(e) => updateForm({ llmBaseUrl: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
+            <Input value={form.llmDefaultModel} onChange={(e) => updateForm({ llmDefaultModel: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('接口', 'API')}>
+            <Select value={form.llmWireApi} onChange={(e) => updateForm({ llmWireApi: e.target.value })}>
               <option value="responses">{tr('Responses 接口', 'Responses')}</option>
               <option value="chat_completions">{tr('Chat Completions 接口', 'Chat Completions')}</option>
-            </select>
-          </label>
-          <label className="field-label">
-            {tr('API 密钥', 'API Key')}
-            <input
+            </Select>
+          </Field>
+          <Field className="settings-voice-field" label={tr('API 密钥', 'API Key')}>
+            <Input
               type="password"
               value={form.llmApiKey}
               onChange={(e) => updateForm({ llmApiKey: e.target.value })}
               placeholder={config?.llm_api_key_configured ? keyText(true, config.llm_api_key_preview) : t('common.enterToSave')}
               autoComplete="off"
             />
-          </label>
+          </Field>
         </section>
 
         <section className="settings-form-panel settings-voice-panel">
@@ -1155,32 +1165,28 @@ function ConfigTab() {
             <Volume2 size={18} />
             <h4>{tr('TTS', 'TTS')}</h4>
           </div>
-          <label className="field-label">
-            {tr('服务商', 'Provider')}
-            <select value={form.ttsProvider} onChange={(e) => updateForm({ ttsProvider: e.target.value })}>
+          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
+            <Select value={form.ttsProvider} onChange={(e) => updateForm({ ttsProvider: e.target.value })}>
               <option value="openrouter">OpenRouter</option>
               <option value="minimax">MiniMax</option>
               <option value="elevenlabs">ElevenLabs</option>
-            </select>
-          </label>
-          <label className="field-label">
-            {tr('基础 URL', 'Base URL')}
-            <input value={form.ttsBaseUrl} onChange={(e) => updateForm({ ttsBaseUrl: e.target.value })} />
-          </label>
-          <label className="field-label">
-            {tr('模型', 'Model')}
-            <input value={form.ttsModel} onChange={(e) => updateForm({ ttsModel: e.target.value })} />
-          </label>
-          <label className="field-label">
-            {tr('API 密钥', 'API Key')}
-            <input
+            </Select>
+          </Field>
+          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
+            <Input value={form.ttsBaseUrl} onChange={(e) => updateForm({ ttsBaseUrl: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
+            <Input value={form.ttsModel} onChange={(e) => updateForm({ ttsModel: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('API 密钥', 'API Key')}>
+            <Input
               type="password"
               value={form.ttsApiKey}
               onChange={(e) => updateForm({ ttsApiKey: e.target.value })}
               placeholder={config?.tts_api_key_configured ? keyText(true, config.tts_api_key_preview) : t('common.enterToSave')}
               autoComplete="off"
             />
-          </label>
+          </Field>
         </section>
 
         <section className="settings-form-panel settings-voice-panel">
@@ -1188,21 +1194,18 @@ function ConfigTab() {
             <Mic size={18} />
             <h4>{tr('STT', 'STT')}</h4>
           </div>
-          <label className="field-label">
-            {tr('服务商', 'Provider')}
-            <select value={form.sttProvider} onChange={(e) => updateForm({ sttProvider: e.target.value })}>
+          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
+            <Select value={form.sttProvider} onChange={(e) => updateForm({ sttProvider: e.target.value })}>
               <option value="whisper">{tr('Whisper 兼容', 'Whisper-compatible')}</option>
               <option value="minimax">MiniMax</option>
-            </select>
-          </label>
-          <label className="field-label">
-            {tr('基础 URL', 'Base URL')}
-            <input value={form.sttBaseUrl} onChange={(e) => updateForm({ sttBaseUrl: e.target.value })} />
-          </label>
-          <label className="field-label">
-            {tr('模型', 'Model')}
-            <input value={form.sttModel} onChange={(e) => updateForm({ sttModel: e.target.value })} />
-          </label>
+            </Select>
+          </Field>
+          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
+            <Input value={form.sttBaseUrl} onChange={(e) => updateForm({ sttBaseUrl: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
+            <Input value={form.sttModel} onChange={(e) => updateForm({ sttModel: e.target.value })} />
+          </Field>
           <label className="settings-checkbox-item settings-voice-check">
             <input
               type="checkbox"
@@ -1212,16 +1215,15 @@ function ConfigTab() {
             <span>{tr('复用 TTS API Key', 'Reuse TTS API key')}</span>
           </label>
           {!form.sttUseTtsApiKey && (
-            <label className="field-label">
-              {tr('STT API 密钥', 'STT API Key')}
-              <input
+            <Field className="settings-voice-field" label={tr('STT API 密钥', 'STT API Key')}>
+              <Input
                 type="password"
                 value={form.sttApiKey}
                 onChange={(e) => updateForm({ sttApiKey: e.target.value })}
                 placeholder={config?.stt_api_key_configured ? keyText(true, config.stt_api_key_preview) : t('common.enterToSave')}
                 autoComplete="off"
               />
-            </label>
+            </Field>
           )}
         </section>
 
@@ -1230,28 +1232,24 @@ function ConfigTab() {
             <Radio size={18} />
             <h4>{tr('实时语音', 'Realtime')}</h4>
           </div>
-          <label className="field-label">
-            {tr('Pipecat OpenAI 服务密钥', 'Pipecat OpenAI service key')}
-            <input
+          <Field className="settings-voice-field" label={tr('Pipecat OpenAI 服务密钥', 'Pipecat OpenAI service key')}>
+            <Input
               type="password"
               value={form.realtimeApiKey}
               onChange={(e) => updateForm({ realtimeApiKey: e.target.value })}
               placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('填写 Pipecat OpenAI 服务 key', 'Enter a Pipecat OpenAI service key')}
               autoComplete="off"
             />
-          </label>
-          <label className="field-label">
-            {tr('实时模型', 'Realtime model')}
-            <input value={form.realtimeModel} onChange={(e) => updateForm({ realtimeModel: e.target.value })} />
-          </label>
-          <label className="field-label">
-            {tr('实时声音', 'Realtime voice')}
-            <input value={form.realtimeVoice} onChange={(e) => updateForm({ realtimeVoice: e.target.value })} />
-          </label>
-          <label className="field-label">
-            {tr('转写模型', 'Transcription Model')}
-            <input value={form.realtimeTranscriptionModel} onChange={(e) => updateForm({ realtimeTranscriptionModel: e.target.value })} />
-          </label>
+          </Field>
+          <Field className="settings-voice-field" label={tr('实时模型', 'Realtime model')}>
+            <Input value={form.realtimeModel} onChange={(e) => updateForm({ realtimeModel: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('实时声音', 'Realtime voice')}>
+            <Input value={form.realtimeVoice} onChange={(e) => updateForm({ realtimeVoice: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('转写模型', 'Transcription Model')}>
+            <Input value={form.realtimeTranscriptionModel} onChange={(e) => updateForm({ realtimeTranscriptionModel: e.target.value })} />
+          </Field>
           <p className="settings-voice-note">
             {tr('实时语音通过 Pipecat 管道运行；逐轮语音继续使用 STT/TTS。', 'Realtime voice runs through Pipecat; turn-based voice keeps using STT/TTS.')}
           </p>
@@ -1259,14 +1257,14 @@ function ConfigTab() {
       </div>
 
       <div className="settings-form-actions settings-voice-actions">
-        <button className="btn-cancel" onClick={loadConfig} disabled={loading || saving}>
+        <Button variant="secondary" onClick={loadConfig} disabled={loading || saving}>
           <RefreshCw size={14} />
           {tr('还原', 'Reset')}
-        </button>
-        <button className="btn-submit" onClick={handleSave} disabled={loading || saving}>
+        </Button>
+        <Button variant="primary" onClick={handleSave} disabled={loading || saving}>
           <Save size={14} />
           {saving ? t('common.saving') : tr('保存并应用', 'Save and Apply')}
-        </button>
+        </Button>
       </div>
     </>
   )

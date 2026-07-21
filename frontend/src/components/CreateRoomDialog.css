@@ -1,30 +1,14 @@
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  backdrop-filter: blur(2px);
-}
-
-.dialog {
-  background: var(--bg-elevated);
-  border-radius: var(--radius-lg);
-  padding: 0;
-  width: 420px;
-  max-height: 85vh;
-  overflow-y: auto;
-  box-shadow: var(--shadow-lg);
-  position: relative;
-}
-
 .create-room-dialog {
   --ui-form-bg-token: var(--bg-elevated);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  width: min(420px, calc(100vw - 32px));
+  box-shadow: var(--shadow-lg);
 }
 
-.dialog::before {
+.create-room-dialog::before {
   content: '';
   display: block;
   height: 3px;
@@ -32,11 +16,11 @@
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
-.dialog-body {
+.create-room-dialog .dialog-body {
   padding: 24px;
 }
 
-.dialog h3 {
+.create-room-title {
   margin: 0 0 20px 0;
   font-size: 17px;
   font-weight: 600;
@@ -44,7 +28,7 @@
   padding: 24px 24px 0;
 }
 
-.field-label {
+.create-room-dialog .field-label {
   display: block;
   font-size: 13px;
   color: var(--text-secondary);
@@ -61,8 +45,8 @@
   margin-top: 5px;
 }
 
-.field-label input:not(.ui-form-control),
-.field-label select:not(.ui-form-control) {
+.create-room-dialog .field-label input:not(.ui-form-control),
+.create-room-dialog .field-label select:not(.ui-form-control) {
   display: block;
   width: 100%;
   margin-top: 5px;
@@ -77,13 +61,13 @@
   color: var(--text-primary);
 }
 
-.field-label input:not(.ui-form-control):focus,
-.field-label select:not(.ui-form-control):focus {
+.create-room-dialog .field-label input:not(.ui-form-control):focus,
+.create-room-dialog .field-label select:not(.ui-form-control):focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.persona-select-list {
+.create-room-dialog .persona-select-list {
   max-height: 200px;
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -91,7 +75,7 @@
   margin-bottom: 14px;
 }
 
-.persona-select-item {
+.create-room-dialog .persona-select-item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -100,48 +84,48 @@
   transition: background var(--transition-fast);
 }
 
-.persona-select-item:hover {
+.create-room-dialog .persona-select-item:hover {
   background: var(--bg-base);
 }
 
-.persona-select-item.selected {
+.create-room-dialog .persona-select-item.selected {
   background: var(--green-soft);
 }
 
-.persona-recommendations {
+.create-room-dialog .persona-recommendations {
   margin-top: 8px;
 }
 
-.persona-recommendations-label {
+.create-room-dialog .persona-recommendations-label {
   margin-bottom: 4px;
 }
 
-.persona-recommendation-list {
+.create-room-dialog .persona-recommendation-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.persona-color {
+.create-room-dialog .persona-color {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.persona-select-name {
+.create-room-dialog .persona-select-name {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
 }
 
-.persona-select-role {
+.create-room-dialog .persona-select-role {
   font-size: 12px;
   color: var(--text-muted);
   margin-left: auto;
 }
 
-.dialog-error {
+.create-room-dialog .dialog-error {
   color: var(--rose);
   font-size: 13px;
   margin-bottom: 14px;
@@ -150,46 +134,9 @@
   border-radius: var(--radius-sm);
 }
 
-.dialog-actions {
+.create-room-dialog .dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   padding: 0 24px 24px;
-}
-
-.btn-cancel {
-  padding: 8px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.btn-cancel:hover {
-  background: var(--bg-base);
-  color: var(--text-primary);
-}
-
-.btn-submit {
-  padding: 8px 18px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--primary-gradient);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity var(--transition-fast);
-}
-
-.btn-submit:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn-submit:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }

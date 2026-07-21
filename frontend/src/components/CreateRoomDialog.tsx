@@ -11,6 +11,11 @@ import {
 } from '../services/api'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from './ui/dialog'
 import { Field, Input, Select } from './ui/form'
 import './CreateRoomDialog.css'
 
@@ -132,12 +137,17 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
     }
   }
 
-  if (!open) return null
-
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog create-room-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>{tr('创建对话房间', 'Create conversation room')}</h3>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent className="create-room-dialog" aria-describedby={undefined}>
+        <DialogTitle className="create-room-title">
+          {tr('创建对话房间', 'Create conversation room')}
+        </DialogTitle>
         <div className="dialog-body">
           <Field className="field-label" label={tr('名称', 'Name')}>
             <Input
@@ -240,7 +250,7 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
             {submitting ? tr('创建中...', 'Creating...') : tr('创建', 'Create')}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
