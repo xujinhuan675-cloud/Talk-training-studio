@@ -1,4 +1,4 @@
-import { Suspense, lazy, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, type ReactNode } from 'react'
 import { Routes, Route, Navigate, Outlet, useLocation, useParams } from 'react-router-dom'
 import Layout from './components/layout/Layout'
 import { AppProvider } from './contexts/AppContext'
@@ -13,6 +13,7 @@ import {
   resolvePersonaEditRedirectTarget,
   resolveTrainingResultSessionRedirectTarget,
 } from './routeRedirects'
+import { getDocumentTitle } from './routeTitles'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
@@ -36,6 +37,17 @@ function RouteLoadingFallback() {
       {t('common.loading')}
     </div>
   )
+}
+
+function DocumentTitleSync() {
+  const location = useLocation()
+  const { t } = useI18n()
+
+  useEffect(() => {
+    document.title = getDocumentTitle(location.pathname, location.search, t)
+  }, [location.pathname, location.search, t])
+
+  return null
 }
 
 function RequireSystemRole({
@@ -96,6 +108,7 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <AppProvider>
+            <DocumentTitleSync />
             <Suspense fallback={<RouteLoadingFallback />}>
               <Routes>
                 <Route element={<Layout />}>

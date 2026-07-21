@@ -1,5 +1,32 @@
 .persona-editor-dialog {
-  width: 500px;
+  --ui-form-bg-token: var(--bg-elevated);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 0;
+  width: min(500px, calc(100vw - 32px));
+}
+
+.persona-editor-dialog::before {
+  content: '';
+  display: block;
+  height: 3px;
+  background: var(--primary-gradient);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.persona-editor-title {
+  margin: 0;
+  padding: 24px 24px 0;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.persona-editor-dialog .dialog-body {
+  padding: 24px;
 }
 
 .persona-avatar-preview {
@@ -8,26 +35,20 @@
   margin-bottom: 20px;
 }
 
-.persona-editor-dialog .field-label textarea {
+.persona-editor-dialog .field-label {
   display: block;
-  width: 100%;
-  margin-top: 5px;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-  transition: all var(--transition-fast);
-  box-sizing: border-box;
-  resize: vertical;
-  min-height: 200px;
-  color: var(--text-primary);
+  margin-bottom: 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.persona-editor-dialog .field-label textarea:focus {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+.persona-editor-dialog .field-label .ui-form-control {
+  margin-top: 5px;
+}
+
+.persona-editor-dialog .field-label .ui-form-textarea {
+  min-height: 200px;
 }
 
 .persona-editor-dialog .color-field {
@@ -52,19 +73,22 @@
   font-family: monospace;
 }
 
-.btn-delete {
-  padding: 8px 18px;
-  border: 1px solid rgba(185, 28, 28, 0.3);
+.persona-editor-dialog .dialog-error {
+  margin-bottom: 14px;
   border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
+  background: var(--rose-soft);
+  padding: 8px 12px;
   color: var(--rose);
-  font-size: 14px;
-  cursor: pointer;
-  margin-right: auto;
-  transition: all var(--transition-fast);
+  font-size: 13px;
 }
 
-.btn-delete:hover {
-  background: var(--rose-soft);
-  border-color: rgba(185, 28, 28, 0.5);
+.persona-editor-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 24px 24px;
+}
+
+.persona-editor-delete {
+  margin-right: auto;
 }

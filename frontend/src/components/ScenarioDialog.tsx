@@ -8,6 +8,13 @@ import {
   type Scenario,
   type PersonaSummary,
 } from '../services/api'
+import { Button } from './ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from './ui/dialog'
+import { Field, Input, Textarea } from './ui/form'
 import './ScenarioDialog.css'
 
 interface ScenarioDialogProps {
@@ -130,25 +137,25 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
     }
   }
 
-  if (!open) return null
-
   const showForm = isNew || editing !== null
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div
-        className="dialog scenario-dialog"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3>场景管理</h3>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent className="scenario-dialog" aria-describedby={undefined}>
+        <DialogTitle className="scenario-dialog-title">场景管理</DialogTitle>
         <div className="dialog-body">
-          <button className="add-scenario-btn" onClick={startCreate}>
+          <Button className="add-scenario-btn" variant="secondary" onClick={startCreate}>
             + 新建场景
-          </button>
+          </Button>
 
           <div className="scenario-list-panel">
             {scenarios.length === 0 ? (
-              <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}>
+              <div className="scenario-list-empty">
                 暂无场景
               </div>
             ) : (
@@ -171,34 +178,31 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
             <div className="scenario-form">
               <h4>{isNew ? '新建场景' : '编辑场景'}</h4>
 
-              <label className="field-label">
-                名称
-                <input
+              <Field className="field-label" label="名称">
+                <Input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="场景名称"
                 />
-              </label>
+              </Field>
 
-              <label className="field-label">
-                描述（可选）
-                <input
+              <Field className="field-label" label="描述（可选）">
+                <Input
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="简短描述"
                 />
-              </label>
+              </Field>
 
-              <label className="field-label">
-                上下文提示词
-                <textarea
+              <Field className="field-label scenario-context-field" label="上下文提示词">
+                <Textarea
                   value={contextPrompt}
                   onChange={(e) => setContextPrompt(e.target.value)}
                   placeholder="设定场景的上下文提示词..."
                 />
-              </label>
+              </Field>
 
               <div className="field-label">推荐角色（可选）</div>
               <div className="persona-checkbox-list">
@@ -226,16 +230,16 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
         {showForm ? (
           <div className="dialog-actions">
             {editing && (
-              <button
-                className="btn-delete"
+              <Button
+                variant="danger"
                 onClick={handleDelete}
                 disabled={submitting}
               >
                 删除
-              </button>
+              </Button>
             )}
-            <button
-              className="btn-cancel"
+            <Button
+              variant="secondary"
               onClick={() => {
                 setEditing(null)
                 setIsNew(false)
@@ -243,23 +247,23 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
               }}
             >
               取消
-            </button>
-            <button
-              className="btn-submit"
+            </Button>
+            <Button
+              variant="primary"
               onClick={handleSave}
               disabled={submitting}
             >
               {submitting ? '保存中...' : '保存'}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="dialog-actions">
-            <button className="btn-cancel" onClick={onClose}>
+            <Button variant="secondary" onClick={onClose}>
               关闭
-            </button>
+            </Button>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -1,5 +1,52 @@
 .scenario-dialog {
-  width: 560px;
+  --ui-form-bg-token: var(--bg-elevated);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  width: min(560px, calc(100vw - 32px));
+  box-shadow: var(--shadow-lg);
+}
+
+.scenario-dialog::before {
+  content: '';
+  display: block;
+  height: 3px;
+  background: var(--primary-gradient);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.scenario-dialog-title {
+  margin: 0;
+  padding: 24px 24px 0;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.scenario-dialog .dialog-body {
+  padding: 24px;
+}
+
+.scenario-dialog .field-label {
+  display: block;
+  margin-bottom: 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scenario-dialog .field-label .ui-form-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.scenario-dialog .field-label .ui-form-control {
+  margin-top: 5px;
+}
+
+.scenario-dialog .scenario-context-field {
+  --ui-form-textarea-min-height-token: 120px;
 }
 
 .scenario-list-panel {
@@ -8,6 +55,13 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   margin-bottom: 14px;
+}
+
+.scenario-list-empty {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 .scenario-list-item {
@@ -55,28 +109,6 @@
   color: var(--text-primary);
 }
 
-.scenario-dialog .field-label textarea {
-  display: block;
-  width: 100%;
-  margin-top: 5px;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-  transition: all var(--transition-fast);
-  box-sizing: border-box;
-  resize: vertical;
-  min-height: 120px;
-  color: var(--text-primary);
-}
-
-.scenario-dialog .field-label textarea:focus {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--focus-ring);
-}
-
 .persona-checkbox-list {
   max-height: 150px;
   overflow-y: auto;
@@ -105,20 +137,39 @@
   accent-color: var(--green);
 }
 
-.add-scenario-btn {
-  width: 100%;
-  padding: 7px;
-  margin-bottom: 10px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-muted);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all var(--transition-fast);
+.scenario-dialog .persona-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-.add-scenario-btn:hover {
+.add-scenario-btn {
+  width: 100%;
+  margin-bottom: 10px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.add-scenario-btn:hover:not(:disabled) {
   border-color: var(--green);
+  background: var(--green-soft);
   color: var(--green);
+}
+
+.scenario-dialog .dialog-error {
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--rose-soft);
+  color: var(--rose);
+  font-size: 13px;
+}
+
+.scenario-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 24px 24px;
 }

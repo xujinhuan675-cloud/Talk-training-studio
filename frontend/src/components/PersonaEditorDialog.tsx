@@ -11,6 +11,13 @@ import {
 } from '../services/api'
 import Avatar from './Avatar'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from './ui/dialog'
+import { Input, Select, Textarea } from './ui/form'
 import './PersonaEditorDialog.css'
 
 interface PersonaEditorDialogProps {
@@ -136,15 +143,17 @@ export default function PersonaEditorDialog({
     }
   }
 
-  if (!open) return null
-
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div
-        className="dialog persona-editor-dialog"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3>{isEdit ? tr('编辑角色', 'Edit Persona') : tr('新建角色', 'New Persona')}</h3>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent className="persona-editor-dialog" aria-describedby={undefined}>
+        <DialogTitle asChild className="persona-editor-title">
+          <h3>{isEdit ? tr('编辑角色', 'Edit Persona') : tr('新建角色', 'New Persona')}</h3>
+        </DialogTitle>
         <div className="dialog-body">
           <div className="persona-avatar-preview">
             <Avatar name={name || '?'} color={avatarColor} size={48} />
@@ -152,7 +161,7 @@ export default function PersonaEditorDialog({
 
           <label className="field-label">
             ID
-            <input
+            <Input
               type="text"
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -164,7 +173,7 @@ export default function PersonaEditorDialog({
 
           <label className="field-label">
             {tr('名称', 'Name')}
-            <input
+            <Input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -174,7 +183,7 @@ export default function PersonaEditorDialog({
 
           <label className="field-label">
             {tr('角色', 'Role')}
-            <input
+            <Input
               type="text"
               value={role}
               onChange={(e) => setRole(e.target.value)}
@@ -197,7 +206,7 @@ export default function PersonaEditorDialog({
           {teams.length > 0 && (
             <label className="field-label">
               {tr('所属团队', 'Team')}
-              <select
+              <Select
                 value={teamId ?? ''}
                 onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : null)}
               >
@@ -205,13 +214,13 @@ export default function PersonaEditorDialog({
                 {teams.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
 
           <label className="field-label">
             {tr('内容（Markdown）', 'Content (Markdown)')}
-            <textarea
+            <Textarea
               value={loading ? tr('加载中...', 'Loading...') : content}
               onChange={(e) => setContent(e.target.value)}
               placeholder={tr('角色画像的详细内容...', 'Detailed persona profile...')}
@@ -224,26 +233,27 @@ export default function PersonaEditorDialog({
 
         <div className="dialog-actions">
           {isEdit && (
-            <button
-              className="btn-delete"
+            <Button
+              className="persona-editor-delete"
+              variant="danger"
               onClick={handleDelete}
               disabled={submitting}
             >
               {tr('删除', 'Delete')}
-            </button>
+            </Button>
           )}
-          <button className="btn-cancel" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             {tr('取消', 'Cancel')}
-          </button>
-          <button
-            className="btn-submit"
+          </Button>
+          <Button
+            variant="primary"
             onClick={handleSave}
             disabled={submitting || loading}
           >
             {submitting ? tr('保存中...', 'Saving...') : tr('保存', 'Save')}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

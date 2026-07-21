@@ -774,10 +774,13 @@
 }
 
 /* ---- Analysis result dialog ---- */
-.analysis-dialog {
-  max-width: 680px;
-  width: 90vw;
+.analysis-dialog.ui-dialog-content {
+  width: min(680px, 90vw);
   max-height: 85vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
   overflow-y: auto;
   padding: 0 !important;
 }
@@ -799,18 +802,17 @@
   font-weight: 700;
 }
 
-.analysis-close {
-  background: none;
-  border: none;
+.analysis-close.ui-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border-color: transparent;
+  background: transparent;
   color: var(--text-muted);
-  cursor: pointer;
   padding: 4px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
 }
 
-.analysis-close:hover {
+.analysis-close.ui-button:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--bg-base);
 }
@@ -822,15 +824,13 @@
   padding: 12px 24px 0;
 }
 
-.analysis-report-selector select {
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  background: var(--bg-card);
-  color: var(--text-primary);
-  outline: none;
+.analysis-report-select.ui-form-control {
+  --ui-form-bg-token: var(--bg-card);
+  --ui-form-control-font-size-token: 13px;
+  --ui-form-control-min-height-token: 34px;
+  --ui-form-control-padding-token: 6px 10px;
+  flex: 1 1 auto;
+  width: auto;
 }
 
 .analysis-report-date {
@@ -839,27 +839,25 @@
   color: var(--text-muted);
 }
 
-.analysis-new-btn {
-  padding: 5px 14px;
-  border: 1px solid var(--green);
-  border-radius: var(--radius-sm);
+.analysis-new-btn.ui-button {
+  min-height: 32px;
+  flex-shrink: 0;
+  border-color: var(--green);
   background: transparent;
   color: var(--green);
   font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
+  font-weight: 600;
+  padding: 0 14px;
   white-space: nowrap;
-  transition: all var(--transition-fast);
 }
 
-.analysis-new-btn:hover:not(:disabled) {
+.analysis-new-btn.ui-button:hover:not(:disabled) {
   background: var(--green);
   color: #fff;
 }
 
-.analysis-new-btn:disabled {
+.analysis-new-btn.ui-button:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .analysis-summary {

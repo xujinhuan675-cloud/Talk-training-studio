@@ -1,6 +1,9 @@
 import { X } from 'lucide-react'
 import type { AnalysisReport, AnalysisReportSummary, TrainingDimensionScore } from '../../services/api'
 import { useI18n } from '../../i18n'
+import { Button } from '../ui/button'
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog'
+import { Select } from '../ui/form'
 import './AnalysisPanel.css'
 
 export interface AnalysisPanelProps {
@@ -48,19 +51,39 @@ export default function AnalysisPanel({
   ].flatMap((item) => hasDimensionContent(item.value) ? [{ ...item, value: item.value }] : [])
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog analysis-dialog" onClick={(e) => e.stopPropagation()}>
+    <Dialog
+      open
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <DialogContent
+        className="analysis-dialog"
+        aria-describedby={undefined}
+        onEscapeKeyDown={(event) => event.preventDefault()}
+      >
         <div className="analysis-header">
-          <h3>{tr('对话分析报告', 'Conversation Analysis Report')}</h3>
-          <button className="analysis-close" onClick={onClose}>
-            <X size={18} />
-          </button>
+          <DialogTitle asChild>
+            <h3>{tr('对话分析报告', 'Conversation Analysis Report')}</h3>
+          </DialogTitle>
+          <DialogClose asChild>
+            <Button
+              aria-label={tr('关闭分析报告', 'Close analysis report')}
+              className="analysis-close"
+              size="icon"
+              variant="ghost"
+            >
+              <X aria-hidden="true" size={18} />
+            </Button>
+          </DialogClose>
         </div>
 
         {/* Historical report selector */}
         {reportList.length > 1 && (
           <div className="analysis-report-selector">
-            <select
+            <Select
+              aria-label={tr('选择历史报告', 'Select report')}
+              className="analysis-report-select"
               value={result.id}
               onChange={(e) => onSelectReport(Number(e.target.value))}
             >
@@ -69,14 +92,16 @@ export default function AnalysisPanel({
                   {r.created_at ? new Date(r.created_at).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : tr('报告 #{id}', 'Report #{id}', { id: r.id })}
                 </option>
               ))}
-            </select>
-            <button
+            </Select>
+            <Button
               className="analysis-new-btn"
               onClick={onGenerateNewReport}
               disabled={analyzingRoom}
+              size="sm"
+              variant="secondary"
             >
               {analyzingRoom ? t('common.generating') : tr('+ 新报告', '+ New Report')}
-            </button>
+            </Button>
           </div>
         )}
         {reportList.length <= 1 && (
@@ -84,13 +109,15 @@ export default function AnalysisPanel({
             <span className="analysis-report-date">
               {result.created_at ? new Date(result.created_at).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : ''}
             </span>
-            <button
+            <Button
               className="analysis-new-btn"
               onClick={onGenerateNewReport}
               disabled={analyzingRoom}
+              size="sm"
+              variant="secondary"
             >
               {analyzingRoom ? t('common.generating') : tr('重新分析', 'Analyze Again')}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -206,7 +233,7 @@ export default function AnalysisPanel({
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
