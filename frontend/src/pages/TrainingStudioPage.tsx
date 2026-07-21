@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  CheckCircle2,
+  ClipboardCheck,
   Keyboard,
   Languages,
   Loader2,
   Mic2,
   Radio,
+  RefreshCw,
   Video,
   Wand2,
 } from 'lucide-react'
@@ -16,6 +19,7 @@ import { LIVE_COACH_LANGUAGE_OPTIONS, getLiveCoachLanguageLabel } from '../data/
 import {
   buildTrainingModeChatPath,
   type InteractionMode,
+  type TrainingFeedbackMode,
   type TrainingMode,
   type TrainingProfile,
 } from '../services/trainingMode'
@@ -41,6 +45,44 @@ type LaunchMode = TrainingMode | 'realtime' | 'live_coach'
 type TopLevelMode = TrainingMode | 'live_coach'
 
 const supportsRealtimeVideo = false
+
+const feedbackModeOptions: Array<{
+  value: TrainingFeedbackMode
+  labelKey: TranslationKey
+  descriptionKey: TranslationKey
+  instructionKey: TranslationKey
+  personaRuleKey: TranslationKey
+  trainingPointKey: TranslationKey
+  icon: typeof Keyboard
+}> = [
+  {
+    value: 'simulation',
+    labelKey: 'training.feedback.simulation.label',
+    descriptionKey: 'training.feedback.simulation.desc',
+    instructionKey: 'training.feedback.simulation.instruction',
+    personaRuleKey: 'training.feedback.simulation.personaRule',
+    trainingPointKey: 'training.feedback.simulation.trainingPoint',
+    icon: ClipboardCheck,
+  },
+  {
+    value: 'assisted',
+    labelKey: 'training.feedback.assisted.label',
+    descriptionKey: 'training.feedback.assisted.desc',
+    instructionKey: 'training.feedback.assisted.instruction',
+    personaRuleKey: 'training.feedback.assisted.personaRule',
+    trainingPointKey: 'training.feedback.assisted.trainingPoint',
+    icon: CheckCircle2,
+  },
+  {
+    value: 'drill',
+    labelKey: 'training.feedback.drill.label',
+    descriptionKey: 'training.feedback.drill.desc',
+    instructionKey: 'training.feedback.drill.instruction',
+    personaRuleKey: 'training.feedback.drill.personaRule',
+    trainingPointKey: 'training.feedback.drill.trainingPoint',
+    icon: RefreshCw,
+  },
+]
 
 interface TrainingStudioPageProps {
   initialProfile?: TrainingProfile
@@ -153,6 +195,18 @@ function modeInstruction(mode: LaunchMode, t: Translate): string {
   return t('training.mode.text.instruction')
 }
 
+function getFeedbackModeOption(mode: TrainingFeedbackMode) {
+  return feedbackModeOptions.find((option) => option.value === mode) ?? feedbackModeOptions[0]
+}
+
+function getFeedbackModeLabel(mode: TrainingFeedbackMode, t: Translate): string {
+  return t(getFeedbackModeOption(mode).labelKey)
+}
+
+function feedbackModeInstruction(mode: TrainingFeedbackMode, t: Translate): string {
+  return t(getFeedbackModeOption(mode).instructionKey)
+}
+
 function getLaunchTrainingMode(mode: LaunchMode): TrainingMode {
   return mode === 'realtime' || mode === 'live_coach' ? 'voice' : mode
 }
@@ -183,11 +237,13 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   const [config, setConfig] = useState<TrainingStudioConfig>(() => getDefaultTrainingStudioConfig(t))
   const previousDefaultsRef = useRef(getDefaultTrainingStudioConfig(t))
   const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : 'voice')
+  const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
   const [liveCoachSourceLanguage, setLiveCoachSourceLanguage] = useState('zh-CN')
   const [liveCoachTargetLanguage, setLiveCoachTargetLanguage] = useState('en-US')
   const [goal, setGoal] = useState('')
   const [starting, setStarting] = useState<'quick' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const effectiveFeedbackMode = mode === 'live_coach' ? 'assisted' : feedbackMode
 
   useEffect(() => {
     if (initialProfile === 'live_coach') {
@@ -211,8 +267,12 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     const scenario = getTrainingScenarioLabel(config.scenario, t)
     const role = config.role.trim() || t('training.defaults.roleFallback')
     const base = goal.trim() || t('training.prompt.defaultGoal', { role, scenario })
-    return buildTrainingStudioPrompt(config, `${base}\n\n${modeInstruction(mode, t)}`, t)
-  }, [config, goal, mode, t])
+    return buildTrainingStudioPrompt(
+      config,
+      `${base}\n\n${modeInstruction(mode, t)}\n${feedbackModeInstruction(effectiveFeedbackMode, t)}`,
+      t,
+    )
+  }, [config, effectiveFeedbackMode, goal, mode, t])
 
   const startQuickSession = async () => {
     setStarting('quick')
@@ -226,6 +286,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       const trainingMode = getLaunchTrainingMode(mode)
       const interactionMode = getLaunchInteractionMode(mode)
       const modeLabel = getModeLabel(mode, t)
+      const feedbackModeLabel = getFeedbackModeLabel(effectiveFeedbackMode, t)
+      const feedbackOption = getFeedbackModeOption(effectiveFeedbackMode)
       const trainingProfile: TrainingProfile = mode === 'live_coach' ? 'live_coach' : 'practice'
       const isLiveCoachMode = trainingProfile === 'live_coach'
       const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachSourceLanguage, locale)
@@ -253,6 +315,13 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               trainingMode,
               interactionMode,
               trainingProfile,
+              feedbackMode: effectiveFeedbackMode,
+              trainingFeedbackMode: effectiveFeedbackMode,
+              feedbackPolicy: {
+                mode: effectiveFeedbackMode,
+                version: 1,
+                channelAgnostic: true,
+              },
               ...(isLiveCoachMode
                 ? {
                     liveCoach: {
@@ -291,8 +360,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               persona_style: isLiveCoachMode
                 ? t('training.liveCoach.personaStyle')
                 : scenarioStakeholder
-                ? t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })
-                : t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel }),
+                ? `${t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })}\n${t(feedbackOption.personaRuleKey)}`
+                : `${t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel })}\n${t(feedbackOption.personaRuleKey)}`,
               scenario_context: isLiveCoachMode
                 ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
                     sourceLanguage: sourceLanguageLabel,
@@ -320,6 +389,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                           t('training.prompt.productTradeoffPoint'),
                         ]
                       : []),
+                    t(feedbackOption.trainingPointKey),
                     t('training.prompt.deliveryPoint', { mode: modeLabel }),
                     t('training.prompt.evidencePoint'),
                   ],
@@ -337,6 +407,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           nextInteractionMode,
           {
             trainingProfile,
+            trainingFeedbackMode: effectiveFeedbackMode,
             sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,
             targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : null,
           },
@@ -347,6 +418,9 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           interactionMode,
           trainingSessionId: startedSession.session_id,
           trainingProfile,
+          trainingFeedbackMode: effectiveFeedbackMode,
+          feedbackMode: effectiveFeedbackMode,
+          feedbackModeLabel,
           sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : undefined,
           targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : undefined,
         }),
@@ -362,8 +436,13 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     navigate(APP_ROUTES.practiceBattle)
   }
 
+  const scenarioLabel = getTrainingScenarioLabel(config.scenario, t)
+  const modeLabel = getModeLabel(mode, t)
+  const feedbackModeLabel = getFeedbackModeLabel(effectiveFeedbackMode, t)
+  const questionMixTotal = config.questionMix.behavioral + config.questionMix.technical + config.questionMix.pressure
+
   return (
-    <div className="training-studio-page">
+    <div className="training-studio-page" data-workbench-skin="training">
       <div className="training-studio-shell">
         <header className="training-studio-header">
           <div>
@@ -393,59 +472,24 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           </div>
         </header>
 
-        <div className="training-studio-grid">
-          <div className="training-studio-main">
-            <label className="training-studio-goal">
-              <span>{t('training.goal.label')}</span>
-              <textarea
-                value={goal}
-                onChange={(event) => setGoal(event.target.value)}
-                rows={4}
-                placeholder={t('training.goal.placeholder')}
-                disabled={starting !== null}
-              />
-            </label>
-
-            {mode === 'live_coach' && (
-              <section className="training-studio-live-coach-panel" aria-label={t('training.liveCoach.panelAria')}>
-                <label>
-                  <span>{t('training.liveCoach.sourceLanguage')}</span>
-                  <select
-                    value={liveCoachSourceLanguage}
-                    onChange={(event) => setLiveCoachSourceLanguage(event.target.value)}
-                    disabled={starting !== null}
-                  >
-                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
-                      <option key={option.code} value={option.code}>
-                        {getLiveCoachLanguageLabel(option.code, locale)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>{t('training.liveCoach.targetLanguage')}</span>
-                  <select
-                    value={liveCoachTargetLanguage}
-                    onChange={(event) => setLiveCoachTargetLanguage(event.target.value)}
-                    disabled={starting !== null}
-                  >
-                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
-                      <option key={option.code} value={option.code}>
-                        {getLiveCoachLanguageLabel(option.code, locale)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="training-studio-live-coach-badge">
-                  <Languages size={14} />
-                  {t('training.liveCoach.languageAdapter')}
-                </div>
-              </section>
-            )}
-
-            <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
+        <section className="training-studio-control-strip" aria-label={t('training.page.summaryAria')}>
+          <div>
+            <span>{t('training.page.summaryScenario')}</span>
+            <strong>{scenarioLabel}</strong>
           </div>
-        </div>
+          <div>
+            <span>{t('training.page.summaryChannel')}</span>
+            <strong>{modeLabel}</strong>
+          </div>
+          <div>
+            <span>{t('training.page.summaryPractice')}</span>
+            <strong>{feedbackModeLabel}</strong>
+          </div>
+          <div>
+            <span>{t('training.page.summaryQuestions')}</span>
+            <strong>{config.questionCount} / {questionMixTotal}%</strong>
+          </div>
+        </section>
 
         <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
           {modeOptions.map((item) => {
@@ -505,6 +549,95 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             )
           })}
         </section>
+
+        <section className="training-studio-feedback-panel" aria-label={t('training.feedback.aria')}>
+          <div className="training-studio-panel-head">
+            <div>
+              <h2>{t('training.feedback.title')}</h2>
+              <p>{t('training.feedback.subtitle')}</p>
+            </div>
+            {mode === 'live_coach' && (
+              <span>{t('training.feedback.liveCoachLock')}</span>
+            )}
+          </div>
+          <div className="training-studio-feedback-options">
+            {feedbackModeOptions.map((item) => {
+              const Icon = item.icon
+              const selected = effectiveFeedbackMode === item.value
+              const disabled = starting !== null || mode === 'live_coach'
+              return (
+                <button
+                  key={item.value}
+                  className={selected ? 'selected' : ''}
+                  type="button"
+                  onClick={() => setFeedbackMode(item.value)}
+                  disabled={disabled}
+                  aria-pressed={selected}
+                >
+                  <span>
+                    <Icon size={15} />
+                    {t(item.labelKey)}
+                  </span>
+                  <small>{t(item.descriptionKey)}</small>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        <div className="training-studio-grid">
+          <div className="training-studio-main">
+            <label className="training-studio-goal">
+              <span>{t('training.goal.label')}</span>
+              <textarea
+                value={goal}
+                onChange={(event) => setGoal(event.target.value)}
+                rows={4}
+                placeholder={t('training.goal.placeholder')}
+                disabled={starting !== null}
+              />
+            </label>
+
+            {mode === 'live_coach' && (
+              <section className="training-studio-live-coach-panel" aria-label={t('training.liveCoach.panelAria')}>
+                <label>
+                  <span>{t('training.liveCoach.sourceLanguage')}</span>
+                  <select
+                    value={liveCoachSourceLanguage}
+                    onChange={(event) => setLiveCoachSourceLanguage(event.target.value)}
+                    disabled={starting !== null}
+                  >
+                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {getLiveCoachLanguageLabel(option.code, locale)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t('training.liveCoach.targetLanguage')}</span>
+                  <select
+                    value={liveCoachTargetLanguage}
+                    onChange={(event) => setLiveCoachTargetLanguage(event.target.value)}
+                    disabled={starting !== null}
+                  >
+                    {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {getLiveCoachLanguageLabel(option.code, locale)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="training-studio-live-coach-badge">
+                  <Languages size={14} />
+                  {t('training.liveCoach.languageAdapter')}
+                </div>
+              </section>
+            )}
+
+            <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
+          </div>
+        </div>
 
       </div>
     </div>

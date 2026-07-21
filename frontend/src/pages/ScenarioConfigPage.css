@@ -1,25 +1,4 @@
 .scenario-config-page {
-  --training-workbench-page-bg: var(--app-bg-gradient);
-  --training-workbench-bg: var(--bg-base);
-  --training-workbench-surface: var(--bg-card);
-  --training-workbench-surface-raised: var(--bg-elevated);
-  --training-workbench-surface-muted: var(--bg-soft);
-  --training-workbench-border: var(--border);
-  --training-workbench-border-soft: var(--border-light);
-  --training-workbench-border-accent: var(--border-accent);
-  --training-workbench-primary: var(--green);
-  --training-workbench-primary-hover: var(--green-hover);
-  --training-workbench-primary-soft: var(--green-soft);
-  --training-workbench-accent: var(--blue);
-  --training-workbench-accent-soft: var(--blue-soft);
-  --training-workbench-warning: var(--amber);
-  --training-workbench-warning-soft: var(--amber-soft);
-  --training-workbench-danger: var(--rose);
-  --training-workbench-danger-soft: var(--rose-soft);
-  --training-workbench-focus: var(--focus-ring);
-  --training-workbench-shadow: var(--shadow-sm);
-  --training-workbench-shadow-strong: var(--shadow-md);
-  --training-workbench-on-primary: var(--bg-card);
   --config-bg: var(--training-workbench-bg);
   --config-surface: var(--training-workbench-surface);
   --config-surface-muted: var(--training-workbench-surface-muted);
@@ -51,7 +30,7 @@
 .scenario-config-notice,
 .scenario-config-tabbar,
 .scenario-config-workspace {
-  width: min(var(--page-max-width), 100%);
+  width: min(var(--training-workbench-page-max-width), 100%);
   margin-left: auto;
   margin-right: auto;
 }

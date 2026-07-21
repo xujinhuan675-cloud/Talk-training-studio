@@ -64,6 +64,29 @@
   --focus-ring: rgba(15,118,110,0.18);
   --surface-quiet: #F8FAFC;
   --app-bg-gradient: linear-gradient(180deg, #F8FBFC 0%, var(--bg-base) 260px);
+  --workbench-bg: var(--bg-base);
+  --workbench-surface: var(--bg-card);
+  --workbench-surface-raised: var(--bg-elevated);
+  --workbench-surface-muted: var(--bg-soft);
+  --workbench-border: var(--border);
+  --workbench-border-soft: var(--border-light);
+  --workbench-border-accent: var(--border-accent);
+  --workbench-primary: var(--green);
+  --workbench-primary-hover: var(--green-hover);
+  --workbench-primary-soft: var(--green-soft);
+  --workbench-accent: var(--blue);
+  --workbench-accent-soft: var(--blue-soft);
+  --workbench-warning: var(--amber);
+  --workbench-warning-soft: var(--amber-soft);
+  --workbench-danger: var(--rose);
+  --workbench-danger-soft: var(--rose-soft);
+  --workbench-focus: var(--focus-ring);
+  --workbench-shadow: var(--shadow-sm);
+  --workbench-shadow-strong: var(--shadow-md);
+  --workbench-on-primary: #FFFFFF;
+  --workbench-page-max-width: 1240px;
+  --workbench-page-gutter: var(--page-gutter);
+  --workbench-page-gutter-mobile: var(--page-gutter-mobile);
 }
 
 :root[data-theme='dark'] {
@@ -120,4 +143,55 @@
   --focus-ring: rgba(45,212,191,0.22);
   --surface-quiet: #0F172A;
   --app-bg-gradient: linear-gradient(180deg, #0F172A 0%, var(--bg-base) 280px);
+  --workbench-bg: var(--bg-base);
+  --workbench-surface: var(--bg-card);
+  --workbench-surface-raised: var(--bg-elevated);
+  --workbench-surface-muted: var(--bg-soft);
+  --workbench-border: var(--border);
+  --workbench-border-soft: var(--border-light);
+  --workbench-border-accent: var(--border-accent);
+  --workbench-primary: var(--green);
+  --workbench-primary-hover: var(--green-hover);
+  --workbench-primary-soft: var(--green-soft);
+  --workbench-accent: var(--blue);
+  --workbench-accent-soft: var(--blue-soft);
+  --workbench-warning: var(--amber);
+  --workbench-warning-soft: var(--amber-soft);
+  --workbench-danger: var(--rose);
+  --workbench-danger-soft: var(--rose-soft);
+  --workbench-focus: var(--focus-ring);
+  --workbench-shadow: var(--shadow-sm);
+  --workbench-shadow-strong: var(--shadow-md);
+  --workbench-on-primary: #061014;
+  --workbench-page-max-width: 1240px;
+  --workbench-page-gutter: var(--page-gutter);
+  --workbench-page-gutter-mobile: var(--page-gutter-mobile);
+}
+
+:root,
+[data-workbench-skin='training'] {
+  --training-workbench-page-bg: var(--app-bg-gradient);
+  --training-workbench-bg: var(--workbench-bg, var(--bg-base));
+  --training-workbench-surface: var(--workbench-surface, var(--bg-card));
+  --training-workbench-surface-raised: var(--workbench-surface-raised, var(--bg-elevated));
+  --training-workbench-surface-muted: var(--workbench-surface-muted, var(--bg-soft));
+  --training-workbench-border: var(--workbench-border, var(--border));
+  --training-workbench-border-soft: var(--workbench-border-soft, var(--border-light));
+  --training-workbench-border-accent: var(--workbench-border-accent, var(--border-accent));
+  --training-workbench-primary: var(--workbench-primary, var(--green));
+  --training-workbench-primary-hover: var(--workbench-primary-hover, var(--green-hover));
+  --training-workbench-primary-soft: var(--workbench-primary-soft, var(--green-soft));
+  --training-workbench-accent: var(--workbench-accent, var(--blue));
+  --training-workbench-accent-soft: var(--workbench-accent-soft, var(--blue-soft));
+  --training-workbench-warning: var(--workbench-warning, var(--amber));
+  --training-workbench-warning-soft: var(--workbench-warning-soft, var(--amber-soft));
+  --training-workbench-danger: var(--workbench-danger, var(--rose));
+  --training-workbench-danger-soft: var(--workbench-danger-soft, var(--rose-soft));
+  --training-workbench-focus: var(--workbench-focus, var(--focus-ring));
+  --training-workbench-shadow: var(--workbench-shadow, var(--shadow-sm));
+  --training-workbench-shadow-strong: var(--workbench-shadow-strong, var(--shadow-md));
+  --training-workbench-on-primary: var(--workbench-on-primary, var(--bg-card));
+  --training-workbench-page-max-width: var(--workbench-page-max-width, var(--page-max-width));
+  --training-workbench-page-gutter: var(--workbench-page-gutter, var(--page-gutter));
+  --training-workbench-page-gutter-mobile: var(--workbench-page-gutter-mobile, var(--page-gutter-mobile));
 }

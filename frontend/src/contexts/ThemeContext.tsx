@@ -47,8 +47,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    document.documentElement.dataset.themeMode = mode
     document.documentElement.style.colorScheme = theme
-  }, [theme])
+  }, [mode, theme])
 
   useEffect(() => {
     try {

@@ -430,7 +430,7 @@ export default function ScenarioConfigPage() {
 
   return (
     <SettingsShell activeTab="training">
-      <div className="scenario-config-page">
+      <div className="scenario-config-page" data-workbench-skin="training">
       <header className="scenario-config-header">
         <div>
           <div className="scenario-config-kicker">

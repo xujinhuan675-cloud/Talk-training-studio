@@ -785,6 +785,43 @@ test('scenario config seeds local drafts from the scenario catalog', () => {
   }
 })
 
+test('scenario config keeps the comprehensive job interview template as a full interview flow', () => {
+  const scenario = scenarioTrainingData.scenarioTrainingCatalog.find(
+    (item) => item.id === 'ai-web3-agent-pm-comprehensive-interview',
+  )
+
+  assert.ok(scenario)
+  assert.equal(scenario.category, 'interview')
+  assert.equal(scenario.framework, 'star')
+  assert.equal(scenario.trainingPoints.length >= 6, true)
+
+  const scenarioText = [
+    scenario.description,
+    scenario.customerProfile,
+    scenario.openingLine,
+    scenario.persona.style,
+    ...scenario.trainingPoints,
+  ].join('\n')
+
+  for (const marker of ['AI Agent', 'Web3', 'XStable', 'NOFX', 'OpenEvolve']) {
+    assert.match(scenarioText, new RegExp(marker))
+  }
+
+  const state = scenarioConfigData.createScenarioConfigState(scenarioTrainingData.scenarioTrainingCatalog)
+  const draft = state.scenarios.find((item) => item.id === scenario.id)
+
+  assert.ok(draft)
+  assert.equal(draft.category, 'interview')
+  assert.equal(scenarioConfigData.validateScenarioWeightTotal(draft.dimensionWeights).valid, true)
+  assert.deepEqual(draft.dimensionWeights, [
+    { dimensionId: 'substance', weight: 30 },
+    { dimensionId: 'structure', weight: 20 },
+    { dimensionId: 'relevance', weight: 20 },
+    { dimensionId: 'credibility', weight: 15 },
+    { dimensionId: 'differentiation', weight: 15 },
+  ])
+})
+
 test('scenario config weight helpers sanitize input and distribute evenly', () => {
   assert.equal(scenarioConfigData.normalizeScenarioWeight('140'), 100)
   assert.equal(scenarioConfigData.normalizeScenarioWeight('-2'), 0)
