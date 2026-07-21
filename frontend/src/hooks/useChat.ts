@@ -51,7 +51,7 @@ export interface UseChatReturn {
   typingPersona: string | null
   streamingEntries: [string, string][]
   messageListRef: React.RefObject<HTMLDivElement | null>
-  handleSend: (metadata?: Record<string, unknown>) => Promise<boolean>
+  handleSend: (metadata?: Record<string, unknown>, contentOverride?: string) => Promise<boolean>
   handleKeyDown: (e: React.KeyboardEvent) => void
   handleInputChange: (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -287,8 +287,11 @@ export function useChat(
     }
   }, [scrollToBottom])
 
-  const handleSend = useCallback(async (metadata?: Record<string, unknown>): Promise<boolean> => {
-    const content = inputValue.trim()
+  const handleSend = useCallback(async (
+    metadata?: Record<string, unknown>,
+    contentOverride?: string,
+  ): Promise<boolean> => {
+    const content = (contentOverride ?? inputValue).trim()
     if (!content || !roomId || sending) return false
 
     // Stop any playing audio when user sends a new message

@@ -67,7 +67,7 @@ async function createDefaultPersona(): Promise<string> {
   return personaId
 }
 
-async function createDefaultConversation(): Promise<ChatRoom> {
+export async function createDefaultConversation(): Promise<ChatRoom> {
   const personaId = await createDefaultPersona()
   return createRoom({
     name: DEFAULT_ROOM_NAME,

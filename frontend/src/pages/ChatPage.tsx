@@ -50,7 +50,7 @@ import {
   type CheatSheet as CheatSheetData,
   type Message as ChatMessage,
 } from '../services/api'
-import { ensureDefaultConversation } from '../services/defaultConversation'
+import { createDefaultConversation } from '../services/defaultConversation'
 import {
   completeTrainingSession,
   buildTrainingCompletionBranchMetadata,
@@ -455,6 +455,7 @@ function ChatArea() {
   const persistedGuidanceSignatureRef = React.useRef<string | null>(null)
   const guidanceEventSourceRef = React.useRef<EventSource | null>(null)
   const guidanceStreamVersionRef = React.useRef(0)
+  const initialRouteMessageKeyRef = React.useRef<string | null>(null)
   const trainingMode = getTrainingModeFromLocation(location.search, location.state)
   const interactionMode = getInteractionModeFromLocation(location.search, location.state)
   const trainingSessionId = getTrainingSessionIdFromLocation(location.search, location.state)
@@ -514,10 +515,34 @@ function ChatArea() {
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
   const sendChatMessage = chat.handleSend
+  const initialRouteMessage = getStateStringValue(location.state, 'initialMessage')
+  const initialRouteMessageSource = getStateStringValue(location.state, 'initialMessageSource')
+    ?? 'conversation_library_new_chat'
 
   useEffect(() => {
     setMessageTreeSelection(null)
   }, [selectedRoomId])
+
+  useEffect(() => {
+    const content = initialRouteMessage?.trim()
+    if (!content || !selectedRoomId || !chat.selectedRoom) return
+
+    const messageKey = `${selectedRoomId}:${content}`
+    if (initialRouteMessageKeyRef.current === messageKey) return
+    initialRouteMessageKeyRef.current = messageKey
+
+    void sendChatMessage({ source: initialRouteMessageSource }, content)
+      .finally(() => {
+        navigate(APP_ROUTES.conversation(selectedRoomId), { replace: true })
+      })
+  }, [
+    chat.selectedRoom,
+    initialRouteMessage,
+    initialRouteMessageSource,
+    navigate,
+    selectedRoomId,
+    sendChatMessage,
+  ])
 
   const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.sourceLanguage, locale)
   const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachLanguagePair.targetLanguage, locale)
@@ -2202,50 +2227,69 @@ function ChatArea() {
 /*  ChatPage — top-level page component                                */
 /* ------------------------------------------------------------------ */
 
-type DefaultRouteState =
-  | { status: 'idle' | 'loading' }
+type NewConversationState =
+  | { status: 'idle' | 'sending' }
   | { status: 'error'; message: string }
 
-function DefaultConversationRouteState({
+function NewConversationRouteState({
   state,
-  onCreate,
+  value,
+  onInputChange,
+  onKeyDown,
+  onSend,
+  onCreateRoom,
 }: {
-  state: DefaultRouteState
-  onCreate: () => void
+  state: NewConversationState
+  value: string
+  onInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onSend: () => void
+  onCreateRoom: () => void
 }) {
   const { tr } = useI18n()
-  const isLoading = state.status === 'idle' || state.status === 'loading'
-  const isError = state.status === 'error'
+  const isSending = state.status === 'sending'
 
   return (
-    <div className="chat-page-empty chat-page-default-state" aria-live="polite">
-      <div className="chat-page-empty-icon">
-        {isLoading ? (
-          <Loader2 size={24} strokeWidth={1.7} className="spin" />
-        ) : (
-          <MessageCircle size={24} strokeWidth={1.7} />
-        )}
-      </div>
-      <h2>
-        {isLoading
-          ? tr('正在准备默认对话...', 'Preparing a default conversation...')
-          : tr('无法准备默认对话', 'Could not prepare a default conversation')}
-      </h2>
-      <p>
-        {isError && state.message
-          ? state.message
-          : tr('如果已有普通会话，会直接打开最近一个；如果没有，会先创建默认角色和默认私聊房间。', 'If a regular room exists, the latest one opens. Otherwise a default persona and private room are created first.')}
-      </p>
-      {!isLoading && (
+    <div className="chat-page-new-chat" aria-live="polite">
+      <div className="chat-page-new-chat-header">
+        <div>
+          <h3>{tr('新对话', 'New conversation')}</h3>
+          <span>{tr('对话库', 'Conversation library')}</span>
+        </div>
         <button
           type="button"
-          className="chat-page-empty-cta"
-          onClick={onCreate}
+          className="chat-page-new-room-btn"
+          onClick={onCreateRoom}
         >
-          <Plus size={16} />
-          {tr('重试默认对话', 'Retry default conversation')}
+          <Plus size={15} />
+          {tr('新建房间', 'New room')}
         </button>
-      )}
+      </div>
+      <div className="chat-page-new-chat-body">
+        <div className="chat-page-new-chat-copy">
+          <MessageCircle size={30} strokeWidth={1.7} />
+          <h2>{tr('从一句话开始', 'Start with a message')}</h2>
+          <p>{tr('需要指定角色或多人场景时，再新建房间。', 'Create a room when you need a specific persona or multi-party setup.')}</p>
+        </div>
+      </div>
+      <div className="chat-page-new-chat-composer">
+        <ChatInput
+          value={value}
+          onInputChange={onInputChange}
+          onKeyDown={onKeyDown}
+          onSend={onSend}
+          sending={isSending}
+          placeholder={tr('输入第一句话...', 'Type the first message...')}
+          mentionQuery={null}
+          mentionResults={[]}
+          onInsertMention={() => undefined}
+          roomId={null}
+          showVideoButton={false}
+          showLiveCoachButton={false}
+          coachingSending={false}
+          sendError={state.status === 'error' ? state.message : null}
+        />
+      </div>
     </div>
   )
 }
@@ -2260,39 +2304,55 @@ export default function ChatPage() {
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [defaultRouteState, setDefaultRouteState] = useState<DefaultRouteState>({ status: 'idle' })
-  const defaultRouteRunIdRef = React.useRef(0)
+  const [newConversationDraft, setNewConversationDraft] = useState('')
+  const [newConversationState, setNewConversationState] = useState<NewConversationState>({ status: 'idle' })
+  const newConversationRunIdRef = React.useRef(0)
   const showDefaultRouteState = !roomId && !hasRoomIdParam
 
-  const openDefaultConversation = React.useCallback(async () => {
-    const runId = defaultRouteRunIdRef.current + 1
-    defaultRouteRunIdRef.current = runId
-    setDefaultRouteState({ status: 'loading' })
+  const handleNewConversationInputChange = React.useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setNewConversationDraft(event.target.value)
+    setNewConversationState((current) => (current.status === 'error' ? { status: 'idle' } : current))
+  }, [])
+
+  const startNewDefaultConversation = React.useCallback(async () => {
+    const content = newConversationDraft.trim()
+    if (!content || newConversationState.status === 'sending') return
+
+    const runId = newConversationRunIdRef.current + 1
+    newConversationRunIdRef.current = runId
+    setNewConversationState({ status: 'sending' })
 
     try {
-      const room = await ensureDefaultConversation()
-      if (defaultRouteRunIdRef.current !== runId) return
+      const room = await createDefaultConversation()
+      if (newConversationRunIdRef.current !== runId) return
+      setNewConversationDraft('')
+      setNewConversationState({ status: 'idle' })
       setRefreshKey((k) => k + 1)
-      navigate(APP_ROUTES.conversation(room.id), { replace: true })
+      navigate(APP_ROUTES.conversation(room.id), {
+        state: {
+          initialMessage: content,
+          initialMessageSource: 'conversation_library_new_chat',
+        },
+      })
     } catch (error: unknown) {
-      if (defaultRouteRunIdRef.current !== runId) return
-      setDefaultRouteState({ status: 'error', message: getErrorMessage(error) })
+      if (newConversationRunIdRef.current !== runId) return
+      setNewConversationState({ status: 'error', message: getErrorMessage(error) })
     }
-  }, [navigate])
+  }, [navigate, newConversationDraft, newConversationState.status])
 
   useEffect(() => {
     if (hasRoomIdParam) {
-      defaultRouteRunIdRef.current += 1
-      setDefaultRouteState({ status: 'idle' })
-      return
+      newConversationRunIdRef.current += 1
+      setNewConversationState({ status: 'idle' })
     }
+  }, [hasRoomIdParam])
 
-    void openDefaultConversation()
-
-    return () => {
-      defaultRouteRunIdRef.current += 1
+  const handleNewConversationKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      void startNewDefaultConversation()
     }
-  }, [hasRoomIdParam, openDefaultConversation])
+  }, [startNewDefaultConversation])
 
   return (
     <div className={`chat-page${roomId || showDefaultRouteState ? ' has-room' : ''}`}>
@@ -2336,9 +2396,13 @@ export default function ChatPage() {
           </button>
         </div>
       ) : (
-        <DefaultConversationRouteState
-          state={defaultRouteState}
-          onCreate={openDefaultConversation}
+        <NewConversationRouteState
+          state={newConversationState}
+          value={newConversationDraft}
+          onInputChange={handleNewConversationInputChange}
+          onKeyDown={handleNewConversationKeyDown}
+          onSend={() => void startNewDefaultConversation()}
+          onCreateRoom={() => setShowCreateDialog(true)}
         />
       )}
 

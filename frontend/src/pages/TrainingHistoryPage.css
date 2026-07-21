@@ -117,7 +117,7 @@
 .training-history-list-head,
 .training-history-row {
   display: grid;
-  grid-template-columns: 148px minmax(260px, 1fr) 132px 112px 158px;
+  grid-template-columns: 148px minmax(260px, 1fr) 132px 112px 188px;
   gap: 14px;
   align-items: center;
 }
@@ -320,14 +320,25 @@
 }
 
 .training-history-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(118px, 1fr) 34px;
   align-items: center;
   justify-content: flex-end;
+  justify-items: end;
   gap: 8px;
 }
 
 .training-history-review-link {
+  justify-self: end;
   gap: 6px;
+}
+
+.training-history-replay-slot {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .training-history-loading,
@@ -377,6 +388,7 @@
   }
 
   .training-history-actions {
+    grid-template-columns: minmax(118px, auto) 34px;
     justify-content: flex-start;
   }
 }

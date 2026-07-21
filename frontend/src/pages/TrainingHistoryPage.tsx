@@ -736,17 +736,19 @@ export default function TrainingHistoryPage() {
                     </Link>
                   </Button>
                 )}
-                {chatPath && (
-                  <Button asChild variant="secondary" size="icon" className="training-history-icon-link">
-                    <Link
-                      to={chatPath}
-                      title={tr('打开聊天回放', 'Open chat replay')}
-                      aria-label={tr('打开聊天回放', 'Open chat replay')}
-                    >
-                      <ExternalLink size={14} />
-                    </Link>
-                  </Button>
-                )}
+                <span className="training-history-replay-slot" aria-hidden={!chatPath}>
+                  {chatPath ? (
+                    <Button asChild variant="secondary" size="icon" className="training-history-icon-link">
+                      <Link
+                        to={chatPath}
+                        title={tr('打开聊天回放', 'Open chat replay')}
+                        aria-label={tr('打开聊天回放', 'Open chat replay')}
+                      >
+                        <ExternalLink size={14} />
+                      </Link>
+                    </Button>
+                  ) : null}
+                </span>
               </div>
             </article>
           )

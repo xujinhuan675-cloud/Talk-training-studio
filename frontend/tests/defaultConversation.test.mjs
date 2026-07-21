@@ -120,6 +120,23 @@ test('ensureDefaultConversation creates a temporary default persona and private 
   assert.deepEqual(state.calls.createRooms[0].persona_ids, [state.calls.createPersonas[0].id])
 })
 
+test('createDefaultConversation always starts a fresh default private room', async () => {
+  const state = createMockState({
+    rooms: [
+      createRoom({ id: 12, name: 'Recent room', created_at: '2026-02-03T00:00:00.000Z' }),
+    ],
+  })
+  const { createDefaultConversation } = await loadDefaultConversationModule(state)
+
+  const room = await createDefaultConversation()
+
+  assert.equal(room.id, 99)
+  assert.equal(state.calls.fetchRooms, 0)
+  assert.equal(state.calls.createPersonas.length, 1)
+  assert.equal(state.calls.createRooms.length, 1)
+  assert.deepEqual(state.calls.createRooms[0].persona_ids, [state.calls.createPersonas[0].id])
+})
+
 test('ensureDefaultConversation coalesces concurrent default room creation', async () => {
   const state = createMockState()
   const { ensureDefaultConversation } = await loadDefaultConversationModule(state)

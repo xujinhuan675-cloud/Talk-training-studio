@@ -21,7 +21,9 @@ export interface ChatInputProps {
   onVoiceRecorderStateChange?: (state: VoiceRecorderState, error: string | null) => void
   onVideoClick?: () => void
   videoActive?: boolean
-  onLiveCoachClick: () => void
+  showVideoButton?: boolean
+  onLiveCoachClick?: () => void
+  showLiveCoachButton?: boolean
   coachingSending: boolean
   sendError?: string | null
 }
@@ -41,7 +43,9 @@ export default function ChatInput({
   onVoiceRecorderStateChange,
   onVideoClick,
   videoActive,
+  showVideoButton = true,
   onLiveCoachClick,
+  showLiveCoachButton = true,
   coachingSending,
   sendError,
 }: ChatInputProps) {
@@ -105,24 +109,28 @@ export default function ChatInput({
             onStateChange={onVoiceRecorderStateChange}
           />
         )}
-        <button
-          className={`video-toggle-btn ${videoActive ? 'active' : ''}`}
-          onClick={onVideoClick}
-          title={tr('录制视频回答', 'Record video answer')}
-          type="button"
-          disabled={sending}
-        >
-          <Video size={18} />
-        </button>
-        <button
-          className="live-coach-btn"
-          onClick={onLiveCoachClick}
-          title={tr('询问教练', 'Ask coach')}
-          disabled={coachingSending}
-          type="button"
-        >
-          <Lightbulb size={18} />
-        </button>
+        {showVideoButton && (
+          <button
+            className={`video-toggle-btn ${videoActive ? 'active' : ''}`}
+            onClick={onVideoClick}
+            title={tr('录制视频回答', 'Record video answer')}
+            type="button"
+            disabled={sending}
+          >
+            <Video size={18} />
+          </button>
+        )}
+        {showLiveCoachButton && (
+          <button
+            className="live-coach-btn"
+            onClick={onLiveCoachClick}
+            title={tr('询问教练', 'Ask coach')}
+            disabled={coachingSending}
+            type="button"
+          >
+            <Lightbulb size={18} />
+          </button>
+        )}
         <button className="send-btn" onClick={onSend} disabled={!value.trim() || sending} type="button">
           <Send size={18} />
         </button>

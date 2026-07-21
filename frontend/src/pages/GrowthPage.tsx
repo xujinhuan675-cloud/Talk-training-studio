@@ -203,7 +203,7 @@ const GrowthPage: React.FC = () => {
   // Loading state
   if (loading) {
     return (
-      <PageShell width="wide" className="growth-page">
+      <PageShell className="growth-page">
         {pageHeader}
         <div className="gp-loading">
           <Loader2 size={24} className="gp-spin" />
@@ -216,7 +216,7 @@ const GrowthPage: React.FC = () => {
   // Error state
   if (error) {
     return (
-      <PageShell width="wide" className="growth-page">
+      <PageShell className="growth-page">
         {pageHeader}
         <div className="gp-empty">
           <p>{tr('加载失败: {error}', 'Failed to load: {error}', { error })}</p>
@@ -228,7 +228,7 @@ const GrowthPage: React.FC = () => {
   // Empty state
   if (!dashboard || dashboard.overview.total_evaluations === 0) {
     return (
-      <PageShell width="wide" className="growth-page">
+      <PageShell className="growth-page">
         {pageHeader}
         <div className="gp-empty">
           <div className="gp-empty-icon">
@@ -250,7 +250,7 @@ const GrowthPage: React.FC = () => {
   const recentEvaluations = evaluations.slice(0, RECENT_EVALUATION_LIMIT)
 
   return (
-    <PageShell width="wide" className="growth-page">
+    <PageShell className="growth-page">
       {pageHeader}
       {/* 1. Overall Score Header */}
       <section className="gp-score-header">
