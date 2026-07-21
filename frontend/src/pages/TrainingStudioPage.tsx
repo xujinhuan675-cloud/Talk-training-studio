@@ -39,6 +39,7 @@ import {
 } from '../services/trainingStudio'
 import { Button } from '../components/ui/button'
 import { Field, Select, Textarea } from '../components/ui/form'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import { useI18n, type Translate, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './TrainingStudioPage.css'
@@ -562,29 +563,30 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               <span>{t('training.feedback.liveCoachLock')}</span>
             )}
           </div>
-          <div className="training-studio-feedback-options">
-            {feedbackModeOptions.map((item) => {
+          <SegmentedControl
+            ariaLabel={t('training.feedback.aria')}
+            className="training-studio-feedback-options"
+            onValueChange={setFeedbackMode}
+            options={feedbackModeOptions.map((item) => {
               const Icon = item.icon
-              const selected = effectiveFeedbackMode === item.value
-              const disabled = starting !== null || mode === 'live_coach'
-              return (
-                <Button
-                  key={item.value}
-                  className={`training-studio-feedback-option ${selected ? 'selected' : ''}`}
-                  variant="ghost"
-                  onClick={() => setFeedbackMode(item.value)}
-                  disabled={disabled}
-                  aria-pressed={selected}
-                >
-                  <span>
-                    <Icon size={15} />
-                    {t(item.labelKey)}
-                  </span>
-                  <small>{t(item.descriptionKey)}</small>
-                </Button>
-              )
+              return {
+                value: item.value,
+                ariaLabel: `${t(item.labelKey)}. ${t(item.descriptionKey)}`,
+                title: t(item.descriptionKey),
+                label: (
+                  <>
+                    <span>
+                      <Icon size={15} />
+                      {t(item.labelKey)}
+                    </span>
+                    <small>{t(item.descriptionKey)}</small>
+                  </>
+                ),
+                disabled: starting !== null || mode === 'live_coach',
+              }
             })}
-          </div>
+            value={effectiveFeedbackMode}
+          />
         </section>
 
         <div className="training-studio-grid">

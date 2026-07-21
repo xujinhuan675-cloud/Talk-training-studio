@@ -306,13 +306,19 @@
   font-weight: 800;
 }
 
-.training-studio-feedback-options {
+.training-studio-feedback-options.ui-segmented-control {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.training-studio-feedback-option {
+.training-studio-feedback-options .ui-segmented-control-button {
+  min-width: 0;
   min-height: 78px;
   display: grid;
   align-content: start;
@@ -332,24 +338,24 @@
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.training-studio-feedback-option.ui-button--ghost:hover:not(:disabled),
-.training-studio-feedback-option.ui-button--ghost.selected {
+.training-studio-feedback-options .ui-segmented-control-button:hover:not(:disabled):not([data-state='on']),
+.training-studio-feedback-options .ui-segmented-control-button[data-state='on'] {
   border-color: var(--training-workbench-border-accent);
   background: var(--training-workbench-primary-soft);
   color: var(--text-primary);
 }
 
-.training-studio-feedback-option:disabled {
+.training-studio-feedback-options .ui-segmented-control-button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
 
-.training-studio-feedback-option:focus-visible {
+.training-studio-feedback-options .ui-segmented-control-button:focus-visible {
   outline: 2px solid var(--training-workbench-primary);
   outline-offset: 3px;
 }
 
-.training-studio-feedback-option > span {
+.training-studio-feedback-options .ui-segmented-control-button > span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -358,12 +364,12 @@
   font-weight: 800;
 }
 
-.training-studio-feedback-option > span svg {
+.training-studio-feedback-options .ui-segmented-control-button > span svg {
   color: var(--training-workbench-primary);
   flex-shrink: 0;
 }
 
-.training-studio-feedback-options small {
+.training-studio-feedback-options .ui-segmented-control-button small {
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.45;
