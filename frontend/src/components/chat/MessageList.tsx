@@ -31,6 +31,9 @@ import {
   type MessageActionForkOption,
   type MessageActionResult,
 } from '../../services/trainingConversation'
+import { Button } from '../ui/button'
+import { Field, Input, Select, Textarea } from '../ui/form'
+import { SegmentedControl } from '../ui/segmented-control'
 import { useI18n } from '../../i18n'
 import './MessageList.css'
 
@@ -435,8 +438,8 @@ function MessageTreeItem({
 }) {
   const preview = treeMessagePreview(message)
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       className={`message-tree-node${active ? ' active' : ''}`}
       onClick={(event) => {
         event.stopPropagation()
@@ -453,7 +456,7 @@ function MessageTreeItem({
         <span>{message.branchId ?? labels.noBranch}</span>
         <span>{labels.statusLabel}: {message.status}</span>
       </span>
-    </button>
+    </Button>
   )
 }
 
@@ -630,7 +633,6 @@ function MessageTreeActions({
     labels.retry,
     labels.retryDesc,
   ])
-
   const handleSubmitWriteAction = React.useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     event.stopPropagation()
@@ -756,6 +758,17 @@ function MessageTreeActions({
   const isReadBusy = Boolean(loadingAction)
   const isWriteBusy = Boolean(applyingAction)
   const isTreeBusy = isReadBusy || isWriteBusy
+  const writeActionOptions = React.useMemo(() => writeActions.map(({ action, label, description, icon: Icon }) => ({
+    value: action,
+    title: description,
+    disabled: isTreeBusy,
+    label: (
+      <>
+        <Icon size={13} aria-hidden="true" />
+        <span>{label}</span>
+      </>
+    ),
+  })), [isTreeBusy, writeActions])
   const editContentMissing = writeAction === 'edit' && editContent.trim().length === 0
   const canSubmitWrite = !isTreeBusy && !editContentMissing
   const submitAccessibleLabel = applyingStatus ?? `${labels.apply}: ${currentWriteActionLabel}`
@@ -826,8 +839,8 @@ function MessageTreeActions({
         </span>
       </div>
       <div className="message-tree-action-links">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           className="message-tree-action"
           title={labels.focusDesc}
           aria-label={loadingAction === 'focus' ? `${labels.focus}: ${labels.loading}` : labels.focus}
@@ -844,9 +857,9 @@ function MessageTreeActions({
             <span className="message-tree-action-label">{labels.focus}</span>
             <span className="message-tree-action-description">{labels.focusDesc}</span>
           </span>
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
           className="message-tree-action"
           title={labels.childrenDesc}
           aria-label={loadingAction === 'children' ? `${labels.children}: ${labels.loading}` : labels.children}
@@ -863,11 +876,11 @@ function MessageTreeActions({
             <span className="message-tree-action-label">{labels.children}</span>
             <span className="message-tree-action-description">{labels.childrenDesc}</span>
           </span>
-        </button>
+        </Button>
         <form className="message-tree-search-form" onSubmit={handleSubmitSearch}>
           <label>
             <span className="sr-only">{labels.searchPlaceholder}</span>
-            <input
+            <Input
               value={searchText}
               onClick={(event) => event.stopPropagation()}
               onChange={(event) => setSearchText(event.target.value)}
@@ -875,7 +888,8 @@ function MessageTreeActions({
               disabled={isTreeBusy}
             />
           </label>
-          <button
+          <Button
+            variant="secondary"
             type="submit"
             title={labels.searchDesc}
             aria-label={loadingAction === 'search' ? `${labels.search}: ${labels.loading}` : labels.search}
@@ -884,13 +898,13 @@ function MessageTreeActions({
           >
             {loadingAction === 'search' ? <Loader2 size={13} className="spin" /> : <Search size={13} />}
             <span>{labels.search}</span>
-          </button>
+          </Button>
         </form>
       </div>
       {writeActions.length > 0 && (
         <div className="message-tree-write">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             className="message-tree-write-toggle"
             aria-expanded={writeExpanded}
             aria-controls={writePanelId}
@@ -912,7 +926,7 @@ function MessageTreeActions({
                 className={writeExpanded ? 'expanded' : undefined}
               />
             </span>
-          </button>
+          </Button>
           {writeExpanded && (
             <form
               id={writePanelId}
@@ -920,27 +934,19 @@ function MessageTreeActions({
               onSubmit={handleSubmitWriteAction}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="message-tree-write-tabs" role="tablist" aria-label={labels.writesTitle}>
-                {writeActions.map(({ action, label, description, icon: Icon }) => (
-                  <button
-                    key={action}
-                    type="button"
-                    className={writeAction === action ? 'active' : undefined}
-                    title={description}
-                    aria-label={`${label}: ${description}`}
-                    aria-pressed={writeAction === action}
-                    disabled={isTreeBusy}
-                    onClick={() => {
-                      setWriteAction(action)
-                      setWriteError(null)
-                      setWriteStatus(null)
-                    }}
-                  >
-                    <Icon size={13} aria-hidden="true" />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                ariaLabel={labels.writesTitle}
+                className="message-tree-write-tabs"
+                options={writeActionOptions}
+                size="sm"
+                value={writeAction}
+                onValueChange={(action) => {
+                  if (isTreeBusy) return
+                  setWriteAction(action)
+                  setWriteError(null)
+                  setWriteStatus(null)
+                }}
+              />
               <div className="message-tree-write-target">
                 <GitFork size={13} aria-hidden="true" />
                 <span>
@@ -955,9 +961,8 @@ function MessageTreeActions({
                 </span>
               </div>
               {writeAction === 'edit' && (
-                <label className="message-tree-write-field">
-                  <span>{labels.editContentLabel}</span>
-                  <textarea
+                <Field className="message-tree-write-field" label={labels.editContentLabel}>
+                  <Textarea
                     rows={3}
                     value={editContent}
                     placeholder={labels.editPlaceholder}
@@ -968,12 +973,11 @@ function MessageTreeActions({
                       setWriteStatus(null)
                     }}
                   />
-                </label>
+                </Field>
               )}
               {writeAction === 'retry' && (
-                <label className="message-tree-write-field">
-                  <span>{labels.retryContentLabel}</span>
-                  <textarea
+                <Field className="message-tree-write-field" label={labels.retryContentLabel}>
+                  <Textarea
                     rows={2}
                     value={retryContent}
                     placeholder={labels.retryPlaceholder}
@@ -984,13 +988,12 @@ function MessageTreeActions({
                       setWriteStatus(null)
                     }}
                   />
-                </label>
+                </Field>
               )}
               {writeAction === 'fork' && (
                 <div className="message-tree-write-grid">
-                  <label className="message-tree-write-field">
-                    <span>{labels.forkTitleLabel}</span>
-                    <input
+                  <Field className="message-tree-write-field" label={labels.forkTitleLabel}>
+                    <Input
                       value={forkTitle}
                       placeholder={labels.forkTitlePlaceholder}
                       disabled={isTreeBusy}
@@ -999,10 +1002,9 @@ function MessageTreeActions({
                         setWriteStatus(null)
                       }}
                     />
-                  </label>
-                  <label className="message-tree-write-field">
-                    <span>{labels.forkOptionLabel}</span>
-                    <select
+                  </Field>
+                  <Field className="message-tree-write-field" label={labels.forkOptionLabel}>
+                    <Select
                       value={forkOption}
                       disabled={isTreeBusy}
                       onChange={(event) => {
@@ -1013,8 +1015,8 @@ function MessageTreeActions({
                       <option value="targetLevel">{labels.forkOptionTargetLevel}</option>
                       <option value="directPath">{labels.forkOptionDirectPath}</option>
                       <option value="includeBranches">{labels.forkOptionIncludeBranches}</option>
-                    </select>
-                  </label>
+                    </Select>
+                  </Field>
                 </div>
               )}
               <div className="message-tree-write-footer">
@@ -1028,7 +1030,8 @@ function MessageTreeActions({
                   {applyingStatus && !writeError && <span className="pending">{applyingStatus}</span>}
                   {writeStatus && !writeError && !applyingStatus && <span className="success">{writeStatus}</span>}
                 </div>
-                <button
+                <Button
+                  variant="primary"
                   type="submit"
                   className="message-tree-write-submit"
                   disabled={!canSubmitWrite}
@@ -1037,7 +1040,7 @@ function MessageTreeActions({
                 >
                   {applyingAction ? <Loader2 size={13} className="spin" /> : <Check size={13} />}
                   <span>{applyingStatus ?? labels.apply}</span>
-                </button>
+                </Button>
               </div>
             </form>
           )}

@@ -219,7 +219,7 @@
   gap: 6px;
 }
 
-.message-tree-action {
+.message-tree-action.ui-button {
   min-width: 0;
   min-height: 44px;
   display: flex;
@@ -240,21 +240,21 @@
     color var(--transition-fast);
 }
 
-.message-tree-action:hover,
-.message-tree-action:focus-visible {
+.message-tree-action.ui-button:hover:not(:disabled),
+.message-tree-action.ui-button:focus-visible {
   color: var(--green);
   border-color: var(--green);
   background: var(--green-soft);
   outline: none;
 }
 
-.message-tree-action:disabled {
+.message-tree-action.ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.message-tree-action:disabled:hover,
-.message-tree-action:disabled:focus-visible {
+.message-tree-action.ui-button:disabled:hover,
+.message-tree-action.ui-button:disabled:focus-visible {
   color: var(--text-secondary);
   border-color: var(--border);
   background: var(--bg-elevated);
@@ -308,7 +308,7 @@
   min-width: 0;
 }
 
-.message-tree-search-form input {
+.message-tree-search-form .ui-form-input {
   width: 100%;
   height: 32px;
   box-sizing: border-box;
@@ -322,12 +322,12 @@
   outline: none;
 }
 
-.message-tree-search-form input:focus {
+.message-tree-search-form .ui-form-input:focus-visible {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.message-tree-search-form button {
+.message-tree-search-form .ui-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -346,26 +346,26 @@
   white-space: nowrap;
 }
 
-.message-tree-search-form button:hover,
-.message-tree-search-form button:focus-visible {
+.message-tree-search-form .ui-button:hover:not(:disabled),
+.message-tree-search-form .ui-button:focus-visible {
   color: var(--green);
   border-color: var(--green);
   background: var(--green-soft);
   outline: none;
 }
 
-.message-tree-search-form input:disabled,
-.message-tree-search-form button:disabled {
+.message-tree-search-form .ui-form-input:disabled,
+.message-tree-search-form .ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.message-tree-search-form input:disabled {
+.message-tree-search-form .ui-form-input:disabled {
   background: var(--bg-base);
 }
 
-.message-tree-search-form button:disabled:hover,
-.message-tree-search-form button:disabled:focus-visible {
+.message-tree-search-form .ui-button:disabled:hover,
+.message-tree-search-form .ui-button:disabled:focus-visible {
   color: var(--text-secondary);
   border-color: var(--border);
   background: var(--bg-elevated);
@@ -377,7 +377,7 @@
   padding-top: 2px;
 }
 
-.message-tree-write-toggle {
+.message-tree-write-toggle.ui-button {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -394,21 +394,21 @@
   font-size: 12px;
 }
 
-.message-tree-write-toggle:hover,
-.message-tree-write-toggle:focus-visible {
+.message-tree-write-toggle.ui-button:hover:not(:disabled),
+.message-tree-write-toggle.ui-button:focus-visible {
   color: var(--green);
   border-color: var(--green);
   background: var(--green-soft);
   outline: none;
 }
 
-.message-tree-write-toggle:disabled {
+.message-tree-write-toggle.ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.message-tree-write-toggle:disabled:hover,
-.message-tree-write-toggle:disabled:focus-visible {
+.message-tree-write-toggle.ui-button:disabled:hover,
+.message-tree-write-toggle.ui-button:disabled:focus-visible {
   color: var(--text-secondary);
   border-color: var(--border);
   background: var(--bg-elevated);
@@ -451,14 +451,18 @@
   background: rgba(255, 255, 255, 0.84);
 }
 
-.message-tree-write-tabs {
+.message-tree-write-tabs.ui-segmented-control {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
+  min-height: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
 }
 
-.message-tree-write-tabs button,
-.message-tree-write-submit {
+.message-tree-write-tabs .ui-segmented-control-button,
+.message-tree-write-submit.ui-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -477,37 +481,37 @@
   white-space: nowrap;
 }
 
-.message-tree-write-tabs button:hover,
-.message-tree-write-tabs button:focus-visible,
-.message-tree-write-tabs button.active,
-.message-tree-write-submit:hover,
-.message-tree-write-submit:focus-visible {
+.message-tree-write-tabs .ui-segmented-control-button:hover:not(:disabled),
+.message-tree-write-tabs .ui-segmented-control-button:focus-visible,
+.message-tree-write-tabs .ui-segmented-control-button[data-state='on'],
+.message-tree-write-submit.ui-button:hover:not(:disabled),
+.message-tree-write-submit.ui-button:focus-visible {
   color: var(--green);
   border-color: var(--green);
   background: var(--green-soft);
   outline: none;
 }
 
-.message-tree-write-submit:disabled {
+.message-tree-write-submit.ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.56;
 }
 
-.message-tree-write-tabs button:disabled {
+.message-tree-write-tabs .ui-segmented-control-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.message-tree-write-tabs button:disabled:hover,
-.message-tree-write-tabs button:disabled:focus-visible,
-.message-tree-write-submit:disabled:hover,
-.message-tree-write-submit:disabled:focus-visible {
+.message-tree-write-tabs .ui-segmented-control-button:disabled:hover,
+.message-tree-write-tabs .ui-segmented-control-button:disabled:focus-visible,
+.message-tree-write-submit.ui-button:disabled:hover,
+.message-tree-write-submit.ui-button:disabled:focus-visible {
   color: var(--text-secondary);
   border-color: var(--border);
   background: #fff;
 }
 
-.message-tree-write-tabs button.active:disabled {
+.message-tree-write-tabs .ui-segmented-control-button[data-state='on']:disabled {
   color: var(--green);
   border-color: var(--green);
   background: var(--green-soft);
@@ -520,16 +524,16 @@
   min-width: 0;
 }
 
-.message-tree-write-field span {
+.message-tree-write-field .ui-form-label {
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.25;
 }
 
-.message-tree-write-field textarea,
-.message-tree-write-field input,
-.message-tree-write-field select {
+.message-tree-write-field .ui-form-textarea,
+.message-tree-write-field .ui-form-input,
+.message-tree-write-field .ui-form-select {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border);
@@ -541,7 +545,7 @@
   outline: none;
 }
 
-.message-tree-write-field textarea {
+.message-tree-write-field .ui-form-textarea {
   min-height: 58px;
   max-height: 132px;
   padding: 7px 8px;
@@ -549,22 +553,22 @@
   line-height: 1.35;
 }
 
-.message-tree-write-field input,
-.message-tree-write-field select {
+.message-tree-write-field .ui-form-input,
+.message-tree-write-field .ui-form-select {
   height: 30px;
   padding: 0 8px;
 }
 
-.message-tree-write-field textarea:focus,
-.message-tree-write-field input:focus,
-.message-tree-write-field select:focus {
+.message-tree-write-field .ui-form-textarea:focus-visible,
+.message-tree-write-field .ui-form-input:focus-visible,
+.message-tree-write-field .ui-form-select:focus-visible {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.message-tree-write-field textarea:disabled,
-.message-tree-write-field input:disabled,
-.message-tree-write-field select:disabled {
+.message-tree-write-field .ui-form-textarea:disabled,
+.message-tree-write-field .ui-form-input:disabled,
+.message-tree-write-field .ui-form-select:disabled {
   cursor: not-allowed;
   background: var(--bg-base);
   color: var(--text-muted);
@@ -664,7 +668,7 @@
   gap: 5px;
 }
 
-.message-tree-node {
+.message-tree-node.ui-button {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 7px;
@@ -679,26 +683,26 @@
   text-align: left;
 }
 
-.message-tree-node:hover,
-.message-tree-node:focus-visible,
-.message-tree-node.active {
+.message-tree-node.ui-button:hover:not(:disabled),
+.message-tree-node.ui-button:focus-visible,
+.message-tree-node.ui-button.active {
   border-color: var(--green);
   background: var(--green-soft);
   outline: none;
 }
 
-.message-tree-node:disabled {
+.message-tree-node.ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
 
-.message-tree-node:disabled:hover,
-.message-tree-node:disabled:focus-visible {
+.message-tree-node.ui-button:disabled:hover,
+.message-tree-node.ui-button:disabled:focus-visible {
   border-color: var(--border);
   background: #fff;
 }
 
-.message-tree-node.active:disabled {
+.message-tree-node.ui-button.active:disabled {
   border-color: var(--green);
   background: var(--green-soft);
   opacity: 0.74;
@@ -824,11 +828,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .message-tree-search-form button {
+  .message-tree-search-form .ui-button {
     width: 100%;
   }
 
-  .message-tree-write-tabs,
+  .message-tree-write-tabs.ui-segmented-control,
   .message-tree-write-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -838,7 +842,7 @@
     flex-direction: column;
   }
 
-  .message-tree-write-submit {
+  .message-tree-write-submit.ui-button {
     width: 100%;
   }
 
