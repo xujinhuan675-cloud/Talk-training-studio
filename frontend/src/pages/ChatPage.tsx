@@ -44,6 +44,13 @@ import EmotionSidebar from '../components/EmotionSidebar'
 import CheatSheetComponent from '../components/CheatSheet'
 import { Button } from '../components/ui/button'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu'
+import { Select } from '../components/ui/form'
+import {
   exportRoom,
   exportRoomHtml,
   generateCheatSheet,
@@ -1584,47 +1591,49 @@ function ChatArea() {
           >
             <GraduationCap size={16} />
           </Button>
-          <div className="export-dropdown-wrapper">
+          <DropdownMenu open={showExportMenu} onOpenChange={setShowExportMenu}>
             <Button
+              asChild
               variant="ghost"
               size="icon"
               className="header-action-btn"
-              onClick={() => setShowExportMenu((v) => !v)}
-              title={tr('导出', 'Export')}
             >
-              <Download size={16} />
+              <DropdownMenuTrigger
+                aria-label={tr('导出', 'Export')}
+                title={tr('导出', 'Export')}
+              >
+                <Download size={16} />
+              </DropdownMenuTrigger>
             </Button>
-            {showExportMenu && (
-              <div className="export-menu">
-                <div
-                  className="export-menu-item"
-                  onClick={() => {
-                    setShowExportMenu(false)
-                    exportRoomHtml(chat.selectedRoom!.room.id).catch(console.error)
-                  }}
-                >
-                  <FileText size={15} />
-                  <div>
-                    <div>{tr('HTML 格式', 'HTML format')}</div>
-                    <span className="export-menu-desc">{tr('保留聊天样式', 'Preserves chat styling')}</span>
-                  </div>
+            <DropdownMenuContent className="export-menu" align="end" sideOffset={6}>
+              <DropdownMenuItem
+                className="export-menu-item"
+                onSelect={() => {
+                  const roomId = chat.selectedRoom?.room.id
+                  if (roomId) void exportRoomHtml(roomId).catch(console.error)
+                }}
+              >
+                <FileText size={15} />
+                <div>
+                  <div>{tr('HTML 格式', 'HTML format')}</div>
+                  <span className="export-menu-desc">{tr('保留聊天样式', 'Preserves chat styling')}</span>
                 </div>
-                <div
-                  className="export-menu-item"
-                  onClick={() => {
-                    setShowExportMenu(false)
-                    exportRoom(chat.selectedRoom!.room.id).catch(console.error)
-                  }}
-                >
-                  <FileDown size={15} />
-                  <div>
-                    <div>{tr('Markdown 格式', 'Markdown format')}</div>
-                    <span className="export-menu-desc">{tr('纯文本，便于编辑', 'Plain text, easy to edit')}</span>
-                  </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="export-menu-item"
+                onSelect={() => {
+                  const roomId = chat.selectedRoom?.room.id
+                  if (roomId) void exportRoom(roomId).catch(console.error)
+                }}
+              >
+                <FileDown size={15} />
+                <div>
+                  <div>{tr('Markdown 格式', 'Markdown format')}</div>
+                  <span className="export-menu-desc">{tr('纯文本，便于编辑', 'Plain text, easy to edit')}</span>
                 </div>
-              </div>
-            )}
-          </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -1683,7 +1692,7 @@ function ChatArea() {
               <span className="chat-page-llm-selector-title">{t('training.llm.selectorLabel')}</span>
               <label>
                 <span>{t('training.llm.provider')}</span>
-                <select
+                <Select
                   aria-label={t('training.llm.providerAria')}
                   value={selectedLlmProvider}
                   onChange={handleLlmProviderChange}
@@ -1694,11 +1703,11 @@ function ChatArea() {
                       {provider.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label>
                 <span>{t('training.llm.model')}</span>
-                <select
+                <Select
                   aria-label={t('training.llm.modelAria')}
                   value={selectedLlmChoice?.key
                     ?? selectedProviderModelChoices.find(isLlmModelChoiceSelectable)?.key
@@ -1712,7 +1721,7 @@ function ChatArea() {
                       {formatLlmOptionLabel(choice, t)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <div
                 className="chat-page-llm-details"
