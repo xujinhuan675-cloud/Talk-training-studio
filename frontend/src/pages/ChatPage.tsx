@@ -42,6 +42,7 @@ import AnalysisPanel from '../components/chat/AnalysisPanel'
 import EmotionCurve from '../components/EmotionCurve'
 import EmotionSidebar from '../components/EmotionSidebar'
 import CheatSheetComponent from '../components/CheatSheet'
+import { Button } from '../components/ui/button'
 import {
   exportRoom,
   exportRoomHtml,
@@ -1524,13 +1525,15 @@ function ChatArea() {
       {/* Chat header */}
       <div className="chat-page-header">
         <div className="chat-page-header-left">
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             className="chat-page-back-btn"
             onClick={() => navigate(APP_ROUTES.conversations)}
             title={tr('返回对话库', 'Back to conversation library')}
           >
             <ArrowLeft size={18} />
-          </button>
+          </Button>
           <h3>{chat.selectedRoom?.room.name ?? ''}</h3>
           {chat.selectedRoom && (
             <span className={`room-type-badge ${chat.selectedRoom.room.type}`}>
@@ -1543,44 +1546,54 @@ function ChatArea() {
           )}
         </div>
         <div className="chat-page-header-actions">
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             className={`header-action-btn ${showEmotionSidebar ? 'active' : ''}`}
             onClick={() => setShowEmotionSidebar((v) => !v)}
             title={tr('实时情绪面板', 'Live emotion panel')}
           >
             <Activity size={16} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             className="header-action-btn"
             onClick={() => setShowEmotionCurve(true)}
             title={tr('情绪详细分析', 'Detailed emotion analysis')}
           >
             <BarChart3 size={16} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             className="header-action-btn"
             onClick={analysis.handleAnalyze}
             title={tr('分析', 'Analyze')}
             disabled={analysis.analyzingRoom}
           >
             <BarChart2 size={16} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             className="header-action-btn coaching"
             onClick={() => coaching.handleStartCoaching()}
             title={tr('AI 复盘', 'AI Review')}
             disabled={coaching.coachingSending}
           >
             <GraduationCap size={16} />
-          </button>
+          </Button>
           <div className="export-dropdown-wrapper">
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               className="header-action-btn"
               onClick={() => setShowExportMenu((v) => !v)}
               title={tr('导出', 'Export')}
             >
               <Download size={16} />
-            </button>
+            </Button>
             {showExportMenu && (
               <div className="export-menu">
                 <div
@@ -1618,14 +1631,14 @@ function ChatArea() {
       {isTrainingSession && (
         <section className="chat-page-training-banner" data-testid="training-context-banner">
           <div className="chat-page-training-top">
-            <button
+            <Button
+              variant="secondary"
               className="chat-page-training-back"
-              type="button"
               onClick={() => navigate(resolvedTrainingBackPath)}
             >
               <ArrowLeft size={15} />
               {tr('返回', 'Back')}
-            </button>
+            </Button>
 
             <div className="chat-page-training-copy">
               <strong>{resolvedTrainingContextTitle}</strong>
@@ -1637,27 +1650,28 @@ function ChatArea() {
                   </span>
                 ))}
               </div>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 className={`chat-page-training-details-toggle${trainingSceneExpanded ? ' expanded' : ''}`}
-                type="button"
                 aria-expanded={trainingSceneExpanded}
                 aria-controls="training-scene-details"
                 onClick={() => setTrainingSceneExpanded((v) => !v)}
               >
                 <span>{trainingSceneExpanded ? tr('收起', 'Hide details') : tr('详情', 'Details')}</span>
                 <ChevronDown size={14} />
-              </button>
+              </Button>
             </div>
 
-            <button
+            <Button
+              variant={trainingSessionCompleted ? 'secondary' : 'primary'}
               className={`chat-page-training-complete${trainingSessionCompleted ? ' completed' : ''}`}
-              type="button"
               onClick={handleCompleteTrainingSession}
               disabled={trainingSessionCompleting || analysis.analyzingRoom}
             >
               {trainingSessionCompleting ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
               {trainingSessionCompleted ? tr('已结束', 'Ended') : tr('结束练习', 'End practice')}
-            </button>
+            </Button>
           </div>
 
           {llmModelChoices.length > 0 && (
@@ -1776,16 +1790,16 @@ function ChatArea() {
                 )}
             </span>
           </div>
-          <button
+          <Button
+            variant="secondary"
             className="guidance-action"
-            type="button"
             onClick={handleRequestGuidance}
             disabled={guidanceLoading}
             aria-label={resolvedGuidanceActionText}
           >
             {guidanceLoading ? <Loader2 size={14} className="spin" /> : <Lightbulb size={14} />}
             {guidanceLoading ? tr('思考中', 'Thinking') : resolvedGuidanceActionText}
-          </button>
+          </Button>
         </section>
       )}
 
@@ -1803,14 +1817,15 @@ function ChatArea() {
         <section className="chat-page-guidance-panel" data-testid="training-guidance-panel">
           <div className="guidance-panel-header">
             <strong>{resolvedGuidanceBarTitle}</strong>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setGuidanceOpen(false)}
               title={tr('关闭指导', 'Close guidance')}
               aria-label={tr('关闭指导', 'Close guidance')}
             >
               <X size={14} />
-            </button>
+            </Button>
           </div>
           {guidanceLoading && guidanceEvents.length === 0 && (
             <div className="guidance-empty">{tr('正在读取最新一轮对话', 'Reading the latest turn')}</div>
@@ -1886,14 +1901,15 @@ function ChatArea() {
               </em>
             </span>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setMessageTreeSelection(null)}
             title={t('messageTree.current.clear')}
             aria-label={t('messageTree.current.clear')}
           >
             <X size={14} />
-          </button>
+          </Button>
         </section>
       )}
 
@@ -1908,7 +1924,9 @@ function ChatArea() {
               style={{ width: `${(battlePrepRoundCount / 12) * 100}%` }}
             />
           </div>
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             className="end-battle-btn"
             onClick={handleEndBattle}
             disabled={battlePrepEnding}
@@ -1919,7 +1937,7 @@ function ChatArea() {
               <Flag size={14} />
             )}
             {battlePrepEnding ? tr('生成话术纸条...', 'Generating cheat sheet...') : tr('结束备战', 'End Battle Prep')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1930,14 +1948,14 @@ function ChatArea() {
             <strong>{tr('电话式练习', 'Phone-style practice')}</strong>
             <span>{voicePracticeStatus}</span>
           </div>
-          <button
+          <Button
+            variant="secondary"
             className="voice-call-action"
-            type="button"
             onClick={handleVoicePracticeAction}
           >
             {voice.voiceEnabled && !voice.voiceMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
             {voicePracticeActionLabel}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1984,13 +2002,14 @@ function ChatArea() {
                 <strong>{tr('视频回答', 'Video answer')}</strong>
                 <span>{videoWorkspacePrompt}</span>
               </div>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => setVideoRecorderOpen(false)}
                 title={tr('关闭视频录制器', 'Close video recorder')}
               >
                 <X size={18} />
-              </button>
+              </Button>
             </div>
             <div className="video-workspace-body">
               <div className="video-workspace-context">
@@ -2070,13 +2089,16 @@ function ChatArea() {
               { key: 'analysis', label: tr('评分', 'Score') },
               { key: 'emotion', label: tr('情绪', 'Emotion') },
             ].map((pill) => (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 key={pill.key}
                 className={`chat-mobile-pill-btn${mobileSheet === pill.key ? ' active' : ''}`}
+                aria-pressed={mobileSheet === pill.key}
                 onClick={() => setMobileSheet(mobileSheet === pill.key ? null : pill.key)}
               >
                 {pill.label}
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -2204,12 +2226,16 @@ function ChatArea() {
               {mobileSheet === 'analysis' && tr('评分', 'Score')}
               {mobileSheet === 'emotion' && tr('情绪', 'Emotion')}
             </h4>
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               className="chat-mobile-sheet-close"
+              aria-label={tr('关闭', 'Close')}
+              title={tr('关闭', 'Close')}
               onClick={() => setMobileSheet(null)}
             >
               <X size={16} />
-            </button>
+            </Button>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
             {mobileSheet === 'cheatsheet' && tr('点击上方"结束备战"按钮后，可在此查看话术锦囊。', 'Tap “End Battle Prep” above to view your cheat sheet here.')}
@@ -2256,14 +2282,14 @@ function NewConversationRouteState({
           <h3>{tr('新对话', 'New conversation')}</h3>
           <span>{tr('对话库', 'Conversation library')}</span>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           className="chat-page-new-room-btn"
           onClick={onCreateRoom}
         >
           <Plus size={15} />
           {tr('新建房间', 'New room')}
-        </button>
+        </Button>
       </div>
       <div className="chat-page-new-chat-body">
         <div className="chat-page-new-chat-copy">
@@ -2387,13 +2413,14 @@ export default function ChatPage() {
           </div>
           <h2>{tr('选择一个对话房间', 'Choose a conversation room')}</h2>
           <p>{tr('从左侧打开已有房间，或新建一个普通对话。', 'Open an existing room, or create a regular conversation.')}</p>
-          <button
+          <Button
+            variant="primary"
             className="chat-page-empty-cta"
             onClick={() => setShowCreateDialog(true)}
           >
             <Plus size={16} />
             {tr('新建对话房间', 'New conversation room')}
-          </button>
+          </Button>
         </div>
       ) : (
         <NewConversationRouteState

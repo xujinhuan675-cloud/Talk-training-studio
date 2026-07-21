@@ -84,23 +84,33 @@
   transition: all var(--transition-fast);
 }
 
-.header-action-btn:hover {
+.header-action-btn:hover,
+.ui-button.header-action-btn:hover:not(:disabled) {
   background: var(--bg-base);
   color: var(--text-primary);
   border-color: var(--border);
 }
 
+.ui-button.header-action-btn.coaching,
 .header-action-btn.coaching {
   color: var(--green);
   border-color: var(--border-accent);
 }
 
-.header-action-btn.coaching:hover {
+.header-action-btn.coaching:hover,
+.ui-button.header-action-btn.coaching:hover:not(:disabled) {
   background: var(--green-soft);
   color: var(--green);
 }
 
+.ui-button.header-action-btn.active,
 .header-action-btn.active {
+  background: var(--green-soft);
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.ui-button.header-action-btn.active:hover:not(:disabled) {
   background: var(--green-soft);
   color: var(--green);
   border-color: var(--green);
