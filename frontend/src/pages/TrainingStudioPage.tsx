@@ -37,6 +37,8 @@ import {
   toBattleDifficulty,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
+import { Button } from '../components/ui/button'
+import { Field, Select, Textarea } from '../components/ui/form'
 import { useI18n, type Translate, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './TrainingStudioPage.css'
@@ -450,24 +452,24 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             <p>{t('training.page.subtitle')}</p>
           </div>
           <div className="training-studio-header-actions" aria-label={t('training.side.aria')}>
-            <button
+            <Button
               className="training-studio-action"
-              type="button"
+              variant="primary"
               onClick={startQuickSession}
               disabled={starting !== null}
             >
               {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Wand2 size={16} />}
               {t('training.page.startRoom')}
-            </button>
-            <button
+            </Button>
+            <Button
               className="training-studio-action secondary"
-              type="button"
+              variant="secondary"
               onClick={startGuidedBattle}
               disabled={starting !== null}
             >
               <Wand2 size={16} />
               {t('training.launch.openBattlePrep')}
-            </button>
+            </Button>
             {error && <div className="training-studio-error">{error}</div>}
           </div>
         </header>
@@ -587,22 +589,20 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
 
         <div className="training-studio-grid">
           <div className="training-studio-main">
-            <label className="training-studio-goal">
-              <span>{t('training.goal.label')}</span>
-              <textarea
+            <Field className="training-studio-goal" label={t('training.goal.label')}>
+              <Textarea
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
                 rows={4}
                 placeholder={t('training.goal.placeholder')}
                 disabled={starting !== null}
               />
-            </label>
+            </Field>
 
             {mode === 'live_coach' && (
               <section className="training-studio-live-coach-panel" aria-label={t('training.liveCoach.panelAria')}>
-                <label>
-                  <span>{t('training.liveCoach.sourceLanguage')}</span>
-                  <select
+                <Field label={t('training.liveCoach.sourceLanguage')}>
+                  <Select
                     value={liveCoachSourceLanguage}
                     onChange={(event) => setLiveCoachSourceLanguage(event.target.value)}
                     disabled={starting !== null}
@@ -612,11 +612,10 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                         {getLiveCoachLanguageLabel(option.code, locale)}
                       </option>
                     ))}
-                  </select>
-                </label>
-                <label>
-                  <span>{t('training.liveCoach.targetLanguage')}</span>
-                  <select
+                  </Select>
+                </Field>
+                <Field label={t('training.liveCoach.targetLanguage')}>
+                  <Select
                     value={liveCoachTargetLanguage}
                     onChange={(event) => setLiveCoachTargetLanguage(event.target.value)}
                     disabled={starting !== null}
@@ -626,8 +625,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                         {getLiveCoachLanguageLabel(option.code, locale)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </Select>
+                </Field>
                 <div className="training-studio-live-coach-badge">
                   <Languages size={14} />
                   {t('training.liveCoach.languageAdapter')}

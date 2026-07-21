@@ -18,6 +18,8 @@ import {
   type TrainingScenario,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
+import { Button } from './ui/button'
+import { Field, Input, Select } from './ui/form'
 import { useI18n, type TranslationKey } from '../i18n'
 import './TrainingStudioLauncher.css'
 
@@ -248,14 +250,15 @@ export default function TrainingStudioLauncher({
             {t('training.launcher.subtitle')}
           </p>
         </div>
-        <button
+        <Button
           className="tsl-reset"
-          type="button"
+          size="sm"
+          variant="secondary"
           onClick={() => onChange(getDefaultTrainingStudioConfig(t))}
           disabled={disabled}
         >
           {t('training.launcher.reset')}
-        </button>
+        </Button>
       </div>
 
       <div className="tsl-section">
@@ -285,9 +288,8 @@ export default function TrainingStudioLauncher({
       <div className="tsl-section">
         <div className="tsl-label">{t('training.launcher.coreSettings')}</div>
         <div className="tsl-core-grid">
-          <label className="tsl-field">
-            <span>{t('training.launcher.scenario')}</span>
-            <select
+          <Field className="tsl-field" label={t('training.launcher.scenario')}>
+            <Select
               value={value.scenario}
               onChange={(event) => updateScenario(event.target.value as TrainingScenario)}
               disabled={disabled}
@@ -297,12 +299,11 @@ export default function TrainingStudioLauncher({
                   {t(item.labelKey)}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
 
-          <label className="tsl-field">
-            <span>{t('training.launcher.difficulty')}</span>
-            <select
+          <Field className="tsl-field" label={t('training.launcher.difficulty')}>
+            <Select
               value={value.difficulty}
               onChange={(event) => update('difficulty', event.target.value as TrainingStudioConfig['difficulty'])}
               disabled={disabled}
@@ -312,12 +313,11 @@ export default function TrainingStudioLauncher({
                   {t(item.labelKey)}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
 
-          <label className="tsl-field">
-            <span>{t('training.launcher.level')}</span>
-            <select
+          <Field className="tsl-field" label={t('training.launcher.level')}>
+            <Select
               value={value.level}
               onChange={(event) => update('level', event.target.value as TrainingLevel)}
               disabled={disabled}
@@ -327,12 +327,11 @@ export default function TrainingStudioLauncher({
                   {t(level.labelKey)}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
 
-          <label className="tsl-field">
-            <span>{t('training.launcher.questions')}</span>
-            <select
+          <Field className="tsl-field" label={t('training.launcher.questions')}>
+            <Select
               value={value.questionCount}
               onChange={(event) => update('questionCount', Number(event.target.value))}
               disabled={disabled}
@@ -342,28 +341,26 @@ export default function TrainingStudioLauncher({
                   {t('training.launcher.questionOption', { count })}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
 
-          <label className="tsl-field tsl-field--span-2">
-            <span>{t('training.launcher.role')}</span>
-            <input
+          <Field className="tsl-field tsl-field--span-2" label={t('training.launcher.role')}>
+            <Input
               value={value.role}
               onChange={(event) => update('role', event.target.value)}
               placeholder={t('training.placeholder.role')}
               disabled={disabled}
             />
-          </label>
+          </Field>
 
-          <label className="tsl-field tsl-field--span-2">
-            <span>{t('training.launcher.techStack')}</span>
-            <input
+          <Field className="tsl-field tsl-field--span-2" label={t('training.launcher.techStack')}>
+            <Input
               value={value.techStack}
               onChange={(event) => update('techStack', event.target.value)}
               placeholder={t('training.placeholder.techStack')}
               disabled={disabled}
             />
-          </label>
+          </Field>
         </div>
       </div>
 
@@ -385,9 +382,8 @@ export default function TrainingStudioLauncher({
           <div className="tsl-advanced-content">
             {value.scenario === 'interview' && (
               <div className="tsl-advanced-grid">
-                <label className="tsl-field">
-                  <span>{t('training.launcher.interviewRoles')}</span>
-                  <select
+                <Field className="tsl-field" label={t('training.launcher.interviewRoles')}>
+                  <Select
                     value={value.interviewRolePreset}
                     onChange={(event) => {
                       const preset = INTERVIEW_ROLE_PRESETS.find((item) => item.value === event.target.value)
@@ -400,12 +396,11 @@ export default function TrainingStudioLauncher({
                         {t(item.labelKey)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </Select>
+                </Field>
 
-                <label className="tsl-field">
-                  <span>{t('training.launcher.interviewScenarios')}</span>
-                  <select
+                <Field className="tsl-field" label={t('training.launcher.interviewScenarios')}>
+                  <Select
                     value={value.interviewScenarioPreset}
                     onChange={(event) => {
                       const preset = INTERVIEW_SCENARIO_PRESETS.find((item) => item.value === event.target.value)
@@ -418,16 +413,15 @@ export default function TrainingStudioLauncher({
                         {t(item.labelKey)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </Select>
+                </Field>
               </div>
             )}
 
             {value.scenario === 'product_management' && (
               <div className="tsl-advanced-grid">
-                <label className="tsl-field">
-                  <span>{t('training.launcher.productRoles')}</span>
-                  <select
+                <Field className="tsl-field" label={t('training.launcher.productRoles')}>
+                  <Select
                     value={value.productRolePreset}
                     onChange={(event) => {
                       const preset = PRODUCT_ROLE_PRESETS.find((item) => item.value === event.target.value)
@@ -440,12 +434,11 @@ export default function TrainingStudioLauncher({
                         {t(item.labelKey)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </Select>
+                </Field>
 
-                <label className="tsl-field">
-                  <span>{t('training.launcher.productScenarios')}</span>
-                  <select
+                <Field className="tsl-field" label={t('training.launcher.productScenarios')}>
+                  <Select
                     value={value.productScenarioPreset}
                     onChange={(event) => {
                       const preset = PRODUCT_SCENARIO_PRESETS.find((item) => item.value === event.target.value)
@@ -458,15 +451,14 @@ export default function TrainingStudioLauncher({
                         {t(item.labelKey)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </Select>
+                </Field>
               </div>
             )}
 
             <div className="tsl-advanced-grid">
-              <label className="tsl-field">
-                <span>{t('training.launcher.framework')}</span>
-                <select
+              <Field className="tsl-field" label={t('training.launcher.framework')}>
+                <Select
                   value={value.framework}
                   onChange={(event) => update('framework', event.target.value as TrainingStudioConfig['framework'])}
                   disabled={disabled}
@@ -476,8 +468,8 @@ export default function TrainingStudioLauncher({
                       {t(item.labelKey)}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
             </div>
 
             <div className="tsl-section">

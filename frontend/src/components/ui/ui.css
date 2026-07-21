@@ -361,6 +361,132 @@
   color: var(--violet);
 }
 
+:where(.ui-form-field, .ui-form-control) {
+  --ui-form-bg: var(--ui-form-bg-token, var(--training-workbench-bg, var(--workbench-bg, var(--bg-base))));
+  --ui-form-surface-muted: var(--ui-form-surface-muted-token, var(--training-workbench-surface-muted, var(--workbench-surface-muted, var(--bg-soft))));
+  --ui-form-border: var(--ui-form-border-token, var(--training-workbench-border, var(--workbench-border, var(--border))));
+  --ui-form-border-accent: var(--ui-form-border-accent-token, var(--training-workbench-border-accent, var(--workbench-border-accent, var(--border-accent))));
+  --ui-form-focus: var(--ui-form-focus-token, var(--training-workbench-focus, var(--workbench-focus, var(--focus-ring))));
+  --ui-form-primary: var(--ui-form-primary-token, var(--training-workbench-primary, var(--workbench-primary, var(--green))));
+  --ui-form-danger: var(--ui-form-danger-token, var(--training-workbench-danger, var(--workbench-danger, var(--rose))));
+  --ui-form-danger-soft: var(--ui-form-danger-soft-token, var(--training-workbench-danger-soft, var(--workbench-danger-soft, var(--rose-soft))));
+  --ui-form-text: var(--ui-form-text-token, var(--text-primary));
+  --ui-form-label: var(--ui-form-label-token, var(--text-secondary));
+  --ui-form-text-muted: var(--ui-form-text-muted-token, var(--text-muted));
+  --ui-form-radius: var(--ui-form-radius-token, var(--radius-sm));
+  --ui-form-label-font-size: var(--ui-form-label-font-size-token, 13px);
+  --ui-form-label-transform: var(--ui-form-label-transform-token, none);
+  --ui-form-control-font-size: var(--ui-form-control-font-size-token, 14px);
+  --ui-form-control-min-height: var(--ui-form-control-min-height-token, 38px);
+  --ui-form-control-padding: var(--ui-form-control-padding-token, 8px 10px);
+  --ui-form-textarea-min-height: var(--ui-form-textarea-min-height-token, 92px);
+}
+
+.ui-form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ui-form-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  width: fit-content;
+  color: var(--ui-form-label);
+  font-size: var(--ui-form-label-font-size);
+  font-weight: 800;
+  line-height: 1.35;
+  text-transform: var(--ui-form-label-transform);
+}
+
+.ui-form-required {
+  color: var(--ui-form-danger);
+}
+
+.ui-form-description,
+.ui-form-message {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ui-form-description {
+  color: var(--ui-form-text-muted);
+}
+
+.ui-form-message {
+  color: var(--ui-form-danger);
+  font-weight: 700;
+}
+
+.ui-form-control {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--ui-form-control-min-height);
+  border: 1px solid var(--ui-form-border);
+  border-radius: var(--ui-form-radius);
+  background: var(--ui-form-bg);
+  color: var(--ui-form-text);
+  font: inherit;
+  font-size: var(--ui-form-control-font-size);
+  line-height: 1.4;
+  padding: var(--ui-form-control-padding);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.ui-form-control::placeholder {
+  color: var(--ui-form-text-muted);
+  opacity: 0.78;
+}
+
+.ui-form-control:hover:not(:disabled):not([aria-invalid='true']):not([data-invalid='true']) {
+  border-color: var(--ui-form-border-accent);
+}
+
+.ui-form-control:focus-visible {
+  border-color: var(--ui-form-primary);
+  box-shadow: 0 0 0 3px var(--ui-form-focus);
+  outline: none;
+}
+
+.ui-form-control:disabled {
+  cursor: not-allowed;
+  background: var(--ui-form-surface-muted);
+  color: var(--ui-form-text-muted);
+  opacity: 0.72;
+}
+
+.ui-form-control[aria-invalid='true'],
+.ui-form-control[data-invalid='true'] {
+  border-color: var(--ui-form-danger);
+}
+
+.ui-form-control[aria-invalid='true']:focus-visible,
+.ui-form-control[data-invalid='true']:focus-visible {
+  border-color: var(--ui-form-danger);
+  box-shadow: 0 0 0 3px var(--ui-form-danger-soft);
+}
+
+.ui-form-input {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-form-select {
+  padding-right: 30px;
+}
+
+.ui-form-textarea {
+  min-height: var(--ui-form-textarea-min-height);
+  resize: vertical;
+}
+
 @media (max-width: 900px) {
   .ui-page-header {
     grid-template-columns: 1fr;

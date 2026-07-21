@@ -10,6 +10,16 @@
   --tsl-danger: var(--training-workbench-danger, var(--rose));
   --tsl-focus: var(--training-workbench-focus, var(--focus-ring));
   --tsl-shadow: var(--training-workbench-shadow, var(--shadow-sm));
+  --ui-form-bg-token: var(--tsl-bg-input);
+  --ui-form-surface-muted-token: var(--tsl-bg-muted);
+  --ui-form-border-token: var(--tsl-border);
+  --ui-form-border-accent-token: var(--tsl-border-accent);
+  --ui-form-focus-token: var(--tsl-focus);
+  --ui-form-primary-token: var(--tsl-primary);
+  --ui-form-danger-token: var(--tsl-danger);
+  --ui-form-label-token: var(--text-secondary);
+  --ui-form-radius-token: 8px;
+  --ui-form-control-font-size-token: 13px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -155,32 +165,9 @@
   grid-column: span 2;
 }
 
-.tsl-field span {
-  color: var(--text-secondary);
+.tsl-field .ui-form-label {
   font-size: 12px;
   font-weight: 700;
-}
-
-.tsl-field input,
-.tsl-field select {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 38px;
-  padding: 0 11px;
-  border: 1px solid var(--tsl-border);
-  border-radius: 8px;
-  background: var(--tsl-bg-input);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13px;
-  outline: none;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.tsl-field input:focus,
-.tsl-field select:focus {
-  border-color: var(--tsl-primary);
-  box-shadow: 0 0 0 3px var(--tsl-focus);
 }
 
 .tsl-advanced-shell {
@@ -306,8 +293,7 @@
 
 .tsl-preset-option:disabled,
 .tsl-reset:disabled,
-.tsl-field input:disabled,
-.tsl-field select:disabled,
+.tsl-field .ui-form-control:disabled,
 .tsl-range input:disabled {
   cursor: not-allowed;
   opacity: 0.55;

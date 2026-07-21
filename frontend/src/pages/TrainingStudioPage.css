@@ -1,4 +1,15 @@
 .training-studio-page {
+  --ui-form-bg-token: var(--training-workbench-bg);
+  --ui-form-surface-muted-token: var(--training-workbench-surface-muted);
+  --ui-form-border-token: var(--training-workbench-border);
+  --ui-form-border-accent-token: var(--training-workbench-border-accent);
+  --ui-form-focus-token: var(--training-workbench-focus);
+  --ui-form-primary-token: var(--training-workbench-primary);
+  --ui-form-danger-token: var(--training-workbench-danger);
+  --ui-form-danger-soft-token: var(--training-workbench-danger-soft);
+  --ui-form-label-token: var(--text-secondary);
+  --ui-form-radius-token: 8px;
+  --ui-form-control-font-size-token: 13px;
   min-height: 100%;
   background: var(--training-workbench-page-bg);
   color: var(--text-primary);
@@ -352,6 +363,9 @@
 }
 
 .training-studio-goal {
+  --ui-form-label-font-size-token: 12px;
+  --ui-form-label-transform-token: uppercase;
+  --ui-form-textarea-min-height-token: 96px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -362,32 +376,9 @@
   box-shadow: var(--training-workbench-shadow);
 }
 
-.training-studio-goal span {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.training-studio-goal textarea {
-  width: 100%;
-  box-sizing: border-box;
+.training-studio-goal .ui-form-textarea {
   resize: vertical;
-  min-height: 96px;
-  border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--training-workbench-bg);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13px;
   line-height: 1.5;
-  outline: none;
-}
-
-.training-studio-goal textarea:focus {
-  border-color: var(--training-workbench-primary);
-  box-shadow: 0 0 0 3px var(--training-workbench-focus);
 }
 
 .training-studio-live-coach-panel {
@@ -402,35 +393,12 @@
   box-shadow: var(--training-workbench-shadow);
 }
 
-.training-studio-live-coach-panel label {
+.training-studio-live-coach-panel .ui-form-field {
+  --ui-form-label-font-size-token: 12px;
+  --ui-form-label-transform-token: uppercase;
   display: grid;
   gap: 7px;
   min-width: 0;
-}
-
-.training-studio-live-coach-panel span {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.training-studio-live-coach-panel select {
-  width: 100%;
-  min-height: 38px;
-  border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
-  padding: 0 10px;
-  background: var(--training-workbench-bg);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13px;
-  outline: none;
-}
-
-.training-studio-live-coach-panel select:focus {
-  border-color: var(--training-workbench-primary);
-  box-shadow: 0 0 0 3px var(--training-workbench-focus);
 }
 
 .training-studio-live-coach-badge {
