@@ -27,7 +27,7 @@ from application.ports.realtime import (
 )
 from application.services.stakeholder.sse import room_event_bus
 from application.services.training_studio.session_service import TrainingSessionService
-from core.config import settings
+from core.config import LLMSettings, settings
 from domain.stakeholder.entity import ChatRoom, Message
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 
@@ -63,6 +63,22 @@ def _session_scope_from_payload(payload: dict) -> TrainingSessionAccessScope:
         user_id=payload.get("user_id") if isinstance(payload.get("user_id"), str) else None,
         team_id=payload.get("team_id") if isinstance(payload.get("team_id"), str) else None,
         include_team_scope=True,
+    )
+
+
+def _llm_settings(
+    *,
+    provider: str = "openai",
+    base_url: str | None = None,
+    default_model: str = "gpt-4o-mini",
+    wire_api: str = "chat_completions",
+) -> LLMSettings:
+    return LLMSettings(
+        provider=provider,
+        api_key="sk-test-llm",
+        base_url=base_url,
+        wire_api=wire_api,
+        default_model=default_model,
     )
 
 
@@ -902,6 +918,68 @@ def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline()
     assert adapter.closed is True
 
 
+def test_realtime_websocket_pipecat_provider_uses_openrouter_llm_metadata(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        settings,
+        "llm",
+        _llm_settings(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            default_model="openai/gpt-4o-mini",
+            wire_api="responses",
+        ),
+    )
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        assert started["payload"]["provider"] == "pipecat"
+        assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
+        assert listening["status"] == "listening"
+
+        ws.send_json({"type": "session.close", "reason": "openrouter-config"})
+        closed = ws.receive_json()
+        assert closed["type"] == "session.closed"
+
+    assert adapter.started_config is not None
+    assert adapter.started_config.provider == "pipecat"
+    assert adapter.started_config.runtime == REALTIME_RUNTIME_PIPECAT
+    assert adapter.started_config.metadata["stt"]["provider"] == "openai"
+    assert adapter.started_config.metadata["tts"] == {"provider": "openai"}
+    assert adapter.started_config.metadata["llm"] == {
+        "provider": "openrouter",
+        "model": "openai/gpt-4o-mini",
+        "baseUrl": "https://openrouter.ai/api/v1",
+    }
+    assert adapter.closed is True
+
+
+def test_pipecat_realtime_llm_provider_detects_openrouter_compatible_base_url(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        settings,
+        "llm",
+        _llm_settings(
+            provider="openai",
+            base_url="https://openrouter.ai/api/v1",
+            default_model="openai/gpt-4o-mini",
+        ),
+    )
+
+    assert training_studio_routes._pipecat_realtime_llm_provider() == "openrouter"
+
+
 def test_realtime_websocket_pipecat_provider_injects_recent_room_turns() -> None:
     app, state = _make_bound_app()
     state.messages.extend(
@@ -1253,7 +1331,8 @@ def test_realtime_websocket_relays_pipecat_turn_events() -> None:
     assert turn_event["payload"]["payload"] == {"signal": "vad", "silenceSeconds": 0.8}
 
 
-def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline() -> None:
+def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "llm", _llm_settings())
     app, _state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (

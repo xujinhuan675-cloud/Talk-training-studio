@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import (
     APIRouter,
@@ -193,6 +193,14 @@ _REALTIME_LIFECYCLE_CONTRACT_EVENTS = (
 _ENV_ASSIGNMENT_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 _VOICE_TTS_PROVIDERS = {"minimax", "elevenlabs", "openrouter"}
 _VOICE_STT_PROVIDERS = {"minimax", "whisper"}
+_OPENROUTER_LLM_PROVIDER = "openrouter"
+_OPENROUTER_LLM_PROVIDER_ALIASES = {
+    "openrouter",
+    "open_router",
+    "openrouter_ai",
+    "openrouter_compatible",
+    "open_router_compatible",
+}
 _TEXT_MESSAGE_TREE_RUNTIME = "conversation_message_tree"
 _TEXT_MESSAGE_TREE_PROVIDER = ConversationTrainingConversationAdapter.provider
 _TEXT_MESSAGE_TREE_OPT_IN_VALUES = {
@@ -1253,6 +1261,29 @@ def _default_realtime_agent_instructions() -> str:
     )
 
 
+def _normalized_realtime_llm_provider(value: object | None) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _is_openrouter_base_url(value: object | None) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    parsed = urlsplit(text if "://" in text else f"https://{text}")
+    hostname = (parsed.hostname or "").lower()
+    return hostname == "openrouter.ai" or hostname.endswith(".openrouter.ai")
+
+
+def _pipecat_realtime_llm_provider() -> str:
+    llm_settings = settings.llm
+    provider = _normalized_realtime_llm_provider(getattr(llm_settings, "provider", None))
+    if provider in _OPENROUTER_LLM_PROVIDER_ALIASES or _is_openrouter_base_url(
+        getattr(llm_settings, "base_url", None)
+    ):
+        return _OPENROUTER_LLM_PROVIDER
+    return "openai"
+
+
 def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, object]:
     stt: dict[str, object] = {
         "provider": "openai",
@@ -1261,7 +1292,7 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
     if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
         stt["model"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
     llm: dict[str, object] = {
-        "provider": "openai",
+        "provider": _pipecat_realtime_llm_provider(),
         "model": settings.llm.default_model,
     }
     if settings.llm.base_url:

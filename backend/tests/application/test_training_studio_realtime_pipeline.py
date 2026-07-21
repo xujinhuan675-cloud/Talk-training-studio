@@ -4,7 +4,9 @@ import pytest
 
 from application.ports.realtime import (
     REALTIME_RUNTIME_PIPECAT,
+    RealtimePipelineConfig,
     RealtimeSessionBinding,
+    TrainingVoiceContext,
 )
 from application.services.training_studio.realtime_pipeline import (
     MemoryTrainingTranscriptSink,
@@ -17,8 +19,10 @@ from application.services.training_studio.realtime_pipeline import (
 from application.services.training_studio.realtime_pipeline_runner import (
     RealtimePipelineProviderError,
 )
+from core.config import LLMSettings, settings
 from domain.stakeholder.entity import ChatRoom, Message
 from domain.training_studio.session_repository import TrainingSessionAccessScope
+from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
 
 
 class _RoomRepository:
@@ -80,11 +84,377 @@ class _TrainingSessionRecorder:
         return None
 
 
+class _FakePipecatService:
+    class Settings:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class _FakeOpenAIRealtimeSTTService(_FakePipecatService):
+    pass
+
+
+class _FakeOpenAITTSService(_FakePipecatService):
+    pass
+
+
+class _FakeOpenRouterLLMService(_FakePipecatService):
+    pass
+
+
+class _FakeVADAnalyzer:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class _FakeVADProcessor:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class _FakeLLMContext:
+    def __init__(self, messages=None, **kwargs):
+        self.messages = messages or []
+        self.kwargs = kwargs
+
+
+class _FakeLLMUserAggregatorParams:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class _FakeLLMAssistantAggregatorParams:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class _FakeLLMUserAggregator:
+    def __init__(self, context, params):
+        self.context = context
+        self.params = params
+
+
+class _FakeLLMAssistantAggregator:
+    def __init__(self, context, params):
+        self.context = context
+        self.params = params
+
+
+class _FakeLLMContextAggregatorPair:
+    def __init__(
+        self,
+        context,
+        *,
+        user_params=None,
+        assistant_params=None,
+        realtime_service_mode=None,
+    ):
+        self.context = context
+        self.user_params = user_params
+        self.assistant_params = assistant_params
+        self.realtime_service_mode = realtime_service_mode
+        self.user_aggregator = _FakeLLMUserAggregator(context, user_params)
+        self.assistant_aggregator = _FakeLLMAssistantAggregator(context, assistant_params)
+
+    def __iter__(self):
+        return iter((self.user_aggregator, self.assistant_aggregator))
+
+
+class _FakeUserTurnProcessor:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class _FakeUserTurnStrategies:
+    pass
+
+
+class _FakeUserTurnCompletionConfig:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+def _fake_pipecat_runtime() -> pipecat_adapter.PipecatRuntime:
+    return pipecat_adapter.PipecatRuntime(
+        Pipeline=object,
+        PipelineParams=object,
+        PipelineWorker=object,
+        WorkerParams=object,
+        WorkerRunner=object,
+        InputAudioRawFrame=object,
+        EndFrame=object,
+        TextFrame=object,
+        TranscriptionFrame=object,
+        LLMContextAssistantTurnFrame=object,
+        TTSAudioRawFrame=object,
+        FrameProcessor=object,
+        FrameDirection=object,
+        SileroVADAnalyzer=_FakeVADAnalyzer,
+        VADProcessor=_FakeVADProcessor,
+        OpenAIRealtimeSTTService=_FakeOpenAIRealtimeSTTService,
+        OpenAITTSService=_FakeOpenAITTSService,
+        OpenAILLMService=_FakePipecatService,
+        OpenRouterLLMService=_FakeOpenRouterLLMService,
+        LLMContext=_FakeLLMContext,
+        LLMContextAggregatorPair=_FakeLLMContextAggregatorPair,
+        LLMUserAggregatorParams=_FakeLLMUserAggregatorParams,
+        LLMAssistantAggregatorParams=_FakeLLMAssistantAggregatorParams,
+        UserTurnProcessor=_FakeUserTurnProcessor,
+        UserTurnStrategies=_FakeUserTurnStrategies,
+        ExternalUserTurnStrategies=_FakeUserTurnStrategies,
+        FilterIncompleteUserTurnStrategies=_FakeUserTurnStrategies,
+        UserTurnCompletionConfig=_FakeUserTurnCompletionConfig,
+    )
+
+
+def _voice_context() -> TrainingVoiceContext:
+    return TrainingVoiceContext(
+        binding=RealtimeSessionBinding(training_session_id="training-openrouter", room_id=42),
+        task_goal="Practice renewal risk discovery.",
+        rubric={"clarity": 1},
+        recent_turns=({"speaker": "user", "text": "Can we discuss renewal risk?"},),
+        metadata={"scenarioId": "renewal-risk"},
+    )
+
+
 def _scope() -> TrainingSessionAccessScope:
     return TrainingSessionAccessScope(
         user_id="user-sales-001",
         team_id="team-revenue",
     )
+
+
+def test_pipecat_voice_config_allows_openrouter_llm_with_openai_stt_tts_and_local_vad():
+    pipecat_adapter.validate_pipecat_voice_config(
+        RealtimePipelineConfig(
+            provider="pipecat",
+            metadata={
+                "stt": {"provider": "openai", "turnDetection": "disabled"},
+                "tts": {"provider": "openai"},
+                "llm": {"provider": "openrouter", "temperature": 0.4},
+                "vad": {"provider": "silero", "sampleRate": 16000},
+                "turnDetection": {"provider": "pipecat"},
+            },
+        )
+    )
+
+
+def test_pipecat_voice_processors_build_openrouter_llm_with_openai_stt_tts():
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        model="fallback-model",
+        voice="alloy",
+        instructions="Stay in role as the counterpart.",
+        metadata={
+            "openaiApiKey": "sk-openai-test",
+            "stt": {"provider": "openai", "turnDetection": "disabled"},
+            "tts": {"provider": "openai"},
+            "llm": {
+                "provider": "openrouter",
+                "apiKey": "sk-openrouter-test",
+                "model": "openai/gpt-4o-mini",
+                "temperature": 0.4,
+            },
+            "vad": {"provider": "silero", "sampleRate": 16000},
+            "turnDetection": {"provider": "pipecat"},
+            "context": {"provider": "pipecat", "realtimeServiceMode": False},
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(
+        _fake_pipecat_runtime(),
+        config,
+        context=_voice_context(),
+    )
+
+    assert [type(processor) for processor in processors] == [
+        _FakeVADProcessor,
+        _FakeOpenAIRealtimeSTTService,
+        _FakeLLMUserAggregator,
+        _FakeOpenRouterLLMService,
+        _FakeOpenAITTSService,
+        _FakeLLMAssistantAggregator,
+    ]
+    assert not any(isinstance(processor, _FakeUserTurnProcessor) for processor in processors)
+    assert processors[1].kwargs["api_key"] == "sk-openai-test"
+    assert processors[4].kwargs["api_key"] == "sk-openai-test"
+
+    llm = processors[3]
+    assert llm.kwargs["api_key"] == "sk-openrouter-test"
+    assert llm.kwargs["base_url"] == pipecat_adapter.OPENROUTER_LLM_BASE_URL
+    llm_settings = llm.kwargs["settings"].kwargs
+    assert llm_settings["model"] == "openai/gpt-4o-mini"
+    assert llm_settings["temperature"] == 0.4
+    assert "Stay in role as the counterpart." in llm_settings["system_instruction"]
+    assert "Practice renewal risk discovery." in llm_settings["system_instruction"]
+    assert processors[2].context.messages == [
+        {"role": "user", "content": "Can we discuss renewal risk?"}
+    ]
+
+
+def test_pipecat_pipeline_capability_reports_openrouter_llm_readiness(monkeypatch):
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "get_pipecat_capability",
+        lambda require_websocket=False: pipecat_adapter.PipecatCapability(
+            available=True,
+            core_available=True,
+            websocket_available=require_websocket,
+            stt_available=True,
+            tts_available=True,
+            llm_available=True,
+            openrouter_llm_available=False,
+            vad_available=True,
+            turn_detection_available=True,
+            optional_missing_modules=(pipecat_adapter.OPENROUTER_LLM_PIPECAT_MODULE,),
+        ),
+    )
+
+    capability = pipecat_adapter.pipecat_pipeline_capability(
+        runtime=_fake_pipecat_runtime(),
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            model="gpt-realtime",
+            voice="alloy",
+            input_audio_format="pcm16",
+            metadata={
+                "openaiApiKey": "sk-openai-test",
+                "stt": {"provider": "openai", "turnDetection": "disabled"},
+                "tts": {"provider": "openai"},
+                "llm": {
+                    "provider": "openrouter",
+                    "apiKey": "sk-openrouter-test",
+                    "model": "openai/gpt-4o-mini",
+                },
+                "vad": {"provider": "silero", "sampleRate": 16000},
+                "turnDetection": {"provider": "pipecat"},
+            },
+        ),
+    )
+
+    assert capability.missing_features == ("llm:openrouter",)
+    assert capability.llm == "openrouter"
+    assert capability.metadata["requestedFeatures"] == {
+        "stt": "openai",
+        "tts": "openai",
+        "llm": "openrouter",
+        "vad": "silero",
+        "turnDetection": "pipecat",
+    }
+    assert capability.metadata["llmService"] == {
+        "provider": "openrouter",
+        "service": "openrouter",
+        "baseUrl": pipecat_adapter.OPENROUTER_LLM_BASE_URL,
+        "entrypoint": pipecat_adapter.OPENROUTER_LLM_PIPECAT_MODULE,
+    }
+    assert capability.ready_for_call is False
+    assert capability.errors[0]["feature"] == "llm:openrouter"
+    assert capability.errors[0]["modules"] == [pipecat_adapter.OPENROUTER_LLM_PIPECAT_MODULE]
+
+
+def test_pipecat_pipeline_capability_requires_openrouter_key_separately(monkeypatch):
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "get_pipecat_capability",
+        lambda require_websocket=False: pipecat_adapter.PipecatCapability(
+            available=True,
+            core_available=True,
+            websocket_available=require_websocket,
+            stt_available=True,
+            tts_available=True,
+            llm_available=True,
+            openrouter_llm_available=True,
+            vad_available=True,
+            turn_detection_available=True,
+        ),
+    )
+
+    capability = pipecat_adapter.pipecat_pipeline_capability(
+        runtime=_fake_pipecat_runtime(),
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            model="gpt-realtime",
+            voice="alloy",
+            input_audio_format="pcm16",
+            metadata={
+                "openaiApiKey": "sk-openai-test",
+                "stt": {"provider": "openai", "turnDetection": "disabled"},
+                "tts": {"provider": "openai"},
+                "llm": {"provider": "openrouter", "model": "openai/gpt-4o-mini"},
+                "vad": {"provider": "silero", "sampleRate": 16000},
+                "turnDetection": {"provider": "pipecat"},
+            },
+        ),
+    )
+
+    assert capability.ready_for_call is False
+    assert [error["code"] for error in capability.errors] == ["MISSING_OPENROUTER_API_KEY"]
+    assert capability.errors[0]["feature"] == "llm:openrouter"
+    assert capability.errors[0]["missingEnv"] == [
+        "REALTIME_OPENROUTER_API_KEY",
+        "OPENROUTER_API_KEY",
+        "LLM__API_KEY",
+    ]
+
+
+def test_pipecat_pipeline_capability_accepts_openrouter_key_from_settings_base_url(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "get_pipecat_capability",
+        lambda require_websocket=False: pipecat_adapter.PipecatCapability(
+            available=True,
+            core_available=True,
+            websocket_available=require_websocket,
+            stt_available=True,
+            tts_available=True,
+            llm_available=True,
+            openrouter_llm_available=True,
+            vad_available=True,
+            turn_detection_available=True,
+        ),
+    )
+    monkeypatch.setattr(
+        settings,
+        "llm",
+        LLMSettings(
+            provider="openai",
+            api_key="sk-openrouter-settings",
+            base_url="https://openrouter.ai/api/v1",
+            default_model="openai/gpt-4o-mini",
+        ),
+    )
+
+    capability = pipecat_adapter.pipecat_pipeline_capability(
+        runtime=_fake_pipecat_runtime(),
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            model="gpt-realtime",
+            voice="alloy",
+            input_audio_format="pcm16",
+            metadata={
+                "openaiApiKey": "sk-openai-test",
+                "stt": {"provider": "openai", "turnDetection": "disabled"},
+                "tts": {"provider": "openai"},
+                "llm": {"provider": "openrouter", "model": "openai/gpt-4o-mini"},
+                "vad": {"provider": "silero", "sampleRate": 16000},
+                "turnDetection": {"provider": "pipecat"},
+            },
+        ),
+    )
+
+    assert capability.ready_for_call is True
+    assert capability.errors == ()
+    assert capability.metadata["llmService"] == {
+        "provider": "openrouter",
+        "service": "openrouter",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "entrypoint": pipecat_adapter.OPENROUTER_LLM_PIPECAT_MODULE,
+    }
 
 
 def test_build_realtime_transcript_maps_pipecat_openai_stt_event_to_provider_neutral_dto():

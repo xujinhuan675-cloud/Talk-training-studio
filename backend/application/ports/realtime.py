@@ -324,6 +324,7 @@ class RealtimePipelineCapability:
     runtime: str = REALTIME_RUNTIME_PIPECAT
     stt: str | None = None
     tts: str | None = None
+    llm: str | None = None
     vad: str | None = None
     turn_detection: str | None = None
     missing_features: Sequence[str] = field(default_factory=tuple)

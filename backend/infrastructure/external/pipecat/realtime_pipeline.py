@@ -53,6 +53,7 @@ VAD_PROCESSOR_PIPECAT_MODULE = "pipecat.processors.audio.vad_processor"
 OPENAI_STT_PIPECAT_MODULE = "pipecat.services.openai.stt"
 OPENAI_TTS_PIPECAT_MODULE = "pipecat.services.openai.tts"
 OPENAI_LLM_PIPECAT_MODULE = "pipecat.services.openai.llm"
+OPENROUTER_LLM_PIPECAT_MODULE = "pipecat.services.openrouter.llm"
 LLM_CONTEXT_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_context"
 LLM_RESPONSE_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_response_universal"
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
@@ -63,6 +64,25 @@ OPENAI_REALTIME_MODEL_SETTING = "REALTIME_OPENAI_MODEL"
 OPENAI_REALTIME_VOICE_SETTING = "REALTIME_OPENAI_VOICE"
 OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING = "REALTIME_OPENAI_INPUT_AUDIO_FORMAT"
 _OPENAI_RUNTIME_VALUE_UNSET = object()
+OPENROUTER_LLM_PROVIDER = "openrouter"
+OPENROUTER_LLM_PROVIDER_ALIASES = {
+    OPENROUTER_LLM_PROVIDER,
+    "open_router",
+    "openrouter_ai",
+    "openrouter_compatible",
+}
+OPENROUTER_LLM_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_API_KEY_ENV_KEYS = (
+    "REALTIME_OPENROUTER_API_KEY",
+    "OPENROUTER_API_KEY",
+    "LLM__API_KEY",
+)
+OPENROUTER_BASE_URL_ENV_KEYS = (
+    "REALTIME_OPENROUTER_BASE_URL",
+    "OPENROUTER_BASE_URL",
+    "LLM__BASE_URL",
+)
+PIPECAT_SUPPORTED_LLM_PROVIDERS = {"openai", OPENROUTER_LLM_PROVIDER}
 PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "stt": "openai",
     "tts": "openai",
@@ -181,6 +201,18 @@ PIPECAT_REALTIME_FEATURE_REQUIREMENTS = {
         ),
     },
 }
+PIPECAT_OPENROUTER_LLM_FEATURE_REQUIREMENT = {
+    "code": "PIPECAT_FEATURE_UNAVAILABLE",
+    "feature": "llm:openrouter",
+    "message": (
+        "Pipecat OpenRouter LLM service is required before starting realtime calls"
+    ),
+    "modules": (
+        OPENROUTER_LLM_PIPECAT_MODULE,
+        LLM_CONTEXT_PIPECAT_MODULE,
+        LLM_RESPONSE_PIPECAT_MODULE,
+    ),
+}
 PIPECAT_FEATURE_MODULE_HINTS = {
     "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
     "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
@@ -237,6 +269,7 @@ OPTIONAL_PIPECAT_FEATURE_SYMBOLS: Mapping[str, Mapping[str, tuple[str, ...]]] = 
             "LLMAssistantAggregatorParams",
         ),
     },
+    "openrouter_llm": {OPENROUTER_LLM_PIPECAT_MODULE: ("OpenRouterLLMService",)},
     "turn_detection": {
         USER_TURN_PROCESSOR_PIPECAT_MODULE: ("UserTurnProcessor",),
         USER_TURN_STRATEGIES_PIPECAT_MODULE: (
@@ -261,6 +294,7 @@ OPTIONAL_PIPECAT_FEATURE_MODULES = {
         LLM_CONTEXT_PIPECAT_MODULE,
         LLM_RESPONSE_PIPECAT_MODULE,
     ),
+    "openrouter_llm": (OPENROUTER_LLM_PIPECAT_MODULE,),
     "turn_detection": (
         USER_TURN_PROCESSOR_PIPECAT_MODULE,
         USER_TURN_STRATEGIES_PIPECAT_MODULE,
@@ -281,6 +315,7 @@ class PipecatCapability:
     stt_available: bool = False
     tts_available: bool = False
     llm_available: bool = False
+    openrouter_llm_available: bool = False
     turn_detection_available: bool = False
     optional_missing_modules: tuple[str, ...] = ()
     error: str | None = None
@@ -320,6 +355,7 @@ class PipecatRuntime:
     OpenAIRealtimeSTTService: type | None = None
     OpenAITTSService: type | None = None
     OpenAILLMService: type | None = None
+    OpenRouterLLMService: type | None = None
     LLMContext: type | None = None
     LLMContextAggregatorPair: type | None = None
     LLMUserAggregatorParams: type | None = None
@@ -808,6 +844,7 @@ def _pipecat_capability_public_payload(capability: PipecatCapability) -> dict[st
         "sttAvailable": bool(capability.stt_available),
         "ttsAvailable": bool(capability.tts_available),
         "llmAvailable": bool(capability.llm_available),
+        "openrouterLlmAvailable": bool(capability.openrouter_llm_available),
         "turnDetectionAvailable": bool(capability.turn_detection_available),
         "missingModules": [str(module) for module in capability.missing_modules],
         "optionalMissingModules": [str(module) for module in capability.optional_missing_modules],
@@ -828,8 +865,14 @@ def _pipecat_feature_available(capability: PipecatCapability, feature: str) -> b
 def _pipecat_feature_missing_modules(
     feature: str,
     optional_missing_modules: Sequence[str],
+    provider: str | None = None,
 ) -> tuple[str, ...]:
-    hints = PIPECAT_FEATURE_MODULE_HINTS[feature]
+    requirement = _pipecat_feature_requirement(feature, provider or "")
+    hints = (
+        (OPENROUTER_LLM_PIPECAT_MODULE,)
+        if feature == "llm" and provider == OPENROUTER_LLM_PROVIDER
+        else PIPECAT_FEATURE_MODULE_HINTS[feature]
+    )
     missing = tuple(
         module
         for module in optional_missing_modules
@@ -837,8 +880,19 @@ def _pipecat_feature_missing_modules(
     )
     if missing:
         return missing
-    return tuple(
-        str(module) for module in PIPECAT_REALTIME_FEATURE_REQUIREMENTS[feature]["modules"]
+    if requirement is None:
+        return ()
+    return tuple(str(module) for module in requirement["modules"])
+
+
+def _pipecat_feature_requirement(
+    feature_name: str,
+    provider: str,
+) -> Mapping[str, object] | None:
+    if feature_name == "llm" and provider == OPENROUTER_LLM_PROVIDER:
+        return PIPECAT_OPENROUTER_LLM_FEATURE_REQUIREMENT
+    return PIPECAT_REALTIME_FEATURE_REQUIREMENTS.get(
+        "turnDetection" if feature_name == "turnDetection" else feature_name
     )
 
 
@@ -913,6 +967,7 @@ def _optional_feature_status() -> dict[str, bool | tuple[str, ...]]:
         "stt_available": not missing_by_feature["stt"],
         "tts_available": not missing_by_feature["tts"],
         "llm_available": not missing_by_feature["llm"],
+        "openrouter_llm_available": not missing_by_feature["openrouter_llm"],
         "turn_detection_available": not missing_by_feature["turn_detection"],
         "optional_missing_modules": tuple(
             module for modules in missing_by_feature.values() for module in modules
@@ -942,6 +997,13 @@ def _runtime_feature_status(
         "llm_available": bool(module_status.get("llm_available"))
         and runtime.OpenAILLMService is not None
         and getattr(runtime.OpenAILLMService, "Settings", None) is not None
+        and runtime.LLMContext is not None
+        and runtime.LLMContextAggregatorPair is not None
+        and runtime.LLMUserAggregatorParams is not None
+        and runtime.LLMAssistantAggregatorParams is not None,
+        "openrouter_llm_available": bool(module_status.get("openrouter_llm_available"))
+        and runtime.OpenRouterLLMService is not None
+        and getattr(runtime.OpenRouterLLMService, "Settings", None) is not None
         and runtime.LLMContext is not None
         and runtime.LLMContextAggregatorPair is not None
         and runtime.LLMUserAggregatorParams is not None
@@ -995,6 +1057,16 @@ def _runtime_missing_optional_symbols(
         is None
     ):
         missing.append(_entrypoint(OPENAI_LLM_PIPECAT_MODULE, "OpenAILLMService.Settings"))
+    if (
+        runtime.OpenRouterLLMService is not None
+        and getattr(
+            runtime.OpenRouterLLMService,
+            "Settings",
+            None,
+        )
+        is None
+    ):
+        missing.append(_entrypoint(OPENROUTER_LLM_PIPECAT_MODULE, "OpenRouterLLMService.Settings"))
     return tuple(missing)
 
 
@@ -1062,6 +1134,9 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     )
     openai_tts = _optional_pipecat_symbol(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService")
     openai_llm = _optional_pipecat_symbol(OPENAI_LLM_PIPECAT_MODULE, "OpenAILLMService")
+    openrouter_llm = _optional_pipecat_symbol(
+        OPENROUTER_LLM_PIPECAT_MODULE, "OpenRouterLLMService"
+    )
     llm_context = _optional_pipecat_symbol(LLM_CONTEXT_PIPECAT_MODULE, "LLMContext")
     llm_context_aggregator_pair = _optional_pipecat_symbol(
         LLM_RESPONSE_PIPECAT_MODULE, "LLMContextAggregatorPair"
@@ -1139,6 +1214,7 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         OpenAIRealtimeSTTService=openai_realtime_stt,
         OpenAITTSService=openai_tts,
         OpenAILLMService=openai_llm,
+        OpenRouterLLMService=openrouter_llm,
         LLMContext=llm_context,
         LLMContextAggregatorPair=llm_context_aggregator_pair,
         LLMUserAggregatorParams=llm_user_aggregator_params,
@@ -1484,6 +1560,8 @@ def _classify_pipecat_start_error(message: str, *, websocket: bool) -> dict[str,
     if not classified:
         return {}
 
+    if "openrouter" in message.lower() and classified.get("feature") == "llm:openai":
+        classified["feature"] = "llm:openrouter"
     feature = str(classified.get("feature") or "")
     code = str(classified.get("code") or "")
     if code == "PIPECAT_MODULE_UNAVAILABLE":
@@ -1525,6 +1603,17 @@ def _missing_openai_api_key_error(feature: str) -> PipecatRealtimePipelineError:
         phase="configuration",
         feature=f"{feature}:openai",
         missing_env=OPENAI_API_KEY_ENV_KEYS,
+    )
+
+
+def _missing_openrouter_api_key_error(feature: str) -> PipecatRealtimePipelineError:
+    label = feature.upper()
+    return PipecatRealtimePipelineError(
+        f"OpenRouter API key is required for Pipecat OpenRouter {label}",
+        code="MISSING_OPENROUTER_API_KEY",
+        phase="configuration",
+        feature=f"{feature}:openrouter",
+        missing_env=OPENROUTER_API_KEY_ENV_KEYS,
     )
 
 
@@ -1717,7 +1806,7 @@ def build_pipecat_voice_processors(
         processors.append(runtime.UserTurnProcessor(**turn_kwargs))
 
     assistant_aggregator = None
-    if llm_provider == "openai":
+    if llm_provider in PIPECAT_SUPPORTED_LLM_PROVIDERS:
         user_aggregator, llm, assistant_aggregator = build_pipecat_llm_processors(
             runtime,
             config,
@@ -1777,13 +1866,17 @@ def build_pipecat_llm_processors(
     *,
     context: TrainingVoiceContext | None = None,
 ) -> tuple[Any, Any, Any]:
-    """Build Pipecat-native LLM context, aggregators, and OpenAI LLM processor."""
+    """Build Pipecat-native LLM context, aggregators, and selected LLM service."""
 
-    if runtime.OpenAILLMService is None:
+    metadata = dict(config.metadata)
+    llm_provider = _feature_provider(metadata, "llm") or "openai"
+    llm_feature = _llm_feature(llm_provider)
+    llm_service = _llm_service_class(runtime, llm_provider)
+    if llm_service is None:
         raise _pipecat_feature_unavailable_error(
-            "Pipecat OpenAI LLM service is unavailable",
-            feature="llm:openai",
-            modules=(OPENAI_LLM_PIPECAT_MODULE,),
+            _llm_service_unavailable_message(llm_provider),
+            feature=llm_feature,
+            modules=(_llm_service_module(llm_provider),),
         )
     if (
         runtime.LLMContext is None
@@ -1793,16 +1886,15 @@ def build_pipecat_llm_processors(
     ):
         raise _pipecat_feature_unavailable_error(
             "Pipecat LLM context aggregators are unavailable",
-            feature="llm:openai",
+            feature=llm_feature,
             modules=(LLM_CONTEXT_PIPECAT_MODULE, LLM_RESPONSE_PIPECAT_MODULE),
         )
 
-    metadata = dict(config.metadata)
     llm_config = _feature_config(metadata, "llm")
-    api_key = _metadata_text(
-        llm_config, "openaiApiKey", "openai_api_key", "apiKey", "api_key"
-    ) or _openai_api_key(metadata)
+    api_key = _llm_api_key(metadata, llm_config, llm_provider)
     if not api_key:
+        if llm_provider == OPENROUTER_LLM_PROVIDER:
+            raise _missing_openrouter_api_key_error("llm")
         raise _missing_openai_api_key_error("llm")
 
     settings_kwargs: dict[str, Any] = {}
@@ -1829,11 +1921,14 @@ def build_pipecat_llm_processors(
     if max_completion_tokens is not None:
         settings_kwargs["max_completion_tokens"] = max_completion_tokens
 
-    llm = runtime.OpenAILLMService(
+    llm = llm_service(
         api_key=api_key,
-        base_url=_metadata_text(llm_config, "baseUrl", "base_url")
-        or _metadata_text(metadata, "llmBaseUrl", "llm_base_url"),
-        settings=runtime.OpenAILLMService.Settings(**settings_kwargs),
+        base_url=_llm_base_url(metadata, llm_config, llm_provider),
+        settings=_service_settings(
+            llm_service,
+            _entrypoint(_llm_service_module(llm_provider), _llm_service_name(llm_provider)),
+            settings_kwargs,
+        ),
     )
     llm_context = runtime.LLMContext(messages=_llm_context_messages(context))
     context_config = _feature_config(metadata, "context")
@@ -1875,8 +1970,11 @@ def pipecat_pipeline_capability(
         missing.append("stt:openai")
     if _feature_provider(metadata, "tts") == "openai" and not capability.tts_available:
         missing.append("tts:openai")
-    if _feature_provider(metadata, "llm") == "openai" and not capability.llm_available:
+    llm_provider = _feature_provider(metadata, "llm")
+    if llm_provider == "openai" and not capability.llm_available:
         missing.append("llm:openai")
+    if llm_provider == OPENROUTER_LLM_PROVIDER and not capability.openrouter_llm_available:
+        missing.append(_llm_feature(llm_provider))
     if _feature_provider(metadata, "vad") == "silero" and not capability.vad_available:
         missing.append("vad:silero")
     if (
@@ -1904,6 +2002,7 @@ def pipecat_pipeline_capability(
         runtime=REALTIME_RUNTIME_PIPECAT,
         stt=_feature_provider(metadata, "stt"),
         tts=_feature_provider(metadata, "tts"),
+        llm=llm_provider,
         vad=_feature_provider(metadata, "vad"),
         turn_detection=_feature_provider(metadata, "turnDetection", "turn_detection"),
         missing_features=tuple(missing),
@@ -1917,6 +2016,7 @@ def pipecat_pipeline_capability(
             "sttAvailable": capability.stt_available,
             "ttsAvailable": capability.tts_available,
             "llmAvailable": capability.llm_available,
+            "openrouterLlmAvailable": capability.openrouter_llm_available,
             "vadAvailable": capability.vad_available,
             "turnDetectionAvailable": capability.turn_detection_available,
             "requestedFeatures": requested_features,
@@ -1933,6 +2033,7 @@ def pipecat_pipeline_capability(
             "sttEntrypoint": OPENAI_STT_PIPECAT_MODULE,
             "ttsEntrypoint": OPENAI_TTS_PIPECAT_MODULE,
             "llmEntrypoint": OPENAI_LLM_PIPECAT_MODULE,
+            "llmService": _llm_service_metadata(metadata),
             "turnDetectionEntrypoint": USER_TURN_PROCESSOR_PIPECAT_MODULE,
         },
     )
@@ -1973,9 +2074,7 @@ def _pipecat_pipeline_readiness(
     optional_missing_modules = tuple(str(module) for module in capability.optional_missing_modules)
     for feature in missing_features:
         feature_name, _, provider = feature.partition(":")
-        requirement = PIPECAT_REALTIME_FEATURE_REQUIREMENTS.get(
-            "turnDetection" if feature_name == "turnDetection" else feature_name
-        )
+        requirement = _pipecat_feature_requirement(feature_name, provider)
         blockers.append(
             RealtimeReadinessIssue(
                 code=str(requirement["code"]) if requirement else "PIPECAT_FEATURE_UNAVAILABLE",
@@ -1993,14 +2092,17 @@ def _pipecat_pipeline_readiness(
                 modules=_pipecat_feature_missing_modules(
                     feature_name,
                     optional_missing_modules,
+                    provider,
                 ),
             )
         )
 
     metadata = dict(config.metadata)
-    if any(
+    uses_openai_key = any(
         requested_features.get(feature) == "openai" for feature in ("stt", "tts", "llm")
-    ) and not _openai_api_key(metadata):
+    )
+    uses_openrouter_key = requested_features.get("llm") == OPENROUTER_LLM_PROVIDER
+    if uses_openai_key and not _openai_api_key(metadata):
         blockers.append(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_API_KEY",
@@ -2011,6 +2113,21 @@ def _pipecat_pipeline_readiness(
                 phase="configuration",
                 provider="pipecat",
                 missing_env=OPENAI_API_KEY_ENV_KEYS,
+            )
+        )
+    if uses_openrouter_key and not _openrouter_api_key(metadata):
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="MISSING_OPENROUTER_API_KEY",
+                message=(
+                    "Set REALTIME_OPENROUTER_API_KEY, OPENROUTER_API_KEY, or "
+                    "LLM__API_KEY with LLM__PROVIDER=openrouter before starting "
+                    "Pipecat realtime calls"
+                ),
+                phase="configuration",
+                provider="pipecat",
+                feature="llm:openrouter",
+                missing_env=OPENROUTER_API_KEY_ENV_KEYS,
             )
         )
     if not openai_requirements.get("model"):
@@ -2054,8 +2171,9 @@ def _pipecat_pipeline_readiness(
         required={
             "transport": "websocket" if websocket is not None else "audio_chunks",
             "features": dict(requested_features),
-            "env": OPENAI_API_KEY_ENV_KEYS,
+            "env": _pipecat_required_env(requested_features),
             "openai": dict(openai_requirements),
+            "openrouter": _openrouter_required_metadata(metadata),
         },
         blocking_reasons=blockers,
         runtime=REALTIME_RUNTIME_PIPECAT,
@@ -2785,6 +2903,8 @@ def _feature_provider(metadata: Mapping[str, Any], *keys: str) -> str | None:
         if isinstance(value, str):
             text = value.strip().lower()
             if text and text not in {"none", "false", "disabled"}:
+                if text.replace("-", "_").replace(" ", "_") in OPENROUTER_LLM_PROVIDER_ALIASES:
+                    return OPENROUTER_LLM_PROVIDER
                 return text
     return None
 
@@ -2921,16 +3041,222 @@ def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
     )
 
 
+def _openrouter_api_key(metadata: Mapping[str, Any]) -> str | None:
+    llm_config = _feature_config(metadata, "llm")
+    openrouter_config = _feature_config(metadata, "openrouter", "open_router")
+    return (
+        _metadata_text(
+            llm_config,
+            "openrouterApiKey",
+            "openRouterApiKey",
+            "openrouter_api_key",
+            "apiKey",
+            "api_key",
+        )
+        or _metadata_text(
+            openrouter_config,
+            "apiKey",
+            "api_key",
+            "openrouterApiKey",
+            "openRouterApiKey",
+            "openrouter_api_key",
+        )
+        or _metadata_text(
+            metadata,
+            "openrouterApiKey",
+            "openRouterApiKey",
+            "openrouter_api_key",
+        )
+        or _settings_openrouter_api_key()
+        or os.getenv("REALTIME_OPENROUTER_API_KEY")
+        or os.getenv("OPENROUTER_API_KEY")
+    )
+
+
+def _llm_api_key(
+    metadata: Mapping[str, Any],
+    llm_config: Mapping[str, Any],
+    provider: str,
+) -> str | None:
+    if provider == OPENROUTER_LLM_PROVIDER:
+        return _openrouter_api_key(metadata)
+    return (
+        _metadata_text(
+            llm_config,
+            "openaiApiKey",
+            "openai_api_key",
+            "apiKey",
+            "api_key",
+        )
+        or _openai_api_key(metadata)
+    )
+
+
+def _llm_base_url(
+    metadata: Mapping[str, Any],
+    llm_config: Mapping[str, Any],
+    provider: str,
+) -> str | None:
+    configured = _metadata_text(llm_config, "baseUrl", "base_url") or _metadata_text(
+        metadata,
+        "llmBaseUrl",
+        "llm_base_url",
+    )
+    if provider != OPENROUTER_LLM_PROVIDER:
+        return configured
+
+    openrouter_config = _feature_config(metadata, "openrouter", "open_router")
+    return (
+        configured
+        or _metadata_text(
+            llm_config,
+            "openrouterBaseUrl",
+            "openRouterBaseUrl",
+            "openrouter_base_url",
+        )
+        or _metadata_text(
+            openrouter_config,
+            "baseUrl",
+            "base_url",
+            "openrouterBaseUrl",
+            "openRouterBaseUrl",
+            "openrouter_base_url",
+        )
+        or _metadata_text(
+            metadata,
+            "openrouterBaseUrl",
+            "openRouterBaseUrl",
+            "openrouter_base_url",
+        )
+        or _settings_openrouter_base_url()
+        or os.getenv("REALTIME_OPENROUTER_BASE_URL")
+        or os.getenv("OPENROUTER_BASE_URL")
+        or OPENROUTER_LLM_BASE_URL
+    )
+
+
+def _llm_feature(provider: str | None) -> str:
+    if provider == OPENROUTER_LLM_PROVIDER:
+        return "llm:openrouter"
+    return "llm:openai"
+
+
+def _llm_service_unavailable_message(provider: str | None) -> str:
+    if provider == OPENROUTER_LLM_PROVIDER:
+        return "Pipecat OpenRouter LLM service is unavailable"
+    return "Pipecat OpenAI LLM service is unavailable"
+
+
+def _llm_service_class(runtime: PipecatRuntime, provider: str | None) -> type | None:
+    if provider == OPENROUTER_LLM_PROVIDER:
+        return runtime.OpenRouterLLMService
+    return runtime.OpenAILLMService
+
+
+def _llm_service_module(provider: str | None) -> str:
+    if provider == OPENROUTER_LLM_PROVIDER:
+        return OPENROUTER_LLM_PIPECAT_MODULE
+    return OPENAI_LLM_PIPECAT_MODULE
+
+
+def _llm_service_name(provider: str | None) -> str:
+    if provider == OPENROUTER_LLM_PROVIDER:
+        return "OpenRouterLLMService"
+    return "OpenAILLMService"
+
+
+def _llm_service_metadata(metadata: Mapping[str, Any]) -> dict[str, object]:
+    llm_provider = _feature_provider(metadata, "llm")
+    llm_config = _feature_config(metadata, "llm")
+    provider = llm_provider or "openai"
+    return {
+        "provider": llm_provider,
+        "service": "openrouter" if provider == OPENROUTER_LLM_PROVIDER else "openai",
+        "baseUrl": _llm_base_url(metadata, llm_config, provider),
+        "entrypoint": _llm_service_module(provider),
+    }
+
+
+def _pipecat_required_env(requested_features: Mapping[str, str | None]) -> tuple[str, ...]:
+    env_keys: list[str] = []
+    if any(requested_features.get(feature) == "openai" for feature in ("stt", "tts", "llm")):
+        env_keys.extend(OPENAI_API_KEY_ENV_KEYS)
+    if requested_features.get("llm") == OPENROUTER_LLM_PROVIDER:
+        env_keys.extend(OPENROUTER_API_KEY_ENV_KEYS)
+    return tuple(dict.fromkeys(env_keys or list(OPENAI_API_KEY_ENV_KEYS)))
+
+
+def _openrouter_required_metadata(metadata: Mapping[str, Any]) -> dict[str, object]:
+    if _feature_provider(metadata, "llm") != OPENROUTER_LLM_PROVIDER:
+        return {}
+    llm_config = _feature_config(metadata, "llm")
+    return {
+        "baseUrl": _llm_base_url(metadata, llm_config, OPENROUTER_LLM_PROVIDER),
+        "env": OPENROUTER_API_KEY_ENV_KEYS,
+        "baseUrlEnv": OPENROUTER_BASE_URL_ENV_KEYS,
+    }
+
+
 def _settings_openai_api_key() -> str | None:
     try:
         from core.config import settings as app_settings
     except Exception:
         return None
+    llm_settings = getattr(app_settings, "llm", None)
+    llm_provider = (
+        str(getattr(llm_settings, "provider", "") or "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    llm_base_url = str(getattr(llm_settings, "base_url", "") or "").strip().lower()
+    if llm_provider in OPENROUTER_LLM_PROVIDER_ALIASES or "openrouter.ai" in llm_base_url:
+        llm_api_key = None
+    else:
+        llm_api_key = getattr(llm_settings, "api_key", None) if llm_settings is not None else None
     return (
         app_settings.REALTIME_OPENAI_API_KEY
-        or getattr(app_settings.llm, "api_key", None)
+        or llm_api_key
         or getattr(app_settings, "OPENAI_API_KEY", None)
     )
+
+
+def _settings_openrouter_api_key() -> str | None:
+    return _settings_llm_value_for_provider(OPENROUTER_LLM_PROVIDER, "api_key")
+
+
+def _settings_openrouter_base_url() -> str | None:
+    return _settings_llm_value_for_provider(OPENROUTER_LLM_PROVIDER, "base_url")
+
+
+def _settings_llm_value_for_provider(provider: str, attr: str) -> str | None:
+    try:
+        from core.config import settings as app_settings
+    except Exception:
+        return None
+
+    llm_settings = getattr(app_settings, "llm", None)
+    if llm_settings is None:
+        return None
+    settings_provider = (
+        str(getattr(llm_settings, "provider", "") or "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    settings_base_url = str(getattr(llm_settings, "base_url", "") or "").strip().lower()
+    if provider == OPENROUTER_LLM_PROVIDER:
+        provider_matches = (
+            settings_provider in OPENROUTER_LLM_PROVIDER_ALIASES
+            or "openrouter.ai" in settings_base_url
+        )
+    else:
+        provider_matches = settings_provider == provider
+    if not provider_matches:
+        return None
+    return _clean_text(getattr(llm_settings, attr, None))
 
 
 def _turn_detection_config(metadata: Mapping[str, Any]) -> Mapping[str, Any] | bool | None:
@@ -3092,7 +3418,7 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
     metadata = dict(config.metadata)
     _validate_provider(metadata, "stt", supported={"openai"})
     _validate_provider(metadata, "tts", supported={"openai"})
-    _validate_provider(metadata, "llm", supported={"openai"})
+    _validate_provider(metadata, "llm", supported=PIPECAT_SUPPORTED_LLM_PROVIDERS)
     _validate_provider(metadata, "vad", supported={"silero"})
     _validate_provider(metadata, "turnDetection", "turn_detection", supported={"pipecat"})
     if _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat":
@@ -3197,6 +3523,15 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         "ttsSettingsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService.Settings"),
         "llmEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService"),
         "llmSettingsEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService.Settings"),
+        "openrouterLlmAdapter": {
+            "provider": OPENROUTER_LLM_PROVIDER,
+            "baseUrl": OPENROUTER_LLM_BASE_URL,
+            "serviceEntrypoint": "pipecat.services.openrouter.llm.OpenRouterLLMService",
+            "settingsEntrypoint": (
+                "pipecat.services.openrouter.llm.OpenRouterLLMService.Settings"
+            ),
+            "mode": "native_pipecat_llm_service",
+        },
         "llmContextEntrypoints": (
             "pipecat.processors.aggregators.llm_context.LLMContext",
             "pipecat.processors.aggregators.llm_response_universal.LLMContextAggregatorPair",
