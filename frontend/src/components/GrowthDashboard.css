@@ -43,17 +43,16 @@
   margin: 0 0 24px;
   line-height: 1.6;
 }
-.growth-cta {
+.growth-cta.ui-button {
   padding: 10px 24px;
   background: var(--green);
   color: #fff;
-  border: none;
   border-radius: 8px;
-  cursor: pointer;
   font-size: 14px;
   font-weight: 500;
 }
-.growth-cta:hover {
+.growth-cta.ui-button--primary:hover:not(:disabled) {
+  background: var(--green);
   opacity: 0.9;
 }
 
@@ -263,25 +262,18 @@
   font-weight: 600;
   margin: 0;
 }
-.insight-btn {
-  display: flex;
-  align-items: center;
+.insight-btn.ui-button {
   gap: 6px;
-  padding: 6px 14px;
+  padding: 0 14px;
   background: var(--green);
   color: #fff;
-  border: none;
   border-radius: 6px;
-  cursor: pointer;
   font-size: 13px;
   font-weight: 500;
 }
-.insight-btn:hover {
+.insight-btn.ui-button--primary:hover:not(:disabled) {
+  background: var(--green);
   opacity: 0.9;
-}
-.insight-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 .insight-loading {
   display: flex;
@@ -313,24 +305,21 @@
   margin-top: 16px;
   text-align: center;
 }
-.profile-card-btn {
-  display: inline-flex;
-  align-items: center;
+.profile-card-btn.ui-button {
   gap: 6px;
   padding: 10px 20px;
-  border: none;
+  border: 0;
   border-radius: 8px;
   background: linear-gradient(135deg, #4f46e5, #7c3aed);
   color: white;
   font-size: 14px;
   font-weight: 500;
-  cursor: pointer;
   transition: opacity 0.2s;
 }
-.profile-card-btn:hover:not(:disabled) {
+.profile-card-btn.ui-button--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
   opacity: 0.9;
 }
-.profile-card-btn:disabled {
+.profile-card-btn.ui-button:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
 }

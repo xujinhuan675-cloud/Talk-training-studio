@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Circle, Play, Square, Trash2 } from 'lucide-react'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
 import './VideoAnswerRecorder.css'
 
 export type VideoRecorderStatus = 'idle' | 'requesting' | 'ready' | 'recording' | 'recorded' | 'error'
@@ -220,21 +221,21 @@ export default function VideoAnswerRecorder({
               : formatDuration(elapsedMs)}
         </span>
         {status === 'recording' ? (
-          <button type="button" onClick={stopRecording} disabled={disabled} title={tr('停止录制', 'Stop recording')}>
+          <Button variant="secondary" size="icon" onClick={stopRecording} disabled={disabled} title={tr('停止录制', 'Stop recording')} aria-label={tr('停止录制', 'Stop recording')}>
             <Square size={16} />
-          </button>
+          </Button>
         ) : status === 'idle' || status === 'error' ? (
-          <button type="button" onClick={prepare} disabled={!canPreview} title={tr('打开摄像头预览', 'Open camera preview')}>
+          <Button variant="secondary" size="icon" onClick={prepare} disabled={!canPreview} title={tr('打开摄像头预览', 'Open camera preview')} aria-label={tr('打开摄像头预览', 'Open camera preview')}>
             <Camera size={16} />
-          </button>
+          </Button>
         ) : (
-          <button type="button" onClick={startRecording} disabled={!canRecord} title={tr('开始录制', 'Start recording')}>
+          <Button variant="secondary" size="icon" onClick={startRecording} disabled={!canRecord} title={tr('开始录制', 'Start recording')} aria-label={tr('开始录制', 'Start recording')}>
             <Play size={16} />
-          </button>
+          </Button>
         )}
-        <button type="button" onClick={reset} disabled={status === 'requesting'} title={tr('清除录制', 'Clear recording')}>
+        <Button variant="secondary" size="icon" onClick={reset} disabled={status === 'requesting'} title={tr('清除录制', 'Clear recording')} aria-label={tr('清除录制', 'Clear recording')}>
           <Trash2 size={16} />
-        </button>
+        </Button>
       </div>
 
       {error && <div className="video-answer-error">{error}</div>}

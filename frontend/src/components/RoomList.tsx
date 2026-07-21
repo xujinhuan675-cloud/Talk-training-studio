@@ -5,6 +5,7 @@ import { fetchRooms, deleteRoom, type ChatRoom } from '../services/api'
 import ConfirmDialog from './layout/ConfirmDialog'
 import { useI18n } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Button } from './ui/button'
 import './RoomList.css'
 
 interface RoomListProps {
@@ -81,13 +82,16 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onRoomDeleted, 
           {room.persona_ids.join(', ')}
         </span>
       </div>
-      <button
+      <Button
         className="room-delete-btn"
+        variant="ghost"
+        size="icon"
         onClick={(e) => handleDeleteClick(e, room)}
         title={tr('删除对话房间', 'Delete conversation room')}
+        aria-label={tr('删除对话房间', 'Delete conversation room')}
       >
         <Trash2 size={13} />
-      </button>
+      </Button>
     </Link>
   )
 
@@ -96,15 +100,16 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onRoomDeleted, 
       {regularRooms.map(renderRoom)}
       <div className={`sidebar-section-header room-battle-header${regularRooms.length === 0 ? ' is-first' : ''}`}>
         <span className="sidebar-section-title room-battle-title">{tr('备战', 'Battle prep')}</span>
-        <Link
-          to={APP_ROUTES.practiceBattle}
-          className="room-battle-create"
-          title={tr('新建备战', 'New battle prep')}
-          aria-label={tr('新建备战', 'New battle prep')}
-        >
-          <span>{tr('新建', 'New')}</span>
-          <Plus size={13} />
-        </Link>
+        <Button asChild variant="primary" size="sm" className="room-battle-create">
+          <Link
+            to={APP_ROUTES.practiceBattle}
+            title={tr('新建备战', 'New battle prep')}
+            aria-label={tr('新建备战', 'New battle prep')}
+          >
+            <span>{tr('新建', 'New')}</span>
+            <Plus size={13} />
+          </Link>
+        </Button>
       </div>
       {battleRooms.map(renderRoom)}
       <ConfirmDialog

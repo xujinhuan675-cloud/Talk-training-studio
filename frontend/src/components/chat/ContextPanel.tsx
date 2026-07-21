@@ -1,5 +1,6 @@
 import { ChevronRight, ChevronLeft } from 'lucide-react'
 import Avatar from '../Avatar'
+import { Button } from '../ui/button'
 import type { PersonaSummary } from '../../services/api'
 import { useI18n } from '../../i18n'
 import './ContextPanel.css'
@@ -80,9 +81,16 @@ export default function ContextPanel({
 
   return (
     <aside className={`context-panel${collapsed ? ' collapsed' : ''}`}>
-      <button className="ctx-toggle" onClick={onToggle} title={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}>
+      <Button
+        aria-label={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}
+        className="ctx-toggle"
+        onClick={onToggle}
+        size="icon"
+        title={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}
+        variant="secondary"
+      >
         {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-      </button>
+      </Button>
 
       {!collapsed && (
         <div className="ctx-body">
@@ -114,9 +122,9 @@ export default function ContextPanel({
             <div className="ctx-section-title">{tr('情绪趋势', 'Emotion Trend')}</div>
             <EmotionMiniChart />
             {onExpandEmotion && (
-              <button className="ctx-link-btn" onClick={onExpandEmotion}>
+              <Button className="ctx-link-btn" onClick={onExpandEmotion} size="sm" variant="ghost">
                 {tr('查看详情 →', 'View details →')}
-              </button>
+              </Button>
             )}
           </div>
 

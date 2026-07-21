@@ -68,27 +68,24 @@
   text-overflow: ellipsis;
 }
 
-.room-delete-btn {
+.room-delete-btn.ui-button {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
-  border: none;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   opacity: 0;
-  transition: all var(--transition-fast);
 }
 
 .room-item:hover .room-delete-btn {
   opacity: 1;
 }
 
-.room-delete-btn:hover {
+.room-delete-btn.ui-button--ghost:hover:not(:disabled) {
   background: var(--rose-soft);
   color: var(--rose);
 }
@@ -109,9 +106,7 @@
   color: var(--green);
 }
 
-.room-battle-create {
-  display: inline-flex;
-  align-items: center;
+.room-battle-create.ui-button {
   gap: 4px;
   min-height: 24px;
   padding: 0 7px;
@@ -121,16 +116,13 @@
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
   transition:
     border-color var(--transition-fast),
     background var(--transition-fast),
     color var(--transition-fast);
 }
 
-.room-battle-create:hover {
+.room-battle-create.ui-button--primary:hover:not(:disabled) {
   border-color: var(--green);
   background: var(--green-soft);
   color: var(--green);

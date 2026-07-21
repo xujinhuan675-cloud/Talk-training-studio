@@ -17,6 +17,7 @@ import {
 import { X, Maximize2 } from 'lucide-react'
 import type { Message, PersonaSummary } from '../services/api'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
 import './EmotionSidebar.css'
 
 interface Props {
@@ -123,12 +124,26 @@ export default function EmotionSidebar({ messages, personaMap, onClose, onExpand
       <div className="es-header">
         <h4>{tr('实时情绪', 'Live Emotion')}</h4>
         <div className="es-header-actions">
-          <button className="es-icon-btn" onClick={onExpand} title={tr('详细分析', 'Detailed analysis')}>
+          <Button
+            className="es-icon-btn"
+            variant="ghost"
+            size="icon"
+            onClick={onExpand}
+            title={tr('详细分析', 'Detailed analysis')}
+            aria-label={tr('详细分析', 'Detailed analysis')}
+          >
             <Maximize2 size={14} />
-          </button>
-          <button className="es-icon-btn" onClick={onClose} title={tr('关闭', 'Close')}>
+          </Button>
+          <Button
+            className="es-icon-btn"
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            title={tr('关闭', 'Close')}
+            aria-label={tr('关闭', 'Close')}
+          >
             <X size={14} />
-          </button>
+          </Button>
         </div>
       </div>
 

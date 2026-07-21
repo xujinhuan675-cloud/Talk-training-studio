@@ -20,6 +20,7 @@ import {
 import ProfileCardDialog from './ProfileCardDialog'
 import { useI18n, type Translate } from '../i18n'
 import { GROWTH_DIMENSIONS, getGrowthDimensionLabel } from '../utils/growthLabels'
+import { Button } from './ui/button'
 import './GrowthDashboard.css'
 
 interface RadarDataPoint {
@@ -111,9 +112,9 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
           </div>
           <h2>{tr('还没有能力评估数据', 'No competency evaluation data yet')}</h2>
           <p>{tr('在对话房间中与 AI 角色对话，然后点击"分析"按钮生成能力评估。', 'Chat with AI personas in a conversation room, then click “Analyze” to generate a competency evaluation.')}<br />{tr('完成 2 次以上评估后，就能看到成长趋势。', 'After 2 or more evaluations, growth trends will appear here.')}</p>
-          <button className="growth-cta" onClick={onCreateRoom}>
+          <Button className="growth-cta" variant="primary" onClick={onCreateRoom}>
             {tr('开始一场练习', 'Start a practice session')}
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -274,14 +275,16 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
       <div className="growth-insight-section">
         <div className="insight-header">
           <h3>{tr('成长洞察', 'Growth Insights')}</h3>
-          <button
+          <Button
             className="insight-btn"
+            variant="primary"
+            size="sm"
             onClick={handleGenerateInsight}
             disabled={insightLoading}
           >
             {insightLoading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
             {insightLoading ? t('common.generating') : tr('生成洞察', 'Generate Insights')}
-          </button>
+          </Button>
         </div>
         {insightLoading && (
           <div className="insight-loading">
@@ -298,8 +301,9 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
 
       {/* Profile Card */}
       <div className="growth-card-section">
-        <button
+        <Button
           className="profile-card-btn"
+          variant="primary"
           onClick={handleGenerateCard}
           disabled={profileCardLoading || data.overview.total_evaluations < 2}
           title={data.overview.total_evaluations < 2
@@ -308,7 +312,7 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
         >
           {profileCardLoading ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />}
           {profileCardLoading ? t('common.generating') : tr('生成我的名片', 'Generate My Card')}
-        </button>
+        </Button>
       </div>
 
       <ProfileCardDialog

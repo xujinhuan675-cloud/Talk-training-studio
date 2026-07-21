@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { X, MessageSquare, Mail, FileText } from 'lucide-react'
 import type { EvidenceItem } from '../../services/personaV2'
 import { useI18n } from '../../i18n'
+import { Button } from '../ui/button'
 
 interface Props {
   evidence: EvidenceItem | null
@@ -98,9 +99,9 @@ export default function EvidencePopover({ evidence, anchor, onClose }: Props) {
     return (
       <div className="evidence-sheet-overlay" onClick={onClose}>
         <div className="evidence-sheet" onClick={(e) => e.stopPropagation()}>
-          <button type="button" className="sheet-close" onClick={onClose} aria-label={tr('关闭', 'Close')}>
+          <Button className="sheet-close" variant="ghost" size="icon" onClick={onClose} aria-label={tr('关闭', 'Close')}>
             <X size={16} />
-          </button>
+          </Button>
           {inner}
         </div>
       </div>

@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import { useI18n } from '../../i18n'
+import { Button } from '../ui/button'
+import { Input } from '../ui/form'
 
 interface Props {
   emoji: string
@@ -58,7 +60,7 @@ export default function FeatureRow(props: Props) {
       <span className="emoji">{props.emoji}</span>
       <div className="text">
         {editing ? (
-          <input
+          <Input
             ref={inputRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -76,24 +78,28 @@ export default function FeatureRow(props: Props) {
       {props.lowConfidence && <span className="warn-chip">⚠ {tr('证据不足', 'Low evidence')}</span>}
       <div className="acts">
         {props.onShowEvidence && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             className={`icon-circ evidence-btn ${props.evidenceFocused ? 'focused' : ''}`}
             onClick={() => props.onShowEvidence!(rowRef.current!)}
             title={tr('查证据', 'View evidence')}
+            aria-label={tr('查证据', 'View evidence')}
           >
             <Search size={13} />
-          </button>
+          </Button>
         )}
         {props.onReject && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             className="icon-circ reject-btn"
             onClick={props.onReject}
             title={props.rejected ? tr('取消标记', 'Clear mark') : tr('标记不对', 'Mark incorrect')}
+            aria-label={props.rejected ? tr('取消标记', 'Clear mark') : tr('标记不对', 'Mark incorrect')}
           >
             <X size={13} />
-          </button>
+          </Button>
         )}
       </div>
     </div>

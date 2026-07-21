@@ -255,6 +255,14 @@
   font-family: inherit;
 }
 
+.feature-edit-input.ui-form-control {
+  min-height: 30px;
+  padding: 4px 8px;
+  border-color: var(--green);
+  border-radius: 6px;
+  background: white;
+}
+
 .feature-row .acts {
   display: flex;
   gap: 6px;
@@ -276,15 +284,35 @@
   border: none;
   transition: all 0.15s ease;
 }
-.icon-circ:hover {
+
+.icon-circ.ui-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: white;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  transition: all 0.15s ease;
+}
+
+.icon-circ:hover,
+.icon-circ.ui-button:hover:not(:disabled) {
   color: var(--green);
+  background: white;
   transform: scale(1.08);
 }
-.icon-circ.focused {
+.icon-circ.focused,
+.icon-circ.focused.ui-button {
   background: var(--green);
   color: white;
 }
-.icon-circ.reject-btn:hover {
+.icon-circ.reject-btn:hover,
+.icon-circ.reject-btn.ui-button:hover:not(:disabled) {
   color: var(--rose);
 }
 
@@ -494,7 +522,23 @@
   align-items: center;
   justify-content: center;
 }
-.sheet-close:hover {
+
+.sheet-close.ui-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: var(--bg-base);
+  color: var(--text-muted);
+}
+
+.sheet-close:hover,
+.sheet-close.ui-button:hover:not(:disabled) {
   background: var(--rose-soft);
   color: var(--rose);
 }
@@ -544,12 +588,28 @@
   font-family: inherit;
 }
 
-.btn-ghost:not(:disabled):hover {
-  color: var(--text-primary);
-  border-color: var(--text-primary);
+.cta .btn-ghost.ui-button {
+  gap: 6px;
+  min-height: auto;
+  padding: 10px 16px;
+  border-color: var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.15s ease;
 }
 
-.btn-ghost:disabled {
+.btn-ghost:not(:disabled):hover,
+.cta .btn-ghost.ui-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+  background: transparent;
+}
+
+.btn-ghost:disabled,
+.cta .btn-ghost.ui-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -568,7 +628,23 @@
   font-family: inherit;
 }
 
-.btn-go:hover {
+.cta .btn-go.ui-button {
+  gap: 6px;
+  min-height: auto;
+  padding: 12px 22px;
+  border: none;
+  border-radius: 12px;
+  background: var(--primary-gradient);
+  color: white;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(15,118,110,0.32);
+  transition: all 0.15s ease;
+}
+
+.btn-go:hover,
+.cta .btn-go.ui-button:hover:not(:disabled) {
+  background: var(--primary-gradient);
   transform: translateY(-1px);
   box-shadow: 0 8px 22px rgba(15,118,110,0.4);
 }

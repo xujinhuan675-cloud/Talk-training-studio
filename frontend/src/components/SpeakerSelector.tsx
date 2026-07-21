@@ -1,6 +1,7 @@
 import { Check, Users, MessageSquare, ChevronRight } from 'lucide-react'
 import type { DetectedSpeaker } from '../services/api'
 import { useI18n, type TranslationKey } from '../i18n'
+import { Button } from './ui/button'
 import './SpeakerSelector.css'
 
 interface Props {
@@ -41,12 +42,13 @@ export default function SpeakerSelector({
           const isSelected = selected.has(s.name)
           const badge = DOMINANCE_BADGE[s.dominance_level] || DOMINANCE_BADGE.medium
           return (
-            <button
+            <Button
               key={s.name}
-              type="button"
+              variant="secondary"
               className={`speaker-card ${isSelected ? 'selected' : ''}`}
               onClick={() => onToggle(s.name)}
               disabled={disabled}
+              aria-pressed={isSelected}
             >
               <div className="speaker-check">
                 {isSelected && <Check size={14} />}
@@ -65,29 +67,30 @@ export default function SpeakerSelector({
                   <div className="speaker-quote">"{s.sample_quote}"</div>
                 )}
               </div>
-            </button>
+            </Button>
           )
         })}
       </div>
 
       <div className="speaker-actions">
-        <button
-          type="button"
-          className="btn-primary speaker-confirm"
+        <Button
+          variant="primary"
+          className="speaker-confirm"
           onClick={onConfirm}
           disabled={disabled || selected.size === 0}
         >
           {tr('为选中的 {count} 人生成画像', 'Generate profiles for {count} selected', { count: selected.size })}
           <ChevronRight size={14} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost speaker-skip"
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="speaker-skip"
           onClick={onSkip}
           disabled={disabled}
         >
           {tr('跳过，直接分析全部素材', 'Skip and analyze all materials')}
-        </button>
+        </Button>
       </div>
     </div>
   )

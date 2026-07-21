@@ -29,21 +29,21 @@
   gap: 4px;
 }
 
-.es-icon-btn {
+.es-icon-btn.ui-button {
   width: 28px;
   height: 28px;
+  min-height: 28px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background: none;
+  border: 0;
+  background: transparent;
   color: var(--text-muted);
   border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
 }
 
-.es-icon-btn:hover {
+.es-icon-btn.ui-button--ghost:hover:not(:disabled) {
   background: var(--bg-card);
   color: var(--text-primary);
 }

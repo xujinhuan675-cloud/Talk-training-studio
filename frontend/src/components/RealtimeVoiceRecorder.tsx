@@ -11,6 +11,7 @@ import {
   type RealtimeTranscriptRole,
 } from '../services/realtimeSession'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
 
 export interface RealtimeVoiceRecorderProps {
   roomId: number | null
@@ -454,6 +455,7 @@ export default function RealtimeVoiceRecorder({
 
   const active = status === 'connecting' || status === 'connected' || status === 'listening' || status === 'speaking'
   const label = statusLabel(status, error, tr)
+  const actionTitle = active ? tr('停止实时语音教练', 'Stop realtime voice agent') : tr('启动实时语音教练', 'Start realtime voice agent')
 
   return (
     <div className="realtime-voice-recorder">
@@ -461,12 +463,14 @@ export default function RealtimeVoiceRecorder({
         <span>{label}</span>
         {preview && <small>{preview}</small>}
       </div>
-      <button
+      <Button
+        variant="secondary"
+        size="sm"
         className={`realtime-voice-action${active ? ' active' : ''}`}
-        type="button"
         onClick={active ? () => closeRealtime('closed') : startRealtime}
         disabled={disabled || !roomId || !trainingSessionId || status === 'connecting'}
-        title={active ? tr('停止实时语音教练', 'Stop realtime voice agent') : tr('启动实时语音教练', 'Start realtime voice agent')}
+        title={actionTitle}
+        aria-label={actionTitle}
       >
         {status === 'connecting'
           ? <Loader2 size={14} className="spin" />
@@ -474,7 +478,7 @@ export default function RealtimeVoiceRecorder({
             ? <Square size={14} />
             : <Mic size={14} />}
         {active ? tr('停止', 'Stop') : tr('开始', 'Start')}
-      </button>
+      </Button>
     </div>
   )
 }

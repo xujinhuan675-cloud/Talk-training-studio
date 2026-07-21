@@ -38,6 +38,9 @@
   border-radius: 12px;
   background: var(--bg-card, #fff);
   cursor: pointer;
+  font-weight: inherit;
+  line-height: 1.4;
+  white-space: normal;
   transition: all 0.15s ease;
   text-align: left;
   width: 100%;

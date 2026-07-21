@@ -2,6 +2,8 @@ import React from 'react'
 import { Send, Lightbulb, Video } from 'lucide-react'
 import Avatar from '../Avatar'
 import VoiceRecorder, { type VoiceRecorderState } from '../VoiceRecorder'
+import { Button } from '../ui/button'
+import { Textarea } from '../ui/form'
 import type { PersonaSummary } from '../../services/api'
 import { useI18n } from '../../i18n'
 import './ChatInput.css'
@@ -88,7 +90,7 @@ export default function ChatInput({
             ))}
           </div>
         )}
-        <textarea
+        <Textarea
           ref={textareaRef}
           className="message-input-textarea"
           value={value}
@@ -110,30 +112,42 @@ export default function ChatInput({
           />
         )}
         {showVideoButton && (
-          <button
-            className={`video-toggle-btn ${videoActive ? 'active' : ''}`}
+          <Button
+            aria-label={tr('录制视频回答', 'Record video answer')}
+            aria-pressed={videoActive}
+            className={`video-toggle-btn${videoActive ? ' active' : ''}`}
             onClick={onVideoClick}
+            size="icon"
             title={tr('录制视频回答', 'Record video answer')}
-            type="button"
+            variant="secondary"
             disabled={sending}
           >
             <Video size={18} />
-          </button>
+          </Button>
         )}
         {showLiveCoachButton && (
-          <button
+          <Button
+            aria-label={tr('询问教练', 'Ask coach')}
             className="live-coach-btn"
             onClick={onLiveCoachClick}
+            size="icon"
             title={tr('询问教练', 'Ask coach')}
             disabled={coachingSending}
-            type="button"
+            variant="secondary"
           >
             <Lightbulb size={18} />
-          </button>
+          </Button>
         )}
-        <button className="send-btn" onClick={onSend} disabled={!value.trim() || sending} type="button">
+        <Button
+          aria-label={tr('发送消息', 'Send message')}
+          className="send-btn"
+          onClick={onSend}
+          disabled={!value.trim() || sending}
+          size="icon"
+          variant="primary"
+        >
           <Send size={18} />
-        </button>
+        </Button>
       </div>
     </div>
   )

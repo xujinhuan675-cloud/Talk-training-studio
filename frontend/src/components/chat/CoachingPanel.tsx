@@ -1,6 +1,8 @@
 import React from 'react'
 import Markdown from 'react-markdown'
 import { GraduationCap, Lightbulb, X, Send } from 'lucide-react'
+import { Button } from '../ui/button'
+import { Input } from '../ui/form'
 import type { CoachingMessageItem } from '../../services/api'
 import { useI18n } from '../../i18n'
 import './CoachingPanel.css'
@@ -35,7 +37,7 @@ export default function CoachingPanel({
   const { tr } = useI18n()
   if (!open) return null
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       onSend()
@@ -50,9 +52,15 @@ export default function CoachingPanel({
       <div className="coaching-header">
         {mode === 'live' ? <Lightbulb size={18} /> : <GraduationCap size={18} />}
         <h3>{mode === 'live' ? tr('实时教练', 'Live Coach') : tr('AI Coach 复盘', 'AI Coach Review')}</h3>
-        <button className="coaching-close" onClick={onClose}>
+        <Button
+          aria-label={tr('关闭教练面板', 'Close coach panel')}
+          className="coaching-close"
+          onClick={onClose}
+          size="icon"
+          variant="ghost"
+        >
           <X size={18} />
-        </button>
+        </Button>
       </div>
       <div className="coaching-messages" ref={listRef}>
         {messages.map((msg) => (
@@ -80,7 +88,7 @@ export default function CoachingPanel({
         )}
       </div>
       <div className="coaching-input-bar">
-        <input
+        <Input
           type="text"
           value={inputValue}
           onChange={(e) => onInputChange(e.target.value)}
@@ -88,13 +96,16 @@ export default function CoachingPanel({
           placeholder={tr('回复 Coach...', 'Reply to Coach...')}
           disabled={inputDisabled}
         />
-        <button
+        <Button
+          aria-label={tr('发送给 Coach', 'Send to Coach')}
           className="send-btn coaching-send"
           onClick={onSend}
           disabled={sendDisabled}
+          size="icon"
+          variant="primary"
         >
           <Send size={16} />
-        </button>
+        </Button>
       </div>
     </aside>
   )

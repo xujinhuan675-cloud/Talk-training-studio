@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Loader2, Square } from 'lucide-react'
 import { useI18n } from '../i18n'
+import { Button } from './ui/button'
 import './VoiceRecorder.css'
 
 export type VoiceRecorderState = 'idle' | 'listening' | 'recording' | 'processing'
@@ -365,6 +366,12 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
     return `${min}:${sec.toString().padStart(2, '0')}`
   }
 
+  const actionTitle = state === 'idle'
+    ? tr('点击录音 / 长按说话', 'Click to record / hold to speak')
+    : state === 'recording'
+      ? tr('点击停止', 'Click to stop')
+      : tr('识别中...', 'Recognizing...')
+
   return (
     <div className="voice-recorder">
       {error && (
@@ -376,26 +383,23 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       {state === 'processing' && (
         <span className="voice-status">{tr('识别中...', 'Recognizing...')}</span>
       )}
-      <button
+      <Button
+        variant={state === 'recording' ? 'danger' : state === 'processing' ? 'primary' : 'secondary'}
+        size="icon"
         className={`voice-btn ${state}`}
         onClick={handleClick}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
         disabled={disabled || state === 'processing'}
-        title={
-          state === 'idle'
-            ? tr('点击录音 / 长按说话', 'Click to record / hold to speak')
-            : state === 'recording'
-              ? tr('点击停止', 'Click to stop')
-              : tr('识别中...', 'Recognizing...')
-        }
+        title={actionTitle}
+        aria-label={actionTitle}
       >
         {state === 'idle' && <Mic size={18} />}
         {state === 'listening' && <Mic size={18} />}
         {state === 'recording' && <Square size={14} />}
         {state === 'processing' && <Loader2 size={18} className="spin" />}
-      </button>
+      </Button>
     </div>
   )
 }
