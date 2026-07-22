@@ -8,7 +8,7 @@
   --ui-form-danger-token: var(--training-workbench-danger);
   --ui-form-danger-soft-token: var(--training-workbench-danger-soft);
   --ui-form-label-token: var(--text-secondary);
-  --ui-form-radius-token: 8px;
+  --ui-form-radius-token: var(--training-workbench-radius);
   --ui-form-control-font-size-token: 13px;
   min-height: 100%;
   background: var(--training-workbench-page-bg);
@@ -18,7 +18,7 @@
 .training-studio-shell {
   width: min(var(--training-workbench-page-max-width), calc(100% - (var(--training-workbench-page-gutter) * 2)));
   margin: 0 auto;
-  padding: 28px 0 40px;
+  padding: 28px 0 42px;
   display: flex;
   flex-direction: column;
 }
@@ -28,21 +28,22 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   margin-bottom: 18px;
 }
 
 .training-studio-header h1 {
   margin: 0;
-  font-size: 26px;
-  line-height: 1.2;
+  color: var(--text-primary);
+  font-size: 28px;
+  line-height: 1.16;
   font-weight: 800;
   letter-spacing: 0;
 }
 
 .training-studio-header p {
-  max-width: 780px;
-  margin: 6px 0 0;
+  max-width: 760px;
+  margin: 9px 0 0;
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.55;
@@ -63,7 +64,7 @@
   justify-content: center;
   gap: 8px;
   border: 1px solid var(--training-workbench-primary);
-  border-radius: 8px;
+  border-radius: var(--training-workbench-radius);
   padding: 0 14px;
   background: var(--training-workbench-primary);
   color: var(--training-workbench-on-primary);
@@ -71,11 +72,23 @@
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
 }
 
 .training-studio-action:hover:not(:disabled) {
-  transform: translateY(-1px);
+  border-color: var(--training-workbench-primary-hover);
+  background: var(--training-workbench-primary-hover);
+  color: var(--training-workbench-on-primary);
+}
+
+.training-studio-action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--training-workbench-focus);
 }
 
 .training-studio-action:disabled {
@@ -92,13 +105,13 @@
 }
 
 .training-studio-control-strip > div {
-  min-height: 64px;
+  min-height: 72px;
   display: grid;
   align-content: center;
   gap: 4px;
   border: 1px solid var(--training-workbench-border-soft);
-  border-radius: 8px;
-  padding: 11px 12px;
+  border-radius: var(--training-workbench-radius);
+  padding: 10px 12px;
   background: var(--training-workbench-surface);
   box-shadow: var(--training-workbench-shadow);
 }
@@ -134,18 +147,22 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  border: 1.5px solid var(--training-workbench-border);
-  border-radius: 8px;
+  border: 1px solid var(--training-workbench-border);
+  border-radius: var(--training-workbench-radius);
   padding: 14px;
   background: var(--training-workbench-surface);
   color: var(--text-primary);
   box-shadow: var(--training-workbench-shadow);
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .training-studio-mode:hover {
   border-color: var(--training-workbench-border-accent);
   background: var(--training-workbench-surface-raised);
+  box-shadow: var(--training-workbench-shadow-strong);
 }
 
 .training-studio-mode.selected {
@@ -182,8 +199,9 @@
 
 .training-studio-mode-main:focus-visible,
 .training-studio-interaction:focus-visible {
-  outline: 2px solid var(--training-workbench-primary);
-  outline-offset: 3px;
+  border-radius: var(--training-workbench-radius);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--training-workbench-focus);
 }
 
 .training-studio-mode-main span {
@@ -212,7 +230,7 @@
   align-content: start;
   justify-content: stretch;
   border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
+  border-radius: var(--training-workbench-radius);
   padding: 10px;
   background: var(--training-workbench-bg);
   color: var(--text-primary);
@@ -221,7 +239,11 @@
   text-align: left;
   white-space: normal;
   cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    opacity var(--transition-fast);
 }
 
 .training-studio-interaction.ui-button--ghost:hover:not(:disabled),
@@ -267,8 +289,8 @@
   display: grid;
   gap: 12px;
   border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: var(--training-workbench-radius);
+  padding: 16px;
   margin-bottom: 16px;
   background: var(--training-workbench-surface);
   box-shadow: var(--training-workbench-shadow);
@@ -283,7 +305,7 @@
 
 .training-studio-panel-head h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1.25;
   font-weight: 800;
 }
@@ -326,7 +348,7 @@
   justify-content: stretch;
   gap: 7px;
   border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
+  border-radius: var(--training-workbench-radius);
   padding: 11px;
   background: var(--training-workbench-bg);
   color: var(--text-primary);
@@ -335,7 +357,12 @@
   line-height: normal;
   text-align: left;
   white-space: normal;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
 }
 
 .training-studio-feedback-options .ui-segmented-control-button:hover:not(:disabled):not([data-state='on']),
@@ -351,8 +378,8 @@
 }
 
 .training-studio-feedback-options .ui-segmented-control-button:focus-visible {
-  outline: 2px solid var(--training-workbench-primary);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--training-workbench-focus);
 }
 
 .training-studio-feedback-options .ui-segmented-control-button > span {
@@ -394,7 +421,7 @@
   flex-direction: column;
   gap: 8px;
   border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
+  border-radius: var(--training-workbench-radius);
   padding: 16px;
   background: var(--training-workbench-surface);
   box-shadow: var(--training-workbench-shadow);
@@ -411,8 +438,8 @@
   gap: 10px;
   align-items: end;
   border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: var(--training-workbench-radius);
+  padding: 16px;
   background: var(--training-workbench-surface);
   box-shadow: var(--training-workbench-shadow);
 }
@@ -432,7 +459,7 @@
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--training-workbench-border);
-  border-radius: 8px;
+  border-radius: var(--training-workbench-radius);
   padding: 0 10px;
   background: var(--training-workbench-bg);
   color: var(--text-secondary);
@@ -451,9 +478,15 @@
   color: var(--text-primary);
 }
 
+.training-studio-action.secondary:hover:not(:disabled) {
+  border-color: var(--training-workbench-primary);
+  background: var(--training-workbench-primary-soft);
+  color: var(--training-workbench-primary);
+}
+
 .training-studio-error {
   border: 1px solid var(--training-workbench-danger);
-  border-radius: 8px;
+  border-radius: var(--training-workbench-radius);
   padding: 9px 10px;
   background: var(--training-workbench-danger-soft);
   color: var(--training-workbench-danger);
@@ -482,14 +515,23 @@
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .training-studio-shell {
-    width: calc(100% - (var(--training-workbench-page-gutter-mobile) * 2));
-    padding-top: 18px;
+    width: auto;
+    padding: var(--training-workbench-page-gutter-mobile);
   }
 
   .training-studio-header {
     flex-direction: column;
+    gap: 14px;
+  }
+
+  .training-studio-header h1 {
+    font-size: 22px;
+  }
+
+  .training-studio-header p {
+    font-size: 13px;
   }
 
   .training-studio-header-actions {

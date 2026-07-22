@@ -1,4 +1,5 @@
 .settings-page {
+  --settings-panel-padding: 20px;
   width: min(var(--page-max-width), calc(100% - (var(--page-gutter) * 2)));
   max-width: none;
   margin: 0 auto;
@@ -63,25 +64,6 @@
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
-}
-
-.settings-create-btn.ui-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--green);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.settings-create-btn.ui-button:hover:not(:disabled) {
-  background: var(--green-hover);
 }
 
 /* List items */
@@ -171,7 +153,7 @@
 .settings-item-btn.danger.ui-button:hover:not(:disabled) {
   background: var(--rose-soft);
   color: var(--rose);
-  border-color: rgba(185, 28, 28, 0.3);
+  border-color: var(--rose-soft);
 }
 
 /* Persona chips on scenario items */
@@ -196,10 +178,13 @@
 
 /* Inline form panel */
 .settings-form-panel {
+  --ui-form-control-padding-token: 9px 12px;
+  --ui-form-label-font-size-token: 13px;
+  --ui-form-textarea-min-height-token: 120px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 24px;
+  padding: var(--settings-panel-padding);
   margin-top: 16px;
 }
 
@@ -211,58 +196,11 @@
 }
 
 .settings-form-panel .field-label {
-  display: grid;
-  gap: 5px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
   margin-bottom: 14px;
 }
 
 .settings-form-panel .field-label .ui-form-label {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.settings-form-panel .field-label .ui-form-input,
-.settings-form-panel .field-label .ui-form-select {
-  width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  outline: none;
-  transition: all var(--transition-fast);
-  box-sizing: border-box;
-  color: var(--text-primary);
-  background: var(--bg-base);
-}
-
-.settings-form-panel .field-label .ui-form-input:focus-visible,
-.settings-form-panel .field-label .ui-form-select:focus-visible {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--focus-ring);
-}
-
-.settings-form-panel .field-label .ui-form-textarea {
-  width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-  transition: all var(--transition-fast);
-  box-sizing: border-box;
-  resize: vertical;
-  min-height: 120px;
-  color: var(--text-primary);
-  background: var(--bg-base);
-}
-
-.settings-form-panel .field-label .ui-form-textarea:focus-visible {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  font-weight: 600;
 }
 
 .settings-form-panel .color-field {
@@ -297,58 +235,7 @@
 }
 
 .settings-form-actions .btn-delete.ui-button {
-  padding: 8px 18px;
-  border: 1px solid rgba(199, 91, 91, 0.3);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  color: var(--rose);
-  font-size: 14px;
-  cursor: pointer;
   margin-right: auto;
-  transition: all var(--transition-fast);
-}
-
-.settings-form-actions .btn-delete.ui-button:hover:not(:disabled) {
-  background: var(--rose-soft);
-  border-color: rgba(199, 91, 91, 0.5);
-}
-
-.settings-form-actions .btn-cancel.ui-button {
-  padding: 8px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.settings-form-actions .btn-cancel.ui-button:hover:not(:disabled) {
-  background: var(--bg-base);
-  color: var(--text-primary);
-}
-
-.settings-form-actions .btn-submit.ui-button {
-  padding: 8px 22px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--green);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.settings-form-actions .btn-submit.ui-button:hover:not(:disabled) {
-  background: var(--green-hover);
-}
-
-.settings-form-actions .btn-submit.ui-button:disabled,
-.settings-form-actions .btn-delete.ui-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Avatar preview in persona form */
@@ -390,7 +277,7 @@
 .settings-checkbox-color {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 
@@ -421,7 +308,7 @@
 .settings-placeholder-icon {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: var(--radius-md);
   background: var(--green-soft);
   color: var(--green);
   display: flex;
@@ -524,8 +411,8 @@
 .settings-success {
   margin: 12px 0;
   padding: 10px 14px;
-  background: var(--green-soft);
-  color: var(--green);
+  background: var(--success-bg);
+  color: var(--success);
   border-radius: var(--radius-sm);
   font-size: 13px;
 }
@@ -572,18 +459,7 @@
 }
 
 .settings-org-selector.ui-form-select {
-  width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  background: var(--bg-card);
-  color: var(--text-primary);
-  outline: none;
-}
-
-.settings-org-selector.ui-form-select:focus-visible {
-  border-color: var(--green);
+  --ui-form-bg-token: var(--bg-card);
 }
 
 .settings-org-tabs.ui-segmented-control {
@@ -630,7 +506,7 @@
 
 .settings-form-panel .team-delete-btn.ui-button:hover:not(:disabled) {
   background: var(--rose-soft);
-  border-color: rgba(185, 28, 28, 0.2);
+  border-color: var(--rose-soft);
   color: var(--rose);
 }
 
@@ -651,7 +527,7 @@
   padding: 4px 10px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-full);
   font-size: 12px;
   color: var(--text-primary);
 }
@@ -659,7 +535,7 @@
 .team-member-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 
@@ -671,7 +547,7 @@
   margin-left: 2px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--text-muted);
   font-size: 14px;
@@ -696,7 +572,7 @@
   min-height: 26px;
   padding: 4px 28px 4px 10px;
   border-style: dashed;
-  border-radius: 14px;
+  border-radius: var(--radius-full);
   background: transparent;
   font-size: 12px;
   color: var(--text-muted);
@@ -790,7 +666,7 @@
 .settings-error {
   margin-top: 12px;
   padding: 10px 14px;
-  background: var(--rose-soft);
+  background: var(--danger-bg);
   color: var(--rose);
   border-radius: var(--radius-sm);
   font-size: 13px;
@@ -803,23 +679,17 @@
   gap: 8px;
 }
 
-.persona-build-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: var(--radius-md);
-  border: none;
-  background: var(--primary-gradient);
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition-fast);
+.persona-build-btn.ui-button {
+  border-color: var(--border-accent);
+  background: var(--green-soft);
+  color: var(--green);
   box-shadow: var(--shadow-sm);
 }
-.persona-build-btn:hover {
-  transform: translateY(-1px);
+
+.persona-build-btn.ui-button:hover:not(:disabled) {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
   box-shadow: var(--shadow-md);
 }
 

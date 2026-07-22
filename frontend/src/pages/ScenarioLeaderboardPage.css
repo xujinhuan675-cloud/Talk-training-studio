@@ -231,7 +231,7 @@
   justify-self: end;
   border-radius: 999px;
   padding: 3px 8px;
-  background: rgba(139, 126, 200, 0.12);
+  background: var(--violet-soft);
   color: var(--violet);
   font-size: 12px;
   font-weight: 900;
@@ -404,7 +404,7 @@
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--green);
-  color: #fff;
+  color: var(--on-primary);
   font-weight: 900;
 }
 
@@ -413,7 +413,7 @@
   align-items: center;
   gap: 8px;
   margin: 0 16px 14px;
-  border: 1px solid rgba(180, 83, 9, 0.26);
+  border: 1px solid var(--amber-soft);
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--amber-soft);

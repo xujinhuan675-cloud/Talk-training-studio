@@ -26,7 +26,7 @@
 .ui-button:focus-visible,
 .ui-dropdown-item:focus-visible,
 .ui-segmented-control-button:focus-visible {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
@@ -49,13 +49,14 @@
 }
 
 .ui-button--primary {
-  border-color: var(--green);
-  background: var(--green);
-  color: #fff;
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .ui-button--primary:hover:not(:disabled) {
-  background: var(--green-hover);
+  border-color: var(--primary-hover);
+  background: var(--primary-hover);
 }
 
 .ui-button--secondary {
@@ -76,18 +77,19 @@
 }
 
 .ui-button--ghost:hover:not(:disabled) {
-  background: var(--green-soft);
+  background: var(--primary-light);
   color: var(--text-primary);
 }
 
 .ui-button--danger {
-  border-color: var(--rose);
-  background: var(--rose);
-  color: #fff;
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-danger);
 }
 
 .ui-button--danger:hover:not(:disabled) {
-  background: #b54e4e;
+  border-color: var(--danger-hover);
+  background: var(--danger-hover);
 }
 
 .ui-dialog-overlay {
@@ -243,7 +245,7 @@
   justify-content: center;
   gap: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   background: var(--bg-card);
 }
@@ -317,7 +319,7 @@
 .ui-surface {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-card);
 }
 
@@ -393,7 +395,7 @@
   align-items: center;
   gap: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 4px;
   background: var(--bg-card);
   color: var(--text-secondary);

@@ -51,6 +51,11 @@
   --primary: var(--green);
   --primary-hover: var(--green-hover);
   --primary-light: var(--green-soft);
+  --on-primary: #FFFFFF;
+  --on-avatar: #FFFFFF;
+  --danger: var(--rose);
+  --danger-hover: #991B1B;
+  --on-danger: #FFFFFF;
   --surface-2: var(--bg-soft);
   --bg-main: var(--bg-base);
   --text-tertiary: var(--text-muted);
@@ -83,8 +88,9 @@
   --workbench-focus: var(--focus-ring);
   --workbench-shadow: var(--shadow-sm);
   --workbench-shadow-strong: var(--shadow-md);
-  --workbench-on-primary: #FFFFFF;
-  --workbench-page-max-width: 1240px;
+  --workbench-radius: var(--radius-md);
+  --workbench-on-primary: var(--on-primary);
+  --workbench-page-max-width: var(--page-max-width);
   --workbench-page-gutter: var(--page-gutter);
   --workbench-page-gutter-mobile: var(--page-gutter-mobile);
 }
@@ -130,6 +136,11 @@
   --primary: var(--green);
   --primary-hover: var(--green-hover);
   --primary-light: var(--green-soft);
+  --on-primary: #061014;
+  --on-avatar: #FFFFFF;
+  --danger: var(--rose);
+  --danger-hover: #FDA4AF;
+  --on-danger: #061014;
   --surface-2: var(--bg-soft);
   --bg-main: var(--bg-base);
   --text-tertiary: var(--text-muted);
@@ -162,8 +173,9 @@
   --workbench-focus: var(--focus-ring);
   --workbench-shadow: var(--shadow-sm);
   --workbench-shadow-strong: var(--shadow-md);
-  --workbench-on-primary: #061014;
-  --workbench-page-max-width: 1240px;
+  --workbench-radius: var(--radius-md);
+  --workbench-on-primary: var(--on-primary);
+  --workbench-page-max-width: var(--page-max-width);
   --workbench-page-gutter: var(--page-gutter);
   --workbench-page-gutter-mobile: var(--page-gutter-mobile);
 }
@@ -190,7 +202,8 @@
   --training-workbench-focus: var(--workbench-focus, var(--focus-ring));
   --training-workbench-shadow: var(--workbench-shadow, var(--shadow-sm));
   --training-workbench-shadow-strong: var(--workbench-shadow-strong, var(--shadow-md));
-  --training-workbench-on-primary: var(--workbench-on-primary, var(--bg-card));
+  --training-workbench-radius: var(--workbench-radius, var(--radius-md));
+  --training-workbench-on-primary: var(--workbench-on-primary, var(--on-primary, var(--bg-card)));
   --training-workbench-page-max-width: var(--workbench-page-max-width, var(--page-max-width));
   --training-workbench-page-gutter: var(--workbench-page-gutter, var(--page-gutter));
   --training-workbench-page-gutter-mobile: var(--workbench-page-gutter-mobile, var(--page-gutter-mobile));

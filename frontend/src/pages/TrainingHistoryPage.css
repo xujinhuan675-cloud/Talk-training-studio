@@ -97,7 +97,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(180, 83, 9, 0.25);
+  border: 1px solid var(--amber-soft);
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--amber-soft);
@@ -230,7 +230,7 @@
 }
 
 .training-history-tags .training-history-source-tag.progress {
-  border-color: rgba(200, 148, 74, 0.3);
+  border-color: var(--amber-soft);
   background: var(--amber-soft);
   color: var(--amber);
 }

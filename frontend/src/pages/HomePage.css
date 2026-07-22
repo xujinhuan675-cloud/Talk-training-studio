@@ -258,7 +258,7 @@
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  color: #fff;
+  color: var(--on-avatar);
   font-size: 13px;
   font-weight: 800;
   flex-shrink: 0;

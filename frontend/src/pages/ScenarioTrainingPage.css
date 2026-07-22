@@ -182,13 +182,13 @@
 }
 
 .scenario-training-status.in_progress {
-  border-color: rgba(180, 83, 9, 0.28);
+  border-color: var(--amber-soft);
   background: var(--amber-soft);
   color: var(--amber);
 }
 
 .scenario-training-status.failed {
-  border-color: rgba(185, 28, 28, 0.28);
+  border-color: var(--rose-soft);
   background: var(--rose-soft);
   color: var(--rose);
 }
