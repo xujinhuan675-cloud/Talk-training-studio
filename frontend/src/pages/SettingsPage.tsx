@@ -177,6 +177,14 @@ function PersonasTab() {
     setDialogOpen(true)
   }
 
+  const openPersona = (persona: PersonaSummary) => {
+    if (persona.supports_v2) {
+      navigate(APP_ROUTES.configPersonaEdit(persona.id))
+      return
+    }
+    startEdit(persona)
+  }
+
   const handleDialogClose = () => {
     setDialogOpen(false)
     setEditing(null)
@@ -220,7 +228,7 @@ function PersonasTab() {
           <div
             key={p.id}
             className={`settings-list-item${editing?.id === p.id ? ' selected' : ''}`}
-            onClick={() => navigate(APP_ROUTES.configPersonaEdit(p.id))}
+            onClick={() => openPersona(p)}
           >
             <div className="settings-item-avatar">
               <Avatar name={p.name} color={p.avatar_color || '#0F766E'} size={40} />
@@ -234,8 +242,8 @@ function PersonasTab() {
                 variant="secondary"
                 size="icon"
                 className="settings-item-btn"
-                onClick={(e) => { e.stopPropagation(); navigate(APP_ROUTES.configPersonaEdit(p.id)) }}
-                title={tr('查看详情', 'View details')}
+                onClick={(e) => { e.stopPropagation(); openPersona(p) }}
+                title={p.supports_v2 ? tr('查看详情', 'View details') : tr('打开基础编辑', 'Open basic editor')}
               >
                 <Eye size={14} />
               </Button>

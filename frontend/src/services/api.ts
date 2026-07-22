@@ -10,6 +10,7 @@ export interface PersonaSummary {
   organization_id: number | null
   team_id: number | null
   parse_status: string
+  supports_v2?: boolean
 }
 
 export interface PersonaDetail extends PersonaSummary {

@@ -174,6 +174,10 @@ def _persona_to_markdown(p) -> str:
     return "\n".join(lines)
 
 
+def _persona_supports_v2_profile(p) -> bool:
+    return bool(p.hard_rules or p.identity or p.expression or p.decision or p.interpersonal)
+
+
 @router.get("/personas", summary="获取所有角色列表")
 async def list_personas(
     loader: PersonaLoader = Depends(get_persona_loader_with_v2),
@@ -189,6 +193,7 @@ async def list_personas(
                 "organization_id": p.organization_id,
                 "team_id": p.team_id,
                 "parse_status": p.parse_status,
+                "supports_v2": _persona_supports_v2_profile(p),
             }
             for p in personas
         ]
