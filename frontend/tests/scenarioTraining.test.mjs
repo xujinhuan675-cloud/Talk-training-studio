@@ -928,3 +928,58 @@ test('scenario config upserts local scenario drafts with normalized weight value
   assert.equal(nextState.scenarios[0].title, 'Objection handling')
   assert.equal(scenarioConfigData.validateScenarioWeightTotal(nextState.scenarios[0].dimensionWeights).valid, true)
 })
+
+test('scenario config removes draft scenarios and selects the next available draft', () => {
+  const state = scenarioConfigData.createScenarioConfigState([])
+  const firstDraft = scenarioConfigData.createBlankScenarioDraft({
+    id: 'local-first',
+    title: 'First draft',
+  })
+  const secondDraft = scenarioConfigData.createBlankScenarioDraft({
+    id: 'local-second',
+    title: 'Second draft',
+  })
+  const withDrafts = scenarioConfigData.upsertScenarioConfigDraft(
+    scenarioConfigData.upsertScenarioConfigDraft(state, firstDraft),
+    secondDraft,
+  )
+
+  const nextState = scenarioConfigData.removeScenarioConfigDraft(withDrafts, 'local-second')
+
+  assert.equal(nextState.scenarios.length, 1)
+  assert.equal(nextState.scenarios[0].id, 'local-first')
+  assert.equal(nextState.selectedScenarioId, 'local-first')
+  assert.equal(scenarioConfigData.removeScenarioConfigDraft(nextState, 'missing'), nextState)
+})
+
+test('scenario config removes local dimensions and rebalances affected scenario weights', () => {
+  const state = scenarioConfigData.createScenarioConfigState([])
+  const localDimension = {
+    id: 'local-confidence',
+    name: 'Confidence',
+    description: 'Keeps pressure without sounding defensive.',
+    enabled: true,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    source: 'local',
+  }
+  const draft = scenarioConfigData.createBlankScenarioDraft({
+    id: 'local-weighted',
+    title: 'Weighted draft',
+    dimensionWeights: [
+      { dimensionId: 'substance', weight: 60 },
+      { dimensionId: 'local-confidence', weight: 40 },
+    ],
+  })
+  const withDimension = scenarioConfigData.upsertScenarioDimension(state, localDimension)
+  const withDraft = scenarioConfigData.upsertScenarioConfigDraft(withDimension, draft)
+
+  const nextState = scenarioConfigData.removeScenarioDimension(withDraft, 'local-confidence')
+  const nextDraft = nextState.scenarios.find((scenario) => scenario.id === 'local-weighted')
+
+  assert.equal(nextState.dimensions.some((dimension) => dimension.id === 'local-confidence'), false)
+  assert.equal(nextDraft.dimensionWeights.some((item) => item.dimensionId === 'local-confidence'), false)
+  assert.equal(nextDraft.dimensionWeights[0].dimensionId, 'substance')
+  assert.equal(nextDraft.dimensionWeights[0].weight, 100)
+  assert.equal(scenarioConfigData.validateScenarioWeightTotal(nextDraft.dimensionWeights).valid, true)
+  assert.equal(scenarioConfigData.removeScenarioDimension(withDraft, 'substance'), withDraft)
+})

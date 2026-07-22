@@ -271,6 +271,45 @@ export function distributeScenarioWeights(dimensionIds: string[]): ScenarioDimen
   }))
 }
 
+function normalizeScenarioWeightTotal(weights: ScenarioDimensionWeight[]): ScenarioDimensionWeight[] {
+  const normalized = weights
+    .map((item) => ({
+      dimensionId: item.dimensionId.trim(),
+      weight: normalizeScenarioWeight(item.weight),
+    }))
+    .filter((item) => item.dimensionId)
+
+  if (normalized.length === 0) return []
+
+  const total = calculateScenarioWeightTotal(normalized)
+  if (total === 100) return normalized
+  if (total <= 0) return distributeScenarioWeights(normalized.map((item) => item.dimensionId))
+
+  const scaled = normalized.map((item, index) => {
+    const raw = (item.weight / total) * 100
+    return {
+      dimensionId: item.dimensionId,
+      fraction: raw - Math.floor(raw),
+      index,
+      weight: Math.floor(raw),
+    }
+  })
+  let remainder = 100 - scaled.reduce((sum, item) => sum + item.weight, 0)
+  const byFraction = [...scaled].sort((a, b) => (
+    b.fraction - a.fraction || a.index - b.index
+  ))
+  for (const item of byFraction) {
+    if (remainder <= 0) break
+    item.weight += 1
+    remainder -= 1
+  }
+
+  return scaled.map((item) => ({
+    dimensionId: item.dimensionId,
+    weight: item.weight,
+  }))
+}
+
 export function getDefaultDimensionWeights(category: ScenarioTrainingCategory): ScenarioDimensionWeight[] {
   const template = DEFAULT_WEIGHTS_BY_CATEGORY[category] ?? DEFAULT_WEIGHTS_BY_CATEGORY.interview
   return DEFAULT_SCENARIO_DIMENSIONS.map((dimension) => ({
@@ -512,6 +551,66 @@ export function upsertScenarioDimension(
     dimensions,
     selectedDimensionId: normalized.id,
     updatedAt: nowIso(),
+  }
+}
+
+export function removeScenarioConfigDraft(
+  state: ScenarioConfigState,
+  scenarioId: string,
+): ScenarioConfigState {
+  const id = scenarioId.trim()
+  const removedIndex = state.scenarios.findIndex((scenario) => scenario.id === id)
+  if (!id || removedIndex < 0) return state
+
+  const scenarios = state.scenarios.filter((scenario) => scenario.id !== id)
+  const selectedScenarioId = state.selectedScenarioId === id
+    ? scenarios[Math.min(removedIndex, scenarios.length - 1)]?.id
+    : scenarios.some((scenario) => scenario.id === state.selectedScenarioId)
+      ? state.selectedScenarioId
+      : scenarios[0]?.id
+
+  return {
+    ...state,
+    scenarios,
+    selectedScenarioId,
+    updatedAt: nowIso(),
+  }
+}
+
+export function removeScenarioDimension(
+  state: ScenarioConfigState,
+  dimensionId: string,
+): ScenarioConfigState {
+  const id = dimensionId.trim()
+  const existing = state.dimensions.find((dimension) => dimension.id === id)
+  if (!id || !existing || existing.source !== 'local') return state
+
+  const updatedAt = nowIso()
+  const dimensions = state.dimensions.filter((dimension) => dimension.id !== id)
+  const scenarios = state.scenarios.map((scenario) => {
+    if (!scenario.dimensionWeights.some((item) => item.dimensionId === id)) return scenario
+
+    const remainingWeights = scenario.dimensionWeights.filter((item) => item.dimensionId !== id)
+    return {
+      ...scenario,
+      dimensionWeights: remainingWeights.length > 0
+        ? normalizeScenarioWeightTotal(remainingWeights)
+        : getDefaultDimensionWeights(scenario.category),
+      updatedAt,
+    }
+  })
+  const selectedDimensionId = state.selectedDimensionId === id
+    ? dimensions[0]?.id
+    : dimensions.some((dimension) => dimension.id === state.selectedDimensionId)
+      ? state.selectedDimensionId
+      : dimensions[0]?.id
+
+  return {
+    ...state,
+    dimensions,
+    scenarios,
+    selectedDimensionId,
+    updatedAt,
   }
 }
 

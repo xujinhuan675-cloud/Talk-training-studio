@@ -72,6 +72,7 @@
 
 .scenario-config-header-actions .ui-button,
 .scenario-config-save,
+.scenario-config-delete,
 .scenario-config-weight-head .ui-button,
 .scenario-config-dimension-footer .ui-button {
   min-height: 38px;
@@ -97,6 +98,7 @@
 
 .scenario-config-header-actions .ui-button:hover:not(:disabled),
 .scenario-config-save:hover:not(:disabled),
+.scenario-config-delete:hover:not(:disabled),
 .scenario-config-weight-head .ui-button:hover:not(:disabled),
 .scenario-config-dimension-footer .ui-button:hover:not(:disabled) {
   border-color: var(--config-primary);
@@ -120,6 +122,7 @@
 
 .scenario-config-header-actions .ui-button:disabled,
 .scenario-config-save:disabled,
+.scenario-config-delete:disabled,
 .scenario-config-dimension-footer .ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
@@ -351,6 +354,25 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.scenario-config-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.scenario-config-delete {
+  border-color: var(--config-danger);
+  background: var(--config-surface);
+  color: var(--config-danger);
+}
+
+.scenario-config-delete:hover:not(:disabled) {
+  border-color: var(--config-danger);
+  background: var(--config-danger-soft);
+  color: var(--config-danger);
 }
 
 .scenario-config-editor-head h2,
@@ -689,7 +711,12 @@
     flex-direction: column;
   }
 
+  .scenario-config-editor-actions {
+    width: 100%;
+  }
+
   .scenario-config-save,
+  .scenario-config-delete,
   .scenario-config-weight-head .ui-button,
   .scenario-config-dimension-footer .ui-button {
     width: 100%;

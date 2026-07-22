@@ -10,6 +10,7 @@ import {
   SlidersHorizontal,
   ToggleLeft,
   ToggleRight,
+  Trash2,
 } from 'lucide-react'
 import {
   createBlankScenarioDraft,
@@ -19,6 +20,8 @@ import {
   getDefaultDimensionWeights,
   loadScenarioConfigState,
   normalizeScenarioWeight,
+  removeScenarioConfigDraft,
+  removeScenarioDimension,
   saveScenarioConfigState,
   upsertScenarioConfigDraft,
   upsertScenarioDimension,
@@ -394,6 +397,26 @@ export default function ScenarioConfigPage() {
     void persistState(upsertScenarioConfigDraft(state, draft))
   }
 
+  const deleteScenarioDraft = () => {
+    const title = draft.title.trim() || tr('未命名场景', 'Untitled scenario')
+    const confirmed = window.confirm(tr(
+      '删除场景草稿「{title}」？此操作会同步保存。',
+      'Delete scenario draft "{title}"? This will be saved.',
+      { title },
+    ))
+    if (!confirmed) return
+
+    const nextState = removeScenarioConfigDraft(state, draft.id)
+    if (nextState === state) return
+
+    setDraft(
+      nextState.scenarios.find((scenario) => scenario.id === nextState.selectedScenarioId)
+      ?? nextState.scenarios[0]
+      ?? createBlankScenarioDraft({ title: tr('新的本地场景', 'New local scenario') }),
+    )
+    void persistState(nextState, tr('场景草稿已删除。', 'Scenario draft deleted.'))
+  }
+
   const createScenarioDraft = () => {
     const nextDraft = createBlankScenarioDraft({
       title: tr('新的本地场景', 'New local scenario'),
@@ -417,6 +440,47 @@ export default function ScenarioConfigPage() {
     setDimensionDraft(nextDimension)
     void persistState(upsertScenarioDimension(state, nextDimension), tr('新的维度已保存到后端。', 'New dimension saved to backend.'))
     setActiveTab('dimensions')
+  }
+
+  const deleteDimensionDraft = () => {
+    const name = getDimensionDisplayName(dimensionDraft, tr) || tr('未命名维度', 'Untitled dimension')
+    if (dimensionDraft.source !== 'local') {
+      setNotice({
+        tone: 'warning',
+        message: tr('默认评分维度不能删除，请使用禁用。', 'Default scoring dimensions cannot be deleted. Disable them instead.'),
+      })
+      return
+    }
+
+    const refCount = dimensionRefs.get(dimensionDraft.id) ?? 0
+    const confirmed = window.confirm(refCount > 0
+      ? tr(
+        '删除维度「{name}」？它会从 {count} 个场景的评分权重中移除，并按剩余维度重算权重。',
+        'Delete dimension "{name}"? It will be removed from {count} scenario weight set(s), and remaining weights will be rebalanced.',
+        { name, count: refCount },
+      )
+      : tr(
+        '删除维度「{name}」？此操作会同步保存。',
+        'Delete dimension "{name}"? This will be saved.',
+        { name },
+      ))
+    if (!confirmed) return
+
+    const nextState = removeScenarioDimension(state, dimensionDraft.id)
+    if (nextState === state) return
+
+    setDimensionDraft(
+      nextState.dimensions.find((dimension) => dimension.id === nextState.selectedDimensionId)
+      ?? nextState.dimensions[0]
+      ?? createLocalDimension(tr('新维度', 'New dimension')),
+    )
+    setDraft(
+      nextState.scenarios.find((scenario) => scenario.id === draft.id)
+      ?? nextState.scenarios.find((scenario) => scenario.id === nextState.selectedScenarioId)
+      ?? nextState.scenarios[0]
+      ?? createBlankScenarioDraft({ title: tr('新的本地场景', 'New local scenario') }),
+    )
+    void persistState(nextState, tr('维度已删除。', 'Dimension deleted.'))
   }
 
   const toggleDimensionEnabled = (dimension: ScenarioDimensionDefinition) => {
@@ -511,10 +575,21 @@ export default function ScenarioConfigPage() {
                 <h2>{draft.title || tr('未命名场景', 'Untitled scenario')}</h2>
                 <p>{draft.id} · {getFrameworkLabel(draft.framework, tr)}</p>
               </div>
-              <Button className="scenario-config-save" variant="primary" onClick={saveScenarioDraft} disabled={isRemoteSaving}>
-                <Save size={16} />
-                {isRemoteSaving ? tr('保存中', 'Saving') : tr('保存草稿', 'Save draft')}
-              </Button>
+              <div className="scenario-config-editor-actions">
+                <Button
+                  className="scenario-config-delete"
+                  variant="secondary"
+                  onClick={deleteScenarioDraft}
+                  disabled={isRemoteSaving || state.scenarios.length === 0}
+                >
+                  <Trash2 size={16} />
+                  {tr('删除草稿', 'Delete draft')}
+                </Button>
+                <Button className="scenario-config-save" variant="primary" onClick={saveScenarioDraft} disabled={isRemoteSaving}>
+                  <Save size={16} />
+                  {isRemoteSaving ? tr('保存中', 'Saving') : tr('保存草稿', 'Save draft')}
+                </Button>
+              </div>
             </div>
 
             <div className="scenario-config-form-grid">
@@ -741,10 +816,21 @@ export default function ScenarioConfigPage() {
                 <h2>{getDimensionDisplayName(dimensionDraft, tr) || tr('未命名维度', 'Untitled dimension')}</h2>
                 <p>{dimensionDraft.id}</p>
               </div>
-              <Button className="scenario-config-save" variant="primary" onClick={saveDimensionDraft} disabled={isRemoteSaving}>
-                <Save size={16} />
-                {isRemoteSaving ? tr('保存中', 'Saving') : tr('保存维度', 'Save dimension')}
-              </Button>
+              <div className="scenario-config-editor-actions">
+                <Button
+                  className="scenario-config-delete"
+                  variant="secondary"
+                  onClick={deleteDimensionDraft}
+                  disabled={isRemoteSaving || !dimensionDraft.id.trim()}
+                >
+                  <Trash2 size={16} />
+                  {tr('删除维度', 'Delete dimension')}
+                </Button>
+                <Button className="scenario-config-save" variant="primary" onClick={saveDimensionDraft} disabled={isRemoteSaving}>
+                  <Save size={16} />
+                  {isRemoteSaving ? tr('保存中', 'Saving') : tr('保存维度', 'Save dimension')}
+                </Button>
+              </div>
             </div>
 
             <div className="scenario-config-form-grid">
