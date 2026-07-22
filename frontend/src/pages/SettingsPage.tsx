@@ -1546,29 +1546,6 @@ function ConfigTab() {
         </Button>
       </div>
 
-      <div className="settings-voice-status">
-        <div className="settings-voice-status-item">
-          <KeyRound size={18} />
-          <span>{tr('LLM', 'LLM')}</span>
-          <strong>{config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : t('common.loading')}</strong>
-        </div>
-        <div className="settings-voice-status-item">
-          <Volume2 size={18} />
-          <span>{tr('TTS', 'TTS')}</span>
-          <strong>{config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : t('common.loading')}</strong>
-        </div>
-        <div className="settings-voice-status-item">
-          <Mic size={18} />
-          <span>{tr('STT', 'STT')}</span>
-          <strong>{config ? sourceText(config.stt_api_key_source) : t('common.loading')}</strong>
-        </div>
-        <div className="settings-voice-status-item">
-          <Radio size={18} />
-          <span>{tr('实时语音', 'Realtime')}</span>
-          <strong>{config ? sourceText(config.realtime_api_key_source) : t('common.loading')}</strong>
-        </div>
-      </div>
-
       {notice && (
         <div className={notice.tone === 'error' ? 'settings-error' : 'settings-success'}>
           {notice.text}

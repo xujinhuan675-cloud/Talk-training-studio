@@ -435,11 +435,6 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     navigate(APP_ROUTES.practiceBattle)
   }
 
-  const scenarioLabel = getTrainingScenarioLabel(config.scenario, t)
-  const modeLabel = getModeLabel(mode, t)
-  const feedbackModeLabel = getFeedbackModeLabel(effectiveFeedbackMode, t)
-  const questionMixTotal = config.questionMix.behavioral + config.questionMix.technical + config.questionMix.pressure
-
   return (
     <div className="training-studio-page" data-workbench-skin="training">
       <div className="training-studio-shell">
@@ -470,25 +465,6 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             {error && <div className="training-studio-error">{error}</div>}
           </div>
         </header>
-
-        <section className="training-studio-control-strip" aria-label={t('training.page.summaryAria')}>
-          <div>
-            <span>{t('training.page.summaryScenario')}</span>
-            <strong>{scenarioLabel}</strong>
-          </div>
-          <div>
-            <span>{t('training.page.summaryChannel')}</span>
-            <strong>{modeLabel}</strong>
-          </div>
-          <div>
-            <span>{t('training.page.summaryPractice')}</span>
-            <strong>{feedbackModeLabel}</strong>
-          </div>
-          <div>
-            <span>{t('training.page.summaryQuestions')}</span>
-            <strong>{config.questionCount} / {questionMixTotal}%</strong>
-          </div>
-        </section>
 
         <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
           {modeOptions.map((item) => {

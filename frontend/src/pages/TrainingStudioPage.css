@@ -96,44 +96,6 @@
   opacity: 0.6;
 }
 
-.training-studio-control-strip {
-  order: 1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.training-studio-control-strip > div {
-  min-height: 72px;
-  display: grid;
-  align-content: center;
-  gap: 4px;
-  border: 1px solid var(--training-workbench-border-soft);
-  border-radius: var(--training-workbench-radius);
-  padding: 10px 12px;
-  background: var(--training-workbench-surface);
-  box-shadow: var(--training-workbench-shadow);
-}
-
-.training-studio-control-strip span {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.training-studio-control-strip strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .training-studio-mode-panel {
   order: 2;
   display: grid;
@@ -505,7 +467,6 @@
 }
 
 @media (max-width: 960px) {
-  .training-studio-control-strip,
   .training-studio-mode-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -538,7 +499,6 @@
     width: 100%;
   }
 
-  .training-studio-control-strip,
   .training-studio-mode-panel {
     grid-template-columns: 1fr;
   }
