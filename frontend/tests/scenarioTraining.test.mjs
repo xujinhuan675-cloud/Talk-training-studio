@@ -111,6 +111,13 @@ test('fetchScenarioTrainingCatalog reads backend templates and maps card fields'
             },
             learner_role: 'Salesperson',
             framework: 'prep',
+            dimension_weights: [
+              { dimension_id: 'substance', weight: 40 },
+              { dimension_id: 'structure', weight: 20 },
+              { dimension_id: 'relevance', weight: 20 },
+              { dimension_id: 'credibility', weight: 10 },
+              { dimension_id: 'differentiation', weight: 10 },
+            ],
             training_points: ['快速建立信任'],
           },
         ],
@@ -142,6 +149,13 @@ test('fetchScenarioTrainingCatalog reads backend templates and maps card fields'
       },
       learnerRole: 'Salesperson',
       framework: 'prep',
+      dimensionWeights: [
+        { dimensionId: 'substance', weight: 40 },
+        { dimensionId: 'structure', weight: 20 },
+        { dimensionId: 'relevance', weight: 20 },
+        { dimensionId: 'credibility', weight: 10 },
+        { dimensionId: 'differentiation', weight: 10 },
+      ],
       trainingPoints: ['快速建立信任'],
     },
   ])
@@ -423,6 +437,30 @@ test('scenario task config maps MVP card values to Training Studio enums', () =>
     { dimensionId: 'credibility', weight: 20 },
     { dimensionId: 'differentiation', weight: 10 },
   ])
+})
+
+test('scenario task config prefers configured dimension weights', () => {
+  const scenario = {
+    ...scenarioTrainingData.scenarioTrainingCatalog[0],
+    dimensionWeights: [
+      { dimensionId: 'substance', weight: 40 },
+      { dimensionId: 'structure', weight: 20 },
+      { dimensionId: 'relevance', weight: 20 },
+      { dimensionId: 'credibility', weight: 10 },
+      { dimensionId: 'differentiation', weight: 10 },
+    ],
+  }
+
+  const config = scenarioTrainingData.buildScenarioTrainingTaskConfig(scenario)
+
+  assert.deepEqual(config.rubric_weights, {
+    substance: 0.4,
+    structure: 0.2,
+    relevance: 0.2,
+    credibility: 0.1,
+    differentiation: 0.1,
+  })
+  assert.deepEqual(config.metadata.scenario_training.dimension_weights, scenario.dimensionWeights)
 })
 
 test('scenario prompts carry realistic customer simulation rules', () => {

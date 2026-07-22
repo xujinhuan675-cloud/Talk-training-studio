@@ -1,10 +1,16 @@
 import React from 'react'
-import { Languages, Monitor, Moon, Sun } from 'lucide-react'
+import { Check, Languages, Monitor, Moon, Sun } from 'lucide-react'
 import { useTheme, type ThemePreference } from '../../contexts/ThemeContext'
 import { SUPPORTED_LOCALES, useI18n, type Locale } from '../../i18n'
 import { Button } from '../ui/button'
-import { Select } from '../ui/form'
-import { SegmentedControl, type SegmentedControlOption } from '../ui/segmented-control'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
 import UserMenu from './UserMenu'
 import './TopBar.css'
 
@@ -26,17 +32,9 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
     { value: 'dark', label: t('app.theme.dark'), Icon: Moon },
     { value: 'system', label: t('app.theme.system'), Icon: Monitor },
   ]
-  const themeOptions: SegmentedControlOption<ThemePreference>[] = themeItems.map(({ value, label, Icon }) => ({
-    value,
-    title: `${themeControlLabel}: ${label}`,
-    label: (
-      <>
-        <Icon className="topbar-theme-icon" size={15} aria-hidden="true" />
-        <span>{label}</span>
-      </>
-    ),
-  }))
   const languageLabel = t('app.languageLabel')
+  const currentLocaleLabel = t(SUPPORTED_LOCALES.find((item) => item.value === locale)?.labelKey ?? 'language.zh')
+  const ActiveThemeIcon = themeItems.find((item) => item.value === mode)?.Icon ?? Sun
 
   return (
     <header className="topbar">
@@ -56,31 +54,77 @@ const TopBar: React.FC<TopBarProps> = ({ onSearchClick }) => {
         <kbd className="topbar-search-kbd">&#8984;K</kbd>
       </Button>
       <div className="topbar-right">
-        <SegmentedControl
-          className="topbar-theme-control"
-          ariaLabel={`${themeControlLabel}. ${resolvedThemeLabel}`}
-          data-theme-mode={mode}
-          data-resolved-theme={theme}
-          onValueChange={setMode}
-          options={themeOptions}
-          size="sm"
-          value={mode}
-        />
-        <label className="topbar-language" aria-label={languageLabel} title={languageLabel}>
-          <Languages size={15} />
-          <Select
-            className="topbar-language-select"
-            value={locale}
-            onChange={(event) => setLocale(event.target.value as Locale)}
-            aria-label={languageLabel}
-          >
-            {SUPPORTED_LOCALES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {t(item.labelKey)}
-              </option>
-            ))}
-          </Select>
-        </label>
+        <DropdownMenu>
+          <Button asChild className="topbar-icon-trigger" variant="secondary" size="icon">
+            <DropdownMenuTrigger
+              aria-label={`${themeControlLabel}. ${resolvedThemeLabel}`}
+              title={`${themeControlLabel}: ${resolvedThemeLabel}`}
+            >
+              <ActiveThemeIcon size={16} aria-hidden="true" />
+            </DropdownMenuTrigger>
+          </Button>
+
+          <DropdownMenuContent className="topbar-quick-menu" align="end">
+            <DropdownMenuLabel className="topbar-quick-menu-heading">{themeControlLabel}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              className="topbar-quick-menu-group"
+              value={mode}
+              onValueChange={(value) => setMode(value as ThemePreference)}
+              aria-label={`${themeControlLabel}. ${resolvedThemeLabel}`}
+            >
+              {themeItems.map(({ value, label, Icon }) => {
+                const selected = mode === value
+                return (
+                  <DropdownMenuRadioItem
+                    key={value}
+                    value={value}
+                    className={`topbar-quick-menu-item${selected ? ' selected' : ''}`}
+                  >
+                    <Icon className="topbar-quick-menu-item-icon" size={15} aria-hidden="true" />
+                    <span>{label}</span>
+                    {selected ? <Check className="topbar-quick-menu-check" size={15} aria-hidden="true" /> : null}
+                  </DropdownMenuRadioItem>
+                )
+              })}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <Button asChild className="topbar-icon-trigger" variant="secondary" size="icon">
+            <DropdownMenuTrigger
+              aria-label={`${languageLabel}: ${currentLocaleLabel}`}
+              title={`${languageLabel}: ${currentLocaleLabel}`}
+            >
+              <Languages size={16} aria-hidden="true" />
+            </DropdownMenuTrigger>
+          </Button>
+
+          <DropdownMenuContent className="topbar-quick-menu topbar-language-menu" align="end">
+            <DropdownMenuLabel className="topbar-quick-menu-heading">{languageLabel}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              className="topbar-quick-menu-group"
+              value={locale}
+              onValueChange={(value) => setLocale(value as Locale)}
+              aria-label={languageLabel}
+            >
+              {SUPPORTED_LOCALES.map((item) => {
+                const selected = locale === item.value
+                return (
+                  <DropdownMenuRadioItem
+                    key={item.value}
+                    value={item.value}
+                    className={`topbar-quick-menu-item${selected ? ' selected' : ''}`}
+                  >
+                    <Languages className="topbar-quick-menu-item-icon" size={15} aria-hidden="true" />
+                    <span>{t(item.labelKey)}</span>
+                    {selected ? <Check className="topbar-quick-menu-check" size={15} aria-hidden="true" /> : null}
+                  </DropdownMenuRadioItem>
+                )
+              })}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <UserMenu />
       </div>
     </header>

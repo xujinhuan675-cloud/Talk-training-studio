@@ -1,6 +1,6 @@
 import type { TrainingFeedbackMode, TrainingMode } from '../services/trainingMode'
 import type { TrainingTaskConfigDTO } from '../services/trainingSession'
-import { getDefaultDimensionWeights } from './scenarioConfig'
+import { getDefaultDimensionWeights, type ScenarioDimensionWeight } from './scenarioConfig'
 
 export type ScenarioTrainingDifficulty = 'easy' | 'medium' | 'hard' | 'expert'
 export type ScenarioTrainingCategory = 'sales' | 'customer_service' | 'negotiation' | 'interview' | 'workplace'
@@ -29,6 +29,7 @@ export interface ScenarioTrainingCard {
   learnerRole: string
   framework: 'prep' | 'star' | 'scqa' | 'pyramid'
   trainingPoints: string[]
+  dimensionWeights?: ScenarioDimensionWeight[]
 }
 
 export interface ScenarioTrainingProgressItem extends Pick<ScenarioTrainingCard, 'status' | 'score' | 'lastPracticedAt'> {
@@ -1060,7 +1061,9 @@ export function buildScenarioTrainingTaskConfig(
   scenario: ScenarioTrainingCard,
   options: ScenarioTrainingFeedbackOptions = {},
 ): TrainingTaskConfigDTO {
-  const dimensionWeights = getDefaultDimensionWeights(scenario.category)
+  const dimensionWeights = scenario.dimensionWeights?.length
+    ? scenario.dimensionWeights
+    : getDefaultDimensionWeights(scenario.category)
   const rubricWeights = Object.fromEntries(
     dimensionWeights.map((item) => [item.dimensionId, item.weight / 100]),
   )

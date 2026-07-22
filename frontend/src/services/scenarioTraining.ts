@@ -27,6 +27,8 @@ interface ScenarioTrainingTemplateDTO {
   learner_role: string
   framework: ScenarioTrainingCard['framework']
   training_points: string[]
+  dimension_weights?: Array<{ dimension_id: string; weight: number }> | null
+  dimensionWeights?: Array<{ dimensionId: string; weight: number }> | null
 }
 
 interface ScenarioTrainingProgressDTO {
@@ -54,6 +56,14 @@ export interface ScenarioTrainingProgressScope {
 }
 
 function toScenarioTrainingCard(dto: ScenarioTrainingTemplateDTO): ScenarioTrainingCard {
+  const rawDimensionWeights = dto.dimension_weights ?? dto.dimensionWeights ?? []
+  const dimensionWeights = rawDimensionWeights
+    .map((item) => ({
+      dimensionId: 'dimension_id' in item ? item.dimension_id : item.dimensionId,
+      weight: item.weight,
+    }))
+    .filter((item) => item.dimensionId)
+
   return {
     id: dto.id,
     title: dto.title,
@@ -74,6 +84,7 @@ function toScenarioTrainingCard(dto: ScenarioTrainingTemplateDTO): ScenarioTrain
     learnerRole: dto.learner_role,
     framework: dto.framework,
     trainingPoints: [...dto.training_points],
+    dimensionWeights: dimensionWeights.length > 0 ? dimensionWeights : undefined,
   }
 }
 

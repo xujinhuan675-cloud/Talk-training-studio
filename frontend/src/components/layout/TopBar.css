@@ -67,8 +67,7 @@
 }
 
 .topbar-search:focus-visible,
-.topbar-language:focus-within,
-.topbar-theme-control:focus-within {
+.topbar-icon-trigger:focus-visible {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--green-soft);
   outline: none;
@@ -101,99 +100,100 @@
   min-width: 0;
 }
 
-.topbar-language {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 30px;
-  padding: 0 8px;
+.topbar-icon-trigger {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-base);
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
 }
 
-.topbar-theme-control {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px;
-  background: var(--bg-base);
-  color: var(--text-secondary);
-}
-
-.topbar-theme-control.ui-segmented-control {
-  background: var(--bg-base);
-}
-
-.topbar-theme-control .ui-segmented-control-button {
-  min-width: 30px;
-  height: 24px;
-  min-height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 7px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
-}
-
-.topbar-theme-control .ui-segmented-control-button:hover:not(:disabled) {
-  border-color: transparent;
+.topbar-icon-trigger.ui-button:hover:not(:disabled),
+.topbar-icon-trigger.ui-button[aria-expanded='true'] {
+  border-color: var(--border-accent);
   background: var(--green-soft);
   color: var(--green);
 }
 
-.topbar-theme-control .ui-segmented-control-button[data-state='on'] {
-  border-color: transparent;
+.topbar-quick-menu {
+  width: 196px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--bg-card);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
 }
 
-.topbar-theme-control .ui-segmented-control-button:focus-visible {
-  outline: none;
+.topbar-language-menu {
+  width: 168px;
 }
 
-.topbar-theme-icon {
-  color: var(--green);
-  flex-shrink: 0;
+.topbar-quick-menu-heading {
+  padding: 4px 7px 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
-.topbar-language svg {
-  color: var(--green);
-  flex-shrink: 0;
+.topbar-quick-menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.topbar-language .topbar-language-select.ui-form-control {
-  width: auto;
-  max-width: 82px;
-  min-height: 24px;
+.topbar-quick-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  min-width: 0;
   border: 0;
-  outline: 0;
+  border-radius: 6px;
+  padding: 7px 8px;
   background: transparent;
-  color: inherit;
-  font: inherit;
+  color: var(--text-secondary);
   cursor: pointer;
-  padding: 0 18px 0 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
 }
 
-.topbar-language .topbar-language-select.ui-form-control:focus-visible {
-  border-color: transparent;
-  box-shadow: none;
+.topbar-quick-menu-item:hover,
+.topbar-quick-menu-item.selected {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.topbar-quick-menu-item.selected {
+  color: var(--green);
+}
+
+.topbar-quick-menu-item-icon,
+.topbar-quick-menu-check {
+  flex-shrink: 0;
+}
+
+.topbar-quick-menu-item-icon {
+  color: var(--green);
+}
+
+.topbar-quick-menu-item span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-quick-menu-check {
+  margin-left: auto;
+  color: var(--green);
 }
 
 @media (max-width: 767px) {
@@ -216,11 +216,11 @@
     gap: 8px;
   }
 
-  .topbar-theme-control .ui-segmented-control-button {
-    padding: 0;
+  .topbar-quick-menu {
+    width: min(196px, calc(100vw - 20px));
   }
 
-  .topbar-theme-control .ui-segmented-control-button span {
-    display: none;
+  .topbar-language-menu {
+    width: min(168px, calc(100vw - 20px));
   }
 }

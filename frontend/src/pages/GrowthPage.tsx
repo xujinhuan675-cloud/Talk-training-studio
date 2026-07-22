@@ -145,6 +145,14 @@ function buildFeedbackSummary(
   return worst?.[1]?.suggestion || ''
 }
 
+function xpProgressText(currentXP: number, nextLevelXP: number | null, tr: TranslateInline): string {
+  if (nextLevelXP === null) return tr('{xp} XP · 已达最高等级', '{xp} XP · max level', { xp: currentXP })
+  return tr('{xp} / {next} XP', '{xp} / {next} XP', {
+    xp: currentXP,
+    next: nextLevelXP,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -156,6 +164,7 @@ const GrowthPage: React.FC = () => {
     dashboard,
     loading,
     error,
+    levelInfo,
     skillPath,
   } = useGrowth()
 
@@ -171,6 +180,49 @@ const GrowthPage: React.FC = () => {
         'Review ability trends, skill path, and recent performance after evaluations.',
       )}
     />
+  )
+  const growthLevelText = tr('Lv.{level}', 'Lv.{level}', { level: levelInfo.level })
+  const growthXpText = xpProgressText(levelInfo.currentXP, levelInfo.nextLevelXP, tr)
+  const growthProgress = Math.round(levelInfo.progress * 100)
+  const remainingXP = levelInfo.nextLevelXP === null
+    ? 0
+    : Math.max(0, levelInfo.nextLevelXP - levelInfo.currentXP)
+  const nextLevelText = levelInfo.nextLevelXP === null
+    ? tr('已达当前最高等级', 'Current max level reached')
+    : tr('还差 {xp} XP 到 Lv.{level}', '{xp} XP to Lv.{level}', {
+        xp: remainingXP,
+        level: levelInfo.level + 1,
+      })
+  const levelPanel = (
+    <section
+      className="gp-level-panel"
+      aria-label={tr('等级与经验值', 'Level and XP')}
+      title={tr(
+        'XP 来自训练复盘评分，分数越高获得越多。',
+        'XP comes from training review scores; higher scores grant more XP.',
+      )}
+    >
+      <div className="gp-level-icon" aria-hidden="true">
+        <Sparkles size={18} />
+      </div>
+      <div className="gp-level-copy">
+        <span>{tr('训练等级', 'Training level')}</span>
+        <strong>{growthLevelText}</strong>
+      </div>
+      <div className="gp-level-progress-box">
+        <div className="gp-level-progress-head">
+          <span>{tr('升级进度', 'Level progress')}</span>
+          <strong>{growthProgress}%</strong>
+        </div>
+        <div className="gp-level-progress" aria-hidden="true">
+          <span style={{ width: `${growthProgress}%` }} />
+        </div>
+        <div className="gp-level-progress-scale">
+          <span>{growthXpText}</span>
+          <span>{nextLevelText}</span>
+        </div>
+      </div>
+    </section>
   )
 
   const handleGenerateCard = async () => {
@@ -230,6 +282,7 @@ const GrowthPage: React.FC = () => {
     return (
       <PageShell className="growth-page">
         {pageHeader}
+        {levelPanel}
         <div className="gp-empty">
           <div className="gp-empty-icon">
             <Sparkles size={48} strokeWidth={1.5} />
@@ -252,6 +305,7 @@ const GrowthPage: React.FC = () => {
   return (
     <PageShell className="growth-page">
       {pageHeader}
+      {levelPanel}
       {/* 1. Overall Score Header */}
       <section className="gp-score-header">
         <div className="gp-score-header-top">

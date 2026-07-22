@@ -49,6 +49,97 @@
   font-size: 14px;
 }
 
+.gp-level-panel {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) minmax(220px, 300px);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--gp-panel-radius);
+  padding: 14px 16px;
+  background: var(--bg-card);
+}
+
+.gp-level-icon {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.gp-level-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.gp-level-copy span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.gp-level-copy strong {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.gp-level-progress-box {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.gp-level-progress-head,
+.gp-level-progress-scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gp-level-progress-head span,
+.gp-level-progress-scale span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.gp-level-progress-head strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.gp-level-progress-scale span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gp-level-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+}
+
+.gp-level-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width var(--transition-normal);
+}
+
 /* ---------- 1. Overall Score Header ---------- */
 
 .gp-score-header {
@@ -549,6 +640,19 @@
 /* ---------- Responsive ---------- */
 
 @media (max-width: 640px) {
+  .gp-level-panel {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .gp-level-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .gp-level-progress-box {
+    grid-column: 1 / -1;
+  }
+
   .gp-score-summary {
     flex-direction: column;
     gap: 16px;

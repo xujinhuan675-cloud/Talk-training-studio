@@ -80,6 +80,9 @@ from application.services.stakeholder.room_access_policy import (
 from application.services.stakeholder.sse import room_event_bus
 from application.services.conversation_service import ConversationApplicationService
 from application.services.training_studio.catalog_service import (
+    ScenarioTrainingDimensionWeightDTO,
+    ScenarioTrainingPersonaDTO,
+    ScenarioTrainingTemplateDTO,
     TrainingCatalogService,
     TrainingTaskConfigDTO,
 )
@@ -584,6 +587,39 @@ def get_training_catalog_service() -> TrainingCatalogService:
 
 def get_training_scenario_config_service() -> TrainingScenarioConfigService:
     return _training_scenario_config_service
+
+
+def _scenario_templates_from_config(config: ScenarioConfigStateDTO) -> list[ScenarioTrainingTemplateDTO]:
+    return [
+        ScenarioTrainingTemplateDTO(
+            id=draft.id,
+            title=draft.title,
+            description=draft.description,
+            customer_profile=draft.customer_profile,
+            difficulty=draft.difficulty,
+            category=draft.category,
+            required=draft.required,
+            status="not_started",
+            opening_line=draft.opening_line,
+            persona=ScenarioTrainingPersonaDTO(
+                name=draft.persona.name,
+                role=draft.persona.role,
+                style=draft.persona.style,
+            ),
+            learner_role=draft.learner_role,
+            framework=draft.framework,
+            training_points=list(draft.training_points),
+            dimension_weights=[
+                ScenarioTrainingDimensionWeightDTO(
+                    dimension_id=weight.dimension_id,
+                    weight=weight.weight,
+                )
+                for weight in draft.dimension_weights
+            ],
+        )
+        for draft in config.scenarios
+        if draft.enabled
+    ]
 
 
 def get_storybank_service() -> StoryBankService:
@@ -2575,9 +2611,10 @@ async def get_catalog(
 
 @router.get("/scenario-templates", summary="Get scenario training templates")
 async def get_scenario_templates(
-    svc: TrainingCatalogService = Depends(get_training_catalog_service),
+    scenario_config_svc: TrainingScenarioConfigService = Depends(get_training_scenario_config_service),
 ):
-    templates = svc.get_scenario_templates()
+    config = scenario_config_svc.get_config()
+    templates = _scenario_templates_from_config(config)
     return success_response(data=[template.model_dump(mode="json") for template in templates])
 
 

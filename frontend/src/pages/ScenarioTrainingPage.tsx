@@ -359,7 +359,6 @@ export default function ScenarioTrainingPage() {
         <SegmentedControl
           ariaLabel={tr('训练模式', 'Training mode')}
           className="scenario-training-mode"
-          label={tr('形式', 'Channel')}
           value={mode}
           onValueChange={setMode}
           options={modeOptions.map((option) => ({
@@ -371,7 +370,6 @@ export default function ScenarioTrainingPage() {
         <SegmentedControl
           ariaLabel={tr('反馈模式', 'Feedback mode')}
           className="scenario-training-mode feedback"
-          label={tr('练法', 'Practice')}
           value={feedbackMode}
           onValueChange={setFeedbackMode}
           options={feedbackModeOptions.map((option) => ({

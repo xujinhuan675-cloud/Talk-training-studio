@@ -217,6 +217,7 @@ async def test_scenario_templates_expose_business_training_cards(client: AsyncCl
     assert new_customer["opening_line"]
     assert new_customer["persona"]["name"]
     assert len(new_customer["training_points"]) >= 1
+    assert sum(item["weight"] for item in new_customer["dimension_weights"]) == pytest.approx(100)
 
     assert any(item["category"] == "customer_service" for item in data)
     assert by_id["renewal-price-negotiation"]["difficulty"] == "expert"
@@ -302,6 +303,37 @@ async def test_scenario_config_persists_dimension_weights(client: AsyncClient) -
     data = await read_scenario_config_state(client, headers={"X-Mock-User": "leader"})
     saved = next(item for item in data["scenarios"] if item["id"] == scenario_id)
     assert saved["dimensionWeights"] == scenario_dimension_weights()
+
+
+@pytest.mark.asyncio
+async def test_scenario_templates_use_saved_scenario_config(client: AsyncClient) -> None:
+    payload = await read_scenario_config_state(client)
+    scenario_id = payload["scenarios"][0]["id"]
+    disabled_id = payload["scenarios"][1]["id"]
+    payload["scenarios"][0]["title"] = "Configured training template"
+    payload["scenarios"][0]["required"] = False
+    payload["scenarios"][0]["dimensionWeights"] = scenario_dimension_weights()
+    payload["scenarios"][1]["enabled"] = False
+
+    save_resp = await client.put(
+        "/api/v1/training-studio/scenario-config",
+        headers={"X-Mock-User": "admin"},
+        json=payload,
+    )
+    assert save_resp.status_code == 200
+
+    resp = await client.get("/api/v1/training-studio/scenario-templates")
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    by_id = {item["id"]: item for item in data}
+    assert disabled_id not in by_id
+    assert by_id[scenario_id]["title"] == "Configured training template"
+    assert by_id[scenario_id]["required"] is False
+    assert by_id[scenario_id]["dimension_weights"] == [
+        {"dimension_id": item["dimensionId"], "weight": item["weight"]}
+        for item in scenario_dimension_weights()
+    ]
 
 
 @pytest.mark.asyncio

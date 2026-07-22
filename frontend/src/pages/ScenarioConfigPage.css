@@ -504,10 +504,12 @@
   gap: 8px;
 }
 
-.scenario-config-check-option {
+.scenario-config-switch-row .scenario-config-check-option {
   min-height: 38px;
   flex: 1 1 110px;
   display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
@@ -522,24 +524,36 @@
   transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.scenario-config-check-option:hover,
-.scenario-config-check-option.selected {
-  border-color: var(--config-accent);
-  background: var(--config-accent-soft);
-  color: var(--config-accent);
+.scenario-config-switch-row .scenario-config-check-option:hover,
+.scenario-config-switch-row .scenario-config-check-option.selected {
+  border-color: var(--config-border-accent);
+  background: var(--config-primary-soft);
+  color: var(--config-primary);
 }
 
-.scenario-config-check-option .ui-checkbox {
+.scenario-config-switch-row .scenario-config-check-option:focus-within {
+  border-color: var(--config-border-accent);
+  box-shadow: 0 0 0 3px var(--config-focus);
+  outline: none;
+}
+
+.scenario-config-switch-row .scenario-config-check-option .ui-checkbox {
   width: 16px;
   height: 16px;
-  --ui-checkbox-accent: var(--config-accent);
+  flex: 0 0 16px;
+  --ui-checkbox-accent: var(--config-primary);
 }
 
-.scenario-config-check-option > span,
+.scenario-config-switch-row .scenario-config-check-option > span,
 .scenario-config-weight-option > span {
   color: inherit;
   font-size: inherit;
   font-weight: inherit;
+}
+
+.scenario-config-switch-row .scenario-config-check-option > span {
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .scenario-config-weight-editor {

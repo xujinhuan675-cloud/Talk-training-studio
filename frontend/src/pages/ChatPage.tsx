@@ -1069,17 +1069,17 @@ function ChatArea() {
   const scenarioDifficultyFromState = getScenarioDifficultyFromState(location.state)
   const scenarioCategoryFromState = getScenarioCategoryFromState(location.state)
   const scenarioRequiredFromState = getStateBooleanValue(location.state, 'scenarioRequired')
-  const scenarioPersonaRole = scenarioTrainingCard?.persona.role || scenarioPersonaRoleFromState
-  const scenarioLearnerRole = scenarioTrainingCard?.learnerRole || scenarioLearnerRoleFromState
-  const scenarioCategory = scenarioTrainingCard?.category || scenarioCategoryFromState
-  const scenarioDifficulty = scenarioTrainingCard?.difficulty || scenarioDifficultyFromState
-  const scenarioRequired = scenarioTrainingCard ? scenarioTrainingCard.required : scenarioRequiredFromState
-  const scenarioTrainingPoints = scenarioTrainingCard?.trainingPoints.length
-    ? scenarioTrainingCard.trainingPoints
-    : scenarioTrainingPointsFromState
+  const scenarioPersonaRole = scenarioPersonaRoleFromState || scenarioTrainingCard?.persona.role
+  const scenarioLearnerRole = scenarioLearnerRoleFromState || scenarioTrainingCard?.learnerRole
+  const scenarioCategory = scenarioCategoryFromState || scenarioTrainingCard?.category
+  const scenarioDifficulty = scenarioDifficultyFromState || scenarioTrainingCard?.difficulty
+  const scenarioRequired = scenarioRequiredFromState ?? scenarioTrainingCard?.required
+  const scenarioTrainingPoints = scenarioTrainingPointsFromState.length
+    ? scenarioTrainingPointsFromState
+    : scenarioTrainingCard?.trainingPoints ?? []
   const trainingBackPath = scenarioTrainingId ? APP_ROUTES.practiceScenarios : APP_ROUTES.practiceCustom
-  const trainingContextTitle = scenarioTrainingCard?.title
-    || scenarioTitleFromState
+  const trainingContextTitle = scenarioTitleFromState
+    || scenarioTrainingCard?.title
     || chat.selectedRoom?.room.name
     || tr('训练会话', 'Training session')
   const trainingContextSubtitle = hasScenarioTrainingContext
@@ -1104,13 +1104,13 @@ function ChatArea() {
     { label: getInteractionModeLabel(interactionMode, tr), tone: 'mode' },
     isTrainingSession ? { label: getTrainingFeedbackModeLabel(trainingFeedbackMode, tr), tone: isDrillFeedbackMode ? 'live' : 'mode' } : null,
   ])
-  const trainingContextDescription = scenarioTrainingCard?.description
-    || scenarioDescriptionFromState
+  const trainingContextDescription = scenarioDescriptionFromState
+    || scenarioTrainingCard?.description
     || scenarioOpeningLineFromState
     || tr('本轮训练已连接 AI 陪练，完成对话后可结束练习并生成复盘。', 'This training session is connected to an AI coach. End the practice when you are ready for review.')
-  const trainingContextOpeningLine = scenarioTrainingCard?.openingLine || scenarioOpeningLineFromState
-  const trainingContextCustomerProfile = scenarioTrainingCard?.customerProfile || scenarioCustomerProfileFromState
-  const trainingContextPersonaStyle = scenarioTrainingCard?.persona.style || scenarioPersonaStyleFromState
+  const trainingContextOpeningLine = scenarioOpeningLineFromState || scenarioTrainingCard?.openingLine
+  const trainingContextCustomerProfile = scenarioCustomerProfileFromState || scenarioTrainingCard?.customerProfile
+  const trainingContextPersonaStyle = scenarioPersonaStyleFromState || scenarioTrainingCard?.persona.style
   const trainingContextPoints = scenarioTrainingPoints.slice(0, 3).join(' / ')
   const trainingInputPlaceholder = scenarioCategory === 'sales' || scenarioCategory === 'customer_service'
     ? tr('输入你想对客户说的话，Enter 发送', 'Type what you want to say to the customer. Enter to send')

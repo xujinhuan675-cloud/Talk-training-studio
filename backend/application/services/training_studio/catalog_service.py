@@ -64,6 +64,11 @@ class ScenarioTrainingPersonaDTO(BaseModel):
     style: str
 
 
+class ScenarioTrainingDimensionWeightDTO(BaseModel):
+    dimension_id: str
+    weight: float
+
+
 class ScenarioTrainingTemplateDTO(BaseModel):
     id: str
     title: str
@@ -78,6 +83,7 @@ class ScenarioTrainingTemplateDTO(BaseModel):
     learner_role: str
     framework: str
     training_points: list[str]
+    dimension_weights: list[ScenarioTrainingDimensionWeightDTO] = Field(default_factory=list)
     score: int | None = None
     last_practiced_at: str | None = None
 
