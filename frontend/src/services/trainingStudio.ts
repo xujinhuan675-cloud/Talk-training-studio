@@ -94,6 +94,20 @@ export interface PipecatRealtimeReadiness {
   blockingReasons?: RealtimeReadinessIssue[]
 }
 
+export interface PipecatProviderCatalogChannelSummary {
+  count: number
+  providers: string[]
+  runtimeIntegrated: string[]
+  inventoryOnly: string[]
+}
+
+export interface PipecatProviderCatalogSummary {
+  schemaVersion: number
+  packageVersion?: string | null
+  source?: string
+  channels: Record<string, PipecatProviderCatalogChannelSummary>
+}
+
 export interface PipecatRealtimeCapability {
   available: boolean
   coreAvailable: boolean
@@ -109,6 +123,7 @@ export interface PipecatRealtimeCapability {
   readyForCall: boolean
   readiness?: PipecatRealtimeReadiness
   errors?: RealtimeReadinessIssue[]
+  providerCatalogSummary?: PipecatProviderCatalogSummary
   sourceSnapshot?: Record<string, unknown>
 }
 

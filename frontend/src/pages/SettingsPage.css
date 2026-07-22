@@ -370,28 +370,6 @@
   white-space: nowrap;
 }
 
-.settings-voice-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.settings-form-panel.settings-voice-panel {
-  margin-top: 0;
-}
-
-.settings-voice-panel-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  color: var(--green);
-}
-
-.settings-voice-panel-title h4 {
-  margin: 0;
-}
-
 .settings-voice-field {
   margin-bottom: 14px;
 }
@@ -417,6 +395,230 @@
   font-size: 13px;
 }
 
+.settings-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 28%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.settings-voice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-voice-module {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(190px, 280px) 24px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.settings-voice-module:hover,
+.settings-voice-module:focus-visible {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-sm);
+  outline: none;
+}
+
+.settings-voice-module-icon {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.settings-voice-module-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.settings-voice-module-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-voice-module-title-row strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-voice-module-subtitle,
+.settings-voice-module-catalog {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-voice-module-catalog {
+  color: var(--text-muted);
+}
+
+.settings-voice-module-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+  gap: 2px;
+}
+
+.settings-voice-module-meta span,
+.settings-voice-module-meta strong,
+.settings-voice-module-meta small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-voice-module-meta span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.settings-voice-module-meta strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-voice-module-meta small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.settings-voice-module-chevron {
+  color: var(--text-muted);
+}
+
+.settings-voice-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.settings-voice-badge.ready {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.settings-voice-badge.warning,
+.settings-voice-badge.neutral {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.settings-voice-badge.blocked {
+  background: var(--rose-soft);
+  color: var(--rose);
+}
+
+.settings-voice-dialog {
+  width: min(620px, calc(100vw - 32px));
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  padding: 0;
+}
+
+.settings-voice-dialog-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-voice-dialog-heading {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.settings-voice-dialog-title .ui-dialog-description {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-voice-dialog-body {
+  --ui-form-control-padding-token: 9px 12px;
+  --ui-form-label-font-size-token: 13px;
+  padding: 18px 20px 4px;
+}
+
+.settings-voice-dialog-actions {
+  justify-content: flex-end;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-voice-catalog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.settings-voice-catalog-row strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: right;
+}
+
+.settings-voice-readonly-grid {
+  display: grid;
+  gap: 8px;
+}
+
 .settings-voice-actions {
   justify-content: flex-end;
 }
@@ -430,12 +632,17 @@
 }
 
 @media (max-width: 1100px) {
-  .settings-voice-grid {
-    grid-template-columns: 1fr;
-  }
-
   .settings-voice-status {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-voice-module {
+    grid-template-columns: 42px minmax(0, 1fr) 24px;
+  }
+
+  .settings-voice-module-meta {
+    grid-column: 2;
+    align-items: flex-start;
   }
 }
 
@@ -448,6 +655,30 @@
 
   .settings-voice-status {
     grid-template-columns: 1fr;
+  }
+
+  .settings-voice-module {
+    grid-template-columns: 36px minmax(0, 1fr);
+    align-items: flex-start;
+  }
+
+  .settings-voice-module-chevron {
+    display: none;
+  }
+
+  .settings-voice-module-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .settings-voice-module-subtitle,
+  .settings-voice-module-catalog {
+    white-space: normal;
+  }
+
+  .settings-voice-module-meta {
+    grid-column: 1 / -1;
   }
 }
 

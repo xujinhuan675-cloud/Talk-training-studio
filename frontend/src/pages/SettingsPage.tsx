@@ -15,6 +15,10 @@ import {
   RefreshCw,
   Save,
   KeyRound,
+  ChevronRight,
+  CheckCircle2,
+  AlertTriangle,
+  Cable,
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppContext } from '../contexts/AppContext'
@@ -50,10 +54,17 @@ import {
   type VoicePreferenceConfig,
 } from '../services/voiceConfig'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../components/ui/dialog'
 import { Button } from '../components/ui/button'
 import { Checkbox } from '../components/ui/checkbox'
 import { Field, Input, Select, Textarea } from '../components/ui/form'
 import { SegmentedControl } from '../components/ui/segmented-control'
+import {
+  fetchRealtimeCapabilities,
+  type PipecatProviderCatalogChannelSummary,
+  type PipecatProviderCatalogSummary,
+  type RealtimeCapabilities,
+} from '../services/trainingStudio'
 import { useI18n, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './SettingsPage.css'
@@ -1010,13 +1021,138 @@ function toVoiceForm(config: VoicePreferenceConfig): VoicePreferenceForm {
   }
 }
 
+type VoiceModuleKey = 'llm' | 'stt' | 'tts' | 'realtime' | 'transport'
+type VoiceModuleTone = 'ready' | 'warning' | 'blocked' | 'neutral'
+
+interface VoiceProviderOption {
+  value: string
+  label: string
+  status: 'runtime' | 'pipecat' | 'inventory'
+  disabled?: boolean
+}
+
+const RUNTIME_TTS_PROVIDERS: VoiceProviderOption[] = [
+  { value: 'openrouter', label: 'OpenRouter', status: 'runtime' },
+  { value: 'minimax', label: 'MiniMax', status: 'runtime' },
+  { value: 'elevenlabs', label: 'ElevenLabs', status: 'runtime' },
+]
+
+const RUNTIME_STT_PROVIDERS: VoiceProviderOption[] = [
+  { value: 'whisper', label: 'Whisper compatible', status: 'runtime' },
+  { value: 'minimax', label: 'MiniMax', status: 'runtime' },
+]
+
+const TTS_PROVIDER_DEFAULTS: Record<string, Partial<VoicePreferenceForm>> = {
+  openrouter: {
+    ttsBaseUrl: 'https://openrouter.ai/api/v1',
+    ttsModel: 'mistralai/voxtral-mini-tts-2603',
+  },
+  minimax: {
+    ttsBaseUrl: 'https://api.minimax.io/v1',
+    ttsModel: 'speech-2.8-hd',
+  },
+  elevenlabs: {
+    ttsBaseUrl: 'https://api.elevenlabs.io/v1',
+    ttsModel: 'eleven_multilingual_v2',
+  },
+}
+
+const STT_PROVIDER_DEFAULTS: Record<string, Partial<VoicePreferenceForm>> = {
+  whisper: {
+    sttBaseUrl: 'https://openrouter.ai/api/v1',
+    sttModel: 'openai/whisper-1',
+  },
+  minimax: {
+    sttBaseUrl: 'https://api.minimax.io/v1',
+    sttModel: 'speech-01',
+  },
+}
+
+function titleCaseProvider(value: string): string {
+  const known: Record<string, string> = {
+    openai: 'OpenAI',
+    openrouter: 'OpenRouter',
+    minimax: 'MiniMax',
+    elevenlabs: 'ElevenLabs',
+    deepgram: 'Deepgram',
+    whisper: 'Whisper compatible',
+    google: 'Google',
+    azure: 'Azure',
+    aws: 'AWS',
+    groq: 'Groq',
+    xai: 'xAI',
+    websocket: 'WebSocket',
+    silero: 'Silero',
+  }
+  if (known[value]) return known[value]
+  return value
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => known[part] ?? `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ')
+}
+
+function providerCatalogChannel(
+  catalog: PipecatProviderCatalogSummary | null | undefined,
+  channel: string,
+): PipecatProviderCatalogChannelSummary | null {
+  return catalog?.channels?.[channel] ?? null
+}
+
+function providerOptionsFromCatalog(
+  channel: PipecatProviderCatalogChannelSummary | null,
+  runtimeProviders: VoiceProviderOption[],
+): VoiceProviderOption[] {
+  const runtimeValues = new Set(runtimeProviders.map((option) => option.value))
+  const pipecatOptions = Array.from(new Set(channel?.runtimeIntegrated ?? []))
+    .filter((provider) => !runtimeValues.has(provider))
+    .sort((a, b) => a.localeCompare(b))
+    .map((provider): VoiceProviderOption => ({
+      value: provider,
+      label: titleCaseProvider(provider),
+      status: 'pipecat',
+      disabled: true,
+    }))
+  const knownValues = new Set([...runtimeValues, ...pipecatOptions.map((option) => option.value)])
+  const inventoryOptions = Array.from(new Set(channel?.inventoryOnly ?? []))
+    .filter((provider) => !knownValues.has(provider))
+    .sort((a, b) => a.localeCompare(b))
+    .map((provider): VoiceProviderOption => ({
+      value: provider,
+      label: titleCaseProvider(provider),
+      status: 'inventory',
+      disabled: true,
+    }))
+  return [...pipecatOptions, ...inventoryOptions]
+}
+
+function voiceProviderLabel(provider: string, options: VoiceProviderOption[]): string {
+  return options.find((option) => option.value === provider)?.label ?? titleCaseProvider(provider)
+}
+
+function countCatalogProviders(channel: PipecatProviderCatalogChannelSummary | null): string {
+  if (!channel) return '0'
+  return String(channel.providers?.length ?? channel.count ?? 0)
+}
+
+function llmEndpointLabel(baseUrl: string): string {
+  const lower = baseUrl.toLowerCase()
+  if (lower.includes('openrouter.ai')) return 'OpenRouter compatible'
+  if (lower.includes('openai.com')) return 'OpenAI compatible'
+  if (lower.includes('flowguide')) return 'FlowGuide gateway'
+  return 'Custom compatible endpoint'
+}
+
 function ConfigTab() {
   const { t, tr } = useI18n()
   const [config, setConfig] = useState<VoicePreferenceConfig | null>(null)
+  const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [form, setForm] = useState<VoicePreferenceForm>(DEFAULT_VOICE_FORM)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [activeModule, setActiveModule] = useState<VoiceModuleKey | null>(null)
 
   const updateForm = (patch: Partial<VoicePreferenceForm>) => {
     setForm((current) => ({ ...current, ...patch }))
@@ -1025,10 +1161,24 @@ function ConfigTab() {
   const loadConfig = useCallback(async () => {
     setLoading(true)
     setNotice(null)
+    setCatalogError(null)
     try {
-      const next = await fetchVoiceConfig()
+      const [voiceResult, realtimeResult] = await Promise.allSettled([
+        fetchVoiceConfig(),
+        fetchRealtimeCapabilities(),
+      ])
+      if (voiceResult.status === 'rejected') {
+        throw voiceResult.reason
+      }
+      const next = voiceResult.value
       setConfig(next)
       setForm(toVoiceForm(next))
+      if (realtimeResult.status === 'fulfilled') {
+        setRealtimeCapabilities(realtimeResult.value)
+      } else {
+        setRealtimeCapabilities(null)
+        setCatalogError(getErrorMessage(realtimeResult.reason))
+      }
     } catch (err) {
       setNotice({ tone: 'error', text: getErrorMessage(err) })
     } finally {
@@ -1088,6 +1238,298 @@ function ConfigTab() {
     }
   }
 
+  const catalog = realtimeCapabilities?.pipecat.providerCatalogSummary ?? null
+  const sttChannel = providerCatalogChannel(catalog, 'stt')
+  const ttsChannel = providerCatalogChannel(catalog, 'tts')
+  const llmChannel = providerCatalogChannel(catalog, 'llm')
+  const realtimeChannel = providerCatalogChannel(catalog, 'realtime')
+  const transportChannel = providerCatalogChannel(catalog, 'transport')
+  const vadChannel = providerCatalogChannel(catalog, 'vad')
+  const turnChannel = providerCatalogChannel(catalog, 'turn_detection')
+
+  const ttsProviderOptions = [
+    ...RUNTIME_TTS_PROVIDERS,
+    ...providerOptionsFromCatalog(ttsChannel, RUNTIME_TTS_PROVIDERS),
+  ]
+  const sttProviderOptions = [
+    ...RUNTIME_STT_PROVIDERS,
+    ...providerOptionsFromCatalog(sttChannel, RUNTIME_STT_PROVIDERS),
+  ]
+
+  const applyTtsProvider = (provider: string) => {
+    if (!RUNTIME_TTS_PROVIDERS.some((option) => option.value === provider)) return
+    updateForm({
+      ttsProvider: provider,
+      ...(TTS_PROVIDER_DEFAULTS[provider] ?? {}),
+    })
+  }
+
+  const applySttProvider = (provider: string) => {
+    if (!RUNTIME_STT_PROVIDERS.some((option) => option.value === provider)) return
+    updateForm({
+      sttProvider: provider,
+      ...(STT_PROVIDER_DEFAULTS[provider] ?? {}),
+    })
+  }
+
+  const toneLabel = (tone: VoiceModuleTone) => {
+    if (tone === 'ready') return tr('可用', 'Ready')
+    if (tone === 'warning') return tr('需配置', 'Needs config')
+    if (tone === 'blocked') return tr('未接入', 'Not wired')
+    return tr('只读', 'Read-only')
+  }
+
+  const voiceModules: Array<{
+    key: VoiceModuleKey
+    icon: React.ReactNode
+    title: string
+    subtitle: string
+    provider: string
+    model: string
+    catalog: string
+    tone: VoiceModuleTone
+    note: string
+  }> = [
+    {
+      key: 'llm',
+      icon: <KeyRound size={18} />,
+      title: tr('LLM 回复生成', 'LLM response generation'),
+      subtitle: tr('组合语音和实时语音都会用到的回复模型', 'Response model used by turn-based and realtime voice'),
+      provider: llmEndpointLabel(form.llmBaseUrl),
+      model: form.llmDefaultModel,
+      catalog: tr('Pipecat LLM：{count} 个 provider，已接入 OpenAI / OpenRouter', 'Pipecat LLM: {count} providers, OpenAI / OpenRouter wired', {
+        count: countCatalogProviders(llmChannel),
+      }),
+      tone: config?.llm_api_key_configured ? 'ready' : 'warning',
+      note: config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : t('common.loading'),
+    },
+    {
+      key: 'stt',
+      icon: <Mic size={18} />,
+      title: tr('STT 语音识别', 'STT speech recognition'),
+      subtitle: tr('回合制语音的录音转文字模块', 'Recording-to-text module for turn-based voice'),
+      provider: voiceProviderLabel(form.sttProvider, sttProviderOptions),
+      model: form.sttModel,
+      catalog: tr('Pipecat STT：{count} 个 provider，当前回合制只接入 Whisper / MiniMax', 'Pipecat STT: {count} providers, turn-based runtime supports Whisper / MiniMax', {
+        count: countCatalogProviders(sttChannel),
+      }),
+      tone: config?.stt_api_key_source === 'missing' ? 'warning' : 'ready',
+      note: config ? sourceText(config.stt_api_key_source) : t('common.loading'),
+    },
+    {
+      key: 'tts',
+      icon: <Volume2 size={18} />,
+      title: tr('TTS 语音合成', 'TTS speech synthesis'),
+      subtitle: tr('回合制语音的文字转语音模块', 'Text-to-speech module for turn-based voice'),
+      provider: voiceProviderLabel(form.ttsProvider, ttsProviderOptions),
+      model: form.ttsModel,
+      catalog: tr('Pipecat TTS：{count} 个 provider，当前回合制接入 OpenRouter / MiniMax / ElevenLabs', 'Pipecat TTS: {count} providers, turn-based runtime supports OpenRouter / MiniMax / ElevenLabs', {
+        count: countCatalogProviders(ttsChannel),
+      }),
+      tone: config?.tts_api_key_configured ? 'ready' : 'warning',
+      note: config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : t('common.loading'),
+    },
+    {
+      key: 'realtime',
+      icon: <Radio size={18} />,
+      title: tr('Realtime 实时语音', 'Realtime voice'),
+      subtitle: tr('Pipecat 实时语音会话：连续音频、打断、实时输出', 'Pipecat session for continuous audio, interruption, and realtime output'),
+      provider: 'Pipecat / OpenAI services',
+      model: form.realtimeModel,
+      catalog: tr('Pipecat realtime：{count} 个 provider，当前运行态仍是 OpenAI 服务组合', 'Pipecat realtime: {count} providers, current runtime still uses OpenAI service composition', {
+        count: countCatalogProviders(realtimeChannel),
+      }),
+      tone: realtimeCapabilities?.pipecat.readyForCall ? 'ready' : (config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'),
+      note: config ? sourceText(config.realtime_api_key_source) : t('common.loading'),
+    },
+    {
+      key: 'transport',
+      icon: <Cable size={18} />,
+      title: tr('Transport / VAD / Turn', 'Transport / VAD / Turn'),
+      subtitle: tr('实时链路的传输、端点检测和回合判断', 'Transport, voice activity detection, and turn detection for realtime voice'),
+      provider: 'WebSocket + Silero + Pipecat turn strategies',
+      model: tr('固定运行组件', 'Fixed runtime components'),
+      catalog: tr('Transport {transport} 个、VAD {vad} 个、Turn {turn} 个；当前只运行 WebSocket / Silero / Pipecat turn', 'Transport {transport}, VAD {vad}, Turn {turn}; current runtime uses WebSocket / Silero / Pipecat turn', {
+        transport: countCatalogProviders(transportChannel),
+        vad: countCatalogProviders(vadChannel),
+        turn: countCatalogProviders(turnChannel),
+      }),
+      tone: realtimeCapabilities?.pipecat.websocketAvailable && realtimeCapabilities?.pipecat.vadAvailable && realtimeCapabilities?.pipecat.turnDetectionAvailable ? 'ready' : 'warning',
+      note: tr('配置只读，后续按 provider adapter 切片开放', 'Read-only until provider adapters are wired slice by slice'),
+    },
+  ]
+
+  const activeModuleMeta = voiceModules.find((module) => module.key === activeModule) ?? null
+
+  const renderProviderSelect = (
+    value: string,
+    options: VoiceProviderOption[],
+    onChange: (value: string) => void,
+  ) => (
+    <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map((option) => (
+        <option key={`${option.status}:${option.value}`} value={option.value} disabled={option.disabled}>
+          {option.label}
+          {option.status === 'pipecat' ? ` · ${tr('Pipecat runtime', 'Pipecat runtime')}` : ''}
+          {option.status === 'inventory' ? ` · ${tr('Pipecat 待接入', 'Pipecat inventory')}` : ''}
+        </option>
+      ))}
+    </Select>
+  )
+
+  const renderCatalogSummary = (channel: PipecatProviderCatalogChannelSummary | null, label: string) => {
+    if (!channel) {
+      return (
+        <div className="settings-voice-catalog-row">
+          <span>{label}</span>
+          <strong>{tr('未加载', 'Not loaded')}</strong>
+        </div>
+      )
+    }
+    return (
+      <div className="settings-voice-catalog-row">
+        <span>{label}</span>
+        <strong>
+          {tr('{runtime} 已接入 / {inventory} 待接入', '{runtime} wired / {inventory} inventory', {
+            runtime: String(channel.runtimeIntegrated.length),
+            inventory: String(channel.inventoryOnly.length),
+          })}
+        </strong>
+      </div>
+    )
+  }
+
+  const renderModuleConfig = () => {
+    if (!activeModuleMeta) return null
+    if (activeModule === 'llm') {
+      return (
+        <>
+          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
+            <Input value={form.llmBaseUrl} onChange={(e) => updateForm({ llmBaseUrl: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
+            <Input value={form.llmDefaultModel} onChange={(e) => updateForm({ llmDefaultModel: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('接口', 'API')}>
+            <Select value={form.llmWireApi} onChange={(e) => updateForm({ llmWireApi: e.target.value })}>
+              <option value="responses">{tr('Responses 接口', 'Responses')}</option>
+              <option value="chat_completions">{tr('Chat Completions 接口', 'Chat Completions')}</option>
+            </Select>
+          </Field>
+          <Field className="settings-voice-field" label={tr('API 密钥', 'API Key')}>
+            <Input
+              type="password"
+              value={form.llmApiKey}
+              onChange={(e) => updateForm({ llmApiKey: e.target.value })}
+              placeholder={config?.llm_api_key_configured ? keyText(true, config.llm_api_key_preview) : t('common.enterToSave')}
+              autoComplete="off"
+            />
+          </Field>
+          {renderCatalogSummary(llmChannel, 'Pipecat LLM')}
+        </>
+      )
+    }
+    if (activeModule === 'tts') {
+      return (
+        <>
+          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
+            {renderProviderSelect(form.ttsProvider, ttsProviderOptions, applyTtsProvider)}
+          </Field>
+          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
+            <Input value={form.ttsBaseUrl} onChange={(e) => updateForm({ ttsBaseUrl: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
+            <Input value={form.ttsModel} onChange={(e) => updateForm({ ttsModel: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('API 密钥', 'API Key')}>
+            <Input
+              type="password"
+              value={form.ttsApiKey}
+              onChange={(e) => updateForm({ ttsApiKey: e.target.value })}
+              placeholder={config?.tts_api_key_configured ? keyText(true, config.tts_api_key_preview) : t('common.enterToSave')}
+              autoComplete="off"
+            />
+          </Field>
+          {renderCatalogSummary(ttsChannel, 'Pipecat TTS')}
+        </>
+      )
+    }
+    if (activeModule === 'stt') {
+      return (
+        <>
+          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
+            {renderProviderSelect(form.sttProvider, sttProviderOptions, applySttProvider)}
+          </Field>
+          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
+            <Input value={form.sttBaseUrl} onChange={(e) => updateForm({ sttBaseUrl: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
+            <Input value={form.sttModel} onChange={(e) => updateForm({ sttModel: e.target.value })} />
+          </Field>
+          <label className="settings-checkbox-item settings-voice-check">
+            <Checkbox
+              checked={form.sttUseTtsApiKey}
+              onChange={(e) => updateForm({ sttUseTtsApiKey: e.target.checked })}
+            />
+            <span>{tr('复用 TTS API Key', 'Reuse TTS API key')}</span>
+          </label>
+          {!form.sttUseTtsApiKey && (
+            <Field className="settings-voice-field" label={tr('STT API 密钥', 'STT API Key')}>
+              <Input
+                type="password"
+                value={form.sttApiKey}
+                onChange={(e) => updateForm({ sttApiKey: e.target.value })}
+                placeholder={config?.stt_api_key_configured ? keyText(true, config.stt_api_key_preview) : t('common.enterToSave')}
+                autoComplete="off"
+              />
+            </Field>
+          )}
+          {renderCatalogSummary(sttChannel, 'Pipecat STT')}
+        </>
+      )
+    }
+    if (activeModule === 'realtime') {
+      return (
+        <>
+          <Field className="settings-voice-field" label={tr('Pipecat OpenAI 服务密钥', 'Pipecat OpenAI service key')}>
+            <Input
+              type="password"
+              value={form.realtimeApiKey}
+              onChange={(e) => updateForm({ realtimeApiKey: e.target.value })}
+              placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('填写 Pipecat OpenAI 服务 key', 'Enter a Pipecat OpenAI service key')}
+              autoComplete="off"
+            />
+          </Field>
+          <Field className="settings-voice-field" label={tr('实时模型', 'Realtime model')}>
+            <Input value={form.realtimeModel} onChange={(e) => updateForm({ realtimeModel: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('实时声音', 'Realtime voice')}>
+            <Input value={form.realtimeVoice} onChange={(e) => updateForm({ realtimeVoice: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('转写模型', 'Transcription Model')}>
+            <Input value={form.realtimeTranscriptionModel} onChange={(e) => updateForm({ realtimeTranscriptionModel: e.target.value })} />
+          </Field>
+          <p className="settings-voice-note">
+            {tr('Realtime 不是单纯 TTS；它是 Pipecat 管道里的连续音频、VAD、turn 和音频输出组合。', 'Realtime is not plain TTS; it is continuous audio, VAD, turn handling, and output audio inside the Pipecat pipeline.')}
+          </p>
+          {renderCatalogSummary(realtimeChannel, 'Pipecat realtime')}
+        </>
+      )
+    }
+    return (
+      <>
+        <div className="settings-voice-readonly-grid">
+          {renderCatalogSummary(transportChannel, 'Transport')}
+          {renderCatalogSummary(vadChannel, 'VAD')}
+          {renderCatalogSummary(turnChannel, 'Turn detection')}
+        </div>
+        <p className="settings-voice-note">
+          {tr('当前真实运行链路固定为 FastAPI WebSocket transport、Silero VAD 和 Pipecat user turn processor/strategies。其它 Pipecat transport/VAD/turn provider 已进入 inventory，但还没有 runtime adapter。', 'The active runtime is fixed to FastAPI WebSocket transport, Silero VAD, and Pipecat user turn processors/strategies. Other Pipecat transport/VAD/turn providers are inventory only until adapters are wired.')}
+        </p>
+      </>
+    )
+  }
+
   return (
     <>
       <div className="settings-section-header">
@@ -1133,129 +1575,72 @@ function ConfigTab() {
         </div>
       )}
 
-      <div className="settings-voice-grid">
-        <section className="settings-form-panel settings-voice-panel">
-          <div className="settings-voice-panel-title">
-            <KeyRound size={18} />
-            <h4>{tr('LLM', 'LLM')}</h4>
-          </div>
-          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
-            <Input value={form.llmBaseUrl} onChange={(e) => updateForm({ llmBaseUrl: e.target.value })} />
-          </Field>
-          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
-            <Input value={form.llmDefaultModel} onChange={(e) => updateForm({ llmDefaultModel: e.target.value })} />
-          </Field>
-          <Field className="settings-voice-field" label={tr('接口', 'API')}>
-            <Select value={form.llmWireApi} onChange={(e) => updateForm({ llmWireApi: e.target.value })}>
-              <option value="responses">{tr('Responses 接口', 'Responses')}</option>
-              <option value="chat_completions">{tr('Chat Completions 接口', 'Chat Completions')}</option>
-            </Select>
-          </Field>
-          <Field className="settings-voice-field" label={tr('API 密钥', 'API Key')}>
-            <Input
-              type="password"
-              value={form.llmApiKey}
-              onChange={(e) => updateForm({ llmApiKey: e.target.value })}
-              placeholder={config?.llm_api_key_configured ? keyText(true, config.llm_api_key_preview) : t('common.enterToSave')}
-              autoComplete="off"
-            />
-          </Field>
-        </section>
+      {catalogError && (
+        <div className="settings-warning">
+          <AlertTriangle size={14} />
+          <span>{tr('Pipecat provider catalog 加载失败：{message}', 'Pipecat provider catalog failed to load: {message}', { message: catalogError })}</span>
+        </div>
+      )}
 
-        <section className="settings-form-panel settings-voice-panel">
-          <div className="settings-voice-panel-title">
-            <Volume2 size={18} />
-            <h4>{tr('TTS', 'TTS')}</h4>
-          </div>
-          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
-            <Select value={form.ttsProvider} onChange={(e) => updateForm({ ttsProvider: e.target.value })}>
-              <option value="openrouter">OpenRouter</option>
-              <option value="minimax">MiniMax</option>
-              <option value="elevenlabs">ElevenLabs</option>
-            </Select>
-          </Field>
-          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
-            <Input value={form.ttsBaseUrl} onChange={(e) => updateForm({ ttsBaseUrl: e.target.value })} />
-          </Field>
-          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
-            <Input value={form.ttsModel} onChange={(e) => updateForm({ ttsModel: e.target.value })} />
-          </Field>
-          <Field className="settings-voice-field" label={tr('API 密钥', 'API Key')}>
-            <Input
-              type="password"
-              value={form.ttsApiKey}
-              onChange={(e) => updateForm({ ttsApiKey: e.target.value })}
-              placeholder={config?.tts_api_key_configured ? keyText(true, config.tts_api_key_preview) : t('common.enterToSave')}
-              autoComplete="off"
-            />
-          </Field>
-        </section>
-
-        <section className="settings-form-panel settings-voice-panel">
-          <div className="settings-voice-panel-title">
-            <Mic size={18} />
-            <h4>{tr('STT', 'STT')}</h4>
-          </div>
-          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
-            <Select value={form.sttProvider} onChange={(e) => updateForm({ sttProvider: e.target.value })}>
-              <option value="whisper">{tr('Whisper 兼容', 'Whisper-compatible')}</option>
-              <option value="minimax">MiniMax</option>
-            </Select>
-          </Field>
-          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
-            <Input value={form.sttBaseUrl} onChange={(e) => updateForm({ sttBaseUrl: e.target.value })} />
-          </Field>
-          <Field className="settings-voice-field" label={tr('模型', 'Model')}>
-            <Input value={form.sttModel} onChange={(e) => updateForm({ sttModel: e.target.value })} />
-          </Field>
-          <label className="settings-checkbox-item settings-voice-check">
-            <Checkbox
-              checked={form.sttUseTtsApiKey}
-              onChange={(e) => updateForm({ sttUseTtsApiKey: e.target.checked })}
-            />
-            <span>{tr('复用 TTS API Key', 'Reuse TTS API key')}</span>
-          </label>
-          {!form.sttUseTtsApiKey && (
-            <Field className="settings-voice-field" label={tr('STT API 密钥', 'STT API Key')}>
-              <Input
-                type="password"
-                value={form.sttApiKey}
-                onChange={(e) => updateForm({ sttApiKey: e.target.value })}
-                placeholder={config?.stt_api_key_configured ? keyText(true, config.stt_api_key_preview) : t('common.enterToSave')}
-                autoComplete="off"
-              />
-            </Field>
-          )}
-        </section>
-
-        <section className="settings-form-panel settings-voice-panel">
-          <div className="settings-voice-panel-title">
-            <Radio size={18} />
-            <h4>{tr('实时语音', 'Realtime')}</h4>
-          </div>
-          <Field className="settings-voice-field" label={tr('Pipecat OpenAI 服务密钥', 'Pipecat OpenAI service key')}>
-            <Input
-              type="password"
-              value={form.realtimeApiKey}
-              onChange={(e) => updateForm({ realtimeApiKey: e.target.value })}
-              placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('填写 Pipecat OpenAI 服务 key', 'Enter a Pipecat OpenAI service key')}
-              autoComplete="off"
-            />
-          </Field>
-          <Field className="settings-voice-field" label={tr('实时模型', 'Realtime model')}>
-            <Input value={form.realtimeModel} onChange={(e) => updateForm({ realtimeModel: e.target.value })} />
-          </Field>
-          <Field className="settings-voice-field" label={tr('实时声音', 'Realtime voice')}>
-            <Input value={form.realtimeVoice} onChange={(e) => updateForm({ realtimeVoice: e.target.value })} />
-          </Field>
-          <Field className="settings-voice-field" label={tr('转写模型', 'Transcription Model')}>
-            <Input value={form.realtimeTranscriptionModel} onChange={(e) => updateForm({ realtimeTranscriptionModel: e.target.value })} />
-          </Field>
-          <p className="settings-voice-note">
-            {tr('实时语音通过 Pipecat 管道运行；逐轮语音继续使用 STT/TTS。', 'Realtime voice runs through Pipecat; turn-based voice keeps using STT/TTS.')}
-          </p>
-        </section>
+      <div className="settings-voice-list" aria-label={tr('语音链路模块', 'Voice pipeline modules')}>
+        {voiceModules.map((module) => (
+          <button
+            type="button"
+            key={module.key}
+            className={`settings-voice-module ${module.tone}`}
+            onClick={() => setActiveModule(module.key)}
+          >
+            <span className="settings-voice-module-icon">{module.icon}</span>
+            <span className="settings-voice-module-main">
+              <span className="settings-voice-module-title-row">
+                <strong>{module.title}</strong>
+                <span className={`settings-voice-badge ${module.tone}`}>
+                  {module.tone === 'ready' ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
+                  {toneLabel(module.tone)}
+                </span>
+              </span>
+              <span className="settings-voice-module-subtitle">{module.subtitle}</span>
+              <span className="settings-voice-module-catalog">{module.catalog}</span>
+            </span>
+            <span className="settings-voice-module-meta">
+              <span>{module.provider}</span>
+              <strong>{module.model}</strong>
+              <small>{module.note}</small>
+            </span>
+            <ChevronRight size={18} className="settings-voice-module-chevron" />
+          </button>
+        ))}
       </div>
+
+      <Dialog open={Boolean(activeModule)} onOpenChange={(open) => { if (!open) setActiveModule(null) }}>
+        <DialogContent className="settings-voice-dialog">
+          {activeModuleMeta && (
+            <>
+              <div className="settings-voice-dialog-title">
+                <span className="settings-voice-module-icon">{activeModuleMeta.icon}</span>
+                <div>
+                  <DialogTitle className="settings-voice-dialog-heading">
+                    {activeModuleMeta.title}
+                  </DialogTitle>
+                  <DialogDescription>{activeModuleMeta.subtitle}</DialogDescription>
+                </div>
+              </div>
+              <div className="settings-voice-dialog-body">
+                {renderModuleConfig()}
+              </div>
+              <div className="dialog-actions settings-voice-dialog-actions">
+                <Button variant="secondary" onClick={() => setActiveModule(null)}>
+                  {tr('关闭', 'Close')}
+                </Button>
+                <Button variant="primary" onClick={() => { setActiveModule(null); handleSave() }} disabled={loading || saving}>
+                  <Save size={14} />
+                  {saving ? t('common.saving') : tr('保存并应用', 'Save and Apply')}
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <div className="settings-form-actions settings-voice-actions">
         <Button variant="secondary" onClick={loadConfig} disabled={loading || saving}>
