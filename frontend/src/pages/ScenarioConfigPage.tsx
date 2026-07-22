@@ -440,10 +440,6 @@ export default function ScenarioConfigPage() {
       <div className="scenario-config-page" data-workbench-skin="training">
       <header className="scenario-config-header">
         <div>
-          <div className="scenario-config-kicker">
-            <SlidersHorizontal size={16} />
-            <span>{tr('训练模板/评分', 'Templates / Rubrics')}</span>
-          </div>
           <h1>{tr('训练场景与评分规则', 'Training scenarios and rubrics')}</h1>
           <p>{tr('统一管理可练习场景、评分维度与权重。', 'Manage practice scenarios, scoring dimensions, and weights.')}</p>
         </div>

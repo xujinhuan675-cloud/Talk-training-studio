@@ -47,16 +47,6 @@
   box-shadow: var(--config-shadow-soft);
 }
 
-.scenario-config-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 8px;
-  color: var(--config-primary);
-  font-size: 12px;
-  font-weight: 800;
-}
-
 .scenario-config-header h1 {
   margin: 0;
   font-size: 26px;
