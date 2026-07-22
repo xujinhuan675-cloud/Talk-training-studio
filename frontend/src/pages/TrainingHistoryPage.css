@@ -42,7 +42,7 @@
 .training-history-select .ui-form-control {
   min-height: 42px;
   padding-left: 38px;
-  background: var(--bg-card);
+  background-color: var(--bg-card);
 }
 
 .training-history-filter-summary {

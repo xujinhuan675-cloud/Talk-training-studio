@@ -593,8 +593,14 @@ function OrganizationsTab() {
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [orgTabHint, setOrgTabHint] = useState<string | null>(null)
 
   const loadOrgs = () => fetchOrganizations().then(setOrgs).catch(() => {})
+
+  const orgSaveHint = tr(
+    '先保存组织基础信息，才能配置团队和角色关系。',
+    'Save the organization basics before configuring teams and relationships.',
+  )
 
   const loadOrgDetail = useCallback(async (orgId: number) => {
     const detail = await fetchOrganizationDetail(orgId)
@@ -604,6 +610,7 @@ function OrganizationsTab() {
     setOrgIndustry(detail.organization.industry)
     setOrgDescription(detail.organization.description)
     setOrgContextPrompt(detail.organization.context_prompt)
+    setOrgTabHint(null)
     fetchRelationships(orgId).then(setRelationships).catch(() => {})
   }, [])
 
@@ -629,6 +636,7 @@ function OrganizationsTab() {
     setOrgContextPrompt('')
     setOrgTab('info')
     setError(null)
+    setOrgTabHint(null)
   }
 
   const handleSaveOrg = async () => {
@@ -652,6 +660,7 @@ function OrganizationsTab() {
         await loadOrgs()
         await loadOrgDetail(created.id)
       }
+      setOrgTabHint(null)
       reloadOrganizations()
     } catch (e: unknown) {
       setError(getErrorMessage(e))
@@ -675,6 +684,8 @@ function OrganizationsTab() {
         setOrgIndustry('')
         setOrgDescription('')
         setOrgContextPrompt('')
+        setOrgTab('info')
+        setOrgTabHint(null)
         await loadOrgs()
         reloadOrganizations()
         reloadPersonas()
@@ -764,9 +775,18 @@ function OrganizationsTab() {
   const personaName = (pid: string) => personas.find((p) => p.id === pid)?.name || pid
   const orgTabOptions = [
     { value: 'info' as const, label: tr('基础', 'Basics') },
-    { value: 'teams' as const, label: tr('团队', 'Teams'), disabled: !selectedOrg },
-    { value: 'relationships' as const, label: tr('关系', 'Relationships'), disabled: !selectedOrg },
+    { value: 'teams' as const, label: tr('团队', 'Teams'), title: selectedOrg ? undefined : orgSaveHint },
+    { value: 'relationships' as const, label: tr('关系', 'Relationships'), title: selectedOrg ? undefined : orgSaveHint },
   ]
+  const handleOrgTabChange = (value: typeof orgTab) => {
+    if (!selectedOrg && value !== 'info') {
+      setOrgTabHint(orgSaveHint)
+      setOrgTab('info')
+      return
+    }
+    setOrgTabHint(null)
+    setOrgTab(value)
+  }
 
   return (
     <>
@@ -799,8 +819,20 @@ function OrganizationsTab() {
           options={orgTabOptions}
           size="sm"
           value={orgTab}
-          onValueChange={(value) => setOrgTab(value)}
+          onValueChange={handleOrgTabChange}
         />
+
+        {!selectedOrg && (
+          <div className="settings-warning settings-org-save-hint" role={orgTabHint ? 'alert' : 'status'}>
+            <AlertTriangle size={14} />
+            <span>
+              {orgTabHint ?? tr(
+                '保存组织后可以继续配置团队和角色关系。',
+                'After saving this organization, you can configure teams and relationships.',
+              )}
+            </span>
+          </div>
+        )}
 
         <div className="settings-form-panel" style={{ marginTop: 0 }}>
           {orgTab === 'info' && (

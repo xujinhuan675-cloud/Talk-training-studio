@@ -646,6 +646,7 @@
 
 .settings-org-selector.ui-form-select {
   --ui-form-bg-token: var(--bg-card);
+  background-color: var(--bg-card);
 }
 
 .settings-org-tabs.ui-segmented-control {
@@ -660,6 +661,11 @@
 
 .settings-org-content {
   margin-top: 16px;
+}
+
+.settings-org-save-hint {
+  margin: 0;
+  align-items: flex-start;
 }
 
 /* Reuse team/relationship styles from OrganizationDialog.css */
@@ -756,10 +762,10 @@
 .team-add-member-select.ui-form-select {
   width: auto;
   min-height: 26px;
-  padding: 4px 28px 4px 10px;
+  padding: 4px 36px 4px 10px;
   border-style: dashed;
   border-radius: var(--radius-full);
-  background: transparent;
+  background-color: transparent;
   font-size: 12px;
   color: var(--text-muted);
   cursor: pointer;
@@ -834,6 +840,7 @@
   flex: 1 1 112px;
   width: auto;
   min-width: 0;
+  padding-right: 36px;
   cursor: pointer;
 }
 

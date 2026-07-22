@@ -39,7 +39,7 @@
 .scenario-leaderboard-select .ui-form-select {
   min-width: 220px;
   min-height: 38px;
-  background: var(--bg-card);
+  background-color: var(--bg-card);
   font-size: 13px;
   font-weight: 800;
 }

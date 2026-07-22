@@ -192,16 +192,62 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 Textarea.displayName = 'Textarea'
 
 const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, id, invalid, 'aria-describedby': ariaDescribedBy, 'aria-invalid': ariaInvalid, ...props }, ref) => {
+  (
+    {
+      className,
+      disabled,
+      id,
+      invalid,
+      onBlur,
+      onChange,
+      onKeyDown,
+      onMouseDown,
+      'aria-describedby': ariaDescribedBy,
+      'aria-invalid': ariaInvalid,
+      ...props
+    },
+    ref,
+  ) => {
+    const [expanded, setExpanded] = React.useState(false)
     const fieldControl = useFieldControl({ ariaDescribedBy, ariaInvalid, id, invalid })
+    const openSelect = () => {
+      if (!disabled) setExpanded(true)
+    }
+    const closeSelect = () => setExpanded(false)
 
     return (
       <select
         ref={ref}
         id={fieldControl.controlId}
         className={cn('ui-form-control', 'ui-form-select', className)}
+        data-open={expanded ? 'true' : undefined}
+        disabled={disabled}
         aria-describedby={fieldControl.describedBy}
+        aria-expanded={expanded || undefined}
         aria-invalid={fieldControl.invalidState}
+        onBlur={(event) => {
+          onBlur?.(event)
+          closeSelect()
+        }}
+        onChange={(event) => {
+          onChange?.(event)
+          closeSelect()
+        }}
+        onKeyDown={(event) => {
+          onKeyDown?.(event)
+          if (event.defaultPrevented || disabled) return
+          if (event.key === 'Escape' || event.key === 'Tab') {
+            closeSelect()
+            return
+          }
+          if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            openSelect()
+          }
+        }}
+        onMouseDown={(event) => {
+          onMouseDown?.(event)
+          if (!event.defaultPrevented) openSelect()
+        }}
         {...props}
       />
     )

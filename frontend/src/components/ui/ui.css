@@ -570,7 +570,26 @@
 }
 
 .ui-form-select {
-  padding-right: 30px;
+  --ui-select-chevron-down: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='%2364758b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --ui-select-chevron-up: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='%2364758b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
+  padding-right: 40px;
+  background-color: var(--ui-form-bg);
+  background-image: var(--ui-select-chevron-down);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px 16px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.ui-form-select[data-open='true'] {
+  background-image: var(--ui-select-chevron-up);
+}
+
+.ui-form-select:disabled {
+  background-color: var(--ui-form-surface-muted);
+  cursor: not-allowed;
 }
 
 .ui-form-textarea {

@@ -463,7 +463,7 @@
   box-sizing: border-box;
   border: 1px solid var(--config-border);
   border-radius: 8px;
-  background: var(--config-surface-muted);
+  background-color: var(--config-surface-muted);
   color: var(--text-primary);
   font: inherit;
   font-size: 13px;
@@ -471,10 +471,14 @@
 }
 
 .scenario-config-form-grid .ui-form-input,
-.scenario-config-form-grid .ui-form-select,
 .scenario-config-weight-table .ui-form-input {
   min-height: 38px;
   padding: 0 10px;
+}
+
+.scenario-config-form-grid .ui-form-select {
+  min-height: 38px;
+  padding: 0 40px 0 10px;
 }
 
 .scenario-config-form-grid .ui-form-input:focus-visible,
@@ -519,8 +523,11 @@
   background: var(--config-surface);
   color: var(--text-primary);
   cursor: pointer;
+  font: inherit;
   font-size: 13px;
   font-weight: 800;
+  line-height: 1;
+  text-align: left;
   transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 

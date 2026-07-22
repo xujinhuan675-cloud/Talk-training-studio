@@ -538,7 +538,7 @@
   box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background-color: #fff;
   color: var(--text-primary);
   font: inherit;
   font-size: 12px;
@@ -556,7 +556,14 @@
 .message-tree-write-field .ui-form-input,
 .message-tree-write-field .ui-form-select {
   height: 30px;
+}
+
+.message-tree-write-field .ui-form-input {
   padding: 0 8px;
+}
+
+.message-tree-write-field .ui-form-select {
+  padding: 0 32px 0 8px;
 }
 
 .message-tree-write-field .ui-form-textarea:focus-visible,
@@ -570,7 +577,7 @@
 .message-tree-write-field .ui-form-input:disabled,
 .message-tree-write-field .ui-form-select:disabled {
   cursor: not-allowed;
-  background: var(--bg-base);
+  background-color: var(--bg-base);
   color: var(--text-muted);
   opacity: 0.72;
 }
