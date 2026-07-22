@@ -16,6 +16,7 @@
 | `analysis_service.py` | AnalysisService — LLM 智能对话分析报告生成（阻力排名 + 有效论点 + 沟通建议；会清洗视频回答 marker 并生成复盘占位维度） |
 | `growth_service.py` | GrowthService — 成长看板聚合不强依赖 LLM；评估、洞察、沟通力名片在配置 Stakeholder LLM 后生成 |
 | `compression_service.py` | CompressionService — 后台对话历史语义压缩（异步增量摘要，不阻塞聊天） |
+| `default_config_service.py` | 默认配置 seed — 幂等预置角色 markdown、组织/团队和对话场景，不覆盖用户已有配置 |
 | `persona_migrator.py` | Story 2.3 — markdown v1 → 5-layer v2 迁移（pure functions + async run_migration），供 `scripts/migrate_personas_to_v2.py` 调用 |
 | `persona_builder_service.py` | Story 2.4 — PersonaBuilderService：agent→parse→adversarialize→persist 流式编排，yield BuildEvent 序列（AC1-AC8）；parse 支持 structured 输出与 legacy generate/repair 测试路径 |
 | `build_events.py` | Story 2.4 — BuildEvent dataclass + 6 canonical event types + heartbeat/error |
@@ -29,6 +30,7 @@
 - `chatroom_service.py` 依赖 `ChatRoomDomainService`（领域规则）、`PersonaLoader`（角色存在性验证）、`UnitOfWork`（事务）
 - `stakeholder_chat_service.py` 依赖 `UnitOfWork`、`PersonaLoader`、`LLMPort`、`prompt_builder`、`RoomEventBus`、`CompressionService`
 - `compression_service.py` 依赖 `UnitOfWork`、`LLMPort`（压缩摘要生成）、`PersonaLoader`（发言者名称解析）
+- `default_config_service.py` 依赖 `UnitOfWork` 和 persona 文件目录；用于启动时补齐默认配置种子数据
 - `dispatcher.py` 依赖 `LLMPort`（调度决策 LLM 调用）、`PersonaLoader`（角色画像摘要）；LLM 返回空/解析失败时首轮调度兜底到房间首位角色
 - `persona_loader.py` 依赖文件系统（读取 `data/personas/*.md`）
 - `analysis_service.py` 依赖 `UnitOfWork`、`LLMPort`（分析生成）、`PersonaLoader`（角色信息）

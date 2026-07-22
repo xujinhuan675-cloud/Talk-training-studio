@@ -55,6 +55,11 @@ interface ApiResponse<T> {
   data: T
 }
 
+async function readApiError(resp: Response, fallback: string): Promise<Error> {
+  const json = await resp.json().catch(() => null)
+  return new Error(getErrorMessage(json, `${fallback}: ${resp.status}`))
+}
+
 // ---------------------------------------------------------------------------
 // Dispatcher transparency types (SSE round_end payload)
 // ---------------------------------------------------------------------------
@@ -639,13 +644,14 @@ export async function startBattle(data: {
   scenario_context: string
   selected_training_points: string[]
   difficulty: 'easy' | 'normal' | 'hard'
+  reply_language?: string
 }): Promise<ChatRoom> {
   const resp = await fetch(`${API_BASE}/battle-prep/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  if (!resp.ok) throw new Error(`Failed to start battle: ${resp.status}`)
+  if (!resp.ok) throw await readApiError(resp, 'Failed to start battle')
   const json: ApiResponse<ChatRoom> = await resp.json()
   return json.data
 }

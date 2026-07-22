@@ -42,6 +42,7 @@ from api.dependencies import (
     get_current_user,
     get_file_asset_service,
     get_growth_service,
+    get_persona_editor_service,
     get_stakeholder_llm_client,
     require_system_roles,
     training_scope_for,
@@ -72,7 +73,8 @@ from application.ports.realtime import (
 )
 from application.services.stakeholder.analysis_service import AnalysisReaderService, AnalysisService
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
-from application.services.stakeholder.dto import CreateChatRoomDTO, MessageDTO
+from application.services.stakeholder.dto import CreateChatRoomDTO, CreatePersonaDTO, MessageDTO
+from application.services.stakeholder.persona_editor_service import PersonaEditorService
 from application.services.stakeholder.room_access_policy import (
     StakeholderRoomAccessScope,
     legacy_training_session_room_scope,
@@ -688,6 +690,15 @@ class StoryBankRegisterDTO(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class TrainingRuntimePersonaDTO(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    role: str = Field(..., min_length=1, max_length=200)
+    style: str = Field(..., min_length=1, max_length=2000)
+    scenario_context: str = Field(..., min_length=1, max_length=8000)
+    training_points: list[str] = Field(default_factory=list, max_length=20)
+    difficulty: str = Field(default="normal", pattern=r"^(easy|normal|hard)$")
+
+
 class StartTrainingSessionDTO(BaseModel):
     room_id: int | str | None = None
     persona_ids: list[str] = Field(default_factory=list)
@@ -696,6 +707,7 @@ class StartTrainingSessionDTO(BaseModel):
     scenario_id: int | None = None
     runtime: str | None = Field(default=None, min_length=1, max_length=80)
     provider: str | None = Field(default=None, min_length=1, max_length=120)
+    runtime_persona: TrainingRuntimePersonaDTO | None = None
 
 
 class CompleteTrainingSessionDTO(BaseModel):
@@ -771,6 +783,78 @@ def _conversation_ref_to_dict(conversation: ConversationRef) -> dict[str, object
         "legacyRoomId": conversation.legacy_room_id,
         "metadata": dict(conversation.metadata),
     }
+
+
+_TRAINING_RUNTIME_DIFFICULTY_RULES = {
+    "easy": "Keep pressure moderate, ask one clear follow-up at a time, and help the learner build momentum.",
+    "normal": "Challenge weak claims, ask for evidence, and keep the conversation realistic.",
+    "hard": "Apply strong pressure, expose vague answers quickly, and require concrete tradeoffs or proof.",
+}
+
+
+def _required_runtime_persona_text(value: str, field_name: str) -> str:
+    text = value.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail=f"runtime_persona.{field_name} cannot be blank")
+    return text
+
+
+def _training_runtime_persona_content(persona: TrainingRuntimePersonaDTO) -> str:
+    style = _required_runtime_persona_text(persona.style, "style")
+    scenario_context = _required_runtime_persona_text(
+        persona.scenario_context,
+        "scenario_context",
+    )
+    training_points = [point.strip() for point in persona.training_points if point.strip()]
+    lines = [
+        style,
+        "",
+        "Scenario context:",
+        scenario_context,
+        "",
+        "Training points:",
+    ]
+    if training_points:
+        lines.extend(f"- {point}" for point in training_points)
+    else:
+        lines.append("- Follow the scenario objective and push for observable learner behavior.")
+    lines.extend(
+        [
+            "",
+            "Training runtime rules:",
+            "- Stay in the assigned counterpart persona; do not act as the learner's assistant.",
+            "- Keep replies concise, natural, and grounded in the scenario.",
+            "- Reveal constraints gradually and make the learner earn trust.",
+            f"- Difficulty behavior: {_TRAINING_RUNTIME_DIFFICULTY_RULES[persona.difficulty]}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _create_training_runtime_persona(
+    persona: TrainingRuntimePersonaDTO,
+    persona_editor: PersonaEditorService,
+) -> str:
+    name = _required_runtime_persona_text(persona.name, "name")
+    role = _required_runtime_persona_text(persona.role, "role")
+    content = _training_runtime_persona_content(persona)
+    for _ in range(8):
+        persona_id = f"ts-{uuid4().hex[:10]}"
+        try:
+            persona_editor.create_persona(
+                CreatePersonaDTO(
+                    id=persona_id,
+                    name=name,
+                    role=role,
+                    avatar_color="#2563eb",
+                    content=content,
+                    temporary=True,
+                )
+            )
+            return persona_id
+        except FileExistsError:
+            continue
+    raise HTTPException(status_code=500, detail="Failed to allocate a training runtime persona")
 
 
 def _requests_message_tree_runtime(body: StartTrainingSessionDTO) -> bool:
@@ -2199,6 +2283,7 @@ async def start_training_session(
     body: StartTrainingSessionDTO,
     svc: TrainingSessionService = Depends(get_training_session_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    persona_editor: PersonaEditorService = Depends(get_persona_editor_service),
     uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_runtime_uow_factory),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -2210,6 +2295,11 @@ async def start_training_session(
     )
 
     if _requests_message_tree_runtime(body):
+        if body.runtime_persona is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="runtime_persona is only available for room-backed training sessions",
+            )
         mode = str(getattr(session.mode, "value", session.mode)).strip().lower()
         if mode != "text":
             raise HTTPException(
@@ -2237,15 +2327,33 @@ async def start_training_session(
         return success_response(data=_started_training_session_to_dict(started))
 
     room_id = str(body.room_id).strip() if body.room_id is not None else ""
+    if room_id and body.runtime_persona is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="runtime_persona cannot be provided when binding an existing room",
+        )
+    if body.persona_ids and body.runtime_persona is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="runtime_persona cannot be combined with persona_ids",
+        )
     if not room_id:
-        if not body.persona_ids:
-            raise HTTPException(status_code=422, detail="room_id or persona_ids is required")
-        room_name = body.room_name or f"Training: {session.task_config.role}"
+        persona_ids = list(body.persona_ids)
+        room_name = body.room_name
+        if body.runtime_persona is not None:
+            persona_ids = [_create_training_runtime_persona(body.runtime_persona, persona_editor)]
+            room_name = room_name or f"Training: {body.runtime_persona.name.strip()}"
+        if not persona_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="room_id, persona_ids, or runtime_persona is required",
+            )
+        room_name = room_name or f"Training: {session.task_config.role}"
         room = await chatroom_svc.create_room(
             CreateChatRoomDTO(
                 name=room_name,
                 type=body.room_type,
-                persona_ids=body.persona_ids,
+                persona_ids=persona_ids,
                 scenario_id=body.scenario_id,
             )
         )

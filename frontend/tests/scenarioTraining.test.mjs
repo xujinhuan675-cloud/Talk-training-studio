@@ -474,8 +474,8 @@ test('scenario prompts carry realistic customer simulation rules', () => {
   const drillPrompt = scenarioTrainingData.buildScenarioTrainingPrompt(scenario, 'text', {
     feedbackMode: 'drill',
   })
-  const payload = scenarioTrainingData.buildScenarioTrainingBattlePayload(scenario, 'text')
-  const drillPayload = scenarioTrainingData.buildScenarioTrainingBattlePayload(scenario, 'voice', {
+  const payload = scenarioTrainingData.buildScenarioTrainingRuntimePersona(scenario, 'text')
+  const drillPayload = scenarioTrainingData.buildScenarioTrainingRuntimePersona(scenario, 'voice', {
     feedbackMode: 'drill',
   })
 
@@ -485,13 +485,27 @@ test('scenario prompts carry realistic customer simulation rules', () => {
   assert.match(prompt, /never score the learner/)
   assert.match(prompt, /complete simulation/)
   assert.match(prompt, /Difficulty behavior:/)
-  assert.match(payload.persona_style, /Speak like a real counterpart/)
-  assert.match(payload.persona_style, /Feedback mode: simulation/)
+  assert.match(payload.style, /Speak like a real counterpart/)
+  assert.match(payload.style, /Feedback mode: simulation/)
+  assert.deepEqual(payload.training_points, scenario.trainingPoints)
   assert.match(drillPrompt, /deliberate drill/)
   assert.match(drillPrompt, /one concise correction, one stronger rewrite/)
   assert.doesNotMatch(drillPrompt, /never give coaching advice/)
-  assert.match(drillPayload.persona_style, /Run deliberate drill turns/)
-  assert.match(drillPayload.persona_style, /Feedback mode: drill/)
+  assert.match(drillPayload.style, /Run deliberate drill turns/)
+  assert.match(drillPayload.style, /Feedback mode: drill/)
+})
+
+test('scenario runtime persona preserves catalog-sized training point lists', () => {
+  const scenario = scenarioTrainingData.scenarioTrainingCatalog.find(
+    (item) => item.id === 'ai-web3-agent-pm-comprehensive-interview',
+  )
+
+  assert.ok(scenario)
+
+  const payload = scenarioTrainingData.buildScenarioTrainingRuntimePersona(scenario, 'voice')
+
+  assert.equal(payload.training_points.length, 6)
+  assert.deepEqual(payload.training_points, scenario.trainingPoints)
 })
 
 test('scenario context helpers find catalog cards and session-linked progress', () => {

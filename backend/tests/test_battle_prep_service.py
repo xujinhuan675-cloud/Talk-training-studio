@@ -1,11 +1,31 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from application.services.stakeholder.battle_prep_service import BattlePrepService
 from application.services.stakeholder.dto import ChatRoomDTO, CreateChatRoomDTO, StartBattleDTO
 from application.services.stakeholder.persona_editor_service import PersonaEditorService
 from application.services.stakeholder.persona_loader import PersonaLoader
+
+
+def test_start_battle_dto_limits_manual_training_points_to_five() -> None:
+    with pytest.raises(ValidationError):
+        StartBattleDTO(
+            persona_name="Interviewer",
+            persona_role="AI product interviewer",
+            persona_style="Structured and evidence-oriented.",
+            scenario_context="A comprehensive AI product manager interview.",
+            selected_training_points=[
+                "Open with an AI Agent product narrative",
+                "Explain XStable responsibilities and evidence",
+                "Frame NOFX as local product adaptation",
+                "Show OpenEvolve mechanism understanding",
+                "Handle pressure follow-up questions",
+                "Keep risk boundaries clear",
+            ],
+            difficulty="hard",
+        )
 
 
 class _StubChatRoomService:
@@ -46,6 +66,7 @@ async def test_start_battle_creates_missing_persona_dir(tmp_path) -> None:
             scenario_context="A budget review meeting for a new training program.",
             selected_training_points=["Handle budget objections"],
             difficulty="normal",
+            reply_language="en-US",
         )
     )
 
@@ -60,6 +81,8 @@ async def test_start_battle_creates_missing_persona_dir(tmp_path) -> None:
     assert "temporary: true" in persona_text
     assert "真实对手扮演守则" in persona_text
     assert "不是训练系统的讲解员" in persona_text
+    assert "回复语言" in persona_text
+    assert "English（en-US）" in persona_text
     assert "Handle budget objections" in persona_text
 
     loaded = loader.get_persona(persona_files[0].stem)

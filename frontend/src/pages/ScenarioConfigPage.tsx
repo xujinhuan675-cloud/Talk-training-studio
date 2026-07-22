@@ -33,7 +33,7 @@ import {
   type ScenarioTrainingCategory,
   type ScenarioTrainingDifficulty,
 } from '../data/trainingScenarios'
-import { useI18n, type Locale, type TranslateInline } from '../i18n'
+import { useI18n, type TranslateInline } from '../i18n'
 import {
   getScenarioCategoryLabel,
   getScenarioDifficultyLabel,
@@ -83,18 +83,6 @@ function getDimensionDisplayDescription(dimension: ScenarioDimensionDefinition, 
 
 function getFrameworkLabel(value: ScenarioConfigFramework, tr: TranslateInline): string {
   return translateLabel(frameworkOptions.find((option) => option.value === value)?.label ?? [value, value], tr)
-}
-
-function formatDate(value: string | undefined, locale: Locale, tr: TranslateInline): string {
-  if (!value) return tr('未保存', 'Not saved')
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function splitLines(value: string): string[] {
@@ -151,7 +139,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function ScenarioConfigPage() {
-  const { locale, tr } = useI18n()
+  const { tr } = useI18n()
   const trRef = useRef(tr)
   const initialConfigState = useMemo(() => loadScenarioConfigState(scenarioTrainingCatalog), [])
   const [state, setState] = useState<ScenarioConfigState>(initialConfigState)
@@ -235,10 +223,6 @@ export default function ScenarioConfigPage() {
     () => state.dimensions.filter((dimension) => dimensionMatchesQuery(dimension, dimensionQuery, tr)),
     [dimensionQuery, state.dimensions, tr],
   )
-  const enabledDimensions = useMemo(
-    () => state.dimensions.filter((dimension) => dimension.enabled),
-    [state.dimensions],
-  )
   const dimensionRefs = useMemo(() => {
     const refs = new Map<string, number>()
     state.scenarios.forEach((scenario) => {
@@ -248,10 +232,6 @@ export default function ScenarioConfigPage() {
     })
     return refs
   }, [state.scenarios])
-  const invalidScenarioCount = useMemo(
-    () => state.scenarios.filter((scenario) => !validateScenarioWeightTotal(scenario.dimensionWeights).valid).length,
-    [state.scenarios],
-  )
   const tabOptions = useMemo<SegmentedControlOption<ScenarioConfigTab>[]>(
     () => [
       {
@@ -478,25 +458,6 @@ export default function ScenarioConfigPage() {
           </Button>
         </div>
       </header>
-
-      <section className="scenario-config-stats" aria-label={tr('场景配置概览', 'Scenario configuration summary')}>
-        <div>
-          <strong>{state.scenarios.length}</strong>
-          <span>{tr('场景', 'Scenarios')}</span>
-        </div>
-        <div>
-          <strong>{enabledDimensions.length}/{state.dimensions.length}</strong>
-          <span>{tr('已启用维度', 'Enabled dimensions')}</span>
-        </div>
-        <div className={invalidScenarioCount ? 'warning' : 'ok'}>
-          <strong>{invalidScenarioCount}</strong>
-          <span>{tr('权重问题', 'Weight issues')}</span>
-        </div>
-        <div>
-          <strong>{formatDate(state.updatedAt, locale, tr)}</strong>
-          <span>{tr('最近配置修改', 'Last config change')}</span>
-        </div>
-      </section>
 
       {notice && (
         <div className={`scenario-config-notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>

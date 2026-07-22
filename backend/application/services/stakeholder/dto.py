@@ -543,6 +543,12 @@ class StartBattleDTO(BaseModel):
     scenario_context: str = Field(..., min_length=1, max_length=5000)
     selected_training_points: list[str] = Field(..., min_length=1, max_length=5)
     difficulty: str = Field(default="normal", pattern=r"^(easy|normal|hard)$")
+    reply_language: str = Field(
+        default="zh-CN",
+        min_length=2,
+        max_length=40,
+        pattern=r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$",
+    )
 
 
 class TacticItem(BaseModel):

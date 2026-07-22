@@ -164,4 +164,8 @@ graphify-out/
 
 # Local dev runtime artifacts
 .codex-*.err
+backend/data/default_config_seed.json
+backend/data/personas/bp-*.md
+backend/data/personas/ts-*.md
+backend/data/personas/tw-*.md
 backend/data/training_studio/video_answers/

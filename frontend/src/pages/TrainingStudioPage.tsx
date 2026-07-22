@@ -13,7 +13,6 @@ import {
   Wand2,
 } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
-import { startBattle } from '../services/api'
 import { buildRoomBackedTrainingSessionStartRequest, createTrainingSession, startTrainingSession } from '../services/trainingSession'
 import { LIVE_COACH_LANGUAGE_OPTIONS, getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import {
@@ -33,7 +32,7 @@ import {
   getTrainingDifficultyLabel,
   getTrainingLevelLabel,
   getTrainingScenarioLabel,
-  toBattleDifficulty,
+  toTrainingRuntimeDifficulty,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
 import { Button } from '../components/ui/button'
@@ -299,6 +298,52 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       const interviewStakeholder = config.scenario === 'interview' ? interviewScenarioPreset : undefined
       const productStakeholder = config.scenario === 'product_management' ? productScenarioPreset : undefined
       const scenarioStakeholder = interviewStakeholder ?? productStakeholder
+      const runtimePersonaName = isLiveCoachMode
+        ? t('training.liveCoach.personaName')
+        : scenarioStakeholder
+          ? t(scenarioStakeholder.personaNameKey)
+          : t('training.prompt.personaName', { role })
+      const runtimePersonaRole = isLiveCoachMode
+        ? t('training.liveCoach.personaRole')
+        : scenarioStakeholder
+          ? t(scenarioStakeholder.personaRoleKey)
+          : t('training.prompt.personaRole', { level, scenario })
+      const runtimePersonaStyle = isLiveCoachMode
+        ? t('training.liveCoach.personaStyle')
+        : scenarioStakeholder
+          ? `${t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })}\n${t(feedbackOption.personaRuleKey)}`
+          : `${t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel })}\n${t(feedbackOption.personaRuleKey)}`
+      const runtimeScenarioContext = isLiveCoachMode
+        ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
+            sourceLanguage: sourceLanguageLabel,
+            targetLanguage: targetLanguageLabel,
+          })}`
+        : prompt
+      const runtimeTrainingPoints = isLiveCoachMode
+        ? [
+            t('training.liveCoach.nextReplyPoint'),
+            t('training.liveCoach.riskPoint'),
+            t('training.liveCoach.translationPoint'),
+            t('training.liveCoach.reviewPoint'),
+          ]
+        : [
+            t('training.prompt.structurePoint', { framework }),
+            ...(interviewStakeholder
+              ? [
+                  t('training.prompt.interviewEvidencePoint'),
+                  t('training.prompt.interviewFollowupPoint'),
+                ]
+              : []),
+            ...(productStakeholder
+              ? [
+                  t('training.prompt.productAlignmentPoint'),
+                  t('training.prompt.productTradeoffPoint'),
+                ]
+              : []),
+            t(feedbackOption.trainingPointKey),
+            t('training.prompt.deliveryPoint', { mode: modeLabel }),
+            t('training.prompt.evidencePoint'),
+          ]
       await launchTrainingSessionFlow({
         createTrainingSessionRequest: {
           mode: trainingMode,
@@ -345,56 +390,18 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           },
         },
         createTrainingSession,
-        battlePayload: {
-          persona_name: isLiveCoachMode
-            ? t('training.liveCoach.personaName')
-            : scenarioStakeholder
-              ? t(scenarioStakeholder.personaNameKey)
-              : t('training.prompt.personaName', { role }),
-          persona_role: isLiveCoachMode
-            ? t('training.liveCoach.personaRole')
-            : scenarioStakeholder
-              ? t(scenarioStakeholder.personaRoleKey)
-              : t('training.prompt.personaRole', { level, scenario }),
-          persona_style: isLiveCoachMode
-            ? t('training.liveCoach.personaStyle')
-            : scenarioStakeholder
-              ? `${t(scenarioStakeholder.personaStyleKey, { difficulty, framework, mode: modeLabel })}\n${t(feedbackOption.personaRuleKey)}`
-              : `${t('training.prompt.personaStyle', { difficulty, framework, mode: modeLabel })}\n${t(feedbackOption.personaRuleKey)}`,
-          scenario_context: isLiveCoachMode
-            ? `${prompt}\n\n${t('training.liveCoach.languageContext', {
-                sourceLanguage: sourceLanguageLabel,
-                targetLanguage: targetLanguageLabel,
-              })}`
-            : prompt,
-          selected_training_points: isLiveCoachMode
-            ? [
-                t('training.liveCoach.nextReplyPoint'),
-                t('training.liveCoach.riskPoint'),
-                t('training.liveCoach.translationPoint'),
-                t('training.liveCoach.reviewPoint'),
-              ]
-            : [
-                t('training.prompt.structurePoint', { framework }),
-                ...(interviewStakeholder
-                  ? [
-                      t('training.prompt.interviewEvidencePoint'),
-                      t('training.prompt.interviewFollowupPoint'),
-                    ]
-                  : []),
-                ...(productStakeholder
-                  ? [
-                      t('training.prompt.productAlignmentPoint'),
-                      t('training.prompt.productTradeoffPoint'),
-                    ]
-                  : []),
-                t(feedbackOption.trainingPointKey),
-                t('training.prompt.deliveryPoint', { mode: modeLabel }),
-                t('training.prompt.evidencePoint'),
-              ],
-          difficulty: toBattleDifficulty(config.difficulty),
+        startRequestData: {
+          room_name: `Training: ${runtimePersonaName}`,
+          room_type: 'battle_prep',
+          runtime_persona: {
+            name: runtimePersonaName,
+            role: runtimePersonaRole,
+            style: runtimePersonaStyle,
+            scenario_context: runtimeScenarioContext,
+            training_points: runtimeTrainingPoints,
+            difficulty: toTrainingRuntimeDifficulty(config.difficulty),
+          },
         },
-        startBattle,
         startTrainingSession,
         buildTrainingSessionStartRequest: buildRoomBackedTrainingSessionStartRequest,
         trainingMode,

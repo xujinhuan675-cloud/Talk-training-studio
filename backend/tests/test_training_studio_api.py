@@ -18,6 +18,7 @@ from api.dependencies import (
     get_analysis_service,
     get_chatroom_service,
     get_growth_service,
+    get_persona_editor_service,
     reset_ai_rate_limit_state,
 )
 import api.routes.training_studio as training_studio_routes
@@ -103,6 +104,14 @@ class FakeChatroomService:
         return self.details[room_id]
 
 
+class FakePersonaEditor:
+    def __init__(self) -> None:
+        self.created_personas: list[object] = []
+
+    def create_persona(self, dto) -> None:
+        self.created_personas.append(dto)
+
+
 class FakeTrainingRuntimeConversationRepository:
     def __init__(self, state) -> None:
         self._state = state
@@ -149,6 +158,7 @@ def app(tmp_path):
     reader_service = FakeAnalysisReaderService()
     growth_service = FakeGrowthService()
     chatroom_service = FakeChatroomService()
+    persona_editor = FakePersonaEditor()
     guidance_service = TrainingLiveGuidanceService(monologue_word_threshold=20)
     test_app.dependency_overrides[get_training_runtime_uow_factory] = (
         lambda: (lambda **kwargs: FakeTrainingRuntimeUnitOfWork(runtime_state, **kwargs))
@@ -161,6 +171,7 @@ def app(tmp_path):
     test_app.dependency_overrides[get_analysis_reader_service] = lambda: reader_service
     test_app.dependency_overrides[get_growth_service] = lambda: growth_service
     test_app.dependency_overrides[get_chatroom_service] = lambda: chatroom_service
+    test_app.dependency_overrides[get_persona_editor_service] = lambda: persona_editor
     test_app.state.scenario_config_service = scenario_config_service
     test_app.state.training_session_service = session_service
     test_app.state.guidance_service = guidance_service
@@ -168,6 +179,7 @@ def app(tmp_path):
     test_app.state.analysis_reader_service = reader_service
     test_app.state.growth_service = growth_service
     test_app.state.chatroom_service = chatroom_service
+    test_app.state.persona_editor = persona_editor
     test_app.state.training_runtime_state = runtime_state
     return test_app
 
@@ -208,6 +220,13 @@ async def test_scenario_templates_expose_business_training_cards(client: AsyncCl
     assert len(data) >= 6
 
     by_id = {item["id"]: item for item in data}
+    assert {
+        "daily-upward-results-report",
+        "budget-freeze-expansion",
+        "cross-team-roadmap-tradeoff",
+        "project-scope-creep-boundary",
+        "service-apology-retention",
+    }.issubset(by_id)
     new_customer = by_id["new-customer-discount"]
     assert new_customer["title"]
     assert new_customer["category"] == "sales"
@@ -1117,6 +1136,59 @@ async def test_training_session_start_can_create_room(client: AsyncClient) -> No
     started = start_resp.json()["data"]
     assert started["status"] == "active"
     assert started["room_id"] == "701"
+
+
+@pytest.mark.asyncio
+async def test_training_session_start_can_create_runtime_persona(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("voice", scenario_template_id="ai-web3-agent-pm-comprehensive-interview"),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={
+            "room_name": "AI Agent PM interview training",
+            "room_type": "battle_prep",
+            "runtime_persona": {
+                "name": "Hiring Panel",
+                "role": "AI Agent product interviewer",
+                "style": "Probe evidence, product judgment, and technical fluency.",
+                "scenario_context": "Full AI/Web3 Agent PM interview simulation.",
+                "training_points": [
+                    "Problem framing",
+                    "Agent architecture",
+                    "Web3 risk",
+                    "Execution metrics",
+                    "Stakeholder tradeoff",
+                    "Roadmap prioritization",
+                ],
+                "difficulty": "hard",
+            },
+        },
+    )
+
+    assert start_resp.status_code == 200
+    started = start_resp.json()["data"]
+    assert started["status"] == "active"
+    assert started["room_id"] == "701"
+
+    created_persona = app.state.persona_editor.created_personas[0]
+    assert created_persona.id.startswith("ts-")
+    assert created_persona.temporary is True
+    assert created_persona.name == "Hiring Panel"
+    assert "Full AI/Web3 Agent PM interview simulation." in created_persona.content
+    assert "Roadmap prioritization" in created_persona.content
+    assert "strong pressure" in created_persona.content
+
+    created_room = app.state.chatroom_service.created_rooms[0]
+    assert created_room.name == "AI Agent PM interview training"
+    assert created_room.type == "battle_prep"
+    assert created_room.persona_ids == [created_persona.id]
 
 
 @pytest.mark.asyncio

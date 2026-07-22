@@ -49,6 +49,15 @@ export interface CreateTrainingSessionRequest {
   team_id?: string | null
 }
 
+export interface TrainingRuntimePersonaRequest {
+  name: string
+  role: string
+  style: string
+  scenario_context: string
+  training_points: string[]
+  difficulty?: 'easy' | 'normal' | 'hard'
+}
+
 export interface StartTrainingSessionRequest {
   room_id?: number | string
   persona_ids?: string[]
@@ -56,6 +65,7 @@ export interface StartTrainingSessionRequest {
   room_type?: 'private' | 'group' | 'battle_prep' | 'defense'
   scenario_id?: number | null
   runtime?: TrainingSessionStartRuntime
+  runtime_persona?: TrainingRuntimePersonaRequest
 }
 
 export interface BuildTrainingSessionStartRequestOptions {

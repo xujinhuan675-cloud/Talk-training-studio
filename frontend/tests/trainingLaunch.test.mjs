@@ -26,18 +26,13 @@ async function loadTrainingLaunchModule() {
 
 const trainingLaunch = await loadTrainingLaunchModule()
 
-test('launchTrainingSessionFlow skips battle when payload is null', async () => {
+test('launchTrainingSessionFlow starts a session with an empty request by default', async () => {
   const events = []
   const result = await trainingLaunch.launchTrainingSessionFlow({
     createTrainingSessionRequest: { mode: 'text', scenario_template_id: 'scenario-1' },
     createTrainingSession: async (request) => {
       events.push(['create', request])
       return { session_id: 'created-1' }
-    },
-    battlePayload: null,
-    startBattle: async () => {
-      events.push(['battle'])
-      return { id: 'room-from-battle' }
     },
     buildTrainingSessionStartRequest: (data, mode, interactionMode) => {
       events.push(['buildRequest', data, mode, interactionMode])
@@ -53,8 +48,7 @@ test('launchTrainingSessionFlow skips battle when payload is null', async () => 
       events.push(['buildPath', roomId, mode, sessionId, interactionMode])
       return `/conversations/${roomId}?trainingMode=${mode}&interactionMode=${interactionMode}`
     },
-    buildNavigationState: ({ room, roomId, startedSession, trainingSession }) => ({
-      room,
+    buildNavigationState: ({ roomId, startedSession, trainingSession }) => ({
       roomId,
       startedSession,
       trainingSession,
@@ -68,7 +62,6 @@ test('launchTrainingSessionFlow skips battle when payload is null', async () => 
   })
 
   assert.deepEqual(events[0], ['create', { mode: 'text', scenario_template_id: 'scenario-1' }])
-  assert.equal(events.some(([name]) => name === 'battle'), false)
   assert.deepEqual(events.find(([name]) => name === 'buildRequest'), [
     'buildRequest',
     {},
@@ -92,18 +85,16 @@ test('launchTrainingSessionFlow skips battle when payload is null', async () => 
     'navigate',
     '/conversations/room-from-session?trainingMode=text&interactionMode=turn_based',
     {
-      room: null,
       roomId: 'room-from-session',
       startedSession: { session_id: 'started-1', room_id: 'room-from-session' },
       trainingSession: { session_id: 'created-1' },
     },
   ])
-  assert.equal(result.room, null)
   assert.equal(result.roomId, 'room-from-session')
   assert.equal(result.chatPath, '/conversations/room-from-session?trainingMode=text&interactionMode=turn_based')
 })
 
-test('launchTrainingSessionFlow calls battle when payload exists and falls back to the battle room', async () => {
+test('launchTrainingSessionFlow passes start request data through the training start endpoint', async () => {
   const events = []
   const result = await trainingLaunch.launchTrainingSessionFlow({
     createTrainingSessionRequest: { mode: 'voice', scenario_template_id: 'scenario-2' },
@@ -111,10 +102,12 @@ test('launchTrainingSessionFlow calls battle when payload exists and falls back 
       events.push(['create', request])
       return { session_id: 'created-2' }
     },
-    battlePayload: { persona_name: 'Stakeholder' },
-    startBattle: async (payload) => {
-      events.push(['battle', payload])
-      return { id: 42 }
+    startRequestData: {
+      room_name: 'Scenario practice',
+      runtime_persona: {
+        name: 'Stakeholder',
+        training_points: ['point-1', 'point-2', 'point-3', 'point-4', 'point-5', 'point-6'],
+      },
     },
     buildTrainingSessionStartRequest: (data, mode, interactionMode) => {
       events.push(['buildRequest', data, mode, interactionMode])
@@ -122,7 +115,7 @@ test('launchTrainingSessionFlow calls battle when payload exists and falls back 
     },
     startTrainingSession: async (sessionId, request) => {
       events.push(['startSession', sessionId, request])
-      return { session_id: 'started-2' }
+      return { session_id: 'started-2', room_id: 42 }
     },
     trainingMode: 'voice',
     interactionMode: 'realtime',
@@ -130,8 +123,7 @@ test('launchTrainingSessionFlow calls battle when payload exists and falls back 
       events.push(['buildPath', roomId, mode, sessionId, interactionMode])
       return `/conversations/${roomId}?trainingMode=${mode}&interactionMode=${interactionMode}`
     },
-    buildNavigationState: ({ room, roomId, startedSession, trainingSession }) => ({
-      room,
+    buildNavigationState: ({ roomId, startedSession, trainingSession }) => ({
       roomId,
       startedSession,
       trainingSession,
@@ -141,12 +133,29 @@ test('launchTrainingSessionFlow calls battle when payload exists and falls back 
     },
   })
 
-  assert.deepEqual(events.find(([name]) => name === 'battle'), ['battle', { persona_name: 'Stakeholder' }])
   assert.deepEqual(events.find(([name]) => name === 'buildRequest'), [
     'buildRequest',
-    { room_id: 42 },
+    {
+      room_name: 'Scenario practice',
+      runtime_persona: {
+        name: 'Stakeholder',
+        training_points: ['point-1', 'point-2', 'point-3', 'point-4', 'point-5', 'point-6'],
+      },
+    },
     'voice',
     'realtime',
+  ])
+  assert.deepEqual(events.find(([name]) => name === 'startSession'), [
+    'startSession',
+    'created-2',
+    {
+      room_name: 'Scenario practice',
+      runtime_persona: {
+        name: 'Stakeholder',
+        training_points: ['point-1', 'point-2', 'point-3', 'point-4', 'point-5', 'point-6'],
+      },
+      runtime: 'voice:realtime',
+    },
   ])
   assert.deepEqual(events.find(([name]) => name === 'buildPath'), [
     'buildPath',
@@ -159,9 +168,8 @@ test('launchTrainingSessionFlow calls battle when payload exists and falls back 
     'navigate',
     '/conversations/42?trainingMode=voice&interactionMode=realtime',
     {
-      room: { id: 42 },
       roomId: 42,
-      startedSession: { session_id: 'started-2' },
+      startedSession: { session_id: 'started-2', room_id: 42 },
       trainingSession: { session_id: 'created-2' },
     },
   ])

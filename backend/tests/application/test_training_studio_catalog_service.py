@@ -4,6 +4,7 @@ from application.services.training_studio.catalog_service import (
     TrainingCatalogService,
     TrainingTaskConfigDTO,
 )
+from domain.training_studio.catalog import SCENARIO_TRAINING_TEMPLATES
 
 
 def test_catalog_service_returns_catalog_options_and_default_weights():
@@ -36,6 +37,13 @@ def test_catalog_service_returns_catalog_options_and_default_weights():
         "self_intro_pitch",
         "resume_deep_dive",
         "product_sense_case",
+    }
+    assert {template.id for template in SCENARIO_TRAINING_TEMPLATES} >= {
+        "daily-upward-results-report",
+        "budget-freeze-expansion",
+        "cross-team-roadmap-tradeoff",
+        "project-scope-creep-boundary",
+        "service-apology-retention",
     }
 
 

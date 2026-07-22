@@ -88,6 +88,7 @@ export default function BattlePrepPage() {
         scenario_context: buildTrainingStudioPrompt(studioConfig, prepResult.scenario_context, t),
         selected_training_points: selectedPoints,
         difficulty: toBattleDifficulty(studioConfig.difficulty),
+        reply_language: studioConfig.replyLanguage,
       })
       navigate(APP_ROUTES.conversation(room.id))
     } catch (e: unknown) {

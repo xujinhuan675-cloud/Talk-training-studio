@@ -116,6 +116,28 @@ test('startTrainingSession posts to the start endpoint with JSON body', async ()
   assert.deepEqual(JSON.parse(calls[0].init.body), body)
 })
 
+test('startTrainingSession can post a runtime persona start request', async () => {
+  const calls = installFetchStub()
+  const body = {
+    room_name: 'Catalog scenario practice',
+    room_type: 'battle_prep',
+    runtime_persona: {
+      name: 'Stakeholder',
+      role: 'Buyer',
+      style: 'Specific and skeptical',
+      scenario_context: 'Negotiate a renewal.',
+      training_points: ['one', 'two', 'three', 'four', 'five', 'six'],
+      difficulty: 'normal',
+    },
+  }
+
+  await trainingSession.startTrainingSession('session-2', body)
+
+  assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session-2/start')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].init.body), body)
+})
+
 test('buildTrainingSessionStartRequest opts text turn-based sessions into message tree runtime', () => {
   assert.deepEqual(
     trainingSession.buildTrainingSessionStartRequest({ room_id: 42 }, 'text', 'turn_based'),

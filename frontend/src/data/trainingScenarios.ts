@@ -456,6 +456,82 @@ export const scenarioTrainingCatalog: ScenarioTrainingCard[] = [
     framework: 'scqa',
     trainingPoints: ['承认影响而不甩锅', '澄清优先级与责任人', '给出可追踪的恢复计划'],
   },
+  {
+    id: 'budget-freeze-expansion',
+    title: '预算冻结下的扩容推进',
+    description: '客户认可价值，但财务宣布预算冻结，你需要找到低风险扩容或分阶段试点路径。',
+    customerProfile: '企业客户业务负责人和财务共同参与，认可痛点但对新增支出非常谨慎。',
+    difficulty: 'hard',
+    category: 'sales',
+    required: false,
+    status: 'not_started',
+    openingLine: '今年预算基本冻结了。除非你能证明这件事不做会损失更大，否则我很难追加采购。',
+    persona: {
+      name: '李总',
+      role: '谨慎的企业预算负责人',
+      style: '理性、压成本、要求 ROI 和退出机制，会持续追问试点范围与失败成本。',
+    },
+    learnerRole: 'Account Executive',
+    framework: 'pyramid',
+    trainingPoints: ['先确认业务损失', '把扩容拆成低风险阶段', '明确成功指标和退出机制'],
+  },
+  {
+    id: 'cross-team-roadmap-tradeoff',
+    title: '跨团队路线图取舍',
+    description: '销售、研发和设计对路线优先级意见冲突，需要产品经理解释判断标准并促成决定。',
+    customerProfile: '跨部门评审会，多个角色各自带着收入、质量、体验和交付压力。',
+    difficulty: 'hard',
+    category: 'workplace',
+    required: false,
+    status: 'not_started',
+    openingLine: '销售说大客户功能必须插队，研发说排期已经满了。你作为产品负责人，准备怎么定优先级？',
+    persona: {
+      name: '赵睿',
+      role: '跨部门路线图评审主持人',
+      style: '要求先给判断框架，再给取舍结论；会追问证据、机会成本和 owner。',
+    },
+    learnerRole: 'Product Manager',
+    framework: 'scqa',
+    trainingPoints: ['先对齐共同目标', '公开优先级判断标准', '给出取舍和补偿方案'],
+  },
+  {
+    id: 'project-scope-creep-boundary',
+    title: '项目范围蔓延边界沟通',
+    description: '客户在项目中途持续追加需求，你需要守住范围边界，同时维护合作关系。',
+    customerProfile: '合作客户项目负责人，认为新增需求只是“小改动”，但实际会影响交付周期。',
+    difficulty: 'medium',
+    category: 'negotiation',
+    required: false,
+    status: 'not_started',
+    openingLine: '这个需求很小，你们顺手一起做了吧。我们上线时间不能再往后拖。',
+    persona: {
+      name: '许经理',
+      role: '持续追加范围的客户项目负责人',
+      style: '表面合作但会施压，希望把新增需求塞进原交付范围。',
+    },
+    learnerRole: 'Project Lead',
+    framework: 'prep',
+    trainingPoints: ['承认需求价值', '解释范围/时间/质量三角', '提出变更单或替代路径'],
+  },
+  {
+    id: 'service-apology-retention',
+    title: '投诉后的留存沟通',
+    description: '客户刚经历服务失误，准备取消合作，需要先修复信任再谈留存。',
+    customerProfile: '高价值客户，情绪不满，愿意听解释但不接受空泛道歉。',
+    difficulty: 'hard',
+    category: 'customer_service',
+    required: false,
+    status: 'not_started',
+    openingLine: '你们上次说会解决，结果还是没人跟进。现在我已经不想继续合作了。',
+    persona: {
+      name: '唐女士',
+      role: '准备流失的高价值客户',
+      style: '失望、警惕，会要求明确补救动作和后续责任人。',
+    },
+    learnerRole: 'Customer Success Manager',
+    framework: 'scqa',
+    trainingPoints: ['先承认影响和责任', '给出具体恢复计划', '用后续机制重建信任'],
+  },
 ]
 
 export function getScenarioTrainingCardById(scenarioId?: string | null): ScenarioTrainingCard | null {
@@ -1149,22 +1225,22 @@ export function buildScenarioTrainingPrompt(
   ].join('\n')
 }
 
-export function buildScenarioTrainingBattlePayload(
+export function buildScenarioTrainingRuntimePersona(
   scenario: ScenarioTrainingCard,
   mode: TrainingMode,
   options: ScenarioTrainingFeedbackOptions = {},
 ) {
   const feedbackMode = resolveScenarioFeedbackMode(options.feedbackMode)
-  const battleDifficulty = scenario.difficulty === 'easy'
+  const difficulty = scenario.difficulty === 'easy'
     ? 'easy'
     : scenario.difficulty === 'medium'
       ? 'normal'
       : 'hard'
 
   return {
-    persona_name: scenario.persona.name,
-    persona_role: scenario.persona.role,
-    persona_style: [
+    name: scenario.persona.name,
+    role: scenario.persona.role,
+    style: [
       scenario.persona.style,
       feedbackMode === 'drill'
         ? 'Run deliberate drill turns: short in-role question, concise correction, stronger rewrite, then ask the learner to retry before moving on.'
@@ -1174,7 +1250,7 @@ export function buildScenarioTrainingBattlePayload(
       `First turn opening line: ${scenario.openingLine}`,
     ].join('\n'),
     scenario_context: buildScenarioTrainingPrompt(scenario, mode, { feedbackMode }),
-    selected_training_points: scenario.trainingPoints,
-    difficulty: battleDifficulty,
+    training_points: scenario.trainingPoints,
+    difficulty,
   } as const
 }

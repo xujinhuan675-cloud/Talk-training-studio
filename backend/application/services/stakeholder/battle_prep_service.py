@@ -140,6 +140,27 @@ _DIFFICULTY_PROMPTS = {
     "hard": "你非常强势，会频繁打断、质疑数据来源、用情绪施压。",
 }
 
+_REPLY_LANGUAGE_LABELS = {
+    "zh-CN": "简体中文",
+    "zh-TW": "繁体中文",
+    "en-US": "English",
+    "ja": "日本語",
+    "ko": "한국어",
+    "es": "Español",
+    "fr": "Français",
+    "de": "Deutsch",
+}
+
+
+def _reply_language_instruction(reply_language: str) -> str:
+    code = (reply_language or "zh-CN").strip() or "zh-CN"
+    label = _REPLY_LANGUAGE_LABELS.get(code, code)
+    return (
+        "## 回复语言\n\n"
+        f"- 你的所有对手回复必须使用 {label}（{code}）。\n"
+        "- 除非用户明确要求切换语言，否则不要混用其他语言。\n"
+    )
+
 
 _REALISTIC_COUNTERPART_RULES = """\
 ## 真实对手扮演守则（最高优先级）
@@ -235,6 +256,7 @@ class BattlePrepService:
             f"## 沟通风格\n\n{dto.persona_style}\n\n"
             f"## 对话场景\n\n{dto.scenario_context}\n\n"
             f"## 难度指令\n\n{difficulty_instruction}\n\n"
+            f"{_reply_language_instruction(dto.reply_language)}\n"
             f"## 训练重点\n\n"
             f"用户选择了以下训练重点，请在对话中重点围绕这些方面施压和互动：\n"
         )

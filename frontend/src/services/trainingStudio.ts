@@ -5,6 +5,7 @@ export type TrainingScenario = 'interview' | 'sales' | 'negotiation' | 'workplac
 export type TrainingDifficulty = 'easy' | 'medium' | 'hard'
 export type ExpressionFramework = 'prep' | 'star' | 'scqa' | 'pyramid'
 export type TrainingLevel = 'intern' | 'junior' | 'mid' | 'senior' | 'staff' | 'manager'
+export type TrainingReplyLanguage = string
 export type InterviewRolePresetId =
   | 'recruiter_screen'
   | 'hiring_manager'
@@ -47,6 +48,7 @@ export interface TrainingStudioConfig {
   techStack: string
   questionMix: QuestionMix
   questionCount: number
+  replyLanguage: TrainingReplyLanguage
 }
 
 export interface VideoAnswerUploadResult {
@@ -773,6 +775,18 @@ export const DEFAULT_TRAINING_STUDIO_CONFIG: TrainingStudioConfig = {
     pressure: 25,
   },
   questionCount: 8,
+  replyLanguage: 'zh-CN',
+}
+
+const REPLY_LANGUAGE_PROMPT_LABELS: Record<string, string> = {
+  'zh-CN': 'Chinese (Simplified)',
+  'zh-TW': 'Chinese (Traditional)',
+  'en-US': 'English',
+  ja: 'Japanese',
+  ko: 'Korean',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
 }
 
 function formatFallback(template: string, params?: TranslationParams): string {
@@ -787,6 +801,12 @@ function translate(t: Translate | undefined, key: TranslationKey, fallback: stri
 function optionLabel<T extends string>(options: LocalizedOption<T>[], value: T, t?: Translate): string {
   const option = options.find((item) => item.value === value)
   return option ? translate(t, option.labelKey, option.fallbackLabel) : value
+}
+
+function replyLanguagePromptValue(replyLanguage: string | null | undefined): string {
+  const code = replyLanguage?.trim() || DEFAULT_TRAINING_STUDIO_CONFIG.replyLanguage
+  const label = REPLY_LANGUAGE_PROMPT_LABELS[code]
+  return label ? `${label} (${code})` : code
 }
 
 function cleanCapabilityText(value: unknown): string | null {
@@ -1240,8 +1260,12 @@ export function normalizeQuestionMix(mix: QuestionMix): QuestionMix {
   }
 }
 
-export function toBattleDifficulty(difficulty: TrainingDifficulty): 'easy' | 'normal' | 'hard' {
+export function toTrainingRuntimeDifficulty(difficulty: TrainingDifficulty): 'easy' | 'normal' | 'hard' {
   return difficulty === 'medium' ? 'normal' : difficulty
+}
+
+export function toBattleDifficulty(difficulty: TrainingDifficulty): 'easy' | 'normal' | 'hard' {
+  return toTrainingRuntimeDifficulty(difficulty)
 }
 
 export function buildTrainingStudioPrompt(config: TrainingStudioConfig, description: string, t?: Translate): string {
@@ -1284,10 +1308,12 @@ export function buildTrainingStudioPrompt(config: TrainingStudioConfig, descript
     `- ${translate(t, 'training.prompt.role', 'Target role')}: ${config.role || notSpecified}`,
     `- ${translate(t, 'training.prompt.level', 'Level')}: ${level || notSpecified}`,
     `- ${translate(t, 'training.prompt.techStack', 'Domain / tools')}: ${config.techStack || notSpecified}`,
+    `- ${translate(t, 'training.prompt.replyLanguage', 'AI reply language')}: ${replyLanguagePromptValue(config.replyLanguage)}`,
     ...interviewScenarioLines,
     ...productScenarioLines,
     `- ${translate(t, 'training.prompt.questionMix', 'Question mix')}: ${translate(t, 'training.launcher.behavioral', 'behavioral')} ${mix.behavioral}%, ${translate(t, 'training.launcher.technical', 'technical')} ${mix.technical}%, ${translate(t, 'training.launcher.pressure', 'pressure')} ${mix.pressure}%`,
     `- ${translate(t, 'training.prompt.questionCount', 'Question count')}: ${config.questionCount}`,
+    translate(t, 'training.prompt.replyLanguageRule', 'The AI counterpart must reply in the selected language unless the learner explicitly asks to switch.'),
   ].join('\n')
 }
 

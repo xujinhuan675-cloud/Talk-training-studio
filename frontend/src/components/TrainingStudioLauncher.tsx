@@ -18,6 +18,7 @@ import {
   type TrainingScenario,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
+import { LIVE_COACH_LANGUAGE_OPTIONS, getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { Button } from './ui/button'
 import { Field, Input, Select } from './ui/form'
 import { SegmentedControl } from './ui/segmented-control'
@@ -109,7 +110,7 @@ export default function TrainingStudioLauncher({
   onChange,
   disabled = false,
 }: TrainingStudioLauncherProps) {
-  const { t } = useI18n()
+  const { locale, t } = useI18n()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const activePreset = getActivePreset(value)
 
@@ -344,6 +345,20 @@ export default function TrainingStudioLauncher({
               {QUESTION_COUNT_OPTIONS.map((count) => (
                 <option key={count} value={count}>
                   {t('training.launcher.questionOption', { count })}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field className="tsl-field" label={t('training.launcher.replyLanguage')}>
+            <Select
+              value={value.replyLanguage || 'zh-CN'}
+              onChange={(event) => update('replyLanguage', event.target.value)}
+              disabled={disabled}
+            >
+              {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {getLiveCoachLanguageLabel(option.code, locale)}
                 </option>
               ))}
             </Select>

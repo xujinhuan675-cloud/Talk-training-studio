@@ -275,27 +275,37 @@
   white-space: nowrap;
 }
 
-.chat-page-llm-selector select {
+.chat-page-llm-selector .ui-form-select {
   width: 100%;
   min-width: 0;
   height: 30px;
-  padding: 0 28px 0 9px;
+  padding: 0 34px 0 9px;
   border: 1px solid var(--border, #e5e7eb);
   border-radius: 6px;
-  background: var(--bg-card, #fff);
+  background-color: var(--bg-card, #fff);
+  background-image: var(--ui-select-chevron-down);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 15px 15px;
   color: var(--text-primary, #1f2937);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
-.chat-page-llm-selector select:focus {
+.chat-page-llm-selector .ui-form-select[data-open='true'] {
+  background-image: var(--ui-select-chevron-up);
+}
+
+.chat-page-llm-selector .ui-form-select:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.chat-page-llm-selector select:disabled {
+.chat-page-llm-selector .ui-form-select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

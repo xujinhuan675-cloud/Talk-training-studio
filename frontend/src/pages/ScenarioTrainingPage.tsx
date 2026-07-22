@@ -12,7 +12,6 @@ import {
   SlidersHorizontal,
   Trophy,
 } from 'lucide-react'
-import { startBattle } from '../services/api'
 import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
 import { buildRoomBackedTrainingSessionStartRequest, createTrainingSession, startTrainingSession } from '../services/trainingSession'
 import {
@@ -27,7 +26,7 @@ import { useI18n, type Locale, type Translate, type TranslateInline } from '../i
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import { PageHeader, PageShell } from '../components/ui/page'
 import {
-  buildScenarioTrainingBattlePayload,
+  buildScenarioTrainingRuntimePersona,
   buildScenarioTrainingRouteState,
   buildScenarioTrainingTaskConfig,
   getScenarioTrainingProgress,
@@ -259,8 +258,11 @@ export default function ScenarioTrainingPage() {
           },
         },
         createTrainingSession,
-        battlePayload: buildScenarioTrainingBattlePayload(scenario, trainingMode, { feedbackMode }),
-        startBattle,
+        startRequestData: {
+          room_name: `Training: ${scenario.title}`,
+          room_type: 'battle_prep',
+          runtime_persona: buildScenarioTrainingRuntimePersona(scenario, trainingMode, { feedbackMode }),
+        },
         startTrainingSession,
         buildTrainingSessionStartRequest: buildRoomBackedTrainingSessionStartRequest,
         trainingMode,

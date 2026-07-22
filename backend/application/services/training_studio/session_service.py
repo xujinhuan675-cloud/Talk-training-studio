@@ -330,7 +330,7 @@ class TrainingSessionService:
 
         return sorted(
             progress,
-            key=lambda item: item.last_practiced_at or datetime.min.replace(tzinfo=UTC),
+            key=lambda item: self._as_utc_datetime(item.last_practiced_at),
             reverse=True,
         )
 
@@ -479,12 +479,21 @@ class TrainingSessionService:
         return max(0, min(100, round(overall_score * 20)))
 
     def _is_later_session(self, candidate: TrainingSession, current: TrainingSession) -> bool:
-        fallback = datetime.min.replace(tzinfo=UTC)
-        candidate_time = candidate.completed_at or candidate.started_at or fallback
-        current_time = current.completed_at or current.started_at or fallback
+        candidate_time = self._session_sort_time(candidate)
+        current_time = self._session_sort_time(current)
         if candidate_time != current_time:
             return candidate_time > current_time
         return candidate.session_id > current.session_id
+
+    def _session_sort_time(self, session: TrainingSession) -> datetime:
+        return self._as_utc_datetime(session.completed_at or session.started_at)
+
+    def _as_utc_datetime(self, value: datetime | None) -> datetime:
+        if value is None:
+            return datetime.min.replace(tzinfo=UTC)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     def _normalize_optional_text(self, value: object | None) -> str | None:
         if value is None:

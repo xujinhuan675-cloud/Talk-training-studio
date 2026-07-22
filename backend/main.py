@@ -26,7 +26,11 @@ from core.i18n import t
 from core.logging_config import configure_logging, get_logger
 from core.observability import tracing as tracing_obs
 from core.response import success_response
+from application.services.stakeholder.default_config_service import (
+    seed_default_stakeholder_config,
+)
 from infrastructure.database import create_tables, upgrade_schema_to_head
+from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 from infrastructure.external.agent_sdk.lifespan import (
     init_agent_sdk_client,
     shutdown_agent_sdk_client,
@@ -82,6 +86,20 @@ async def lifespan(app: FastAPI):
             "database_migrations_required",
             message="Auto migration is disabled in production, run Alembic before startup",
         )
+    try:
+        seed_result = await seed_default_stakeholder_config(
+            uow_factory=SQLAlchemyUnitOfWork,
+            persona_dir=settings.stakeholder.persona_dir,
+        )
+        logger.info(
+            "default_stakeholder_config_seeded",
+            persona_files_created=seed_result.persona_files_created,
+            organizations_created=seed_result.organizations_created,
+            teams_created=seed_result.teams_created,
+            scenarios_created=seed_result.scenarios_created,
+        )
+    except Exception as exc:
+        logger.warning("default_stakeholder_config_seed_failed", error=str(exc))
     if settings.redis.url:
         try:
             await init_redis_client()

@@ -1,4 +1,5 @@
 import pytest
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from application.services.training_studio.session_service import (
@@ -102,6 +103,41 @@ async def test_session_service_tracks_scenario_progress():
     assert progress[0].score_status == "pending"
     assert progress[0].training_session_id == "session-1"
     assert progress[0].report_id == "report-1"
+
+
+async def test_session_service_scenario_progress_handles_mixed_timezone_datetimes():
+    session_ids = iter(["scenario-a-old", "scenario-a-new", "scenario-b"])
+    service = TrainingSessionService(id_factory=lambda: next(session_ids))
+
+    old = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "scenario-a",
+        }
+    )
+    new = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "scenario-a",
+        }
+    )
+    other = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "scenario-b",
+        }
+    )
+    old.status = TrainingSessionStatus.ACTIVE
+    new.status = TrainingSessionStatus.ACTIVE
+    other.status = TrainingSessionStatus.ACTIVE
+    old.started_at = datetime(2026, 7, 22, 8, 0, 0)
+    new.started_at = datetime(2026, 7, 22, 9, 0, 0, tzinfo=UTC)
+    other.started_at = datetime(2026, 7, 22, 10, 0, 0)
+
+    progress = await service.list_scenario_progress(access_scope=_scope())
+
+    assert [item.scenario_id for item in progress] == ["scenario-b", "scenario-a"]
+    assert [item.training_session_id for item in progress] == ["scenario-b", "scenario-a-new"]
 
 
 async def test_session_service_can_fail_session():

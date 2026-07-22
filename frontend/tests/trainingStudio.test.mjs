@@ -64,6 +64,7 @@ test('default training studio config is product-manager interview oriented', () 
   assert.equal(config.interviewRolePreset, 'hiring_manager')
   assert.equal(config.interviewScenarioPreset, 'resume_deep_dive')
   assert.equal(config.role, 'Product Manager')
+  assert.equal(config.replyLanguage, 'zh-CN')
   assert.match(config.techStack, /interview/i)
 })
 
@@ -93,6 +94,8 @@ test('buildTrainingStudioPrompt includes interview round and interviewer context
   assert.match(prompt, /Interview round: Resume deep dive/)
   assert.match(prompt, /Interviewer: Hiring manager/)
   assert.match(prompt, /Interview focus: resume project/)
+  assert.match(prompt, /AI reply language: Chinese \(Simplified\) \(zh-CN\)/)
+  assert.match(prompt, /must reply in the selected language/)
 })
 
 test('buildTrainingStudioPrompt includes product drill and counterpart context', () => {

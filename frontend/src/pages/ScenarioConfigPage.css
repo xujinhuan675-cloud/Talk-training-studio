@@ -26,7 +26,6 @@
 }
 
 .scenario-config-header,
-.scenario-config-stats,
 .scenario-config-notice,
 .scenario-config-tabbar,
 .scenario-config-workspace {
@@ -134,49 +133,6 @@
 .scenario-config-dimension-footer .ui-button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
-}
-
-.scenario-config-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.scenario-config-stats div {
-  min-height: 68px;
-  display: grid;
-  align-content: center;
-  gap: 4px;
-  border: 1px solid var(--config-border-soft);
-  border-radius: 8px;
-  padding: 11px 12px;
-  background: var(--config-surface);
-  box-shadow: var(--config-shadow-soft);
-}
-
-.scenario-config-stats strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.scenario-config-stats span {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.scenario-config-stats .ok strong {
-  color: var(--config-primary);
-}
-
-.scenario-config-stats .warning strong {
-  color: var(--config-danger);
 }
 
 .scenario-config-notice {
@@ -708,10 +664,6 @@
     flex: 1;
   }
 
-  .scenario-config-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .scenario-config-list {
     position: static;
   }
@@ -726,7 +678,6 @@
     font-size: 23px;
   }
 
-  .scenario-config-stats,
   .scenario-config-form-grid,
   .scenario-config-weight-table > div {
     grid-template-columns: 1fr;

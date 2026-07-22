@@ -317,6 +317,7 @@ function extractTrainingReportScore(report: TrainingSessionReportDTO): number | 
 const GUIDANCE_TURN_WINDOW = 8
 const GUIDANCE_AUTO_DELAY_MS = 900
 const GUIDANCE_AUTO_MIN_INTERVAL_MS = 1200
+const ROOM_AUTO_OPENING_MESSAGE = '我来接'
 
 const GUIDE_EVENT_TEXTS: Record<string, [string, string]> = {
   'Ask a calibration question': ['追问校准问题', 'Ask a calibration question'],
@@ -522,6 +523,7 @@ function ChatArea() {
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
   const [trainingSceneExpanded, setTrainingSceneExpanded] = useState(false)
   const [llmRegistry, setLlmRegistry] = useState<LLMProviderMetadata | null>(null)
+  const [llmRegistryStatus, setLlmRegistryStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [selectedLlmChoiceKey, setSelectedLlmChoiceKey] = useState<string | null>(null)
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
@@ -529,6 +531,7 @@ function ChatArea() {
   const initialRouteMessage = getStateStringValue(location.state, 'initialMessage')
   const initialRouteMessageSource = getStateStringValue(location.state, 'initialMessageSource')
     ?? 'conversation_library_new_chat'
+  const autoOpeningRoomIdsRef = React.useRef<Set<number>>(new Set())
 
   useEffect(() => {
     setMessageTreeSelection(null)
@@ -541,6 +544,7 @@ function ChatArea() {
     const messageKey = `${selectedRoomId}:${content}`
     if (initialRouteMessageKeyRef.current === messageKey) return
     initialRouteMessageKeyRef.current = messageKey
+    autoOpeningRoomIdsRef.current.add(selectedRoomId)
 
     void sendChatMessage({ source: initialRouteMessageSource }, content)
       .finally(() => {
@@ -623,20 +627,26 @@ function ChatArea() {
     let cancelled = false
     if (!isTrainingSession) {
       setLlmRegistry(null)
+      setLlmRegistryStatus('idle')
       setSelectedLlmChoiceKey(null)
       return () => {
         cancelled = true
       }
     }
 
+    setLlmRegistryStatus('loading')
     fetchLlmRegistry()
       .then((registry) => {
-        if (!cancelled) setLlmRegistry(registry)
+        if (!cancelled) {
+          setLlmRegistry(registry)
+          setLlmRegistryStatus('ready')
+        }
       })
       .catch((error) => {
         if (cancelled) return
         console.warn('Failed to fetch LLM registry:', error)
         setLlmRegistry(null)
+        setLlmRegistryStatus('error')
       })
 
     return () => {
@@ -711,6 +721,43 @@ function ChatArea() {
     const nextChoice = llmModelChoices.find((choice) => choice.key === nextKey) ?? null
     setSelectedLlmChoiceKey(nextChoice && isLlmModelChoiceSelectable(nextChoice) ? nextChoice.key : null)
   }, [llmModelChoices])
+
+  useEffect(() => {
+    if (!selectedRoomId || !chat.selectedRoom || chat.sending) return
+    if (isLiveCoachSession || initialRouteMessage?.trim()) return
+    if (isTrainingSession && (llmRegistryStatus === 'idle' || llmRegistryStatus === 'loading')) return
+    if (isTrainingSession && llmModelChoices.length > 0 && !selectedLlmChoice) return
+    if (chat.selectedRoom.messages.length > 0) return
+    if (autoOpeningRoomIdsRef.current.has(selectedRoomId)) return
+
+    autoOpeningRoomIdsRef.current.add(selectedRoomId)
+    const metadata = mergeMetadata(outgoingMessageMetadata, {
+      source: 'room_auto_opening',
+      autoOpening: {
+        content: ROOM_AUTO_OPENING_MESSAGE,
+        version: 1,
+      },
+    })
+
+    void sendChatMessage(metadata, ROOM_AUTO_OPENING_MESSAGE)
+      .then((success) => {
+        if (!success) {
+          autoOpeningRoomIdsRef.current.delete(selectedRoomId)
+        }
+      })
+  }, [
+    chat.selectedRoom,
+    chat.sending,
+    initialRouteMessage,
+    isLiveCoachSession,
+    isTrainingSession,
+    llmModelChoices.length,
+    llmRegistryStatus,
+    outgoingMessageMetadata,
+    selectedLlmChoice,
+    selectedRoomId,
+    sendChatMessage,
+  ])
 
   useEffect(() => {
     setTrainingSessionCompleted(false)
