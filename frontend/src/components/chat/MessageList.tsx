@@ -35,6 +35,7 @@ import { Button } from '../ui/button'
 import { Field, Input, Select, Textarea } from '../ui/form'
 import { SegmentedControl } from '../ui/segmented-control'
 import { useI18n } from '../../i18n'
+import { useAuthContext } from '../../contexts/AuthContext'
 import './MessageList.css'
 
 /* ------------------------------------------------------------------ */
@@ -1167,6 +1168,8 @@ export default function MessageList({
   onClick,
 }: MessageListProps) {
   const { t, tr, locale } = useI18n()
+  const { currentUser } = useAuthContext()
+  const userName = currentUser?.name ?? tr('用户', 'User')
   const isEmpty = messages.length === 0 && streamingEntries.length === 0
   const currentTreePathIds = React.useMemo(
     () => new Set(currentTreeSelection?.path.map((item) => item.publicId) ?? []),
@@ -1312,22 +1315,28 @@ export default function MessageList({
                   </div>
                 )}
                 {msg.sender_type === 'user' && (
-                  <>
-                    <div className="message-bubble">
-                      {renderContent(msg.content)}
-                      {renderVideoAttachment(videoAttachment)}
+                  <div className="message-row">
+                    <Avatar name={userName} color="#2563EB" size={28} />
+                    <div className="message-content">
+                      <div className="sender-name user-sender-name">
+                        {userName}
+                      </div>
+                      <div className="message-bubble">
+                        {renderContent(msg.content)}
+                        {renderVideoAttachment(videoAttachment)}
+                      </div>
+                      {messageTreeActionContext && (
+                        <MessageTreeActions
+                          message={msg}
+                          context={messageTreeActionContext}
+                          labels={messageTreeActionLabels}
+                          selectedTreeNodeId={currentTreeSelection?.selectedMessageId}
+                          onSelectPath={onSelectTreePath}
+                        />
+                      )}
+                      <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
                     </div>
-                    {messageTreeActionContext && (
-                      <MessageTreeActions
-                        message={msg}
-                        context={messageTreeActionContext}
-                        labels={messageTreeActionLabels}
-                        selectedTreeNodeId={currentTreeSelection?.selectedMessageId}
-                        onSelectPath={onSelectTreePath}
-                      />
-                    )}
-                    <div className="message-time">{formatTime(msg.timestamp, locale === 'zh' ? 'zh-CN' : 'en-US')}</div>
-                  </>
+                  </div>
                 )}
                 {msg.sender_type === 'system' && (
                   <>

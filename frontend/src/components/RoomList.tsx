@@ -97,8 +97,23 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onRoomDeleted, 
 
   return (
     <div className="room-list">
-      {regularRooms.map(renderRoom)}
-      <div className={`sidebar-section-header room-battle-header${regularRooms.length === 0 ? ' is-first' : ''}`}>
+      <div className="sidebar-section-header room-conversation-header">
+        <span className="sidebar-section-title room-conversation-title">{tr('会话', 'Conversations')}</span>
+        <Button asChild variant="secondary" size="sm" className="room-conversation-create">
+          <Link
+            to={APP_ROUTES.conversations}
+            title={tr('新建会话', 'New conversation')}
+            aria-label={tr('新建会话', 'New conversation')}
+          >
+            <span>{tr('新建', 'New')}</span>
+            <Plus size={13} />
+          </Link>
+        </Button>
+      </div>
+      {regularRooms.length > 0
+        ? regularRooms.map(renderRoom)
+        : <div className="room-list-empty">{tr('暂无会话', 'No conversations yet')}</div>}
+      <div className="sidebar-section-header room-battle-header">
         <span className="sidebar-section-title room-battle-title">{tr('备战', 'Battle prep')}</span>
         <Button asChild variant="primary" size="sm" className="room-battle-create">
           <Link

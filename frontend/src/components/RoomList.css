@@ -12,6 +12,12 @@
   font-size: 13px;
 }
 
+.room-list-empty {
+  padding: 10px 18px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .room-item {
   display: flex;
   align-items: center;
@@ -88,6 +94,23 @@
 .room-delete-btn.ui-button--ghost:hover:not(:disabled) {
   background: var(--rose-soft);
   color: var(--rose);
+}
+
+.room-conversation-header {
+  margin-bottom: 6px;
+}
+
+.room-conversation-title {
+  color: var(--text-secondary);
+}
+
+.room-conversation-create.ui-button {
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .room-battle-header {
