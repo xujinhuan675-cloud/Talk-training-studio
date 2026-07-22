@@ -1143,12 +1143,23 @@ function llmEndpointLabel(baseUrl: string): string {
   return 'Custom compatible endpoint'
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: number | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) window.clearTimeout(timer)
+  })
+}
+
 function ConfigTab() {
   const { t, tr } = useI18n()
   const [config, setConfig] = useState<VoicePreferenceConfig | null>(null)
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [form, setForm] = useState<VoicePreferenceForm>(DEFAULT_VOICE_FORM)
   const [loading, setLoading] = useState(true)
+  const [catalogLoading, setCatalogLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [catalogError, setCatalogError] = useState<string | null>(null)
@@ -1158,33 +1169,39 @@ function ConfigTab() {
     setForm((current) => ({ ...current, ...patch }))
   }
 
+  const loadProviderCatalog = useCallback(async () => {
+    setCatalogLoading(true)
+    setCatalogError(null)
+    try {
+      const next = await withTimeout(
+        fetchRealtimeCapabilities(),
+        8000,
+        tr('Pipecat provider catalog 请求超时', 'Pipecat provider catalog request timed out'),
+      )
+      setRealtimeCapabilities(next)
+    } catch (err) {
+      setRealtimeCapabilities(null)
+      setCatalogError(getErrorMessage(err))
+    } finally {
+      setCatalogLoading(false)
+    }
+  }, [tr])
+
   const loadConfig = useCallback(async () => {
     setLoading(true)
     setNotice(null)
     setCatalogError(null)
     try {
-      const [voiceResult, realtimeResult] = await Promise.allSettled([
-        fetchVoiceConfig(),
-        fetchRealtimeCapabilities(),
-      ])
-      if (voiceResult.status === 'rejected') {
-        throw voiceResult.reason
-      }
-      const next = voiceResult.value
+      const next = await fetchVoiceConfig()
       setConfig(next)
       setForm(toVoiceForm(next))
-      if (realtimeResult.status === 'fulfilled') {
-        setRealtimeCapabilities(realtimeResult.value)
-      } else {
-        setRealtimeCapabilities(null)
-        setCatalogError(getErrorMessage(realtimeResult.reason))
-      }
     } catch (err) {
       setNotice({ tone: 'error', text: getErrorMessage(err) })
     } finally {
       setLoading(false)
     }
-  }, [])
+    void loadProviderCatalog()
+  }, [loadProviderCatalog])
 
   useEffect(() => {
     loadConfig()
@@ -1203,6 +1220,7 @@ function ConfigTab() {
     if (source === 'stt') return tr('使用 STT 专用 key', 'Uses dedicated STT key')
     return t('common.notConfigured')
   }
+  const configStatusText = loading ? t('common.loading') : t('common.notConfigured')
 
   const handleSave = async () => {
     setSaving(true)
@@ -1301,7 +1319,7 @@ function ConfigTab() {
         count: countCatalogProviders(llmChannel),
       }),
       tone: config?.llm_api_key_configured ? 'ready' : 'warning',
-      note: config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : t('common.loading'),
+      note: config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : configStatusText,
     },
     {
       key: 'stt',
@@ -1314,7 +1332,7 @@ function ConfigTab() {
         count: countCatalogProviders(sttChannel),
       }),
       tone: config?.stt_api_key_source === 'missing' ? 'warning' : 'ready',
-      note: config ? sourceText(config.stt_api_key_source) : t('common.loading'),
+      note: config ? sourceText(config.stt_api_key_source) : configStatusText,
     },
     {
       key: 'tts',
@@ -1327,7 +1345,7 @@ function ConfigTab() {
         count: countCatalogProviders(ttsChannel),
       }),
       tone: config?.tts_api_key_configured ? 'ready' : 'warning',
-      note: config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : t('common.loading'),
+      note: config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : configStatusText,
     },
     {
       key: 'realtime',
@@ -1340,7 +1358,7 @@ function ConfigTab() {
         count: countCatalogProviders(realtimeChannel),
       }),
       tone: realtimeCapabilities?.pipecat.readyForCall ? 'ready' : (config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'),
-      note: config ? sourceText(config.realtime_api_key_source) : t('common.loading'),
+      note: config ? sourceText(config.realtime_api_key_source) : configStatusText,
     },
     {
       key: 'transport',
@@ -1556,6 +1574,12 @@ function ConfigTab() {
         <div className="settings-warning">
           <AlertTriangle size={14} />
           <span>{tr('Pipecat provider catalog 加载失败：{message}', 'Pipecat provider catalog failed to load: {message}', { message: catalogError })}</span>
+        </div>
+      )}
+      {catalogLoading && !catalogError && (
+        <div className="settings-warning">
+          <RefreshCw size={14} />
+          <span>{tr('正在加载 Pipecat provider catalog，不会阻塞主配置。', 'Loading Pipecat provider catalog without blocking the main configuration.')}</span>
         </div>
       )}
 
