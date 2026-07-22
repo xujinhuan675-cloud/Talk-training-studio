@@ -427,6 +427,11 @@ class FakeEvaluationRepository:
         return self.evaluations.get(report_id)
 
 
+class FailingEvaluationRepository:
+    async def get_by_report_id(self, report_id: int):
+        raise RuntimeError("evaluation store unavailable")
+
+
 async def test_session_service_progress_uses_competency_evaluation_scores():
     session_ids = iter(["session-1", "session-2"])
     repository = InMemoryTrainingSessionRepository()
@@ -468,6 +473,68 @@ async def test_session_service_progress_uses_competency_evaluation_scores():
     assert progress[0].score == 85
     assert progress[0].overall_score == 4.25
     assert progress[0].evaluation_id == 12
+
+
+async def test_session_service_progress_degrades_when_evaluation_lookup_fails():
+    repository = InMemoryTrainingSessionRepository()
+    service = TrainingSessionService(
+        uow_factory=lambda **_: FakeTrainingUow(repository, FailingEvaluationRepository()),
+        id_factory=lambda: "session-1",
+    )
+
+    session = await service.create_session({
+        **make_payload(),
+        "scenario_template_id": "new-customer-discount",
+        "user_id": "user-sales-001",
+        "team_id": "team-revenue",
+    })
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.complete_session(session.session_id, report_id="501", access_scope=_scope())
+
+    progress = await service.list_scenario_progress(
+        user_id="user-sales-001",
+        access_scope=_scope(),
+    )
+
+    assert len(progress) == 1
+    assert progress[0].status == "completed"
+    assert progress[0].report_id == "501"
+    assert progress[0].score_status == "pending"
+    assert progress[0].score is None
+    assert progress[0].overall_score is None
+    assert progress[0].evaluation_id is None
+
+
+async def test_session_service_progress_degrades_when_evaluation_score_is_invalid():
+    repository = InMemoryTrainingSessionRepository()
+    evaluations = FakeEvaluationRepository({
+        501: SimpleNamespace(id=12, overall_score="not-a-number"),
+    })
+    service = TrainingSessionService(
+        uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
+        id_factory=lambda: "session-1",
+    )
+
+    session = await service.create_session({
+        **make_payload(),
+        "scenario_template_id": "new-customer-discount",
+        "user_id": "user-sales-001",
+        "team_id": "team-revenue",
+    })
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.complete_session(session.session_id, report_id="501", access_scope=_scope())
+
+    progress = await service.list_scenario_progress(
+        user_id="user-sales-001",
+        access_scope=_scope(),
+    )
+
+    assert len(progress) == 1
+    assert progress[0].status == "completed"
+    assert progress[0].score_status == "pending"
+    assert progress[0].score is None
+    assert progress[0].overall_score is None
+    assert progress[0].evaluation_id is None
 
 
 async def test_session_service_can_start_with_explicit_room_id():

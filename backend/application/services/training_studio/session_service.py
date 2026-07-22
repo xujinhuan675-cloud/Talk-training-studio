@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -24,6 +25,8 @@ from domain.training_studio.session_repository import (
     training_session_matches_access_scope,
 )
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
+
+logger = logging.getLogger(__name__)
 
 
 class TrainingSessionDTO(BaseModel):
@@ -458,15 +461,37 @@ class TrainingSessionService:
             except ValueError:
                 report_id = None
             if report_id is not None:
-                evaluation = await evaluation_lookup(report_id)
+                try:
+                    evaluation = await evaluation_lookup(report_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to resolve competency evaluation for scenario progress",
+                        exc_info=True,
+                        extra={
+                            "training_session_id": session.session_id,
+                            "report_id": session.report_id,
+                        },
+                    )
+                    evaluation = None
                 if evaluation is not None:
-                    overall_score = float(getattr(evaluation, "overall_score", 0.0) or 0.0)
-                    return {
-                        "score": self._overall_score_to_percent(overall_score),
-                        "score_status": "ready",
-                        "overall_score": overall_score,
-                        "evaluation_id": getattr(evaluation, "id", None),
-                    }
+                    try:
+                        overall_score = float(getattr(evaluation, "overall_score", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Ignoring invalid competency evaluation score for scenario progress",
+                            extra={
+                                "training_session_id": session.session_id,
+                                "report_id": session.report_id,
+                                "evaluation_id": getattr(evaluation, "id", None),
+                            },
+                        )
+                    else:
+                        return {
+                            "score": self._overall_score_to_percent(overall_score),
+                            "score_status": "ready",
+                            "overall_score": overall_score,
+                            "evaluation_id": getattr(evaluation, "id", None),
+                        }
 
         return {
             "score": None,
