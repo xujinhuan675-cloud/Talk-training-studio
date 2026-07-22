@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { startBattle } from '../services/api'
 import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
-import { buildTrainingSessionStartRequest, createTrainingSession, startTrainingSession } from '../services/trainingSession'
+import { buildRoomBackedTrainingSessionStartRequest, createTrainingSession, startTrainingSession } from '../services/trainingSession'
 import {
   buildTrainingModeChatPath,
   type InteractionMode,
@@ -226,7 +226,6 @@ export default function ScenarioTrainingPage() {
     try {
       const trainingMode = getScenarioTrainingMode(mode)
       const interactionMode = getScenarioInteractionMode(mode)
-      const useConversationMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
       const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
       const taskConfig = buildScenarioTrainingTaskConfig(scenario, { feedbackMode })
       const scenarioTrainingMetadata = taskConfig.metadata?.scenario_training
@@ -260,12 +259,10 @@ export default function ScenarioTrainingPage() {
           },
         },
         createTrainingSession,
-        battlePayload: useConversationMessageTreeRuntime
-          ? null
-          : buildScenarioTrainingBattlePayload(scenario, trainingMode, { feedbackMode }),
+        battlePayload: buildScenarioTrainingBattlePayload(scenario, trainingMode, { feedbackMode }),
         startBattle,
         startTrainingSession,
-        buildTrainingSessionStartRequest,
+        buildTrainingSessionStartRequest: buildRoomBackedTrainingSessionStartRequest,
         trainingMode,
         interactionMode,
         buildChatPath: (roomId, nextTrainingMode, trainingSessionId, nextInteractionMode) => {

@@ -131,6 +131,13 @@ test('buildTrainingSessionStartRequest opts text turn-based sessions into messag
   )
 })
 
+test('buildRoomBackedTrainingSessionStartRequest keeps a numeric room for text turn-based sessions', () => {
+  assert.deepEqual(
+    trainingSession.buildRoomBackedTrainingSessionStartRequest({ room_id: 42 }, 'text', 'turn_based'),
+    { room_id: 42 },
+  )
+})
+
 test('completeTrainingSession posts to the complete endpoint with JSON body', async () => {
   const calls = installFetchStub()
   const body = { report_id: 501, generate_report: false }

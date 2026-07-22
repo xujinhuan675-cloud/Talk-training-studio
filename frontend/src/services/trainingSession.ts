@@ -58,6 +58,10 @@ export interface StartTrainingSessionRequest {
   runtime?: TrainingSessionStartRuntime
 }
 
+export interface BuildTrainingSessionStartRequestOptions {
+  useMessageTreeRuntime?: boolean
+}
+
 export interface CompleteTrainingSessionRequest {
   report_id?: number | string | null
   score_id?: number | string | null
@@ -349,15 +353,28 @@ export function buildTrainingSessionStartRequest(
   data: StartTrainingSessionRequest,
   trainingMode: TrainingMode,
   interactionMode: InteractionMode,
+  options: BuildTrainingSessionStartRequestOptions = {},
 ): StartTrainingSessionRequest {
   const request: StartTrainingSessionRequest = { ...data }
-  if (trainingMode === 'text' && interactionMode === 'turn_based') {
+  const canUseMessageTreeRuntime = trainingMode === 'text' && interactionMode === 'turn_based'
+  const useMessageTreeRuntime = canUseMessageTreeRuntime && (options.useMessageTreeRuntime ?? true)
+  if (useMessageTreeRuntime) {
     request.runtime = TRAINING_SESSION_MESSAGE_TREE_RUNTIME
     delete request.room_id
   } else {
     delete request.runtime
   }
   return request
+}
+
+export function buildRoomBackedTrainingSessionStartRequest(
+  data: StartTrainingSessionRequest,
+  trainingMode: TrainingMode,
+  interactionMode: InteractionMode,
+): StartTrainingSessionRequest {
+  return buildTrainingSessionStartRequest(data, trainingMode, interactionMode, {
+    useMessageTreeRuntime: false,
+  })
 }
 
 function cleanText(value: unknown): string | undefined {
