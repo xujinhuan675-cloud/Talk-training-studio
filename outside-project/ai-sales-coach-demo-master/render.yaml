@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: ai-sales-training-center
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: AI_MODE
+        value: real
+      - key: AUTO_SEED_DEMO
+        value: "1"
+      - key: AI_DAILY_LIMIT_PER_USER
+        value: "30"
+      - key: AI_DAILY_LIMIT_PER_IP
+        value: "80"
+      - key: QWEN_API_KEY
+        sync: false

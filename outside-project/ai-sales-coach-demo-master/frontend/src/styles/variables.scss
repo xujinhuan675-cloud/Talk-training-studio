@@ -1,0 +1,40 @@
+
+
+/* 改变主题色变量 */
+$--color-primary: #4f46e5;
+
+// /* 改变 icon 字体路径变量，必需 */
+$--font-path: '~element-ui/lib/theme-chalk/fonts';
+@import "~element-ui/packages/theme-chalk/src/index";
+
+// sidebar
+$menuText:#bfcbd9;
+$menuActiveText:#4f46e5;
+$subMenuActiveText:#333333; //https://github.com/ElemeFE/element/issues/12951
+
+$menuBg:#ffffff;
+$menuHover:#ffffff;
+
+$subMenuBg:#F0F3F8;
+$subMenuHover:#F0F3F8;
+
+$sideBarWidth: 260px;
+
+//顶部加载进度条颜色
+#nprogress .bar {
+  background:$menuActiveText !important; //自定义颜色
+}
+
+// the :export directive is the magic sauce for webpack
+// https://www.bluematador.com/blog/how-to-share-variables-between-js-and-sass
+:export {
+  menuText: $menuText;
+  menuActiveText: $menuActiveText;
+  subMenuActiveText: $subMenuActiveText;
+  menuBg: $menuBg;
+  menuHover: $menuHover;
+  subMenuBg: $subMenuBg;
+  subMenuHover: $subMenuHover;
+  sideBarWidth: $sideBarWidth;
+}
+
