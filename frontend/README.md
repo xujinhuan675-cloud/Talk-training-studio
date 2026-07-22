@@ -4,12 +4,14 @@ React + TypeScript + Vite 前端项目。
 
 ## 开发
 
-```bash
-npm run dev     # 启动开发服务器 (http://localhost:5173)
+```powershell
+..\start-dev.cmd  # 推荐：从仓库根目录同步前后端 env 并启动完整开发环境
 npm run build   # 生产构建
 ```
 
+直接调试前端时可以运行 `npm run dev`，但要确保 `.env` 中的 `VITE_API_URL` 指向正在运行的后端。仓库默认本地后端为 `http://127.0.0.1:8012`。
+
 ## 配置
 
-- `.env` 中 `VITE_API_URL` 设置后端地址（默认 `http://localhost:8000`）
-- `vite.config.ts` 将 `/api` 请求代理到后端
+- `.env` 中 `VITE_API_URL` 设置后端地址；`start-dev.cmd` 会自动写入
+- `vite.config.ts` 将 `/api` 和 `/health` 请求代理到后端，便于本地健康检查

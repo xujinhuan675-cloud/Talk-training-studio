@@ -164,22 +164,26 @@
 
 ## 30秒启动
 
-```bash
+```powershell
 git clone <repo-url> && cd TalkWise
-docker-compose up -d
 
-# 访问前端
-open http://localhost:5173
+# Windows 本地开发入口：自动同步 backend/.env 与 frontend/.env，并检查前端代理到后端是否可用
+.\start-dev.cmd
 ```
 
-```bash
-# 本地开发
-# 后端
-cd backend && uv sync --extra voice && uv run python main.py
-
-# 前端（新终端）
-cd frontend && npm install && npm run dev
+```text
+# 默认地址
+前端: http://127.0.0.1:5177
+后端: http://127.0.0.1:8012
+后端文档: http://127.0.0.1:8012/docs
 ```
+
+```powershell
+# 只检查当前 dev 环境，不启动服务
+.\scripts\check-dev.ps1
+```
+
+本地开发不要手动分别启动 `uvicorn` 和 `npm run dev` 作为默认路径；统一使用 `start-dev.cmd`，避免前端 Vite 代理仍指向旧端口导致“后端加载不上”。默认端口来自根目录 `.env` 的 `BACKEND_PORT` / `FRONTEND_PORT`，缺省为 `8012` / `5177`；端口被占用时脚本会报出占用进程，确实需要临时换端口时再使用 `.\start-dev.cmd -AutoPort`。
 
 多智能体或多人并行开发时，先按 [Multi-Agent Core Development Loop](docs/development/multi-agent-core-loop.md) 拆分切片；涉及跨前后端/外部服务/持久化的纵切功能时，按 [Agentic Vertical Slice Development Loop](docs/development/agentic-vertical-slice-loop.md) 执行 code graph、子智能体、最小验收和风险收口，再用 `.\scripts\core-loop.ps1 -Slice voice` 这类快速检查先跑通核心路径。
 

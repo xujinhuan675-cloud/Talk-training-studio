@@ -8,6 +8,9 @@ param(
     [switch]$ShowServiceWindows,
     [switch]$NoBrowser,
     [switch]$SkipHealthCheck,
+    [switch]$AutoPort,
+    [int]$BackendPort = 0,
+    [int]$FrontendPort = 0,
     [int]$DockerTimeoutSeconds = 180,
     [int]$PostgresTimeoutSeconds = 120,
     [int]$ServiceTimeoutSeconds = 120
@@ -379,6 +382,73 @@ function Test-PortListening {
     }
 }
 
+function Get-PortOwnerSummary {
+    param([int]$Port)
+
+    try {
+        $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    } catch {
+        return "unknown process"
+    }
+
+    if ($listeners.Count -eq 0) {
+        return "no listener"
+    }
+
+    $ownerIds = @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
+    $summaries = foreach ($ownerId in $ownerIds) {
+        $process = Get-Process -Id $ownerId -ErrorAction SilentlyContinue
+        if ($process) {
+            "$($process.ProcessName) pid=$ownerId"
+        } else {
+            "pid=$ownerId"
+        }
+    }
+
+    return ($summaries -join ", ")
+}
+
+function Get-ConfiguredPort {
+    param(
+        [string]$Key,
+        [int]$DefaultValue,
+        [int]$OverrideValue
+    )
+
+    if ($OverrideValue -gt 0) {
+        return $OverrideValue
+    }
+
+    $rawValue = Get-EnvValue $RootEnvPath $Key "$DefaultValue"
+    [int]$port = 0
+    if (-not [int]::TryParse($rawValue, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+        throw "$Key must be an integer TCP port between 1 and 65535, got '$rawValue'."
+    }
+
+    return $port
+}
+
+function Resolve-DevPort {
+    param(
+        [string]$Name,
+        [int]$Port,
+        [switch]$AllowAutoPort
+    )
+
+    if (-not (Test-PortListening $Port)) {
+        return $Port
+    }
+
+    $ownerSummary = Get-PortOwnerSummary $Port
+    if ($AllowAutoPort) {
+        $fallbackPort = Get-AvailablePort ($Port + 1)
+        Write-Warn "$Name port $Port is already in use by $ownerSummary; using $fallbackPort because -AutoPort was passed."
+        return $fallbackPort
+    }
+
+    throw "$Name port $Port is already in use by $ownerSummary. Stop that process, change $Name port in .env, or rerun start-dev.cmd -AutoPort."
+}
+
 function Get-DecodedPowerShellCommandLine {
     param([AllowNull()][string]$CommandLine)
 
@@ -458,11 +528,23 @@ function Test-TcpPort {
 }
 
 function Test-HttpEndpoint {
-    param([string]$Url)
+    param(
+        [string]$Url,
+        [string]$ExpectedContentPattern = ""
+    )
 
     try {
         $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
-        return [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
+        $statusOk = [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
+        if (-not $statusOk) {
+            return $false
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ExpectedContentPattern)) {
+            return $true
+        }
+
+        return "$($response.Content)" -match $ExpectedContentPattern
     } catch {
         return $false
     }
@@ -489,14 +571,15 @@ function Wait-HttpEndpoint {
         [string]$Name,
         [string]$Url,
         [string]$LogPath,
-        [int]$TimeoutSeconds
+        [int]$TimeoutSeconds,
+        [string]$ExpectedContentPattern = ""
     )
 
     Write-Step "Waiting for $Name"
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 
     while ((Get-Date) -lt $deadline) {
-        if (Test-HttpEndpoint $Url) {
+        if (Test-HttpEndpoint -Url $Url -ExpectedContentPattern $ExpectedContentPattern) {
             Write-Host ""
             Write-Ok "$Name is responding at $Url"
             return
@@ -508,7 +591,8 @@ function Wait-HttpEndpoint {
 
     Write-Host ""
     Write-LogTail -Path $LogPath
-    throw "$Name did not respond at $Url after $TimeoutSeconds seconds."
+    $expectedMessage = if ([string]::IsNullOrWhiteSpace($ExpectedContentPattern)) { "" } else { " with expected content '$ExpectedContentPattern'" }
+    throw "$Name did not respond at $Url$expectedMessage after $TimeoutSeconds seconds."
 }
 
 function Get-AvailablePort {
@@ -633,6 +717,8 @@ Ensure-EnvValue $RootEnvPath "POSTGRES_USER" "stakecoach"
 Ensure-EnvValue $RootEnvPath "POSTGRES_PASSWORD" "stakecoach_dev_password"
 Ensure-EnvValue $RootEnvPath "POSTGRES_DB" "stakecoachdb"
 Ensure-EnvValue $RootEnvPath "POSTGRES_HOST_PORT" "15432"
+Ensure-EnvValue $RootEnvPath "BACKEND_PORT" "8012"
+Ensure-EnvValue $RootEnvPath "FRONTEND_PORT" "5177"
 Ensure-EnvValue $RootEnvPath "SECRET_KEY" "dev-secret-change-me"
 Ensure-EnvValue $RootEnvPath "DEBUG" "true"
 
@@ -640,8 +726,15 @@ $pgUser = Get-EnvValue $RootEnvPath "POSTGRES_USER" "stakecoach"
 $pgPassword = Get-EnvValue $RootEnvPath "POSTGRES_PASSWORD" "stakecoach_dev_password"
 $pgDb = Get-EnvValue $RootEnvPath "POSTGRES_DB" "stakecoachdb"
 $pgHostPort = [int](Get-EnvValue $RootEnvPath "POSTGRES_HOST_PORT" "15432")
-$backendPort = Get-AvailablePort 8010
-$frontendPort = Get-AvailablePort 5173
+$configuredBackendPort = Get-ConfiguredPort -Key "BACKEND_PORT" -DefaultValue 8012 -OverrideValue $BackendPort
+$configuredFrontendPort = Get-ConfiguredPort -Key "FRONTEND_PORT" -DefaultValue 5177 -OverrideValue $FrontendPort
+$backendPort = Resolve-DevPort -Name "backend" -Port $configuredBackendPort -AllowAutoPort:$AutoPort
+$frontendPort = Resolve-DevPort -Name "frontend" -Port $configuredFrontendPort -AllowAutoPort:$AutoPort
+if ($backendPort -eq $frontendPort) {
+    throw "BACKEND_PORT and FRONTEND_PORT must be different; both resolved to $backendPort."
+}
+Set-EnvValue $RootEnvPath "BACKEND_PORT" "$backendPort"
+Set-EnvValue $RootEnvPath "FRONTEND_PORT" "$frontendPort"
 $encodedPgUser = [uri]::EscapeDataString($pgUser)
 $encodedPgPassword = [uri]::EscapeDataString($pgPassword)
 $encodedPgDb = [uri]::EscapeDataString($pgDb)
@@ -649,10 +742,11 @@ $sqliteDatabaseUrl = "sqlite+aiosqlite:///./app.db"
 $postgresDatabaseUrl = "postgresql+asyncpg://${encodedPgUser}:${encodedPgPassword}@127.0.0.1:${pgHostPort}/${encodedPgDb}"
 $databaseUrl = if ($UsePostgres) { $postgresDatabaseUrl } else { $sqliteDatabaseUrl }
 $usingSqlite = -not [bool]$UsePostgres
-$frontendUrl = "http://localhost:$frontendPort"
-$backendUrl = "http://localhost:$backendPort"
+$frontendUrl = "http://127.0.0.1:$frontendPort"
+$backendUrl = "http://127.0.0.1:$backendPort"
 $backendLogPath = Join-Path $LogDir "backend-dev.log"
 $frontendLogPath = Join-Path $LogDir "frontend-dev.log"
+$corsOriginsValue = "[`"http://127.0.0.1:$frontendPort`",`"http://localhost:$frontendPort`",`"http://127.0.0.1:$backendPort`",`"http://localhost:$backendPort`"]"
 
 Set-EnvValue $BackendEnvPath "SECRET_KEY" "dev-secret-change-me"
 Set-EnvValue $BackendEnvPath "DEBUG" "true"
@@ -660,7 +754,7 @@ Set-EnvValue $BackendEnvPath "RELOAD" "true"
 Set-EnvValue $BackendEnvPath "AUTO_RUN_MIGRATIONS" "true"
 Set-EnvValue $BackendEnvPath "PORT" "$backendPort"
 Set-EnvValue $BackendEnvPath "DATABASE__URL" $databaseUrl
-Set-EnvValue $BackendEnvPath "CORS_ORIGINS" "[`"$frontendUrl`",`"$backendUrl`"]"
+Set-EnvValue $BackendEnvPath "CORS_ORIGINS" $corsOriginsValue
 Set-EnvValue $BackendEnvPath "STORAGE__LOCAL_BASE_PATH" "./storage"
 
 Set-EnvValue $FrontendEnvPath "VITE_API_URL" $backendUrl
@@ -712,13 +806,21 @@ if (-not $SkipHealthCheck) {
         -Name "backend" `
         -Url "$backendUrl/health/live" `
         -LogPath $backendLogPath `
-        -TimeoutSeconds $ServiceTimeoutSeconds
+        -TimeoutSeconds $ServiceTimeoutSeconds `
+        -ExpectedContentPattern "alive"
 
     Wait-HttpEndpoint `
         -Name "frontend" `
         -Url $frontendUrl `
         -LogPath $frontendLogPath `
         -TimeoutSeconds $ServiceTimeoutSeconds
+
+    Wait-HttpEndpoint `
+        -Name "frontend API proxy" `
+        -Url "$frontendUrl/health/live" `
+        -LogPath $frontendLogPath `
+        -TimeoutSeconds $ServiceTimeoutSeconds `
+        -ExpectedContentPattern "alive"
 }
 
 if (-not $NoBrowser) {
@@ -729,6 +831,9 @@ Write-Host ""
 Write-Ok "Dev startup finished."
 Write-Host "Frontend: $frontendUrl"
 Write-Host "Backend docs: $backendUrl/docs"
+Write-Host "Backend health: $backendUrl/health/live"
+Write-Host "Frontend API proxy health: $frontendUrl/health/live"
+Write-Host "Logs: $LogDir"
 Write-Host ""
 if (-not $usingSqlite) {
     Write-Host "To stop Postgres later: docker compose stop postgres"
