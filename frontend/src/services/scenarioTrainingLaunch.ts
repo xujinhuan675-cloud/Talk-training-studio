@@ -16,6 +16,7 @@ import {
   type ScenarioTrainingProgress,
   type ScenarioTrainingProgressScope,
 } from '../data/trainingScenarios'
+import { DEFAULT_TRAINING_REPLY_LANGUAGE, normalizeTrainingReplyLanguage } from '../data/trainingReplyLanguages'
 
 export type ScenarioLaunchMode = TrainingMode | 'realtime'
 
@@ -23,6 +24,7 @@ export interface LaunchScenarioTrainingParams {
   scenario: ScenarioTrainingCard
   mode?: ScenarioLaunchMode
   feedbackMode?: TrainingFeedbackMode
+  replyLanguage?: string | null
   progress: ScenarioTrainingProgress
   progressScope?: ScenarioTrainingProgressScope
   navigate: (to: string, options: { state: unknown }) => void
@@ -41,6 +43,7 @@ export async function launchScenarioTraining({
   scenario,
   mode = 'text',
   feedbackMode = 'simulation',
+  replyLanguage = DEFAULT_TRAINING_REPLY_LANGUAGE,
   progress,
   progressScope,
   navigate,
@@ -48,8 +51,12 @@ export async function launchScenarioTraining({
 }: LaunchScenarioTrainingParams) {
   const trainingMode = getScenarioTrainingMode(mode)
   const interactionMode = getScenarioInteractionMode(mode)
+  const normalizedReplyLanguage = normalizeTrainingReplyLanguage(replyLanguage)
   const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
-  const taskConfig = buildScenarioTrainingTaskConfig(scenario, { feedbackMode })
+  const taskConfig = buildScenarioTrainingTaskConfig(scenario, {
+    feedbackMode,
+    replyLanguage: normalizedReplyLanguage,
+  })
   const scenarioTrainingMetadata = taskConfig.metadata?.scenario_training
   const scenarioTrainingRecord = scenarioTrainingMetadata
     && typeof scenarioTrainingMetadata === 'object'
@@ -72,11 +79,15 @@ export async function launchScenarioTraining({
           feedbackMode,
           trainingFeedbackMode: feedbackMode,
           trainingProfile: 'practice',
+          replyLanguage: normalizedReplyLanguage,
+          reply_language: normalizedReplyLanguage,
           scenario_training: {
             ...scenarioTrainingRecord,
             trainingMode,
             interactionMode,
             feedbackMode,
+            replyLanguage: normalizedReplyLanguage,
+            reply_language: normalizedReplyLanguage,
           },
         },
       },
@@ -85,7 +96,10 @@ export async function launchScenarioTraining({
     startRequestData: {
       room_name: `Training: ${scenario.title}`,
       room_type: 'battle_prep',
-      runtime_persona: buildScenarioTrainingRuntimePersona(scenario, trainingMode, { feedbackMode }),
+      runtime_persona: buildScenarioTrainingRuntimePersona(scenario, trainingMode, {
+        feedbackMode,
+        replyLanguage: normalizedReplyLanguage,
+      }),
       opening_message: {
         content: scenario.openingLine,
         metadata: {
@@ -96,6 +110,8 @@ export async function launchScenarioTraining({
           interactionMode,
           feedbackMode,
           trainingFeedbackMode: feedbackMode,
+          replyLanguage: normalizedReplyLanguage,
+          reply_language: normalizedReplyLanguage,
         },
       },
     },
@@ -109,15 +125,22 @@ export async function launchScenarioTraining({
         nextTrainingMode,
         trainingSessionId,
         nextInteractionMode,
-        { trainingFeedbackMode: feedbackMode },
+        {
+          trainingFeedbackMode: feedbackMode,
+          replyLanguage: normalizedReplyLanguage,
+        },
       )
       return `${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`
     },
     buildNavigationState: ({ startedSession }) => ({
-      ...buildScenarioTrainingRouteState(scenario, { feedbackMode }),
+      ...buildScenarioTrainingRouteState(scenario, {
+        feedbackMode,
+        replyLanguage: normalizedReplyLanguage,
+      }),
       trainingMode,
       interactionMode,
       trainingFeedbackMode: feedbackMode,
+      replyLanguage: normalizedReplyLanguage,
       trainingSessionId: startedSession.session_id,
     }),
     navigate,

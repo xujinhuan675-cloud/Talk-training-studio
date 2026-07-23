@@ -17,6 +17,7 @@ export type VoiceRecorderState = 'idle' | 'listening' | 'recording' | 'processin
 interface VoiceRecorderProps {
   roomId: number
   disabled?: boolean
+  metadata?: Record<string, unknown>
   onTranscription?: (text: string) => void
   onStateChange?: (state: VoiceRecorderState, error: string | null) => void
 }
@@ -29,6 +30,7 @@ const TRANSCRIPTION_TIMEOUT_MS = 45000
 const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   roomId,
   disabled,
+  metadata,
   onTranscription,
   onStateChange,
 }) => {
@@ -50,6 +52,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const startingRef = useRef(false)
   const pendingSendsRef = useRef(0)
   const chunksRef = useRef<Blob[]>([])
+  const metadataRef = useRef<Record<string, unknown> | undefined>(metadata)
 
   const setRecordState = useCallback((next: VoiceRecorderState) => {
     stateRef.current = next
@@ -59,6 +62,10 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   useEffect(() => {
     stateRef.current = state
   }, [state])
+
+  useEffect(() => {
+    metadataRef.current = metadata
+  }, [metadata])
 
   useEffect(() => {
     onStateChange?.(state, error)
@@ -255,7 +262,11 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
             return
           }
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'speech_end', format: 'webm' }))
+            const message: Record<string, unknown> = { type: 'speech_end', format: 'webm' }
+            if (metadataRef.current && Object.keys(metadataRef.current).length > 0) {
+              message.metadata = metadataRef.current
+            }
+            ws.send(JSON.stringify(message))
           }
           setRecordState('processing')
           if (transcriptionTimeoutRef.current) {

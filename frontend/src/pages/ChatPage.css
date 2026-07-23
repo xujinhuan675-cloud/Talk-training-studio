@@ -266,14 +266,19 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex: 0 1 190px;
 }
 
-.chat-page-llm-selector label:first-of-type {
+.chat-page-llm-selector .chat-page-llm-provider {
   flex: 0 1 220px;
 }
 
-.chat-page-llm-selector label:last-of-type {
-  flex: 0 1 300px;
+.chat-page-llm-selector .chat-page-llm-model {
+  flex: 0 1 270px;
+}
+
+.chat-page-llm-selector .chat-page-llm-language {
+  flex: 0 1 190px;
 }
 
 .chat-page-llm-selector label > span {
@@ -1742,8 +1747,9 @@
   }
 
   .chat-page-llm-selector label,
-  .chat-page-llm-selector label:first-of-type,
-  .chat-page-llm-selector label:last-of-type {
+  .chat-page-llm-selector .chat-page-llm-provider,
+  .chat-page-llm-selector .chat-page-llm-model,
+  .chat-page-llm-selector .chat-page-llm-language {
     flex: 1 1 180px;
   }
 

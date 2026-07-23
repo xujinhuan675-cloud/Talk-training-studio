@@ -1,5 +1,9 @@
 import { getAuthRequestHeaders } from './auth'
 import type { Translate, TranslationKey, TranslationParams } from '../i18n'
+import {
+  DEFAULT_TRAINING_REPLY_LANGUAGE,
+  formatTrainingReplyLanguagePromptValue,
+} from '../data/trainingReplyLanguages'
 
 export type TrainingScenario = 'interview' | 'sales' | 'negotiation' | 'workplace' | 'product_management'
 export type TrainingDifficulty = 'easy' | 'medium' | 'hard'
@@ -775,18 +779,7 @@ export const DEFAULT_TRAINING_STUDIO_CONFIG: TrainingStudioConfig = {
     pressure: 25,
   },
   questionCount: 8,
-  replyLanguage: 'zh-CN',
-}
-
-const REPLY_LANGUAGE_PROMPT_LABELS: Record<string, string> = {
-  'zh-CN': 'Chinese (Simplified)',
-  'zh-TW': 'Chinese (Traditional)',
-  'en-US': 'English',
-  ja: 'Japanese',
-  ko: 'Korean',
-  es: 'Spanish',
-  fr: 'French',
-  de: 'German',
+  replyLanguage: DEFAULT_TRAINING_REPLY_LANGUAGE,
 }
 
 function formatFallback(template: string, params?: TranslationParams): string {
@@ -801,12 +794,6 @@ function translate(t: Translate | undefined, key: TranslationKey, fallback: stri
 function optionLabel<T extends string>(options: LocalizedOption<T>[], value: T, t?: Translate): string {
   const option = options.find((item) => item.value === value)
   return option ? translate(t, option.labelKey, option.fallbackLabel) : value
-}
-
-function replyLanguagePromptValue(replyLanguage: string | null | undefined): string {
-  const code = replyLanguage?.trim() || DEFAULT_TRAINING_STUDIO_CONFIG.replyLanguage
-  const label = REPLY_LANGUAGE_PROMPT_LABELS[code]
-  return label ? `${label} (${code})` : code
 }
 
 function cleanCapabilityText(value: unknown): string | null {
@@ -1308,7 +1295,7 @@ export function buildTrainingStudioPrompt(config: TrainingStudioConfig, descript
     `- ${translate(t, 'training.prompt.role', 'Target role')}: ${config.role || notSpecified}`,
     `- ${translate(t, 'training.prompt.level', 'Level')}: ${level || notSpecified}`,
     `- ${translate(t, 'training.prompt.techStack', 'Domain / tools')}: ${config.techStack || notSpecified}`,
-    `- ${translate(t, 'training.prompt.replyLanguage', 'AI reply language')}: ${replyLanguagePromptValue(config.replyLanguage)}`,
+    `- ${translate(t, 'training.prompt.replyLanguage', 'AI reply language')}: ${formatTrainingReplyLanguagePromptValue(config.replyLanguage)}`,
     ...interviewScenarioLines,
     ...productScenarioLines,
     `- ${translate(t, 'training.prompt.questionMix', 'Question mix')}: ${translate(t, 'training.launcher.behavioral', 'behavioral')} ${mix.behavioral}%, ${translate(t, 'training.launcher.technical', 'technical')} ${mix.technical}%, ${translate(t, 'training.launcher.pressure', 'pressure')} ${mix.pressure}%`,

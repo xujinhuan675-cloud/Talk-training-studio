@@ -9,6 +9,7 @@ export const TRAINING_MODE_QUERY_PARAM = 'trainingMode'
 export const INTERACTION_MODE_QUERY_PARAM = 'interactionMode'
 export const TRAINING_PROFILE_QUERY_PARAM = 'trainingProfile'
 export const TRAINING_FEEDBACK_MODE_QUERY_PARAM = 'trainingFeedbackMode'
+export const REPLY_LANGUAGE_QUERY_PARAM = 'replyLanguage'
 export const SOURCE_LANGUAGE_QUERY_PARAM = 'sourceLanguage'
 export const TARGET_LANGUAGE_QUERY_PARAM = 'targetLanguage'
 const CONVERSATION_ROUTE_PREFIX = '/conversations'
@@ -26,6 +27,7 @@ export interface TrainingModeLocationState {
   trainingSessionId?: string
   trainingProfile?: TrainingProfile
   trainingFeedbackMode?: TrainingFeedbackMode
+  replyLanguage?: string
   sourceLanguage?: string
   targetLanguage?: string
 }
@@ -33,6 +35,7 @@ export interface TrainingModeLocationState {
 export interface TrainingModeChatPathOptions {
   trainingProfile?: TrainingProfile | null
   trainingFeedbackMode?: TrainingFeedbackMode | null
+  replyLanguage?: string | null
   sourceLanguage?: string | null
   targetLanguage?: string | null
 }
@@ -94,6 +97,10 @@ export function buildTrainingModeChatPath(
   const trainingFeedbackMode = normalizeTrainingFeedbackMode(options.trainingFeedbackMode)
   if (trainingFeedbackMode && trainingFeedbackMode !== DEFAULT_TRAINING_FEEDBACK_MODE) {
     params.set(TRAINING_FEEDBACK_MODE_QUERY_PARAM, trainingFeedbackMode)
+  }
+  const replyLanguage = normalizeLanguage(options.replyLanguage)
+  if (replyLanguage) {
+    params.set(REPLY_LANGUAGE_QUERY_PARAM, replyLanguage)
   }
   const sourceLanguage = normalizeLanguage(options.sourceLanguage)
   const targetLanguage = normalizeLanguage(options.targetLanguage)
@@ -184,6 +191,12 @@ export function getTrainingFeedbackModeFromLocation(search: string, state: unkno
   }
 
   return DEFAULT_TRAINING_FEEDBACK_MODE
+}
+
+export function getTrainingReplyLanguageFromLocation(search: string, state: unknown): string | null {
+  const searchParams = new URLSearchParams(search)
+  return normalizeLanguage(searchParams.get(REPLY_LANGUAGE_QUERY_PARAM))
+    ?? normalizeLanguage(getStateValue(state, 'replyLanguage'))
 }
 
 export function getLiveCoachLanguagePairFromLocation(

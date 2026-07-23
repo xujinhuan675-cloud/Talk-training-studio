@@ -19,6 +19,7 @@ export interface ChatInputProps {
   mentionResults: PersonaSummary[]
   onInsertMention: (persona: PersonaSummary) => void
   roomId: number | null
+  messageMetadata?: Record<string, unknown>
   onVoiceTranscription?: (text: string) => void
   onVoiceRecorderStateChange?: (state: VoiceRecorderState, error: string | null) => void
   onVideoClick?: () => void
@@ -41,6 +42,7 @@ export default function ChatInput({
   mentionResults,
   onInsertMention,
   roomId,
+  messageMetadata,
   onVoiceTranscription,
   onVoiceRecorderStateChange,
   onVideoClick,
@@ -107,6 +109,7 @@ export default function ChatInput({
           <VoiceRecorder
             roomId={roomId}
             disabled={sending}
+            metadata={messageMetadata}
             onTranscription={onVoiceTranscription}
             onStateChange={onVoiceRecorderStateChange}
           />

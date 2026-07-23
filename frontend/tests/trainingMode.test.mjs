@@ -94,6 +94,15 @@ test('buildTrainingModeChatPath carries non-default training feedback modes', ()
   assert.equal(drillPath.searchParams.get('trainingFeedbackMode'), 'drill')
 })
 
+test('buildTrainingModeChatPath carries reply language', () => {
+  const path = new URL(trainingMode.buildTrainingModeChatPath(42, 'text', 'training-session-1', null, {
+    replyLanguage: 'en-US',
+  }), 'http://localhost')
+
+  assert.equal(trainingMode.REPLY_LANGUAGE_QUERY_PARAM, 'replyLanguage')
+  assert.equal(path.searchParams.get('replyLanguage'), 'en-US')
+})
+
 test('buildTrainingModeChatPath preserves existing URLs when feedback mode is omitted or default', () => {
   const omittedPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice'), 'http://localhost')
   const defaultPath = new URL(trainingMode.buildTrainingModeChatPath(42, 'voice', null, null, {
@@ -195,6 +204,18 @@ test('getTrainingFeedbackModeFromLocation reads query first and falls back to ro
 test('getTrainingFeedbackModeFromLocation defaults to simulation', () => {
   assert.equal(trainingMode.getTrainingFeedbackModeFromLocation('', null), 'simulation')
   assert.equal(trainingMode.getTrainingFeedbackModeFromLocation('?trainingFeedbackMode=invalid', null), 'simulation')
+})
+
+test('getTrainingReplyLanguageFromLocation reads query first and falls back to state', () => {
+  assert.equal(
+    trainingMode.getTrainingReplyLanguageFromLocation('?replyLanguage=en-US', { replyLanguage: 'zh-CN' }),
+    'en-US',
+  )
+  assert.equal(
+    trainingMode.getTrainingReplyLanguageFromLocation('', { replyLanguage: ' ja ' }),
+    'ja',
+  )
+  assert.equal(trainingMode.getTrainingReplyLanguageFromLocation('?replyLanguage=', null), null)
 })
 
 test('getLiveCoachLanguagePairFromLocation reads query first and falls back to state', () => {

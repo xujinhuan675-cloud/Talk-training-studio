@@ -36,6 +36,7 @@ class _FakeSTT:
 class _FakeStakeholderChatService:
     def __init__(self) -> None:
         self.sent_messages: list[tuple[int, str]] = []
+        self.sent_metadata: list[dict[str, Any] | None] = []
         self.reply_jobs: list[tuple[int, ChatRoom]] = []
         self.reply_started = Event()
 
@@ -44,9 +45,11 @@ class _FakeStakeholderChatService:
         room_id: int,
         content: str,
         *,
+        metadata: dict[str, Any] | None = None,
         access_scope,
     ) -> tuple[MessageDTO, ChatRoom]:
         self.sent_messages.append((room_id, content))
+        self.sent_metadata.append(metadata)
         room = ChatRoom(
             id=room_id,
             name="Voice Battle",
@@ -132,6 +135,7 @@ def test_voice_websocket_transcription_auto_sends_chat_message(monkeypatch) -> N
         {"audio": b"voice-bytes", "language": "zh", "audio_format": "webm"}
     ]
     assert fake_chat.sent_messages == [(7, "Here is my spoken answer.")]
+    assert fake_chat.sent_metadata == [None]
     assert fake_chat.reply_started.wait(timeout=1)
     assert [(room_id, room.id) for room_id, room in fake_chat.reply_jobs] == [(7, 7)]
     assert message_sent["type"] == "message_sent"
@@ -198,6 +202,36 @@ def test_voice_websocket_ack_failure_does_not_block_reply_generation(monkeypatch
 
     assert fake_chat.sent_messages == [(8, "Continue the training turn.")]
     assert [(room_id, room.id) for room_id, room in fake_chat.reply_jobs] == [(8, 8)]
+
+
+def test_voice_websocket_forwards_message_metadata(monkeypatch) -> None:
+    fake_stt = _FakeSTT("Answer with configured language.")
+    fake_chat = _FakeStakeholderChatService()
+
+    import infrastructure.external.voice as voice_module
+
+    monkeypatch.setattr(voice_module, "get_stt_client", lambda: fake_stt)
+    client = _make_client(fake_chat)
+
+    metadata = {
+        "replyLanguage": "en-US",
+        "language": {"replyLanguage": "en-US"},
+    }
+
+    with client.websocket_connect("/api/v1/stakeholder/rooms/9/voice") as ws:
+        ws.send_json(
+            {
+                "type": "audio_chunk",
+                "data": base64.b64encode(b"voice-bytes").decode("ascii"),
+            }
+        )
+        ws.send_json({"type": "speech_end", "format": "webm", "metadata": metadata})
+        assert ws.receive_json()["type"] == "transcription"
+        assert ws.receive_json()["type"] == "message_sent"
+        ws.close()
+
+    assert fake_chat.sent_messages == [(9, "Answer with configured language.")]
+    assert fake_chat.sent_metadata == [metadata]
 
 
 def test_voice_websocket_respects_battle_prep_round_limit(monkeypatch) -> None:

@@ -10,6 +10,7 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 
 - 文本侧优先对齐和迁移 LibreChat 的成熟能力。
 - 实时语音/多模态侧优先对齐和迁移 Pipecat 的成熟能力。
+- 语音体验允许两条画像并存：低成本、低延迟的转写式近实时链路，以及基于 Pipecat 的真正实时语音链路；两者都应接入同一训练闭环。
 - TalkWise 当前训练能力保留为产品差异化：训练目标、persona/stakeholder、scenario、dispatcher、evaluation、growth/report、live guidance、训练复盘和能力沉淀。
 - TalkWise 当前核心不是绝对不可变。如果直接站在 LibreChat 或 Pipecat 之上改造更稳、更成熟、更利于长期扩展，可以重构、迁移或重建当前核心。
 - 所有模式最终应服务同一套训练产品闭环：训练目标 -> 场景模拟 -> 多模态对话 -> 实时提示 -> 结束复盘 -> 改进计划 -> 针对弱点继续训练。
@@ -52,6 +53,8 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 
 Pipecat 和当前项目语言栈一致时，可以优先直接使用其原生依赖或迁移其架构，而不是手写低成熟度替代品。
 
+同时不要把 Pipecat 视为必须替换所有语音链路的唯一答案。当前项目可以保留低成本、低延迟的转写式近实时链路；当它的体验满足训练目标时，优先把它作为经济型语音模式接入同一训练语义。Pipecat 主要承接需要真正实时语音、多模态、打断/turn detection 和更强 transport 能力的链路。
+
 ### TalkWise 保留和可变的部分
 
 必须保留的不是当前实现形状，而是产品能力：
@@ -74,16 +77,16 @@ Pipecat 和当前项目语言栈一致时，可以优先直接使用其原生依
 
 1. 成熟运行底座
    - 文本聊天底座：LibreChat-style conversation runtime。
-   - 语音/多模态底座：Pipecat realtime runtime。
+   - 语音/多模态底座：低成本转写式 near-realtime voice pipeline + Pipecat true realtime voice/multimodal runtime。
 
 2. TalkWise 训练语义层
    - TrainingCore 或等价核心只负责训练语义、适配器契约、session 语义、复盘上下文和评估边界。
-   - 它不应无意中拥有完整聊天 runtime 或完整语音 runtime，除非经过明确迁移决策。
+   - 它不应无意中拥有完整聊天 runtime 或各条语音 runtime 的编排细节，除非经过明确迁移决策。
 
 3. 产品体验层
    - Training Studio、ChatPage、TrainingResult、TrainingHistory、Live Coach 等页面负责把成熟底座能力转成训练产品体验。
 
-不要让文本、语音、视频各自发展成三套训练逻辑。允许存在过渡期 adapter，但长期应收敛到同一训练语义核心。
+不要让文本、语音、视频各自发展成三套训练逻辑。语音侧可以长期保留不同成本/延迟画像的 adapter，但它们必须收敛到同一训练语义核心，而不是各自维护 evaluation/growth/live guidance。
 
 ## 4. 默认工作流
 
@@ -112,11 +115,13 @@ Pipecat 和当前项目语言栈一致时，可以优先直接使用其原生依
 
 - LibreChat 是否已有成熟实现？
 - Pipecat 是否已有原生依赖或成熟实现？
+- 语音链路是否需要真正实时能力，还是低成本低延迟的转写式近实时已经满足场景？
 - 当前 TalkWise 核心是否需要保留、改造、迁移或替换？
 - 是否能通过 adapter/plugin/workflow 接入，而不是新造一套？
 - 本轮是否会破坏现有训练闭环？
 
 如果决定不采用 LibreChat/Pipecat 的成熟能力，需要在最终说明中写出原因：太重、太耦合、当前范围不适合、审计成本太高、或会破坏训练目标。
+如果选择转写式近实时语音链路而不是 Pipecat，需要说明成本、延迟、质量和训练体验的取舍；只要指标满足目标，就不视为迁移链路不完整。
 
 ### 4.3 多智能体协作
 
@@ -200,6 +205,7 @@ git diff --check
 - conversation tree metadata 要保护 persona/scenario/dispatcher/evaluation/growthReport/liveGuidance。
 - selected branch/path/tail 是回放和复盘上下文，不是默认评分完成状态。
 - Pipecat final transcript、audio.output、provider-neutral events 应接入 TalkWise training semantics。
+- 转写式近实时语音链路和 Pipecat 真正实时语音链路可以并存；两者都要写入同一 session/transcript/review 语义，并在 adapter 层清楚标记 capability、latency profile 和成本画像。
 - realtime binding、guidance stream、session access 必须保持当前用户 scope。
 - 能用现有 mock user/role 机制验证访问边界时，优先补测试，不先重构完整 auth。
 - 如果开始迁移 LibreChat auth 或 MCP/agent 能力，必须先写清迁移边界和兼容计划。
@@ -222,15 +228,15 @@ git diff --check
 
 - 已有 TrainingCore / training session / branch metadata 的雏形。
 - 文本侧已开始接近 LibreChat-style message tree、edit/retry/fork。
-- 语音侧已开始接近 Pipecat realtime pipeline、audio output、readiness diagnostics。
+- 语音侧已开始形成转写式 near-realtime voice pipeline 与 Pipecat realtime pipeline 两种链路画像，并接近 audio output、readiness diagnostics 等能力。
 - 结果页/历史页开始支持 branch-aware review。
 - API 已有小范围 conversation/chat/training 隔离测试。
 
-但仍未完成：
+当前仍需继续收口的边界：
 
 - LibreChat 尚未成为系统性文本底座。
-- Pipecat 尚未成为唯一稳定语音 runtime 抽象。
+- Pipecat 不再被定义为必须成为唯一稳定语音 runtime；低成本、低延迟的转写式近实时链路可以与真正实时语音链路并存。
 - TrainingCore 尚未完全统一文本/语音/视频训练编排。
-- legacy stakeholder room、conversation tree、training session、realtime pipeline 仍处于过渡并存状态。
+- legacy stakeholder room、conversation tree、training session、转写式 near-realtime pipeline、Pipecat realtime pipeline 仍需收口 adapter 边界，但并存本身不是问题。
 
 后续开发应围绕本文件继续推进，不再重复重新解释总体目标。

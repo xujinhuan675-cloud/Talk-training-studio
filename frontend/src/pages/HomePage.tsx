@@ -156,6 +156,28 @@ function resolveLiveCoachLanguage(session: TrainingSessionDTO, key: 'sourceLangu
     || null
 }
 
+function resolveReplyLanguage(session: TrainingSessionDTO): string | null {
+  const sessionMetadata = asRecord(session.metadata)
+  const taskMetadata = asRecord(session.task_config.metadata)
+  const scenarioTraining = asRecord(taskMetadata?.scenario_training)
+  const language = asRecord(taskMetadata?.language)
+  const candidates = [
+    taskMetadata?.replyLanguage,
+    taskMetadata?.reply_language,
+    scenarioTraining?.replyLanguage,
+    scenarioTraining?.reply_language,
+    language?.replyLanguage,
+    language?.reply_language,
+    sessionMetadata?.replyLanguage,
+    sessionMetadata?.reply_language,
+  ]
+  for (const candidate of candidates) {
+    const text = cleanText(candidate)
+    if (text) return text
+  }
+  return null
+}
+
 function isContinuableSession(session: TrainingSessionDTO): boolean {
   return session.status !== 'completed'
     && session.status !== 'failed'
@@ -171,6 +193,7 @@ function sessionPath(session: TrainingSessionDTO): string {
       resolveInteractionMode(session),
       {
         trainingProfile: resolveTrainingProfile(session),
+        replyLanguage: resolveReplyLanguage(session),
         sourceLanguage: resolveLiveCoachLanguage(session, 'sourceLanguage'),
         targetLanguage: resolveLiveCoachLanguage(session, 'targetLanguage'),
       },

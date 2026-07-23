@@ -15,6 +15,7 @@ import {
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { buildRoomBackedTrainingSessionStartRequest, createTrainingSession, startTrainingSession } from '../services/trainingSession'
 import { LIVE_COACH_LANGUAGE_OPTIONS, getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
+import { normalizeTrainingReplyLanguage } from '../data/trainingReplyLanguages'
 import {
   buildTrainingModeChatPath,
   type InteractionMode,
@@ -291,6 +292,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       const feedbackOption = getFeedbackModeOption(effectiveFeedbackMode)
       const trainingProfile: TrainingProfile = mode === 'live_coach' ? 'live_coach' : 'practice'
       const isLiveCoachMode = trainingProfile === 'live_coach'
+      const replyLanguage = normalizeTrainingReplyLanguage(config.replyLanguage)
       const sourceLanguageLabel = getLiveCoachLanguageLabel(liveCoachSourceLanguage, locale)
       const targetLanguageLabel = getLiveCoachLanguageLabel(liveCoachTargetLanguage, locale)
       const interviewScenarioPreset = getInterviewScenarioPreset(config.interviewScenarioPreset)
@@ -363,6 +365,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               trainingProfile,
               feedbackMode: effectiveFeedbackMode,
               trainingFeedbackMode: effectiveFeedbackMode,
+              replyLanguage,
+              reply_language: replyLanguage,
               feedbackPolicy: {
                 mode: effectiveFeedbackMode,
                 version: 1,
@@ -414,6 +418,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           {
             trainingProfile,
             trainingFeedbackMode: effectiveFeedbackMode,
+            replyLanguage,
             sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,
             targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : null,
           },
@@ -427,6 +432,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           trainingFeedbackMode: effectiveFeedbackMode,
           feedbackMode: effectiveFeedbackMode,
           feedbackModeLabel,
+          replyLanguage,
           sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : undefined,
           targetLanguage: isLiveCoachMode ? liveCoachTargetLanguage : undefined,
         }),

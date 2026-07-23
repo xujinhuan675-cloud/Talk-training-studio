@@ -30,6 +30,37 @@ async function loadTrainingStudioModule() {
     cleanupPaths.push(authPath)
     outputText = outputText.replace("from './auth'", `from '${pathToFileURL(authPath).href}'`)
   }
+  if (outputText.includes("from '../data/trainingReplyLanguages'")) {
+    const liveCoachLanguageSource = fs.readFileSync(path.resolve('src/data/liveCoachLanguages.ts'), 'utf8')
+    const liveCoachLanguageOutput = ts.transpileModule(liveCoachLanguageSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const liveCoachLanguagePath = path.join(os.tmpdir(), `live-coach-languages-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(liveCoachLanguagePath, liveCoachLanguageOutput)
+    cleanupPaths.push(liveCoachLanguagePath)
+
+    const replyLanguageSource = fs.readFileSync(path.resolve('src/data/trainingReplyLanguages.ts'), 'utf8')
+    let replyLanguageOutput = ts.transpileModule(replyLanguageSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    replyLanguageOutput = replyLanguageOutput.replace(
+      "from './liveCoachLanguages'",
+      `from '${pathToFileURL(liveCoachLanguagePath).href}'`,
+    )
+    const replyLanguagePath = path.join(os.tmpdir(), `training-reply-languages-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(replyLanguagePath, replyLanguageOutput)
+    cleanupPaths.push(replyLanguagePath)
+    outputText = outputText.replace(
+      "from '../data/trainingReplyLanguages'",
+      `from '${pathToFileURL(replyLanguagePath).href}'`,
+    )
+  }
   const outputPath = path.join(os.tmpdir(), `training-studio-${process.pid}-${Date.now()}.mjs`)
   fs.writeFileSync(outputPath, outputText)
   try {

@@ -205,6 +205,28 @@ function getLiveCoachLanguages(session: TrainingSessionDTO | null): {
   }
 }
 
+function getTrainingReplyLanguage(session: TrainingSessionDTO | null): string | null {
+  const sessionMetadata = asRecord(session?.metadata)
+  const metadata = asRecord(session?.task_config.metadata)
+  const scenarioTraining = asRecord(metadata?.scenario_training)
+  const language = asRecord(metadata?.language)
+  const candidates = [
+    metadata?.replyLanguage,
+    metadata?.reply_language,
+    scenarioTraining?.replyLanguage,
+    scenarioTraining?.reply_language,
+    language?.replyLanguage,
+    language?.reply_language,
+    sessionMetadata?.replyLanguage,
+    sessionMetadata?.reply_language,
+  ]
+  for (const candidate of candidates) {
+    const text = asString(candidate)
+    if (text) return text
+  }
+  return null
+}
+
 function getLiveCoachLanguagePair(
   session: TrainingSessionDTO | null,
   locale: Locale,
@@ -759,6 +781,7 @@ export default function TrainingResultPage() {
         isLiveCoachSession ? 'realtime' : undefined,
         {
           trainingProfile: isLiveCoachSession ? 'live_coach' : null,
+          replyLanguage: getTrainingReplyLanguage(session),
           sourceLanguage: liveCoachLanguages.sourceLanguage,
           targetLanguage: liveCoachLanguages.targetLanguage,
         },

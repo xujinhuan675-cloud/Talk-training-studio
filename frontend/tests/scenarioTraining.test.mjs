@@ -33,6 +33,37 @@ async function loadTsModule(sourcePath, prefix, transformSource = (source) => so
       `from '${pathToFileURL(dependencyPath).href}'`,
     )
   }
+  if (outputText.includes("from './trainingReplyLanguages'")) {
+    const liveCoachLanguageSource = fs.readFileSync(path.resolve('src/data/liveCoachLanguages.ts'), 'utf8')
+    const liveCoachLanguageOutput = ts.transpileModule(liveCoachLanguageSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    const liveCoachLanguagePath = path.join(os.tmpdir(), `live-coach-languages-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(liveCoachLanguagePath, liveCoachLanguageOutput)
+    cleanupPaths.push(liveCoachLanguagePath)
+
+    const replyLanguageSource = fs.readFileSync(path.resolve('src/data/trainingReplyLanguages.ts'), 'utf8')
+    let replyLanguageOutput = ts.transpileModule(replyLanguageSource, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    }).outputText
+    replyLanguageOutput = replyLanguageOutput.replace(
+      "from './liveCoachLanguages'",
+      `from '${pathToFileURL(liveCoachLanguagePath).href}'`,
+    )
+    const replyLanguagePath = path.join(os.tmpdir(), `training-reply-languages-${process.pid}-${Date.now()}.mjs`)
+    fs.writeFileSync(replyLanguagePath, replyLanguageOutput)
+    cleanupPaths.push(replyLanguagePath)
+    outputText = outputText.replace(
+      "from './trainingReplyLanguages'",
+      `from '${pathToFileURL(replyLanguagePath).href}'`,
+    )
+  }
   if (outputText.includes("from '../data/scenarioConfig'")) {
     const dependencySource = fs.readFileSync(path.resolve('src/data/scenarioConfig.ts'), 'utf8')
     const dependencyOutput = ts.transpileModule(dependencySource, {
@@ -451,7 +482,9 @@ test('scenario task config prefers configured dimension weights', () => {
     ],
   }
 
-  const config = scenarioTrainingData.buildScenarioTrainingTaskConfig(scenario)
+  const config = scenarioTrainingData.buildScenarioTrainingTaskConfig(scenario, {
+    replyLanguage: 'en-US',
+  })
 
   assert.deepEqual(config.rubric_weights, {
     substance: 0.4,
@@ -461,6 +494,8 @@ test('scenario task config prefers configured dimension weights', () => {
     differentiation: 0.1,
   })
   assert.deepEqual(config.metadata.scenario_training.dimension_weights, scenario.dimensionWeights)
+  assert.equal(config.metadata.replyLanguage, 'en-US')
+  assert.equal(config.metadata.scenario_training.replyLanguage, 'en-US')
 })
 
 test('scenario prompts carry realistic customer simulation rules', () => {
@@ -471,16 +506,23 @@ test('scenario prompts carry realistic customer simulation rules', () => {
   assert.ok(scenario)
 
   const prompt = scenarioTrainingData.buildScenarioTrainingPrompt(scenario, 'text')
+  const englishPrompt = scenarioTrainingData.buildScenarioTrainingPrompt(scenario, 'text', {
+    replyLanguage: 'en-US',
+  })
   const drillPrompt = scenarioTrainingData.buildScenarioTrainingPrompt(scenario, 'text', {
     feedbackMode: 'drill',
   })
   const payload = scenarioTrainingData.buildScenarioTrainingRuntimePersona(scenario, 'text')
+  const englishPayload = scenarioTrainingData.buildScenarioTrainingRuntimePersona(scenario, 'text', {
+    replyLanguage: 'en-US',
+  })
   const drillPayload = scenarioTrainingData.buildScenarioTrainingRuntimePersona(scenario, 'voice', {
     feedbackMode: 'drill',
   })
 
   assert.match(prompt, /not a cooperative demo/)
   assert.match(prompt, /30-120 Chinese characters/)
+  assert.match(prompt, /AI reply language: Chinese \(Simplified\) \(zh-CN\)/)
   assert.match(prompt, /Do not reveal all needs, budget, objections, or bottom lines at once/)
   assert.match(prompt, /opening line has already been sent/)
   assert.doesNotMatch(prompt, /start with this exact opening line/)
@@ -489,8 +531,12 @@ test('scenario prompts carry realistic customer simulation rules', () => {
   assert.match(prompt, /Difficulty behavior:/)
   assert.match(payload.style, /Speak like a real counterpart/)
   assert.match(payload.style, /Feedback mode: simulation/)
+  assert.match(payload.style, /Reply language: Chinese \(Simplified\) \(zh-CN\)/)
   assert.match(payload.style, /Do not repeat the opening line/)
   assert.deepEqual(payload.training_points, scenario.trainingPoints)
+  assert.match(englishPrompt, /AI reply language: English \(en-US\)/)
+  assert.match(englishPrompt, /Reply in English \(en-US\)/)
+  assert.match(englishPayload.style, /Reply language: English \(en-US\)/)
   assert.match(drillPrompt, /deliberate drill/)
   assert.match(drillPrompt, /one concise correction, one stronger rewrite/)
   assert.doesNotMatch(drillPrompt, /never give coaching advice/)

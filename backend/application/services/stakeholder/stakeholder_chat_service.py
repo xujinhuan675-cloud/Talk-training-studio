@@ -65,6 +65,16 @@ def _extract_mentions(content: str, persona_loader) -> list[str]:
 
 _EMOTION_RE = re.compile(r"\s*<!--emotion:\s*(\{.*?\})\s*-->\s*$", re.DOTALL)
 _EMOTION_STREAM_MARKER = "<!--emotion:"
+_REPLY_LANGUAGE_LABELS = {
+    "zh-CN": "Chinese (Simplified)",
+    "zh-TW": "Chinese (Traditional)",
+    "en-US": "English",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+}
 
 
 def _extract_emotion(content: str) -> tuple[str, int | None, str | None]:
@@ -125,6 +135,47 @@ def _selected_llm_model_from_history(history: list[dict[str, object]]) -> str | 
             or _clean_llm_selection_text(metadata.get("model"))
         )
     return None
+
+
+def _metadata_reply_language(metadata: dict[str, object]) -> str | None:
+    nested_language = metadata.get("language")
+    if isinstance(nested_language, dict):
+        nested_value = (
+            _clean_llm_selection_text(nested_language.get("replyLanguage"))
+            or _clean_llm_selection_text(nested_language.get("reply_language"))
+        )
+        if nested_value:
+            return nested_value
+    return (
+        _clean_llm_selection_text(metadata.get("replyLanguage"))
+        or _clean_llm_selection_text(metadata.get("reply_language"))
+        or _clean_llm_selection_text(metadata.get("trainingReplyLanguage"))
+    )
+
+
+def _selected_reply_language_from_history(history: list[dict[str, object]]) -> str | None:
+    """Read runtime reply language from the latest user turn metadata."""
+    for item in reversed(history):
+        if item.get("sender_type") != "user":
+            continue
+        metadata = item.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        return _metadata_reply_language(metadata)
+    return None
+
+
+def _append_reply_language_instruction(system_prompt: str, reply_language: str | None) -> str:
+    language = _clean_llm_selection_text(reply_language)
+    if not language:
+        return system_prompt
+    label = _REPLY_LANGUAGE_LABELS.get(language, language)
+    return (
+        f"{system_prompt}\n\n"
+        "## AI reply language (must follow)\n"
+        f"- Reply to the learner in {label} ({language}) unless the learner explicitly asks to switch languages.\n"
+        "- Preserve names, product terms, and quoted user text in their original language when appropriate."
+    )
 
 
 class StakeholderChatService:
@@ -330,6 +381,7 @@ class StakeholderChatService:
                         for m in history_entities
                     ]
                 selected_model = _selected_llm_model_from_history(history)
+                selected_reply_language = _selected_reply_language_from_history(history)
 
                 # Load room for compression state
                 room = await uow.chat_room_repository.get_by_id(room_id)
@@ -358,6 +410,10 @@ class StakeholderChatService:
                         scenario_context=scenario_context,
                         org_context=org_ctx,
                     )
+                system_prompt = _append_reply_language_instruction(
+                    system_prompt,
+                    selected_reply_language,
+                )
 
                 # Stream LLM response, pushing incremental deltas via SSE
                 reply_content = None

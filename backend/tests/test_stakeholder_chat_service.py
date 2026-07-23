@@ -383,6 +383,39 @@ async def test_selected_llm_model_metadata_is_passed_to_stream(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_reply_language_metadata_is_appended_to_system_prompt(session_factory):
+    from application.services.stakeholder.stakeholder_chat_service import (
+        StakeholderChatService,
+    )
+
+    room_id = await _create_room(session_factory)
+    llm = _CapturingLLM(response="language acknowledged.")
+    svc = StakeholderChatService(
+        uow_factory=_uow_factory(session_factory),
+        persona_loader=FakePersonaLoader(),
+        llm=llm,
+    )
+
+    _, room = await svc.send_message(
+        room_id,
+        "Please answer in the selected room language.",
+        access_scope=unrestricted_stakeholder_room_scope(),
+        metadata={
+            "replyLanguage": "en-US",
+            "language": {
+                "replyLanguage": "en-US",
+                "source": "training_room_selector",
+            },
+        },
+    )
+    await svc.generate_replies(room_id, room)
+
+    assert llm.last_messages[0].role == "system"
+    assert "AI reply language" in llm.last_messages[0].content
+    assert "English (en-US)" in llm.last_messages[0].content
+
+
+@pytest.mark.asyncio
 async def test_v2_persona_prompts_use_5_layer_builder(session_factory):
     """Story 2.8 AC5/AC6: a v2 persona's system prompt must include Expression
     catchphrases (proves build_system_prompt was chosen over markdown path)."""

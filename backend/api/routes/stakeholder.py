@@ -851,10 +851,15 @@ async def voice_ws(
                     # the frontend may close immediately after final transcription.
                     message_ack_sent = True
                     if text:
+                        metadata = raw.get("metadata")
+                        message_metadata = metadata if isinstance(metadata, dict) else None
+                        send_kwargs = {"access_scope": access_scope}
+                        if message_metadata is not None:
+                            send_kwargs["metadata"] = message_metadata
                         msg, room = await svc.send_message(
                             room_id,
                             text,
-                            access_scope=access_scope,
+                            **send_kwargs,
                         )
                         # Generate replies in background (TTS audio will come via SSE)
                         asyncio.create_task(svc.generate_replies(room_id, room))

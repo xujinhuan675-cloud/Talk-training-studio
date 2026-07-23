@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
+  Languages,
   Loader2,
   Play,
   Search,
@@ -15,6 +16,8 @@ import {
 import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
 import { type TrainingFeedbackMode } from '../services/trainingMode'
 import { launchScenarioTraining, type ScenarioLaunchMode } from '../services/scenarioTrainingLaunch'
+import { LIVE_COACH_LANGUAGE_OPTIONS, getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
+import { DEFAULT_TRAINING_REPLY_LANGUAGE } from '../data/trainingReplyLanguages'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type Translate, type TranslateInline } from '../i18n'
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
@@ -129,6 +132,7 @@ export default function ScenarioTrainingPage() {
   const { currentUser, hasAnySystemRole } = useAuthContext()
   const [mode, setMode] = useState<ScenarioLaunchMode>('text')
   const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
+  const [replyLanguage, setReplyLanguage] = useState(DEFAULT_TRAINING_REPLY_LANGUAGE)
   const [query, setQuery] = useState('')
   const [difficulty, setDifficulty] = useState<DifficultyFilter>('all')
   const [category, setCategory] = useState<CategoryFilter>('all')
@@ -208,6 +212,7 @@ export default function ScenarioTrainingPage() {
         scenario,
         mode,
         feedbackMode,
+        replyLanguage,
         progress,
         progressScope,
         navigate,
@@ -270,6 +275,21 @@ export default function ScenarioTrainingPage() {
             {categoryOptions.map((option) => (
               <option key={option} value={option}>
                 {getScenarioCategoryFilterLabel(option, tr)}
+              </option>
+            ))}
+          </Select>
+        </label>
+
+        <label className="scenario-training-select">
+          <Languages size={15} />
+          <Select
+            aria-label={t('training.llm.replyLanguageAria')}
+            value={replyLanguage}
+            onChange={(event) => setReplyLanguage(event.target.value)}
+          >
+            {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+              <option key={option.code} value={option.code}>
+                {getLiveCoachLanguageLabel(option.code, locale)}
               </option>
             ))}
           </Select>

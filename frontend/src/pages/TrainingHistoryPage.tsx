@@ -69,6 +69,7 @@ interface HistoryEntry {
   reportId?: string
   roomId?: string | null
   mode?: TrainingSessionDTO['mode']
+  replyLanguage?: string | null
   messageCount?: number
   startedAt?: string | null
   completedAt?: string | null
@@ -303,6 +304,28 @@ function scenarioMetadataFromSession(session: TrainingSessionDTO): {
   }
 }
 
+function resolveReplyLanguage(session: TrainingSessionDTO): string | null {
+  const sessionMetadata = asRecord(session.metadata)
+  const taskMetadata = asRecord(session.task_config.metadata)
+  const scenarioTraining = asRecord(taskMetadata?.scenario_training)
+  const language = asRecord(taskMetadata?.language)
+  const candidates = [
+    taskMetadata?.replyLanguage,
+    taskMetadata?.reply_language,
+    scenarioTraining?.replyLanguage,
+    scenarioTraining?.reply_language,
+    language?.replyLanguage,
+    language?.reply_language,
+    sessionMetadata?.replyLanguage,
+    sessionMetadata?.reply_language,
+  ]
+  for (const candidate of candidates) {
+    const text = asString(candidate)
+    if (text) return text
+  }
+  return null
+}
+
 function progressEntry(
   scenarioId: string,
   item: ScenarioTrainingProgressItem,
@@ -363,6 +386,7 @@ function buildHistoryEntries(
       reportId: session.report_id ? String(session.report_id) : progressForSession?.reportId,
       roomId: session.room_id,
       mode: session.mode,
+      replyLanguage: resolveReplyLanguage(session),
       messageCount: session.message_count,
       startedAt: session.started_at,
       completedAt: session.completed_at,
@@ -652,7 +676,9 @@ export default function TrainingHistoryPage() {
           const practicedAt = entry.completedAt || entry.lastPracticedAt || entry.startedAt
           const roomId = legacyChatRoomId(entry.roomId)
           const chatPath = entry.sessionId && entry.mode && roomId
-            ? buildTrainingModeChatPath(roomId, entry.mode, entry.sessionId)
+            ? buildTrainingModeChatPath(roomId, entry.mode, entry.sessionId, undefined, {
+                replyLanguage: entry.replyLanguage,
+              })
             : null
           const branchSummary = entry.branchInfo ? historyBranchSummaryText(entry.branchInfo, tr) : ''
           return (

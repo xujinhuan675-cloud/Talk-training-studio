@@ -89,6 +89,7 @@ import {
   getTrainingFeedbackModeFromLocation,
   getTrainingProfileFromLocation,
   getTrainingModeFromLocation,
+  getTrainingReplyLanguageFromLocation,
   getTrainingSessionIdFromLocation,
   isTrainingModeBattlePrep,
   type TrainingFeedbackMode,
@@ -103,7 +104,11 @@ import {
   type ScenarioTrainingDifficulty,
   type ScenarioTrainingProgressScope,
 } from '../data/trainingScenarios'
-import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
+import { LIVE_COACH_LANGUAGE_OPTIONS, getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
+import {
+  buildTrainingReplyLanguageMetadata,
+  normalizeTrainingReplyLanguage,
+} from '../data/trainingReplyLanguages'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
@@ -476,6 +481,9 @@ function ChatArea() {
   const trainingProfile = getTrainingProfileFromLocation(location.search, location.state)
   const trainingFeedbackMode = getTrainingFeedbackModeFromLocation(location.search, location.state)
   const liveCoachLanguagePair = getLiveCoachLanguagePairFromLocation(location.search, location.state)
+  const routeReplyLanguage = normalizeTrainingReplyLanguage(
+    getTrainingReplyLanguageFromLocation(location.search, location.state),
+  )
   const isLiveCoachSession = trainingProfile === 'live_coach'
   const isTrainingSession = Boolean(trainingSessionId)
   const isDrillFeedbackMode = trainingFeedbackMode === 'drill'
@@ -526,6 +534,7 @@ function ChatArea() {
   const [trainingSceneExpanded, setTrainingSceneExpanded] = useState(false)
   const [llmRegistry, setLlmRegistry] = useState<LLMProviderMetadata | null>(null)
   const [selectedLlmChoiceKey, setSelectedLlmChoiceKey] = useState<string | null>(null)
+  const [selectedReplyLanguage, setSelectedReplyLanguage] = useState(routeReplyLanguage)
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
   const sendChatMessage = chat.handleSend
@@ -537,6 +546,10 @@ function ChatArea() {
   useEffect(() => {
     setMessageTreeSelection(null)
   }, [selectedRoomId])
+
+  useEffect(() => {
+    setSelectedReplyLanguage(routeReplyLanguage)
+  }, [routeReplyLanguage, trainingSessionId])
 
   useEffect(() => {
     const content = initialRouteMessage?.trim()
@@ -575,6 +588,11 @@ function ChatArea() {
         }
       : undefined
   ), [isTrainingSession, trainingFeedbackMode])
+  const replyLanguageMetadata = React.useMemo(() => (
+    isTrainingSession
+      ? buildTrainingReplyLanguageMetadata(selectedReplyLanguage, 'training_room_selector')
+      : undefined
+  ), [isTrainingSession, selectedReplyLanguage])
   const liveCoachGuidanceMetadata = React.useMemo(() => {
     if (!isLiveCoachSession) return undefined
     return {
@@ -620,8 +638,8 @@ function ChatArea() {
       : undefined
   ), [liveCoachGuidanceMetadata])
   const realtimeTranscriptMetadata = React.useMemo(
-    () => mergeMetadata(liveCoachRealtimeTranscriptMetadata, trainingFeedbackMetadata),
-    [liveCoachRealtimeTranscriptMetadata, trainingFeedbackMetadata],
+    () => mergeMetadata(liveCoachRealtimeTranscriptMetadata, trainingFeedbackMetadata, replyLanguageMetadata),
+    [liveCoachRealtimeTranscriptMetadata, replyLanguageMetadata, trainingFeedbackMetadata],
   )
 
   useEffect(() => {
@@ -690,8 +708,8 @@ function ChatArea() {
     [selectedLlmChoice],
   )
   const outgoingMessageMetadata = React.useMemo(
-    () => mergeMetadata(liveCoachGuidanceMetadata, trainingFeedbackMetadata, llmSelectionMetadata),
-    [liveCoachGuidanceMetadata, llmSelectionMetadata, trainingFeedbackMetadata],
+    () => mergeMetadata(liveCoachGuidanceMetadata, trainingFeedbackMetadata, replyLanguageMetadata, llmSelectionMetadata),
+    [liveCoachGuidanceMetadata, llmSelectionMetadata, replyLanguageMetadata, trainingFeedbackMetadata],
   )
 
   useEffect(() => {
@@ -1760,68 +1778,89 @@ function ChatArea() {
             </Button>
           </div>
 
-          {llmModelChoices.length > 0 && (
+          {isTrainingSession && (
             <div
               className="chat-page-llm-selector"
               data-testid="training-llm-selector"
-              aria-label={t('training.llm.selectorLabel')}
+              aria-label={t('training.llm.runtimeSelectorLabel')}
             >
-              <span className="chat-page-llm-selector-title">{t('training.llm.selectorLabel')}</span>
-              <label>
-                <span>{t('training.llm.provider')}</span>
+              <span className="chat-page-llm-selector-title">{t('training.llm.runtimeSelectorLabel')}</span>
+              {llmModelChoices.length > 0 && (
+                <>
+                  <label className="chat-page-llm-provider">
+                    <span>{t('training.llm.provider')}</span>
+                    <Select
+                      aria-label={t('training.llm.providerAria')}
+                      value={selectedLlmProvider}
+                      onChange={handleLlmProviderChange}
+                      disabled={chat.sending}
+                    >
+                      {llmProviderOptions.map((provider) => (
+                        <option key={provider.provider} value={provider.provider}>
+                          {provider.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="chat-page-llm-model">
+                    <span>{t('training.llm.model')}</span>
+                    <Select
+                      aria-label={t('training.llm.modelAria')}
+                      value={selectedLlmChoice?.key
+                        ?? selectedProviderModelChoices.find(isLlmModelChoiceSelectable)?.key
+                        ?? selectedProviderModelChoices[0]?.key
+                        ?? ''}
+                      onChange={handleLlmModelChange}
+                      disabled={chat.sending}
+                    >
+                      {selectedProviderModelChoices.map((choice) => (
+                        <option key={choice.key} value={choice.key} disabled={choice.disabled}>
+                          {formatLlmOptionLabel(choice, t)}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                </>
+              )}
+              <label className="chat-page-llm-language">
+                <span>{t('training.llm.replyLanguage')}</span>
                 <Select
-                  aria-label={t('training.llm.providerAria')}
-                  value={selectedLlmProvider}
-                  onChange={handleLlmProviderChange}
+                  aria-label={t('training.llm.replyLanguageAria')}
+                  value={selectedReplyLanguage}
+                  onChange={(event) => setSelectedReplyLanguage(event.target.value)}
                   disabled={chat.sending}
                 >
-                  {llmProviderOptions.map((provider) => (
-                    <option key={provider.provider} value={provider.provider}>
-                      {provider.label}
+                  {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.code} value={option.code}>
+                      {getLiveCoachLanguageLabel(option.code, locale)}
                     </option>
                   ))}
                 </Select>
               </label>
-              <label>
-                <span>{t('training.llm.model')}</span>
-                <Select
-                  aria-label={t('training.llm.modelAria')}
-                  value={selectedLlmChoice?.key
-                    ?? selectedProviderModelChoices.find(isLlmModelChoiceSelectable)?.key
-                    ?? selectedProviderModelChoices[0]?.key
-                    ?? ''}
-                  onChange={handleLlmModelChange}
-                  disabled={chat.sending}
+              {llmModelChoices.length > 0 && (
+                <div
+                  className="chat-page-llm-details"
+                  aria-label={t('training.llm.detailsAria')}
                 >
-                  {selectedProviderModelChoices.map((choice) => (
-                    <option key={choice.key} value={choice.key} disabled={choice.disabled}>
-                      {formatLlmOptionLabel(choice, t)}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <div
-                className="chat-page-llm-details"
-                aria-label={t('training.llm.detailsAria')}
-              >
-                {displayedLlmChoice?.description && (
-                  <span className="chat-page-llm-description" title={displayedLlmChoice.description}>
-                    {displayedLlmChoice.description}
-                  </span>
-                )}
-                {llmDetailTags.length > 0 && (
-                  <span className="chat-page-llm-tags">
-                    {llmDetailTags.map((tag) => (
-                      <span
-                        key={tag.key}
-                        className={tag.tone === 'warning' ? 'warning' : undefined}
-                      >
-                        {tag.label}
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </div>
+                  {displayedLlmChoice?.description && (
+                    <span className="chat-page-llm-description" title={displayedLlmChoice.description}>
+                      {displayedLlmChoice.description}
+                    </span>
+                  )}
+                  {llmDetailTags.length > 0 && (
+                    <span className="chat-page-llm-tags">
+                      {llmDetailTags.map((tag) => (
+                        <span
+                          key={tag.key}
+                          className={tag.tone === 'warning' ? 'warning' : undefined}
+                        >
+                          {tag.label}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -2188,6 +2227,7 @@ function ChatArea() {
             mentionResults={chat.mentionResults}
             onInsertMention={chat.insertMention}
             roomId={chat.selectedRoom?.room.id ?? null}
+            messageMetadata={outgoingMessageMetadata}
             onVoiceTranscription={(text) => {
               const transcript = text.trim()
               if (!transcript) return
@@ -2202,8 +2242,7 @@ function ChatArea() {
                   speaker: 'user',
                   text: transcript,
                   metadata: {
-                    ...(liveCoachGuidanceMetadata || {}),
-                    ...(trainingFeedbackMetadata || {}),
+                    ...(outgoingMessageMetadata || {}),
                     source: isLiveCoachSession ? 'live_coach_voice_transcription' : 'voice_transcription',
                     trainingMode: 'voice',
                     interactionMode: 'turn_based',
