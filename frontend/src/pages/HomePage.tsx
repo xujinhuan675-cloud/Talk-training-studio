@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
   ChevronRight,
-  ClipboardList,
   Loader2,
   Play,
   Swords,
@@ -366,8 +365,8 @@ const HomePage: React.FC = () => {
       <PageHeader
         title={t('nav.home')}
         description={tr(
-          '从推荐场景、紧急备战和最近训练快速进入练习闭环。',
-          'Start from recommendations, battle prep, recent sessions, reviews, and growth.',
+          '从推荐场景、快速备战和最近训练快速进入练习闭环。',
+          'Start from recommendations, quick prep, recent sessions, reviews, and growth.',
         )}
       />
 
@@ -400,21 +399,6 @@ const HomePage: React.FC = () => {
               </Link>
             </div>
 
-            <div className="home-start-actions">
-              <Button asChild variant="secondary" className="home-start-button">
-                <Link to={APP_ROUTES.practiceScenarios}>
-                  <ClipboardList size={16} />
-                  {t('nav.scenarioTraining')}
-                </Link>
-              </Button>
-              <Button asChild variant="secondary">
-                <Link to={APP_ROUTES.practiceBattle}>
-                  <Swords size={16} />
-                  {t('nav.battlePrep')}
-                </Link>
-              </Button>
-            </div>
-
             {scenarioLaunchError && (
               <div className="home-scenario-error" role="alert">
                 <AlertCircle size={15} />
@@ -425,10 +409,7 @@ const HomePage: React.FC = () => {
             <section className="home-recommendations" aria-label={tr('推荐训练场景', 'Recommended training scenarios')}>
               <div className="home-recommendation-head">
                 <span>{tr('推荐下一场训练', 'Recommended next practice')}</span>
-                <Link to={APP_ROUTES.practiceScenarios}>
-                  {tr('查看全部', 'View all')}
-                  <ChevronRight size={14} />
-                </Link>
+                <em>{tr('根据进度优先继续、必练或补练', 'Prioritizes active, required, or recovery practice')}</em>
               </div>
 
               <div className="home-recommendation-grid">
@@ -436,27 +417,37 @@ const HomePage: React.FC = () => {
                   const starting = startingScenarioId === scenario.id
                   return (
                     <article className="home-scenario-option" key={scenario.id}>
-                      <div className="home-scenario-meta">
-                        <span className={`difficulty ${scenario.difficulty}`}>
-                          {getScenarioDifficultyLabel(scenario.difficulty, tr)}
-                        </span>
-                        <span>{getScenarioCategoryLabel(scenario.category, tr)}</span>
-                        {scenario.required && <span className="required">{tr('必练', 'Required')}</span>}
+                      <div className="home-scenario-body">
+                        <div className="home-scenario-meta">
+                          <span className={`difficulty ${scenario.difficulty}`}>
+                            {getScenarioDifficultyLabel(scenario.difficulty, tr)}
+                          </span>
+                          <span>{getScenarioCategoryLabel(scenario.category, tr)}</span>
+                          {scenario.required && <span className="required">{tr('必练', 'Required')}</span>}
+                        </div>
+                        <h3>{scenario.title}</h3>
+                        <p>{scenario.description}</p>
+                        <div className="home-scenario-reason">{recommendationReason(scenario, tr)}</div>
                       </div>
-                      <h3>{scenario.title}</h3>
-                      <p>{scenario.description}</p>
-                      <div className="home-scenario-reason">{recommendationReason(scenario, tr)}</div>
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        className="home-scenario-start"
-                        onClick={() => void startRecommendedScenario(scenario)}
-                        disabled={startingScenarioId !== null}
-                      >
-                        {starting ? <Loader2 size={15} className="home-scenario-spin" /> : <Play size={15} />}
-                        {starting ? t('common.starting') : tr('立即开始', 'Start now')}
-                      </Button>
+                      <div className="home-scenario-actions">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="home-scenario-start"
+                          onClick={() => void startRecommendedScenario(scenario)}
+                          disabled={startingScenarioId !== null}
+                        >
+                          {starting ? <Loader2 size={15} className="home-scenario-spin" /> : <Play size={15} />}
+                          {starting ? t('common.starting') : tr('立即开始', 'Start now')}
+                        </Button>
+                        <Button asChild variant="secondary" size="sm" className="home-scenario-prep">
+                          <Link to={APP_ROUTES.practiceBattle}>
+                            <Swords size={15} />
+                            {tr('快速备战', 'Quick prep')}
+                          </Link>
+                        </Button>
+                      </div>
                     </article>
                   )
                 })}

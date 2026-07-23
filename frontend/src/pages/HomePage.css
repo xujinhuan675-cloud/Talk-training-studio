@@ -1,7 +1,7 @@
 .home-page {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 18px;
 }
 
 .home-main-stack {
@@ -16,11 +16,10 @@
 }
 
 .home-start-panel {
-  min-height: 300px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: 20px;
+  gap: 18px;
 }
 
 .home-start-header {
@@ -55,16 +54,6 @@
   line-height: 1.5;
 }
 
-.home-start-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.home-start-button {
-  min-width: 180px;
-}
-
 .home-scenario-error {
   display: flex;
   align-items: center;
@@ -92,7 +81,7 @@
 
 .home-recommendation-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
@@ -103,15 +92,14 @@
   font-weight: 900;
 }
 
-.home-recommendation-head a {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--green);
+.home-recommendation-head em {
+  max-width: 320px;
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
-  text-decoration: none;
-  white-space: nowrap;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: right;
 }
 
 .home-recommendation-grid {
@@ -122,11 +110,19 @@
 
 .home-scenario-option {
   min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.home-scenario-body {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 0 0;
-  border-top: 1px solid var(--border);
 }
 
 .home-scenario-meta {
@@ -177,11 +173,9 @@
   overflow: hidden;
   margin: 0;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .home-scenario-option p {
@@ -189,7 +183,6 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 36px;
   margin: 0;
   color: var(--text-secondary);
   font-size: 12px;
@@ -206,10 +199,19 @@
   white-space: nowrap;
 }
 
+.home-scenario-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .home-scenario-start {
-  width: fit-content;
-  min-width: 112px;
-  margin-top: auto;
+  min-width: 116px;
+}
+
+.home-scenario-prep {
+  min-width: 108px;
 }
 
 .home-scenario-spin {
@@ -394,12 +396,6 @@
   line-height: 1.55;
 }
 
-@media (max-width: 980px) {
-  .home-start-panel {
-    min-height: 240px;
-  }
-}
-
 @media (max-width: 640px) {
   .home-start-header {
     flex-direction: column;
@@ -413,19 +409,25 @@
     font-size: 19px;
   }
 
-  .home-start-actions {
+  .home-recommendation-head {
     flex-direction: column;
+    gap: 6px;
   }
 
-  .home-start-actions .ui-button {
-    width: 100%;
+  .home-recommendation-head em {
+    max-width: none;
+    text-align: left;
   }
 
-  .home-recommendation-grid {
+  .home-scenario-option {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .home-scenario-start {
+  .home-scenario-actions {
+    justify-content: stretch;
+  }
+
+  .home-scenario-actions .ui-button {
     width: 100%;
   }
 }
