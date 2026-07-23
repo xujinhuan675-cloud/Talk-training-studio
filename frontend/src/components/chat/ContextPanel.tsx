@@ -1,8 +1,9 @@
-import { ChevronRight, ChevronLeft } from 'lucide-react'
+import { PanelRightClose, PanelRightOpen } from 'lucide-react'
 import Avatar from '../Avatar'
 import { Button } from '../ui/button'
 import type { PersonaSummary } from '../../services/api'
 import { useI18n } from '../../i18n'
+import '../../styles/panelControls.css'
 import './ContextPanel.css'
 
 export interface ContextPanelProps {
@@ -83,13 +84,13 @@ export default function ContextPanel({
     <aside className={`context-panel${collapsed ? ' collapsed' : ''}`}>
       <Button
         aria-label={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}
-        className="ctx-toggle"
+        className="ctx-toggle panel-toggle"
         onClick={onToggle}
         size="icon"
         title={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}
         variant="secondary"
       >
-        {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+        {collapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
       </Button>
 
       {!collapsed && (

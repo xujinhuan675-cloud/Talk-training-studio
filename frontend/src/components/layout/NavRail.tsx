@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  ChevronsLeft,
-  ChevronsRight,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n'
 import { Button } from '../ui/button'
 import { desktopNavSections, isNavItemActive } from './navigation'
+import '../../styles/panelControls.css'
 import './NavRail.css'
 
 const STORAGE_KEY = 'talkwise.navrail.collapsed'
@@ -72,16 +73,16 @@ const NavRail: React.FC = () => {
       <div className="navrail-footer">
         <Button
           variant="ghost"
-          className="navrail-toggle"
+          className="navrail-toggle panel-toggle panel-toggle--wide"
           aria-label={toggleLabel}
           title={toggleLabel}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
-        >
-          <span className="navrail-toggle-icon" aria-hidden="true">
-            {collapsed ? <ChevronsRight size={19} /> : <ChevronsLeft size={19} />}
+          >
+          <span className="navrail-toggle-icon panel-toggle-icon" aria-hidden="true">
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </span>
-          <span className="navrail-toggle-label">{toggleText}</span>
+          <span className="navrail-toggle-label panel-toggle-label">{toggleText}</span>
         </Button>
       </div>
     </nav>

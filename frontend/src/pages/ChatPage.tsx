@@ -113,11 +113,13 @@ import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { getErrorMessage } from '../utils/errors'
+import { stripTrainingCoachNotesFromCounterpart } from '../utils/trainingMessageContent'
 import {
   getScenarioCategoryLabel,
   getScenarioDifficultyLabel,
 } from '../utils/scenarioLabels'
 import '../App.css'
+import '../styles/panelControls.css'
 import './ChatPage.css'
 
 function displayInitial(name: string): string {
@@ -532,6 +534,7 @@ function ChatArea() {
   const [cheatSheetData, setCheatSheetData] = useState<CheatSheetData | null>(null)
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
   const [trainingSceneExpanded, setTrainingSceneExpanded] = useState(false)
+  const [runtimeConfigExpanded, setRuntimeConfigExpanded] = useState(false)
   const [llmRegistry, setLlmRegistry] = useState<LLMProviderMetadata | null>(null)
   const [selectedLlmChoiceKey, setSelectedLlmChoiceKey] = useState<string | null>(null)
   const [selectedReplyLanguage, setSelectedReplyLanguage] = useState(routeReplyLanguage)
@@ -703,6 +706,16 @@ function ChatArea() {
     () => buildLlmDetailTags(displayedLlmChoice, t),
     [displayedLlmChoice, t],
   )
+  const llmRuntimeSummary = React.useMemo(() => {
+    const providerLabel = llmProviderOptions.find((provider) => provider.provider === selectedLlmProvider)?.label
+      || selectedLlmProvider
+      || t('training.llm.provider')
+    const modelLabel = displayedLlmChoice
+      ? formatLlmOptionLabel(displayedLlmChoice, t)
+      : t('training.llm.model')
+    const languageLabel = getLiveCoachLanguageLabel(selectedReplyLanguage, locale)
+    return compactStrings([providerLabel, modelLabel, languageLabel]).join(' · ')
+  }, [displayedLlmChoice, llmProviderOptions, locale, selectedLlmProvider, selectedReplyLanguage, t])
   const llmSelectionMetadata = React.useMemo(
     () => buildLlmSelectionMetadata(selectedLlmChoice),
     [selectedLlmChoice],
@@ -1110,8 +1123,9 @@ function ChatArea() {
     const personaMessages = (selectedRoomMessages || []).filter(
       (m: { sender_type: string; content: string }) => m.sender_type === 'persona' && m.content.trim(),
     )
-    return personaMessages[personaMessages.length - 1]?.content.trim() || ''
-  }, [selectedRoomMessages])
+    const latest = personaMessages[personaMessages.length - 1]?.content.trim() || ''
+    return isDrillFeedbackMode ? stripTrainingCoachNotesFromCounterpart(latest) : latest
+  }, [isDrillFeedbackMode, selectedRoomMessages])
   const latestGuidanceMessage = React.useMemo(() => {
     const messages = ((selectedRoomMessages || []) as ChatMessage[]).filter((message) => message.content.trim())
     return messages[messages.length - 1] || null
@@ -1222,6 +1236,12 @@ function ChatArea() {
   const resolvedTrainingContextCustomerProfile = isLiveCoachSession ? null : trainingContextCustomerProfile
   const resolvedTrainingContextPersonaStyle = isLiveCoachSession ? null : trainingContextPersonaStyle
   const resolvedTrainingContextPoints = isLiveCoachSession ? null : trainingContextPoints
+  const resolvedTrainingSceneSummary = compactStrings([
+    resolvedTrainingContextCustomerProfile,
+    resolvedTrainingContextDescription,
+    resolvedTrainingContextPersonaStyle,
+    resolvedTrainingContextPoints ? `${tr('重点', 'Focus')}: ${resolvedTrainingContextPoints}` : null,
+  ]).join(' · ')
   const resolvedTrainingInputPlaceholder = isLiveCoachSession
     ? tr('输入会议现场内容或你的下一句，回车发送', 'Type a meeting line or your next reply. Enter to send')
     : trainingInputPlaceholder
@@ -1745,15 +1765,19 @@ function ChatArea() {
             </Button>
 
             <div className="chat-page-training-copy">
-              <strong>{resolvedTrainingContextTitle}</strong>
-              {resolvedTrainingContextSubtitle && <span>{resolvedTrainingContextSubtitle}</span>}
-              <div className="chat-page-training-tags" aria-label={tr('练习标签', 'Practice tags')}>
-                {resolvedTrainingContextTags.map((tag) => (
-                  <span className={tag.tone ? `tone-${tag.tone}` : undefined} key={`${tag.tone || 'tag'}:${tag.label}`}>
-                    {tag.label}
-                  </span>
-                ))}
+              <div className="chat-page-training-title-line">
+                <strong>{resolvedTrainingContextTitle}</strong>
+                {resolvedTrainingContextSubtitle && <span>{resolvedTrainingContextSubtitle}</span>}
               </div>
+              {resolvedTrainingContextTags.length > 0 && (
+                <div className="chat-page-training-tags" aria-label={tr('练习标签', 'Practice tags')}>
+                  {resolvedTrainingContextTags.map((tag) => (
+                    <span className={tag.tone ? `tone-${tag.tone}` : undefined} key={`${tag.tone || 'tag'}:${tag.label}`}>
+                      {tag.label}
+                    </span>
+                  ))}
+                </div>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -1780,83 +1804,94 @@ function ChatArea() {
 
           {isTrainingSession && (
             <div
-              className="chat-page-llm-selector"
+              className={`chat-page-llm-selector${runtimeConfigExpanded ? ' expanded' : ' collapsed'}`}
               data-testid="training-llm-selector"
               aria-label={t('training.llm.runtimeSelectorLabel')}
             >
-              <span className="chat-page-llm-selector-title">{t('training.llm.runtimeSelectorLabel')}</span>
-              {llmModelChoices.length > 0 && (
-                <>
-                  <label className="chat-page-llm-provider">
-                    <span>{t('training.llm.provider')}</span>
+              <div className="chat-page-llm-summary">
+                <span className="chat-page-llm-selector-title">{t('training.llm.runtimeSelectorLabel')}</span>
+                <span className="chat-page-llm-summary-text">{llmRuntimeSummary}</span>
+                {llmDetailTags.length > 0 && (
+                  <span className="chat-page-llm-tags">
+                    {llmDetailTags.map((tag) => (
+                      <span
+                        key={tag.key}
+                        className={tag.tone === 'warning' ? 'warning' : undefined}
+                      >
+                        {tag.label}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`chat-page-runtime-toggle${runtimeConfigExpanded ? ' expanded' : ''}`}
+                  aria-expanded={runtimeConfigExpanded}
+                  aria-controls="training-runtime-fields"
+                  onClick={() => setRuntimeConfigExpanded((value) => !value)}
+                >
+                  <span>{runtimeConfigExpanded ? tr('收起配置', 'Hide config') : tr('配置', 'Config')}</span>
+                  <ChevronDown size={14} />
+                </Button>
+              </div>
+              {runtimeConfigExpanded && (
+                <div id="training-runtime-fields" className="chat-page-llm-fields">
+                  {llmModelChoices.length > 0 && (
+                    <>
+                      <label className="chat-page-llm-provider">
+                        <span>{t('training.llm.provider')}</span>
+                        <Select
+                          aria-label={t('training.llm.providerAria')}
+                          value={selectedLlmProvider}
+                          onChange={handleLlmProviderChange}
+                          disabled={chat.sending}
+                        >
+                          {llmProviderOptions.map((provider) => (
+                            <option key={provider.provider} value={provider.provider}>
+                              {provider.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                      <label className="chat-page-llm-model">
+                        <span>{t('training.llm.model')}</span>
+                        <Select
+                          aria-label={t('training.llm.modelAria')}
+                          value={selectedLlmChoice?.key
+                            ?? selectedProviderModelChoices.find(isLlmModelChoiceSelectable)?.key
+                            ?? selectedProviderModelChoices[0]?.key
+                            ?? ''}
+                          onChange={handleLlmModelChange}
+                          disabled={chat.sending}
+                        >
+                          {selectedProviderModelChoices.map((choice) => (
+                            <option key={choice.key} value={choice.key} disabled={choice.disabled}>
+                              {formatLlmOptionLabel(choice, t)}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                    </>
+                  )}
+                  <label className="chat-page-llm-language">
+                    <span>{t('training.llm.replyLanguage')}</span>
                     <Select
-                      aria-label={t('training.llm.providerAria')}
-                      value={selectedLlmProvider}
-                      onChange={handleLlmProviderChange}
+                      aria-label={t('training.llm.replyLanguageAria')}
+                      value={selectedReplyLanguage}
+                      onChange={(event) => setSelectedReplyLanguage(event.target.value)}
                       disabled={chat.sending}
                     >
-                      {llmProviderOptions.map((provider) => (
-                        <option key={provider.provider} value={provider.provider}>
-                          {provider.label}
+                      {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
+                        <option key={option.code} value={option.code}>
+                          {getLiveCoachLanguageLabel(option.code, locale)}
                         </option>
                       ))}
                     </Select>
                   </label>
-                  <label className="chat-page-llm-model">
-                    <span>{t('training.llm.model')}</span>
-                    <Select
-                      aria-label={t('training.llm.modelAria')}
-                      value={selectedLlmChoice?.key
-                        ?? selectedProviderModelChoices.find(isLlmModelChoiceSelectable)?.key
-                        ?? selectedProviderModelChoices[0]?.key
-                        ?? ''}
-                      onChange={handleLlmModelChange}
-                      disabled={chat.sending}
-                    >
-                      {selectedProviderModelChoices.map((choice) => (
-                        <option key={choice.key} value={choice.key} disabled={choice.disabled}>
-                          {formatLlmOptionLabel(choice, t)}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                </>
-              )}
-              <label className="chat-page-llm-language">
-                <span>{t('training.llm.replyLanguage')}</span>
-                <Select
-                  aria-label={t('training.llm.replyLanguageAria')}
-                  value={selectedReplyLanguage}
-                  onChange={(event) => setSelectedReplyLanguage(event.target.value)}
-                  disabled={chat.sending}
-                >
-                  {LIVE_COACH_LANGUAGE_OPTIONS.map((option) => (
-                    <option key={option.code} value={option.code}>
-                      {getLiveCoachLanguageLabel(option.code, locale)}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              {llmModelChoices.length > 0 && (
-                <div
-                  className="chat-page-llm-details"
-                  aria-label={t('training.llm.detailsAria')}
-                >
                   {displayedLlmChoice?.description && (
                     <span className="chat-page-llm-description" title={displayedLlmChoice.description}>
                       {displayedLlmChoice.description}
-                    </span>
-                  )}
-                  {llmDetailTags.length > 0 && (
-                    <span className="chat-page-llm-tags">
-                      {llmDetailTags.map((tag) => (
-                        <span
-                          key={tag.key}
-                          className={tag.tone === 'warning' ? 'warning' : undefined}
-                        >
-                          {tag.label}
-                        </span>
-                      ))}
                     </span>
                   )}
                 </div>
@@ -1868,27 +1903,37 @@ function ChatArea() {
             id="training-scene-details"
             className={`chat-page-training-scene${trainingSceneExpanded ? ' expanded' : ' collapsed'}`}
           >
-            {resolvedTrainingContextCustomerProfile && (
-              <p>
-                <strong>{tr('客户画像', 'Customer profile')}:</strong>
-                <span>{resolvedTrainingContextCustomerProfile}</span>
+            {!trainingSceneExpanded && (
+              <p className="chat-page-training-scene-summary">
+                <strong>{tr('场景', 'Scene')}:</strong>
+                <span>{resolvedTrainingSceneSummary || resolvedTrainingContextDescription}</span>
               </p>
             )}
-            <p>
-              <strong>{tr('场景描述', 'Scenario')}:</strong>
-              <span>{resolvedTrainingContextDescription}</span>
-            </p>
-            {resolvedTrainingContextPersonaStyle && (
-              <p>
-                <strong>{tr('角色状态', 'Persona stance')}:</strong>
-                <span>{resolvedTrainingContextPersonaStyle}</span>
-              </p>
-            )}
-            {resolvedTrainingContextPoints && (
-              <p>
-                <strong>{tr('练习重点', 'Focus')}:</strong>
-                <span>{resolvedTrainingContextPoints}</span>
-              </p>
+            {trainingSceneExpanded && (
+              <>
+                {resolvedTrainingContextCustomerProfile && (
+                  <p>
+                    <strong>{tr('客户画像', 'Customer profile')}:</strong>
+                    <span>{resolvedTrainingContextCustomerProfile}</span>
+                  </p>
+                )}
+                <p>
+                  <strong>{tr('场景描述', 'Scenario')}:</strong>
+                  <span>{resolvedTrainingContextDescription}</span>
+                </p>
+                {resolvedTrainingContextPersonaStyle && (
+                  <p>
+                    <strong>{tr('角色状态', 'Persona stance')}:</strong>
+                    <span>{resolvedTrainingContextPersonaStyle}</span>
+                  </p>
+                )}
+                {resolvedTrainingContextPoints && (
+                  <p>
+                    <strong>{tr('练习重点', 'Focus')}:</strong>
+                    <span>{resolvedTrainingContextPoints}</span>
+                  </p>
+                )}
+              </>
             )}
           </div>
         </section>
@@ -1939,6 +1984,7 @@ function ChatArea() {
             <Button
               variant="ghost"
               size="icon"
+              className="panel-toggle panel-toggle--subtle"
               onClick={() => setGuidanceOpen(false)}
               title={tr('关闭指导', 'Close guidance')}
               aria-label={tr('关闭指导', 'Close guidance')}
@@ -2197,6 +2243,7 @@ function ChatArea() {
             playingPersonaId={isVoiceBattlePrep || isRealtimeBattlePrep ? voice.playingPersonaId : null}
             currentTreeSelection={messageTreeSelection}
             onSelectTreePath={setMessageTreeSelection}
+            trainingFeedbackMode={trainingFeedbackMode}
             onClick={() => showExportMenu && setShowExportMenu(false)}
           />
 
@@ -2498,7 +2545,7 @@ export default function ChatPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="chat-page-left-toggle"
+            className="chat-page-left-toggle panel-toggle"
             aria-label={roomListCollapsed ? tr('展开会话列表', 'Expand room list') : tr('收起会话列表', 'Collapse room list')}
             aria-expanded={!roomListCollapsed}
             onClick={() => setRoomListCollapsed((value) => !value)}

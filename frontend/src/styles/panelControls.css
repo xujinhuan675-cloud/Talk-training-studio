@@ -1,0 +1,62 @@
+.panel-toggle.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  width: 32px;
+  padding: 0;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--bg-card, #fff);
+  color: var(--text-secondary, #6b7280);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.panel-toggle.ui-button:hover:not(:disabled),
+.panel-toggle.ui-button:focus-visible {
+  background: var(--bg-base, #f3f4f6);
+  border-color: var(--border-light, #d1d5db);
+  color: var(--text-primary, #1f2937);
+  box-shadow: var(--shadow-sm);
+  outline: none;
+}
+
+.panel-toggle.ui-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.panel-toggle--wide.ui-button {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.panel-toggle--wide .panel-toggle-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.panel-toggle--wide .panel-toggle-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.panel-toggle--subtle.ui-button {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}

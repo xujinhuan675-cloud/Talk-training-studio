@@ -36,6 +36,8 @@ import { Field, Input, Select, Textarea } from '../ui/form'
 import { SegmentedControl } from '../ui/segmented-control'
 import { useI18n } from '../../i18n'
 import { useAuthContext } from '../../contexts/AuthContext'
+import type { TrainingFeedbackMode } from '../../services/trainingMode'
+import { stripTrainingCoachNotesFromCounterpart } from '../../utils/trainingMessageContent'
 import './MessageList.css'
 
 /* ------------------------------------------------------------------ */
@@ -54,7 +56,10 @@ const EMOTION_TAG_RE = /\s*<!--emotion:\s*\{[\s\S]*?\}\s*-->\s*/gi
 const EMOTION_PARTIAL_TAG_RE = /\s*<!--emotion:[\s\S]*$/i
 const INTERNAL_PERSONA_ID_RE = /^(ts|bp)-[a-z0-9-]+$/i
 
-function cleanDisplayMessageContent(text: string): string {
+function cleanDisplayMessageContent(
+  text: string,
+  options: { stripCounterpartCoachNotes?: boolean } = {},
+): string {
   let cleaned = text.replace(EMOTION_TAG_RE, '')
   cleaned = cleaned.replace(EMOTION_PARTIAL_TAG_RE, '')
   const lower = cleaned.toLowerCase()
@@ -63,6 +68,9 @@ function cleanDisplayMessageContent(text: string): string {
       cleaned = cleaned.slice(0, -size)
       break
     }
+  }
+  if (options.stripCounterpartCoachNotes) {
+    cleaned = stripTrainingCoachNotesFromCounterpart(cleaned)
   }
   return cleaned.trimEnd()
 }
@@ -1162,6 +1170,7 @@ export interface MessageListProps {
   playingPersonaId: string | null
   currentTreeSelection?: MessageTreePathSelection | null
   onSelectTreePath?: (selection: MessageTreePathSelection) => void
+  trainingFeedbackMode?: TrainingFeedbackMode
   /** Close export menu on click inside message list */
   onClick?: () => void
 }
@@ -1183,6 +1192,7 @@ export default function MessageList({
   playingPersonaId,
   currentTreeSelection,
   onSelectTreePath,
+  trainingFeedbackMode = 'simulation',
   onClick,
 }: MessageListProps) {
   const { t, tr, locale } = useI18n()
@@ -1290,7 +1300,9 @@ export default function MessageList({
           {messages.map((msg) => {
             const persona = msg.sender_type === 'persona' ? personaMap[msg.sender_id] : null
             const personaName = msg.sender_type === 'persona' ? getPersonaName(msg.sender_id) : ''
-            const displayContent = cleanDisplayMessageContent(msg.content)
+            const displayContent = cleanDisplayMessageContent(msg.content, {
+              stripCounterpartCoachNotes: trainingFeedbackMode === 'drill' && msg.sender_type === 'persona',
+            })
             const borderColor = persona?.avatar_color || undefined
             const videoAttachment = findVideoAttachment(msg)
             const messageTreeActionContext = getMessageTreeActionContext(msg)
@@ -1389,7 +1401,9 @@ export default function MessageList({
           {streamingEntries.map(([personaId, text]) => {
             const persona = personaMap[personaId]
             const personaName = getPersonaName(personaId)
-            const displayContent = cleanDisplayMessageContent(text)
+            const displayContent = cleanDisplayMessageContent(text, {
+              stripCounterpartCoachNotes: trainingFeedbackMode === 'drill',
+            })
             const borderColor = persona?.avatar_color || undefined
             return (
               <div key={`streaming-${personaId}`} className="message persona streaming" data-sender="persona">

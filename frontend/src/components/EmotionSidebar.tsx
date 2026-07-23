@@ -14,10 +14,11 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from 'recharts'
-import { X, Maximize2 } from 'lucide-react'
+import { Maximize2, PanelRightClose } from 'lucide-react'
 import type { Message, PersonaSummary } from '../services/api'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
+import '../styles/panelControls.css'
 import './EmotionSidebar.css'
 
 interface Props {
@@ -125,7 +126,7 @@ export default function EmotionSidebar({ messages, personaMap, onClose, onExpand
         <h4>{tr('实时情绪', 'Live Emotion')}</h4>
         <div className="es-header-actions">
           <Button
-            className="es-icon-btn"
+            className="es-icon-btn panel-toggle panel-toggle--subtle"
             variant="ghost"
             size="icon"
             onClick={onExpand}
@@ -135,14 +136,14 @@ export default function EmotionSidebar({ messages, personaMap, onClose, onExpand
             <Maximize2 size={14} />
           </Button>
           <Button
-            className="es-icon-btn"
+            className="es-icon-btn panel-toggle"
             variant="ghost"
             size="icon"
             onClick={onClose}
             title={tr('关闭', 'Close')}
             aria-label={tr('关闭', 'Close')}
           >
-            <X size={14} />
+            <PanelRightClose size={16} />
           </Button>
         </div>
       </div>
