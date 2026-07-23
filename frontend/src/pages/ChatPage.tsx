@@ -26,6 +26,8 @@ import {
   Lightbulb,
   Radio,
   Languages,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
 import { ChatProvider, useChatContext } from '../contexts/ChatContext'
@@ -523,7 +525,6 @@ function ChatArea() {
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
   const [trainingSceneExpanded, setTrainingSceneExpanded] = useState(false)
   const [llmRegistry, setLlmRegistry] = useState<LLMProviderMetadata | null>(null)
-  const [llmRegistryStatus, setLlmRegistryStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [selectedLlmChoiceKey, setSelectedLlmChoiceKey] = useState<string | null>(null)
   const selectedRoomId = chat.selectedRoom?.room.id ?? null
   const selectedRoomType = chat.selectedRoom?.room.type
@@ -627,26 +628,22 @@ function ChatArea() {
     let cancelled = false
     if (!isTrainingSession) {
       setLlmRegistry(null)
-      setLlmRegistryStatus('idle')
       setSelectedLlmChoiceKey(null)
       return () => {
         cancelled = true
       }
     }
 
-    setLlmRegistryStatus('loading')
     fetchLlmRegistry()
       .then((registry) => {
         if (!cancelled) {
           setLlmRegistry(registry)
-          setLlmRegistryStatus('ready')
         }
       })
       .catch((error) => {
         if (cancelled) return
         console.warn('Failed to fetch LLM registry:', error)
         setLlmRegistry(null)
-        setLlmRegistryStatus('error')
       })
 
     return () => {
@@ -725,8 +722,7 @@ function ChatArea() {
   useEffect(() => {
     if (!selectedRoomId || !chat.selectedRoom || chat.sending) return
     if (isLiveCoachSession || initialRouteMessage?.trim()) return
-    if (isTrainingSession && (llmRegistryStatus === 'idle' || llmRegistryStatus === 'loading')) return
-    if (isTrainingSession && llmModelChoices.length > 0 && !selectedLlmChoice) return
+    if (isTrainingSession) return
     if (chat.selectedRoom.messages.length > 0) return
     if (autoOpeningRoomIdsRef.current.has(selectedRoomId)) return
 
@@ -751,10 +747,7 @@ function ChatArea() {
     initialRouteMessage,
     isLiveCoachSession,
     isTrainingSession,
-    llmModelChoices.length,
-    llmRegistryStatus,
     outgoingMessageMetadata,
-    selectedLlmChoice,
     selectedRoomId,
     sendChatMessage,
   ])
@@ -1108,8 +1101,8 @@ function ChatArea() {
   const scenarioTitleFromState = getStateStringValue(location.state, 'scenarioTitle')
   const scenarioDescriptionFromState = getStateStringValue(location.state, 'scenarioDescription')
   const scenarioCustomerProfileFromState = getStateStringValue(location.state, 'scenarioCustomerProfile')
-  const scenarioOpeningLineFromState = getStateStringValue(location.state, 'scenarioOpeningLine')
   const scenarioPersonaRoleFromState = getStateStringValue(location.state, 'scenarioPersonaRole')
+  const scenarioPersonaNameFromState = getStateStringValue(location.state, 'scenarioPersonaName')
   const scenarioPersonaStyleFromState = getStateStringValue(location.state, 'scenarioPersonaStyle')
   const scenarioLearnerRoleFromState = getStateStringValue(location.state, 'scenarioLearnerRole')
   const scenarioTrainingPointsFromState = getStateStringArrayValue(location.state, 'scenarioTrainingPoints')
@@ -1117,10 +1110,33 @@ function ChatArea() {
   const scenarioCategoryFromState = getScenarioCategoryFromState(location.state)
   const scenarioRequiredFromState = getStateBooleanValue(location.state, 'scenarioRequired')
   const scenarioPersonaRole = scenarioPersonaRoleFromState || scenarioTrainingCard?.persona.role
+  const scenarioPersonaName = scenarioPersonaNameFromState || scenarioTrainingCard?.persona.name || null
   const scenarioLearnerRole = scenarioLearnerRoleFromState || scenarioTrainingCard?.learnerRole
   const scenarioCategory = scenarioCategoryFromState || scenarioTrainingCard?.category
   const scenarioDifficulty = scenarioDifficultyFromState || scenarioTrainingCard?.difficulty
   const scenarioRequired = scenarioRequiredFromState ?? scenarioTrainingCard?.required
+  const displayPersonaMap = React.useMemo(() => {
+    if (!scenarioPersonaName || !chat.selectedRoom?.room.persona_ids.length) return personaMap
+    const primaryPersonaId = chat.selectedRoom.room.persona_ids[0]
+    if (!primaryPersonaId || personaMap[primaryPersonaId]?.name) return personaMap
+    return {
+      ...personaMap,
+      [primaryPersonaId]: {
+        id: primaryPersonaId,
+        name: scenarioPersonaName,
+        role: scenarioPersonaRole || tr('对方', 'Counterpart'),
+        avatar_color: '#0F766E',
+        organization_id: null,
+        team_id: null,
+        parse_status: 'ready',
+      },
+    }
+  }, [chat.selectedRoom?.room.persona_ids, personaMap, scenarioPersonaName, scenarioPersonaRole, tr])
+  const displayRoomPersonas = chat.selectedRoom
+    ? chat.selectedRoom.room.persona_ids
+        .map((id) => displayPersonaMap[id])
+        .filter(Boolean)
+    : []
   const scenarioTrainingPoints = scenarioTrainingPointsFromState.length
     ? scenarioTrainingPointsFromState
     : scenarioTrainingCard?.trainingPoints ?? []
@@ -1153,9 +1169,7 @@ function ChatArea() {
   ])
   const trainingContextDescription = scenarioDescriptionFromState
     || scenarioTrainingCard?.description
-    || scenarioOpeningLineFromState
     || tr('本轮训练已连接 AI 陪练，完成对话后可结束练习并生成复盘。', 'This training session is connected to an AI coach. End the practice when you are ready for review.')
-  const trainingContextOpeningLine = scenarioOpeningLineFromState || scenarioTrainingCard?.openingLine
   const trainingContextCustomerProfile = scenarioCustomerProfileFromState || scenarioTrainingCard?.customerProfile
   const trainingContextPersonaStyle = scenarioPersonaStyleFromState || scenarioTrainingCard?.persona.style
   const trainingContextPoints = scenarioTrainingPoints.slice(0, 3).join(' / ')
@@ -1189,7 +1203,6 @@ function ChatArea() {
     : trainingContextDescription
   const resolvedTrainingContextCustomerProfile = isLiveCoachSession ? null : trainingContextCustomerProfile
   const resolvedTrainingContextPersonaStyle = isLiveCoachSession ? null : trainingContextPersonaStyle
-  const resolvedTrainingContextOpeningLine = isLiveCoachSession ? null : trainingContextOpeningLine
   const resolvedTrainingContextPoints = isLiveCoachSession ? null : trainingContextPoints
   const resolvedTrainingInputPlaceholder = isLiveCoachSession
     ? tr('输入会议现场内容或你的下一句，回车发送', 'Type a meeting line or your next reply. Enter to send')
@@ -1256,6 +1269,9 @@ function ChatArea() {
         setLastVoiceTranscript(null)
         setVoiceRecorderState('idle')
         setVoiceRecorderError(null)
+        if (voice.voiceEnabled || voice.playingPersonaId || !voice.voiceMuted) {
+          voice.stopVoiceSession()
+        }
       }
       return
     }
@@ -1829,12 +1845,6 @@ function ChatArea() {
                 <span>{resolvedTrainingContextPersonaStyle}</span>
               </p>
             )}
-            {resolvedTrainingContextOpeningLine && resolvedTrainingContextOpeningLine !== resolvedTrainingContextDescription && (
-              <p>
-                <strong>{tr('客户开场', 'Opening line')}:</strong>
-                <span>{resolvedTrainingContextOpeningLine}</span>
-              </p>
-            )}
             {resolvedTrainingContextPoints && (
               <p>
                 <strong>{tr('练习重点', 'Focus')}:</strong>
@@ -2139,13 +2149,13 @@ function ChatArea() {
             messages={chat.selectedRoom?.messages ?? []}
             streamingEntries={chat.streamingEntries}
             highlightedMessageId={analysis.highlightedMessageId}
-            personaMap={personaMap}
+            personaMap={displayPersonaMap}
             listRef={chat.messageListRef}
             dispatchSummary={chat.dispatchSummary}
             dispatchExpanded={chat.dispatchExpanded}
             onToggleDispatch={() => chat.setDispatchExpanded((v) => !v)}
             typingPersona={chat.typingPersona}
-            playingPersonaId={voice.playingPersonaId}
+            playingPersonaId={isVoiceBattlePrep || isRealtimeBattlePrep ? voice.playingPersonaId : null}
             currentTreeSelection={messageTreeSelection}
             onSelectTreePath={setMessageTreeSelection}
             onClick={() => showExportMenu && setShowExportMenu(false)}
@@ -2218,7 +2228,7 @@ function ChatArea() {
         {showEmotionSidebar && (
           <EmotionSidebar
             messages={chat.selectedRoom?.messages ?? []}
-            personaMap={personaMap}
+            personaMap={displayPersonaMap}
             onClose={() => setShowEmotionSidebar(false)}
             onExpand={() => setShowEmotionCurve(true)}
           />
@@ -2228,7 +2238,7 @@ function ChatArea() {
 
       {/* Right column: context panel */}
       <ContextPanel
-        personas={roomPersonas}
+        personas={displayRoomPersonas}
         collapsed={!showContextPanel}
         onToggle={() => setShowContextPanel((v) => !v)}
         onExpandEmotion={() => setShowEmotionCurve(true)}
@@ -2253,7 +2263,7 @@ function ChatArea() {
         open={showEmotionCurve}
         onClose={() => setShowEmotionCurve(false)}
         messages={chat.selectedRoom?.messages ?? []}
-        personaMap={personaMap}
+        personaMap={displayPersonaMap}
       />
 
       {analysis.analysisResult && (
@@ -2389,6 +2399,7 @@ export default function ChatPage() {
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [roomListCollapsed, setRoomListCollapsed] = useState(false)
   const [newConversationDraft, setNewConversationDraft] = useState('')
   const [newConversationState, setNewConversationState] = useState<NewConversationState>({ status: 'idle' })
   const newConversationRunIdRef = React.useRef(0)
@@ -2442,19 +2453,35 @@ export default function ChatPage() {
   return (
     <div className={`chat-page${roomId || showDefaultRouteState ? ' has-room' : ''}`}>
       {/* Left column: room list */}
-      <div className="chat-page-left">
-        <RoomList
-          selectedRoomId={roomId}
-          onSelectRoom={(room: ChatRoom) => {
-            navigate(APP_ROUTES.conversation(room.id))
-          }}
-          onRoomDeleted={(id) => {
-            if (roomId === id) {
-              navigate(APP_ROUTES.conversations)
-            }
-          }}
-          refreshKey={refreshKey}
-        />
+      <div className={`chat-page-left${roomListCollapsed ? ' collapsed' : ''}`}>
+        <div className="chat-page-left-header">
+          <span>{tr('对话库', 'Conversation library')}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="chat-page-left-toggle"
+            aria-label={roomListCollapsed ? tr('展开会话列表', 'Expand room list') : tr('收起会话列表', 'Collapse room list')}
+            aria-expanded={!roomListCollapsed}
+            onClick={() => setRoomListCollapsed((value) => !value)}
+            title={roomListCollapsed ? tr('展开会话列表', 'Expand room list') : tr('收起会话列表', 'Collapse room list')}
+          >
+            {roomListCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </Button>
+        </div>
+        {!roomListCollapsed && (
+          <RoomList
+            selectedRoomId={roomId}
+            onSelectRoom={(room: ChatRoom) => {
+              navigate(APP_ROUTES.conversation(room.id))
+            }}
+            onRoomDeleted={(id) => {
+              if (roomId === id) {
+                navigate(APP_ROUTES.conversations)
+              }
+            }}
+            refreshKey={refreshKey}
+          />
+        )}
       </div>
 
       {/* Center + Right columns */}

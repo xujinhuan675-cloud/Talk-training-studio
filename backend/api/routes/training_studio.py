@@ -699,6 +699,12 @@ class TrainingRuntimePersonaDTO(BaseModel):
     difficulty: str = Field(default="normal", pattern=r"^(easy|normal|hard)$")
 
 
+class TrainingOpeningMessageDTO(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+    sender_id: str | None = Field(default=None, min_length=1, max_length=100)
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
 class StartTrainingSessionDTO(BaseModel):
     room_id: int | str | None = None
     persona_ids: list[str] = Field(default_factory=list)
@@ -708,6 +714,7 @@ class StartTrainingSessionDTO(BaseModel):
     runtime: str | None = Field(default=None, min_length=1, max_length=80)
     provider: str | None = Field(default=None, min_length=1, max_length=120)
     runtime_persona: TrainingRuntimePersonaDTO | None = None
+    opening_message: TrainingOpeningMessageDTO | None = None
 
 
 class CompleteTrainingSessionDTO(BaseModel):
@@ -855,6 +862,54 @@ def _create_training_runtime_persona(
         except FileExistsError:
             continue
     raise HTTPException(status_code=500, detail="Failed to allocate a training runtime persona")
+
+
+async def _persist_training_opening_message(
+    *,
+    room_id: str,
+    opening_message: TrainingOpeningMessageDTO | None,
+    session_id: str,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+) -> MessageDTO | None:
+    if opening_message is None:
+        return None
+    try:
+        numeric_room_id = int(str(room_id).strip())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Session room_id must be numeric to save opening message",
+        ) from exc
+
+    async with uow_factory() as uow:
+        room = await uow.chat_room_repository.get_by_id(numeric_room_id)
+        if room is None:
+            raise HTTPException(status_code=404, detail=f"Chat room {numeric_room_id} not found")
+        sender_id = (opening_message.sender_id or "").strip()
+        if not sender_id:
+            sender_id = room.persona_ids[0] if room.persona_ids else "training_customer"
+        metadata = dict(opening_message.metadata)
+        metadata.setdefault("source", "training_opening_message")
+        metadata["eventKind"] = "scenario_opening"
+        metadata["trainingSessionId"] = session_id
+        saved = await uow.stakeholder_message_repository.create(
+            Message(
+                id=None,
+                room_id=numeric_room_id,
+                sender_type="persona",
+                sender_id=sender_id,
+                content=opening_message.content,
+                metadata=metadata,
+            )
+        )
+        await uow.chat_room_repository.update_last_message_at(
+            numeric_room_id,
+            saved.timestamp,
+        )
+        dto = MessageDTO.model_validate(saved)
+
+    await room_event_bus.publish(numeric_room_id, "message", dto.model_dump(mode="json"))
+    return dto
 
 
 def _requests_message_tree_runtime(body: StartTrainingSessionDTO) -> bool:
@@ -2300,6 +2355,11 @@ async def start_training_session(
                 status_code=422,
                 detail="runtime_persona is only available for room-backed training sessions",
             )
+        if body.opening_message is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="opening_message is only available for room-backed training sessions",
+            )
         mode = str(getattr(session.mode, "value", session.mode)).strip().lower()
         if mode != "text":
             raise HTTPException(
@@ -2374,6 +2434,12 @@ async def start_training_session(
         raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
+    await _persist_training_opening_message(
+        room_id=room_id,
+        opening_message=body.opening_message,
+        session_id=session_id,
+        uow_factory=uow_factory,
+    )
     return success_response(data=_session_to_dict(started))
 
 

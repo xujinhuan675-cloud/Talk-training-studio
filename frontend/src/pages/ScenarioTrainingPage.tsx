@@ -13,24 +13,14 @@ import {
   Trophy,
 } from 'lucide-react'
 import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
-import { buildRoomBackedTrainingSessionStartRequest, createTrainingSession, startTrainingSession } from '../services/trainingSession'
-import {
-  buildTrainingModeChatPath,
-  type InteractionMode,
-  type TrainingFeedbackMode,
-  type TrainingMode,
-} from '../services/trainingMode'
-import { launchTrainingSessionFlow } from '../services/trainingLaunch'
+import { type TrainingFeedbackMode } from '../services/trainingMode'
+import { launchScenarioTraining, type ScenarioLaunchMode } from '../services/scenarioTrainingLaunch'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type Translate, type TranslateInline } from '../i18n'
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import { PageHeader, PageShell } from '../components/ui/page'
 import {
-  buildScenarioTrainingRuntimePersona,
-  buildScenarioTrainingRouteState,
-  buildScenarioTrainingTaskConfig,
   getScenarioTrainingProgress,
-  markScenarioTrainingStarted,
   mergeScenarioTrainingProgress,
   mergeScenarioTrainingProgressRecords,
   saveScenarioTrainingProgress,
@@ -57,7 +47,6 @@ import './ScenarioTrainingPage.css'
 
 type DifficultyFilter = ScenarioDifficultyFilter
 type CategoryFilter = ScenarioCategoryFilter
-type ScenarioLaunchMode = TrainingMode | 'realtime'
 
 const difficultyOptions: DifficultyFilter[] = ['all', ...scenarioDifficultyOptions]
 const categoryOptions: CategoryFilter[] = ['all', ...scenarioCategoryOptions]
@@ -101,14 +90,6 @@ function getFeedbackModeDescription(value: TrainingFeedbackMode, tr: TranslateIn
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
-}
-
-function getScenarioTrainingMode(mode: ScenarioLaunchMode): TrainingMode {
-  return mode === 'realtime' ? 'voice' : mode
-}
-
-function getScenarioInteractionMode(mode: ScenarioLaunchMode): InteractionMode {
-  return mode === 'realtime' ? 'realtime' : 'turn_based'
 }
 
 function formatDate(value: string | undefined, locale: Locale, tr: TranslateInline): string {
@@ -223,78 +204,14 @@ export default function ScenarioTrainingPage() {
     setStartingScenarioId(scenario.id)
     setError(null)
     try {
-      const trainingMode = getScenarioTrainingMode(mode)
-      const interactionMode = getScenarioInteractionMode(mode)
-      const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
-      const taskConfig = buildScenarioTrainingTaskConfig(scenario, { feedbackMode })
-      const scenarioTrainingMetadata = taskConfig.metadata?.scenario_training
-      const scenarioTrainingRecord = scenarioTrainingMetadata
-        && typeof scenarioTrainingMetadata === 'object'
-        && !Array.isArray(scenarioTrainingMetadata)
-        ? scenarioTrainingMetadata as Record<string, unknown>
-        : {}
-      await launchTrainingSessionFlow({
-        createTrainingSessionRequest: {
-          mode: trainingMode,
-          scenario_template_id: scenario.id,
-          user_id: progressScope.userId,
-          team_id: progressScope.teamId,
-          task_config: {
-            ...taskConfig,
-            metadata: {
-              ...taskConfig.metadata,
-              trainingMode,
-              interactionMode,
-              feedbackMode,
-              trainingFeedbackMode: feedbackMode,
-              trainingProfile: 'practice',
-              scenario_training: {
-                ...scenarioTrainingRecord,
-                trainingMode,
-                interactionMode,
-                feedbackMode,
-              },
-            },
-          },
-        },
-        createTrainingSession,
-        startRequestData: {
-          room_name: `Training: ${scenario.title}`,
-          room_type: 'battle_prep',
-          runtime_persona: buildScenarioTrainingRuntimePersona(scenario, trainingMode, { feedbackMode }),
-        },
-        startTrainingSession,
-        buildTrainingSessionStartRequest: buildRoomBackedTrainingSessionStartRequest,
-        trainingMode,
-        interactionMode,
-        buildChatPath: (roomId, nextTrainingMode, trainingSessionId, nextInteractionMode) => {
-          const chatPath = buildTrainingModeChatPath(
-            roomId,
-            nextTrainingMode,
-            trainingSessionId,
-            nextInteractionMode,
-            { trainingFeedbackMode: feedbackMode },
-          )
-          return `${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`
-        },
-        buildNavigationState: ({ startedSession }) => ({
-          ...buildScenarioTrainingRouteState(scenario, { feedbackMode }),
-          trainingMode,
-          interactionMode,
-          trainingFeedbackMode: feedbackMode,
-          trainingSessionId: startedSession.session_id,
-        }),
+      await launchScenarioTraining({
+        scenario,
+        mode,
+        feedbackMode,
+        progress,
+        progressScope,
         navigate,
-        afterStartSession: ({ startedSession }) => {
-          const nextProgress = markScenarioTrainingStarted(
-            progress,
-            scenario.id,
-            startedSession.session_id,
-            progressScope,
-          )
-          setProgress(nextProgress)
-          saveScenarioTrainingProgress(nextProgress, progressScope)
-        },
+        onProgressChange: setProgress,
       })
     } catch (e: unknown) {
       setError(getErrorMessage(e, tr('启动训练失败', 'Failed to start training')))

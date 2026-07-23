@@ -64,6 +64,7 @@ def _extract_mentions(content: str, persona_loader) -> list[str]:
 
 
 _EMOTION_RE = re.compile(r"\s*<!--emotion:\s*(\{.*?\})\s*-->\s*$", re.DOTALL)
+_EMOTION_STREAM_MARKER = "<!--emotion:"
 
 
 def _extract_emotion(content: str) -> tuple[str, int | None, str | None]:
@@ -83,6 +84,20 @@ def _extract_emotion(content: str) -> tuple[str, int | None, str | None]:
     except (json.JSONDecodeError, ValueError, TypeError):
         return content[: m.start()].rstrip(), None, None
     return content[: m.start()].rstrip(), score, label
+
+
+def _split_visible_stream_delta(buffer: str) -> tuple[str, str]:
+    """Return visible delta text while keeping trailing emotion markup private."""
+    lower = buffer.lower()
+    marker_index = lower.find(_EMOTION_STREAM_MARKER)
+    if marker_index >= 0:
+        return buffer[:marker_index], buffer[marker_index:]
+
+    max_prefix = min(len(buffer), len(_EMOTION_STREAM_MARKER) - 1)
+    for size in range(max_prefix, 0, -1):
+        if _EMOTION_STREAM_MARKER.startswith(lower[-size:]):
+            return buffer[:-size], buffer[-size:]
+    return buffer, ""
 
 
 def _clean_llm_selection_text(value: object) -> str | None:
@@ -352,6 +367,7 @@ class StakeholderChatService:
                         LLMMessage(role=m["role"], content=m["content"]) for m in llm_messages
                     )
                     chunks: list[str] = []
+                    stream_buffer = ""
 
                     # Set up TTS pipeline if voice is enabled for this persona
                     tts_enabled = self._tts is not None
@@ -368,15 +384,19 @@ class StakeholderChatService:
                     async for chunk in self._llm.stream(all_messages, model=selected_model):
                         if chunk.content:
                             chunks.append(chunk.content)
-                            await room_event_bus.publish(
-                                room_id,
-                                "streaming_delta",
-                                {"persona_id": persona_id, "delta": chunk.content},
+                            public_delta, stream_buffer = _split_visible_stream_delta(
+                                stream_buffer + chunk.content
                             )
+                            if public_delta:
+                                await room_event_bus.publish(
+                                    room_id,
+                                    "streaming_delta",
+                                    {"persona_id": persona_id, "delta": public_delta},
+                                )
 
                             # Feed to SentenceBuffer for TTS
-                            if sentence_buf is not None:
-                                sentence = sentence_buf.feed(chunk.content)
+                            if sentence_buf is not None and public_delta:
+                                sentence = sentence_buf.feed(public_delta)
                                 if sentence:
                                     task = asyncio.create_task(
                                         self._synthesize_and_push(

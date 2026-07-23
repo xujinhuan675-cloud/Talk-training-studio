@@ -82,7 +82,8 @@ class FakeGrowthService:
 
 
 class FakeChatroomService:
-    def __init__(self) -> None:
+    def __init__(self, runtime_state=None) -> None:
+        self._runtime_state = runtime_state
         self.created_rooms: list[object] = []
         self.details: dict[int, ChatRoomDetailDTO] = {}
         self.detail_calls: list[tuple[int, int]] = []
@@ -90,7 +91,16 @@ class FakeChatroomService:
 
     async def create_room(self, dto):
         self.created_rooms.append(dto)
-        return SimpleNamespace(id=701)
+        room = SimpleNamespace(
+            id=701,
+            name=dto.name,
+            type=dto.type,
+            persona_ids=list(dto.persona_ids),
+            scenario_id=dto.scenario_id,
+        )
+        if self._runtime_state is not None:
+            self._runtime_state.rooms[room.id] = room
+        return room
 
     async def get_room_detail(
         self,
@@ -128,11 +138,44 @@ class FakeTrainingRuntimeConversationRepository:
         return saved
 
 
+class FakeTrainingRuntimeChatRoomRepository:
+    def __init__(self, state) -> None:
+        self._state = state
+
+    async def get_by_id(self, room_id: int):
+        return self._state.rooms.get(room_id)
+
+    async def update_last_message_at(self, room_id: int, timestamp) -> None:
+        self._state.last_message_updates.append((room_id, timestamp))
+
+
+class FakeTrainingRuntimeMessageRepository:
+    def __init__(self, state) -> None:
+        self._state = state
+
+    async def create(self, message):
+        saved = SimpleNamespace(
+            id=len(self._state.messages) + 1,
+            room_id=message.room_id,
+            sender_type=message.sender_type,
+            sender_id=message.sender_id,
+            content=message.content,
+            timestamp=message.timestamp,
+            emotion_score=message.emotion_score,
+            emotion_label=message.emotion_label,
+            metadata=dict(message.metadata),
+        )
+        self._state.messages.append(saved)
+        return saved
+
+
 class FakeTrainingRuntimeUnitOfWork:
     def __init__(self, state, **kwargs) -> None:
         self._state = state
         self._kwargs = kwargs
         self.conversation_repository = FakeTrainingRuntimeConversationRepository(state)
+        self.chat_room_repository = FakeTrainingRuntimeChatRoomRepository(state)
+        self.stakeholder_message_repository = FakeTrainingRuntimeMessageRepository(state)
 
     async def __aenter__(self):
         return self
@@ -153,11 +196,16 @@ def app(tmp_path):
     )
     session_ids = count(1)
     session_service = TrainingSessionService(id_factory=lambda: f"session-{next(session_ids)}")
-    runtime_state = SimpleNamespace(created_conversations=[])
+    runtime_state = SimpleNamespace(
+        created_conversations=[],
+        rooms={},
+        messages=[],
+        last_message_updates=[],
+    )
     analysis_service = FakeAnalysisService()
     reader_service = FakeAnalysisReaderService()
     growth_service = FakeGrowthService()
-    chatroom_service = FakeChatroomService()
+    chatroom_service = FakeChatroomService(runtime_state)
     persona_editor = FakePersonaEditor()
     guidance_service = TrainingLiveGuidanceService(monologue_word_threshold=20)
     test_app.dependency_overrides[get_training_runtime_uow_factory] = (
@@ -1189,6 +1237,54 @@ async def test_training_session_start_can_create_runtime_persona(
     assert created_room.name == "AI Agent PM interview training"
     assert created_room.type == "battle_prep"
     assert created_room.persona_ids == [created_persona.id]
+
+
+@pytest.mark.asyncio
+async def test_training_session_start_persists_runtime_persona_opening_message(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload("voice", scenario_template_id="new-customer-discount"),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={
+            "room_name": "New customer discount",
+            "room_type": "battle_prep",
+            "runtime_persona": {
+                "name": "Customer",
+                "role": "Discount-sensitive walk-in customer",
+                "style": "Ask concise price questions and test trust.",
+                "scenario_context": "New customer discount consult.",
+                "training_points": ["Clarify need", "Explain offer boundary"],
+                "difficulty": "normal",
+            },
+            "opening_message": {
+                "content": "你好，我看到你们门口说有新客优惠，能介绍一下吗？",
+                "metadata": {
+                    "source": "scenario_training_opening",
+                    "scenarioTrainingId": "new-customer-discount",
+                },
+            },
+        },
+    )
+
+    assert start_resp.status_code == 200
+    created_persona = app.state.persona_editor.created_personas[0]
+    assert len(app.state.training_runtime_state.messages) == 1
+    opening = app.state.training_runtime_state.messages[0]
+    assert opening.room_id == 701
+    assert opening.sender_type == "persona"
+    assert opening.sender_id == created_persona.id
+    assert opening.content == "你好，我看到你们门口说有新客优惠，能介绍一下吗？"
+    assert opening.metadata["source"] == "scenario_training_opening"
+    assert opening.metadata["eventKind"] == "scenario_opening"
+    assert opening.metadata["trainingSessionId"] == session_id
+    assert app.state.training_runtime_state.last_message_updates[0][0] == 701
 
 
 @pytest.mark.asyncio

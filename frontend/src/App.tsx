@@ -119,7 +119,7 @@ function App() {
                     <Route path="custom" element={managementOnly(<TrainingStudioPage />)} />
                     <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
                     <Route path="defense-prep" element={<DefensePrepPage />} />
-                    <Route path="battle-prep" element={managementOnly(<BattlePrepPage />)} />
+                    <Route path="battle-prep" element={<BattlePrepPage />} />
                   </Route>
                   <Route path="chat/:roomId" element={<ConversationRoomRedirect />} />
                   <Route path="conversations" element={<ChatPage />} />

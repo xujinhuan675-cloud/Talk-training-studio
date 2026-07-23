@@ -22,7 +22,7 @@ export interface UseVoiceReturn {
 
 export function useVoice(): UseVoiceReturn {
   const [voiceEnabled, setVoiceEnabled] = useState(false)
-  const [voiceMuted, setVoiceMuted] = useState(false)
+  const [voiceMuted, setVoiceMuted] = useState(true)
   const [voiceStatus, setVoiceStatusState] = useState<VoiceSessionStatus>('idle')
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [playingPersonaId, setPlayingPersonaId] = useState<string | null>(null)
@@ -44,6 +44,7 @@ export function useVoice(): UseVoiceReturn {
         })
       },
     })
+    player.setMuted(true)
     audioPlayerRef.current = player
     return () => {
       player.destroy()
@@ -90,6 +91,10 @@ export function useVoice(): UseVoiceReturn {
   }, [setVoiceStatus])
 
   const stopVoiceSession = useCallback(() => {
+    audioPlayerRef.current?.stop()
+    audioPlayerRef.current?.setMuted(true)
+    setVoiceEnabled(false)
+    setVoiceMuted(true)
     setPlayingPersonaId(null)
     setVoiceStatus('idle')
   }, [setVoiceStatus])

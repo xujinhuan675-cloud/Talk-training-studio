@@ -110,7 +110,6 @@ export function useCommandPalette(
         label: t('command.action.battlePrep'),
         icon: 'Swords',
         shortcut: '\u2318B',
-        roles: MANAGEMENT_SYSTEM_ROLES,
         onSelect: () => {
           close()
           navigate(APP_ROUTES.practiceBattle)
@@ -236,7 +235,7 @@ export function useCommandPalette(
     }
 
     return items
-  }, [query, rooms, personaMap, actions, close, navigate, t, hasAnySystemRole])
+  }, [query, rooms, personaMap, actions, close, navigate, t, hasAnySystemRole, canUseManagementActions])
 
   const currentSelectedIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : 0
 
@@ -264,7 +263,7 @@ export function useCommandPalette(
       // Global shortcuts (only when palette is NOT open)
       if (!isOpen) {
         // Cmd+B -> battle prep
-        if (meta && e.key === 'b' && canUseManagementActions) {
+        if (meta && e.key === 'b') {
           e.preventDefault()
           navigate(APP_ROUTES.practiceBattle)
           return
@@ -311,7 +310,7 @@ export function useCommandPalette(
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, results, currentSelectedIndex, navigate, close, canUseManagementActions])
+  }, [isOpen, results, currentSelectedIndex, navigate, close])
 
   return {
     isOpen,

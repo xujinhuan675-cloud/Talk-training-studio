@@ -1,17 +1,30 @@
-import React, { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import React, { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
+  AlertCircle,
   ChevronRight,
   ClipboardList,
+  Loader2,
   Play,
-  SlidersHorizontal,
+  Swords,
   TrendingUp,
 } from 'lucide-react'
 import { useAuthContext } from '../contexts/AuthContext'
-import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import { useI18n, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
-import { getScenarioTrainingCardById } from '../data/trainingScenarios'
+import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
+import { launchScenarioTraining } from '../services/scenarioTrainingLaunch'
+import {
+  getScenarioTrainingCardById,
+  getScenarioTrainingProgress,
+  mergeScenarioTrainingProgress,
+  mergeScenarioTrainingProgressRecords,
+  saveScenarioTrainingProgress,
+  scenarioTrainingCatalog,
+  type ScenarioTrainingCard,
+  type ScenarioTrainingProgress,
+} from '../data/trainingScenarios'
+import { getScenarioCategoryLabel, getScenarioDifficultyLabel } from '../utils/scenarioLabels'
 import {
   listTrainingSessions,
   type TrainingSessionDTO,
@@ -23,6 +36,7 @@ import {
   type TrainingProfile,
 } from '../services/trainingMode'
 import { useGrowth } from '../hooks/useGrowth'
+import { getErrorMessage } from '../utils/errors'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageSection, PageShell } from '../components/ui/page'
 import { Surface } from '../components/ui/surface'
@@ -173,8 +187,43 @@ function xpProgressText(currentXP: number, nextLevelXP: number | null, tr: Trans
   })
 }
 
+function scenarioTimestamp(value?: string): number {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
+function scenarioRecommendationPriority(scenario: ScenarioTrainingCard): number {
+  if (scenario.status === 'in_progress') return 0
+  if (scenario.required && scenario.status === 'not_started') return 1
+  if (scenario.status === 'not_started') return 2
+  if (scenario.status === 'failed') return 3
+  if (typeof scenario.score === 'number' && scenario.score < 80) return 4
+  return 5
+}
+
+function getRecommendedScenarios(scenarios: ScenarioTrainingCard[]): ScenarioTrainingCard[] {
+  return [...scenarios]
+    .sort((a, b) => (
+      scenarioRecommendationPriority(a) - scenarioRecommendationPriority(b)
+      || Number(b.required) - Number(a.required)
+      || scenarioTimestamp(a.lastPracticedAt) - scenarioTimestamp(b.lastPracticedAt)
+      || a.title.localeCompare(b.title)
+    ))
+    .slice(0, 1)
+}
+
+function recommendationReason(scenario: ScenarioTrainingCard, tr: TranslateInline): string {
+  if (scenario.status === 'in_progress') return tr('继续进行中的训练', 'Continue an active practice')
+  if (scenario.required && scenario.status === 'not_started') return tr('必练场景，建议先完成', 'Required scenario to finish first')
+  if (scenario.status === 'failed') return tr('上次未通过，适合补练', 'Recovery practice after a failed run')
+  if (typeof scenario.score === 'number' && scenario.score < 80) return tr('分数还有提升空间', 'Score has room to improve')
+  return tr('适合直接热身', 'Good warm-up scenario')
+}
+
 const HomePage: React.FC = () => {
-  const { currentUser, hasAnySystemRole } = useAuthContext()
+  const navigate = useNavigate()
+  const { currentUser } = useAuthContext()
   const { tr, t } = useI18n()
   const [sessions, setSessions] = useState<TrainingSessionDTO[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
@@ -182,14 +231,64 @@ const HomePage: React.FC = () => {
     loading: growthLoading,
     levelInfo,
   } = useGrowth()
+  const progressScope = useMemo(() => ({
+    userId: currentUser?.userId ?? null,
+    teamId: currentUser?.teamId ?? null,
+  }), [currentUser?.teamId, currentUser?.userId])
+  const [catalog, setCatalog] = useState<ScenarioTrainingCard[]>(scenarioTrainingCatalog)
+  const [progress, setProgress] = useState<ScenarioTrainingProgress>(() => (
+    getScenarioTrainingProgress(progressScope)
+  ))
+  const [startingScenarioId, setStartingScenarioId] = useState<string | null>(null)
+  const [scenarioLaunchError, setScenarioLaunchError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setProgress(getScenarioTrainingProgress(progressScope))
+  }, [progressScope])
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetchScenarioTrainingCatalog()
+      .then((templates) => {
+        if (cancelled) return
+        if (templates.length > 0) setCatalog(templates)
+      })
+      .catch(() => {
+        if (!cancelled) setCatalog(scenarioTrainingCatalog)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetchScenarioTrainingProgress(progressScope)
+      .then((remoteProgress) => {
+        if (cancelled) return
+        setProgress((current) => {
+          const merged = mergeScenarioTrainingProgressRecords(current, remoteProgress)
+          saveScenarioTrainingProgress(merged, progressScope)
+          return merged
+        })
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [progressScope])
 
   useEffect(() => {
     let cancelled = false
     setSessionsLoading(true)
     listTrainingSessions({
       limit: 5,
-      userId: currentUser?.userId ?? null,
-      teamId: currentUser?.teamId ?? null,
+      userId: progressScope.userId,
+      teamId: progressScope.teamId,
     })
       .then((data) => {
         if (cancelled) return
@@ -204,24 +303,48 @@ const HomePage: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [currentUser?.teamId, currentUser?.userId])
+  }, [progressScope])
 
+  const scenarios = useMemo(
+    () => mergeScenarioTrainingProgress(catalog, progress),
+    [catalog, progress],
+  )
+  const recommendedScenarios = useMemo(
+    () => getRecommendedScenarios(scenarios),
+    [scenarios],
+  )
   const recentSessions = sessions.slice(0, 3)
-  const latestSession = recentSessions[0]
-  const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
   const growthLevelText = growthLoading ? '--' : tr('Lv.{level}', 'Lv.{level}', { level: levelInfo.level })
   const growthXpText = growthLoading
     ? t('common.loading')
     : xpProgressText(levelInfo.currentXP, levelInfo.nextLevelXP, tr)
   const growthProgress = growthLoading ? 0 : Math.round(levelInfo.progress * 100)
 
+  const startRecommendedScenario = async (scenario: ScenarioTrainingCard) => {
+    if (startingScenarioId !== null) return
+    setStartingScenarioId(scenario.id)
+    setScenarioLaunchError(null)
+    try {
+      await launchScenarioTraining({
+        scenario,
+        progress,
+        progressScope,
+        navigate,
+        onProgressChange: setProgress,
+      })
+    } catch (error: unknown) {
+      setScenarioLaunchError(getErrorMessage(error, tr('启动训练失败', 'Failed to start training')))
+      setStartingScenarioId(null)
+    }
+  }
+
   return (
     <PageShell className="home-page">
       <PageHeader
         title={t('nav.home')}
         description={tr(
-          '从训练目录进入场景演练，也可以继续最近训练、查看复盘和成长进度。',
-          'Start from the catalog, continue recent sessions, and track reviews and growth.',
+          '从推荐场景、紧急备战和最近训练快速进入练习闭环。',
+          'Start from recommendations, battle prep, recent sessions, reviews, and growth.',
         )}
       />
 
@@ -233,8 +356,8 @@ const HomePage: React.FC = () => {
                 <h2>{t('common.startTraining')}</h2>
                 <p>
                   {tr(
-                    '选择场景或工作台配置开始练习，每次结束后回到复盘和成长追踪。',
-                    'Choose a scenario or studio setup, then return to review and growth after each session.',
+                    '先从推荐场景立即开始；需要临场准备时，直接进入紧急备战。',
+                    'Start from the recommended scenario, or use battle prep for an urgent conversation.',
                   )}
                 </p>
               </div>
@@ -255,48 +378,67 @@ const HomePage: React.FC = () => {
             </div>
 
             <div className="home-start-actions">
-              <Button asChild variant="primary" className="home-start-button">
+              <Button asChild variant="secondary" className="home-start-button">
                 <Link to={APP_ROUTES.practiceScenarios}>
-                  <Play size={16} />
+                  <ClipboardList size={16} />
                   {t('nav.scenarioTraining')}
                 </Link>
               </Button>
-              {canUseManagementActions && (
-                <Button asChild variant="secondary">
-                  <Link to={APP_ROUTES.practiceCustom}>
-                    <SlidersHorizontal size={16} />
-                    {t('nav.trainingStudio')}
-                  </Link>
-                </Button>
-              )}
+              <Button asChild variant="secondary">
+                <Link to={APP_ROUTES.practiceBattle}>
+                  <Swords size={16} />
+                  {t('nav.battlePrep')}
+                </Link>
+              </Button>
             </div>
 
-            {latestSession ? (
-              <Link to={sessionPath(latestSession)} className="home-continue-link">
-                <span className="home-continue-icon" aria-hidden="true">
-                  <ClipboardList size={15} />
-                </span>
-                <span className="home-continue-copy">
-                  <strong>
-                    {isContinuableSession(latestSession)
-                      ? tr('继续最近训练', 'Continue latest training')
-                      : tr('查看最近训练结果', 'View latest training result')}
-                  </strong>
-                  <em>{sessionTitle(latestSession, tr)} · {timeAgo(sessionTime(latestSession), tr) || tr('未记录时间', 'No time')}</em>
-                </span>
-                <ChevronRight size={15} />
-              </Link>
-            ) : (
-              <div className="home-continue-link is-empty">
-                <span className="home-continue-icon" aria-hidden="true">
-                  <ClipboardList size={15} />
-                </span>
-                <span className="home-continue-copy">
-                  <strong>{sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}</strong>
-                  <em>{tr('从训练目录开始', 'Start from the catalog')}</em>
-                </span>
+            {scenarioLaunchError && (
+              <div className="home-scenario-error" role="alert">
+                <AlertCircle size={15} />
+                <span>{scenarioLaunchError}</span>
               </div>
             )}
+
+            <section className="home-recommendations" aria-label={tr('推荐训练场景', 'Recommended training scenarios')}>
+              <div className="home-recommendation-head">
+                <span>{tr('推荐下一场训练', 'Recommended next practice')}</span>
+                <Link to={APP_ROUTES.practiceScenarios}>
+                  {tr('查看全部', 'View all')}
+                  <ChevronRight size={14} />
+                </Link>
+              </div>
+
+              <div className="home-recommendation-grid">
+                {recommendedScenarios.map((scenario) => {
+                  const starting = startingScenarioId === scenario.id
+                  return (
+                    <article className="home-scenario-option" key={scenario.id}>
+                      <div className="home-scenario-meta">
+                        <span className={`difficulty ${scenario.difficulty}`}>
+                          {getScenarioDifficultyLabel(scenario.difficulty, tr)}
+                        </span>
+                        <span>{getScenarioCategoryLabel(scenario.category, tr)}</span>
+                        {scenario.required && <span className="required">{tr('必练', 'Required')}</span>}
+                      </div>
+                      <h3>{scenario.title}</h3>
+                      <p>{scenario.description}</p>
+                      <div className="home-scenario-reason">{recommendationReason(scenario, tr)}</div>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="home-scenario-start"
+                        onClick={() => void startRecommendedScenario(scenario)}
+                        disabled={startingScenarioId !== null}
+                      >
+                        {starting ? <Loader2 size={15} className="home-scenario-spin" /> : <Play size={15} />}
+                        {starting ? t('common.starting') : tr('立即开始', 'Start now')}
+                      </Button>
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
           </Surface>
 
           <PageSection

@@ -121,6 +121,27 @@ class FakeLLM:
         yield LLMChunk(content="", finish_reason="end_turn")
 
 
+class EmotionTaggedStreamingLLM:
+    async def generate(self, messages, **kwargs):
+        from application.ports.llm import LLMResponse
+
+        return LLMResponse(
+            content='First line.\n<!--emotion:{"score":0,"label":"neutral"}-->',
+            model="fake",
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            finish_reason="end_turn",
+        )
+
+    async def stream(self, messages, **kwargs):
+        from application.ports.llm import LLMChunk
+
+        yield LLMChunk(content="First line.\n<")
+        yield LLMChunk(content='!--emotion:{"score":0,"label":"neutral"}-->')
+        yield LLMChunk(content="", finish_reason="end_turn")
+
+
 class FailingLLM:
     async def generate(self, messages, **kwargs):
         raise RuntimeError("LLM down")
@@ -238,6 +259,48 @@ async def test_sse_events_on_send(session_factory):
 
     # typing(stop) must be the last event
     assert events[-1] == ("typing", {"persona_id": "jianfeng", "status": "stop"})
+
+
+@pytest.mark.asyncio
+async def test_sse_streaming_delta_hides_emotion_tag(session_factory):
+    from application.services.stakeholder.sse import room_event_bus
+    from application.services.stakeholder.stakeholder_chat_service import (
+        StakeholderChatService,
+    )
+
+    room_id = await _create_room(session_factory)
+    queue = room_event_bus.subscribe(room_id)
+
+    svc = StakeholderChatService(
+        uow_factory=_uow_factory(session_factory),
+        persona_loader=FakePersonaLoader(),
+        llm=EmotionTaggedStreamingLLM(),
+    )
+    _, room = await svc.send_message(
+        room_id,
+        "Hello",
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
+    await svc.generate_replies(room_id, room)
+
+    events = []
+    while not queue.empty():
+        events.append(await queue.get())
+
+    room_event_bus.unsubscribe(room_id, queue)
+
+    deltas = [data["delta"] for event, data in events if event == "streaming_delta"]
+    streamed_text = "".join(deltas)
+    assert streamed_text == "First line.\n"
+    assert "<!--emotion:" not in streamed_text
+
+    persona_messages = [
+        data for event, data in events
+        if event == "message" and data["sender_type"] == "persona"
+    ]
+    assert persona_messages[-1]["content"] == "First line."
+    assert persona_messages[-1]["emotion_score"] == 0
+    assert persona_messages[-1]["emotion_label"] == "neutral"
 
 
 @pytest.mark.asyncio

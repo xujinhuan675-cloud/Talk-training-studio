@@ -49,6 +49,24 @@ function formatTime(ts: string | null, locale: string): string {
   return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 }
 
+const EMOTION_MARKER_START = '<!--emotion:'
+const EMOTION_TAG_RE = /\s*<!--emotion:\s*\{[\s\S]*?\}\s*-->\s*/gi
+const EMOTION_PARTIAL_TAG_RE = /\s*<!--emotion:[\s\S]*$/i
+const INTERNAL_PERSONA_ID_RE = /^(ts|bp)-[a-z0-9-]+$/i
+
+function cleanDisplayMessageContent(text: string): string {
+  let cleaned = text.replace(EMOTION_TAG_RE, '')
+  cleaned = cleaned.replace(EMOTION_PARTIAL_TAG_RE, '')
+  const lower = cleaned.toLowerCase()
+  for (let size = Math.min(cleaned.length, EMOTION_MARKER_START.length - 1); size > 0; size -= 1) {
+    if (EMOTION_MARKER_START.startsWith(lower.slice(-size))) {
+      cleaned = cleaned.slice(0, -size)
+      break
+    }
+  }
+  return cleaned.trimEnd()
+}
+
 /** Highlight @mentions inside a plain text string */
 function highlightMentions(text: string): React.ReactNode {
   const parts = text.split(/(@[\w\u4e00-\u9fff]+)/g)
@@ -1170,6 +1188,12 @@ export default function MessageList({
   const { t, tr, locale } = useI18n()
   const { currentUser } = useAuthContext()
   const userName = currentUser?.name ?? tr('用户', 'User')
+  const getPersonaName = React.useCallback((personaId: string | null | undefined) => {
+    if (!personaId) return tr('对方', 'Counterpart')
+    const personaName = personaMap[personaId]?.name?.trim()
+    if (personaName) return personaName
+    return INTERNAL_PERSONA_ID_RE.test(personaId) ? tr('对方', 'Counterpart') : personaId
+  }, [personaMap, tr])
   const isEmpty = messages.length === 0 && streamingEntries.length === 0
   const currentTreePathIds = React.useMemo(
     () => new Set(currentTreeSelection?.path.map((item) => item.publicId) ?? []),
@@ -1265,6 +1289,8 @@ export default function MessageList({
         <>
           {messages.map((msg) => {
             const persona = msg.sender_type === 'persona' ? personaMap[msg.sender_id] : null
+            const personaName = msg.sender_type === 'persona' ? getPersonaName(msg.sender_id) : ''
+            const displayContent = cleanDisplayMessageContent(msg.content)
             const borderColor = persona?.avatar_color || undefined
             const videoAttachment = findVideoAttachment(msg)
             const messageTreeActionContext = getMessageTreeActionContext(msg)
@@ -1284,10 +1310,10 @@ export default function MessageList({
               >
                 {msg.sender_type === 'persona' && (
                   <div className="message-row">
-                    <Avatar name={persona?.name || msg.sender_id} color={borderColor || '#0F766E'} size={28} />
+                    <Avatar name={personaName} color={borderColor || '#0F766E'} size={28} />
                     <div className="message-content">
                       <div className="sender-name" style={borderColor ? { color: borderColor } : undefined}>
-                        {persona?.name || msg.sender_id}
+                        {personaName}
                         {msg.emotion_label && (
                           <span className={`emotion-tag ${(msg.emotion_score ?? 0) > 0 ? 'positive' : (msg.emotion_score ?? 0) < 0 ? 'negative' : 'neutral'}`}>
                             {msg.emotion_label}
@@ -1298,7 +1324,7 @@ export default function MessageList({
                         className="message-bubble"
                         style={borderColor ? { borderLeft: `2px solid ${borderColor}` } : undefined}
                       >
-                        {renderContent(msg.content)}
+                        {renderContent(displayContent)}
                         {renderVideoAttachment(videoAttachment)}
                       </div>
                       {messageTreeActionContext && (
@@ -1322,7 +1348,7 @@ export default function MessageList({
                         {userName}
                       </div>
                       <div className="message-bubble">
-                        {renderContent(msg.content)}
+                        {renderContent(displayContent)}
                         {renderVideoAttachment(videoAttachment)}
                       </div>
                       {messageTreeActionContext && (
@@ -1341,7 +1367,7 @@ export default function MessageList({
                 {msg.sender_type === 'system' && (
                   <>
                     <div className="message-bubble">
-                      {renderContent(msg.content)}
+                      {renderContent(displayContent)}
                       {renderVideoAttachment(videoAttachment)}
                     </div>
                     {messageTreeActionContext && (
@@ -1362,20 +1388,22 @@ export default function MessageList({
           {/* Streaming messages -- in-progress persona replies */}
           {streamingEntries.map(([personaId, text]) => {
             const persona = personaMap[personaId]
+            const personaName = getPersonaName(personaId)
+            const displayContent = cleanDisplayMessageContent(text)
             const borderColor = persona?.avatar_color || undefined
             return (
               <div key={`streaming-${personaId}`} className="message persona streaming" data-sender="persona">
                 <div className="message-row">
-                  <Avatar name={persona?.name || personaId} color={borderColor || '#0F766E'} size={28} />
+                  <Avatar name={personaName} color={borderColor || '#0F766E'} size={28} />
                   <div className="message-content">
                     <div className="sender-name" style={borderColor ? { color: borderColor } : undefined}>
-                      {persona?.name || personaId}
+                      {personaName}
                     </div>
                     <div
                       className="message-bubble"
                       style={borderColor ? { borderLeft: `2px solid ${borderColor}` } : undefined}
                     >
-                      {renderContent(text)}
+                      {renderContent(displayContent)}
                       <span className="streaming-cursor" />
                     </div>
                   </div>
@@ -1407,7 +1435,7 @@ export default function MessageList({
                       ? tr('初始响应', 'Initial response')
                       : phase.trigger_persona_id
                         ? tr('跟进讨论（由 {name} 触发）', 'Follow-up discussion triggered by {name}', {
-                          name: personaMap[phase.trigger_persona_id]?.name || phase.trigger_persona_id,
+                          name: getPersonaName(phase.trigger_persona_id),
                         })
                         : tr('跟进讨论', 'Follow-up discussion')}
                   </div>
@@ -1415,7 +1443,7 @@ export default function MessageList({
                     {phase.responders.map((r) => (
                       <li key={r.persona_id}>
                         <strong style={{ color: personaMap[r.persona_id]?.avatar_color || undefined }}>
-                          {personaMap[r.persona_id]?.name || r.persona_id}
+                          {getPersonaName(r.persona_id)}
                         </strong>
                         {' — '}
                         {r.reason || tr('参与讨论', 'Joined the discussion')}
@@ -1434,7 +1462,7 @@ export default function MessageList({
           <div className="message-bubble typing-bubble">
             <span className="typing-dots" aria-hidden="true"><span /><span /><span /></span>
             <span className="typing-label">
-          {tr('{name} 正在回复', '{name} is replying', { name: personaMap[typingPersona]?.name || typingPersona })}
+          {tr('{name} 正在回复', '{name} is replying', { name: getPersonaName(typingPersona) })}
             </span>
           </div>
         </div>
@@ -1443,7 +1471,7 @@ export default function MessageList({
       {playingPersonaId && !typingPersona && (
         <div className="typing-indicator">
           <Volume2 size={14} />
-          &nbsp;{tr('{name} 正在播放语音', '{name} is playing voice', { name: personaMap[playingPersonaId]?.name || playingPersonaId })}
+          &nbsp;{tr('{name} 正在播放语音', '{name} is playing voice', { name: getPersonaName(playingPersonaId) })}
         </div>
       )}
     </div>

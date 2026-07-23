@@ -58,6 +58,12 @@ export interface TrainingRuntimePersonaRequest {
   difficulty?: 'easy' | 'normal' | 'hard'
 }
 
+export interface TrainingOpeningMessageRequest {
+  content: string
+  sender_id?: string
+  metadata?: Record<string, unknown>
+}
+
 export interface StartTrainingSessionRequest {
   room_id?: number | string
   persona_ids?: string[]
@@ -66,6 +72,7 @@ export interface StartTrainingSessionRequest {
   scenario_id?: number | null
   runtime?: TrainingSessionStartRuntime
   runtime_persona?: TrainingRuntimePersonaRequest
+  opening_message?: TrainingOpeningMessageRequest
 }
 
 export interface BuildTrainingSessionStartRequestOptions {

@@ -13,6 +13,15 @@ import { useI18n } from '../i18n'
 
 const API_BASE = '/api/v1/stakeholder'
 const LOCAL_VIDEO_PREFIX = '[video-answer]'
+const EMOTION_TAG_RE = /\s*<!--emotion:\s*\{[\s\S]*?\}\s*-->\s*/gi
+const EMOTION_PARTIAL_TAG_RE = /\s*<!--emotion:[\s\S]*$/i
+
+function cleanDisplayMessageContent(content: string, options: { trimEnd?: boolean } = {}): string {
+  const cleaned = content
+    .replace(EMOTION_TAG_RE, '')
+    .replace(EMOTION_PARTIAL_TAG_RE, '')
+  return options.trimEnd === false ? cleaned : cleaned.trimEnd()
+}
 
 export interface LocalVideoAttachment {
   url: string
@@ -70,9 +79,12 @@ function serializeVideoMessage(attachment: LocalVideoAttachment, caption?: strin
 }
 
 function hydrateLocalVideoMessage(message: Message): Message {
-  if (!message.content.includes(LOCAL_VIDEO_PREFIX)) return message
+  if (!message.content.includes(LOCAL_VIDEO_PREFIX)) {
+    const content = cleanDisplayMessageContent(message.content)
+    return content === message.content ? message : { ...message, content }
+  }
   const markerIndex = message.content.indexOf(LOCAL_VIDEO_PREFIX)
-  const caption = message.content.slice(0, markerIndex).trim()
+  const caption = cleanDisplayMessageContent(message.content.slice(0, markerIndex).trim())
   const raw = message.content.slice(markerIndex + LOCAL_VIDEO_PREFIX.length).trim()
   try {
     const attachment = JSON.parse(raw) as LocalVideoAttachment
@@ -101,7 +113,8 @@ function hydrateLocalVideoMessage(message: Message): Message {
       ],
     }
   } catch {
-    return message
+    const content = cleanDisplayMessageContent(message.content)
+    return content === message.content ? message : { ...message, content }
   }
 }
 
@@ -204,7 +217,7 @@ export function useChat(
       setTypingPersona((prev) => (prev === data.persona_id ? null : prev))
       setStreamingContent((prev) => ({
         ...prev,
-        [data.persona_id]: (prev[data.persona_id] || '') + data.delta,
+        [data.persona_id]: cleanDisplayMessageContent((prev[data.persona_id] || '') + data.delta, { trimEnd: false }),
       }))
       setTimeout(scrollToBottom, 30)
     })
