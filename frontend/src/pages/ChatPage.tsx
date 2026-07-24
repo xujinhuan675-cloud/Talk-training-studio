@@ -3,8 +3,6 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageCircle,
   Plus,
-  Activity,
-  BarChart3,
   BarChart2,
   GraduationCap,
   Download,
@@ -16,6 +14,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ArrowLeft,
+  Settings,
   ListTree,
   Route,
   PhoneCall,
@@ -28,6 +27,8 @@ import {
   Languages,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react'
 import { useAppContext } from '../contexts/AppContext'
 import { ChatProvider, useChatContext } from '../contexts/ChatContext'
@@ -42,7 +43,6 @@ import ContextPanel from '../components/chat/ContextPanel'
 import CoachingPanel from '../components/chat/CoachingPanel'
 import AnalysisPanel from '../components/chat/AnalysisPanel'
 import EmotionCurve from '../components/EmotionCurve'
-import EmotionSidebar from '../components/EmotionSidebar'
 import CheatSheetComponent from '../components/CheatSheet'
 import { Button } from '../components/ui/button'
 import {
@@ -280,61 +280,6 @@ function buildLlmSelectionMetadata(choice: LLMModelChoice | null): Record<string
   }
 }
 
-function formatCompactTokenCount(value: number | null): string | null {
-  if (!value || value <= 0) return null
-  const formatUnit = (amount: number, suffix: string) => {
-    const rounded = Math.round(amount * 10) / 10
-    return `${Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)}${suffix}`
-  }
-  if (value >= 1_000_000) return formatUnit(value / 1_000_000, 'M')
-  if (value >= 1_000) return formatUnit(value / 1_000, 'K')
-  return String(value)
-}
-
-function getLlmCapabilityLabel(capability: string, t: Translate): string {
-  const normalized = capability.trim().toLowerCase().replace(/[\s-]+/g, '_')
-  switch (normalized) {
-    case 'vision':
-      return t('training.llm.capability.vision')
-    case 'tools':
-    case 'tool_use':
-    case 'function_calling':
-      return t('training.llm.capability.tools')
-    case 'reasoning':
-      return t('training.llm.capability.reasoning')
-    case 'audio':
-      return t('training.llm.capability.audio')
-    case 'realtime':
-      return t('training.llm.capability.realtime')
-    case 'image':
-    case 'image_generation':
-      return t('training.llm.capability.image')
-    default:
-      return capability.replace(/[_-]+/g, ' ')
-  }
-}
-
-type LlmDetailTag = {
-  key: string
-  label: string
-  tone?: 'warning'
-}
-
-function buildLlmDetailTags(choice: LLMModelChoice | null, t: Translate): LlmDetailTag[] {
-  if (!choice) return []
-  const contextCount = formatCompactTokenCount(choice.contextWindow)
-  const outputCount = formatCompactTokenCount(choice.maxOutputTokens)
-  const tags: LlmDetailTag[] = compactStrings([
-    contextCount ? t('training.llm.contextTag', { count: contextCount }) : null,
-    outputCount ? t('training.llm.maxOutputTag', { count: outputCount }) : null,
-    ...choice.capabilities.slice(0, 4).map((capability) => getLlmCapabilityLabel(capability, t)),
-  ]).map((label) => ({ key: label, label }))
-  if (choice.disabled) {
-    tags.push({ key: 'unavailable', label: t('training.llm.unavailableTag'), tone: 'warning' })
-  }
-  return tags
-}
-
 function formatLlmOptionLabel(choice: LLMModelChoice, t: Translate): string {
   const badges = compactStrings([
     choice.isDefault ? t('training.llm.defaultBadge') : null,
@@ -534,13 +479,7 @@ function ChatArea() {
   const scenarioTrainingId = getScenarioTrainingIdFromLocation(location.search, location.state)
     ?? getScenarioTrainingIdFromProgress(trainingSessionId, progressScope)
   const scenarioTrainingCard = getScenarioTrainingCardById(scenarioTrainingId)
-  const hasScenarioTrainingContext = Boolean(
-    scenarioTrainingCard
-    || scenarioTrainingId
-    || getStateStringValue(location.state, 'source') === 'scenario-training',
-  )
 
-  const [showEmotionSidebar, setShowEmotionSidebar] = useState(false)
   const [showEmotionCurve, setShowEmotionCurve] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showContextPanel, setShowContextPanel] = useState(false)
@@ -739,20 +678,6 @@ function ChatArea() {
     [llmModelChoices, selectedLlmProvider],
   )
   const displayedLlmChoice = selectedLlmChoice ?? selectedProviderModelChoices[0] ?? null
-  const llmDetailTags = React.useMemo(
-    () => buildLlmDetailTags(displayedLlmChoice, t),
-    [displayedLlmChoice, t],
-  )
-  const llmRuntimeSummary = React.useMemo(() => {
-    const providerLabel = llmProviderOptions.find((provider) => provider.provider === selectedLlmProvider)?.label
-      || selectedLlmProvider
-      || t('training.llm.provider')
-    const modelLabel = displayedLlmChoice
-      ? formatLlmOptionLabel(displayedLlmChoice, t)
-      : t('training.llm.model')
-    const languageLabel = getLiveCoachLanguageLabel(selectedReplyLanguage, locale)
-    return compactStrings([providerLabel, modelLabel, languageLabel]).join(' · ')
-  }, [displayedLlmChoice, llmProviderOptions, locale, selectedLlmProvider, selectedReplyLanguage, t])
   const llmSelectionMetadata = React.useMemo(
     () => buildLlmSelectionMetadata(selectedLlmChoice),
     [selectedLlmChoice],
@@ -1173,14 +1098,12 @@ function ChatArea() {
   const scenarioPersonaRoleFromState = getStateStringValue(location.state, 'scenarioPersonaRole')
   const scenarioPersonaNameFromState = getStateStringValue(location.state, 'scenarioPersonaName')
   const scenarioPersonaStyleFromState = getStateStringValue(location.state, 'scenarioPersonaStyle')
-  const scenarioLearnerRoleFromState = getStateStringValue(location.state, 'scenarioLearnerRole')
   const scenarioTrainingPointsFromState = getStateStringArrayValue(location.state, 'scenarioTrainingPoints')
   const scenarioDifficultyFromState = getScenarioDifficultyFromState(location.state)
   const scenarioCategoryFromState = getScenarioCategoryFromState(location.state)
   const scenarioRequiredFromState = getStateBooleanValue(location.state, 'scenarioRequired')
   const scenarioPersonaRole = scenarioPersonaRoleFromState || scenarioTrainingCard?.persona.role
   const scenarioPersonaName = scenarioPersonaNameFromState || scenarioTrainingCard?.persona.name || null
-  const scenarioLearnerRole = scenarioLearnerRoleFromState || scenarioTrainingCard?.learnerRole
   const scenarioCategory = scenarioCategoryFromState || scenarioTrainingCard?.category
   const scenarioDifficulty = scenarioDifficultyFromState || scenarioTrainingCard?.difficulty
   const scenarioRequired = scenarioRequiredFromState ?? scenarioTrainingCard?.required
@@ -1214,16 +1137,6 @@ function ChatArea() {
     || scenarioTrainingCard?.title
     || chat.selectedRoom?.room.name
     || tr('训练会话', 'Training session')
-  const trainingContextSubtitle = hasScenarioTrainingContext
-    ? compactStrings([
-      scenarioPersonaRole,
-      scenarioLearnerRole ? `${tr('你扮演', 'You play')}: ${scenarioLearnerRole}` : null,
-    ]).join(' · ')
-    : compactStrings([
-      counterpartName,
-      trainingMode ? getTrainingModeLabel(trainingMode, tr) : null,
-      getInteractionModeLabel(interactionMode, tr),
-    ]).join(' · ')
   const trainingContextTags = compactTags([
     scenarioCategory ? { label: getScenarioCategoryLabel(scenarioCategory, tr), tone: 'category' } : null,
     scenarioDifficulty ? { label: getScenarioDifficultyLabel(scenarioDifficulty, tr), tone: 'difficulty' } : null,
@@ -1252,13 +1165,6 @@ function ChatArea() {
   ]).join(' -> ')
   const resolvedTrainingBackPath = isLiveCoachSession ? APP_ROUTES.practiceLiveCoach : trainingBackPath
   const resolvedTrainingContextTitle = isLiveCoachSession ? tr('实时教练', 'Live coach') : trainingContextTitle
-  const resolvedTrainingContextSubtitle = isLiveCoachSession
-    ? compactStrings([
-      tr('真实对话', 'Real conversation'),
-      liveCoachLanguageSummary || null,
-      getInteractionModeLabel(interactionMode, tr),
-    ]).join(' / ')
-    : trainingContextSubtitle
   const resolvedTrainingContextTags = isLiveCoachSession
     ? compactTags([
       { label: tr('实时教练', 'Live coach'), tone: 'live' },
@@ -1273,12 +1179,13 @@ function ChatArea() {
   const resolvedTrainingContextCustomerProfile = isLiveCoachSession ? null : trainingContextCustomerProfile
   const resolvedTrainingContextPersonaStyle = isLiveCoachSession ? null : trainingContextPersonaStyle
   const resolvedTrainingContextPoints = isLiveCoachSession ? null : trainingContextPoints
-  const resolvedTrainingSceneSummary = compactStrings([
-    resolvedTrainingContextCustomerProfile,
-    resolvedTrainingContextDescription,
-    resolvedTrainingContextPersonaStyle,
-    resolvedTrainingContextPoints ? `${tr('重点', 'Focus')}: ${resolvedTrainingContextPoints}` : null,
-  ]).join(' · ')
+  const resolvedTrainingSceneSummary = resolvedTrainingContextDescription
+  const resolvedTrainingSceneFocus = resolvedTrainingContextPoints
+  const hasTrainingSceneDetails = Boolean(
+    resolvedTrainingContextCustomerProfile
+    || resolvedTrainingContextPersonaStyle,
+  )
+  const trainingSceneDetailsVisible = trainingSceneExpanded && hasTrainingSceneDetails
   const resolvedTrainingInputPlaceholder = isLiveCoachSession
     ? tr('输入会议现场内容或你的下一句，回车发送', 'Type a meeting line or your next reply. Enter to send')
     : trainingInputPlaceholder
@@ -1693,6 +1600,18 @@ function ChatArea() {
           >
             <ArrowLeft size={18} />
           </Button>
+          {isTrainingSession && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="chat-page-training-header-back"
+              onClick={() => navigate(resolvedTrainingBackPath)}
+              aria-label={tr('返回训练入口', 'Back to training entry')}
+              title={tr('返回训练入口', 'Back to training entry')}
+            >
+              <ArrowLeft size={16} />
+            </Button>
+          )}
           <h3>{chat.selectedRoom?.room.name ?? ''}</h3>
           {chat.selectedRoom && (
             <span className={`room-type-badge ${chat.selectedRoom.room.type}`}>
@@ -1703,26 +1622,32 @@ function ChatArea() {
                   : tr('备战', 'Battle prep')}
             </span>
           )}
+          {isTrainingSession && (
+            <div className="chat-page-training-header-meta">
+              {resolvedTrainingContextTags.length > 0 && (
+                <div className="chat-page-training-tags" aria-label={resolvedTrainingContextTitle}>
+                  {resolvedTrainingContextTags.map((tag) => (
+                    <span className={tag.tone ? `tone-${tag.tone}` : undefined} key={`${tag.tone || 'tag'}:${tag.label}`}>
+                      {tag.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="chat-page-header-actions">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`header-action-btn ${showEmotionSidebar ? 'active' : ''}`}
-            onClick={() => setShowEmotionSidebar((v) => !v)}
-            title={tr('实时情绪面板', 'Live emotion panel')}
-          >
-            <Activity size={16} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="header-action-btn"
-            onClick={() => setShowEmotionCurve(true)}
-            title={tr('情绪详细分析', 'Detailed emotion analysis')}
-          >
-            <BarChart3 size={16} />
-          </Button>
+          {isTrainingSession && (
+            <Button
+              variant={trainingSessionCompleted ? 'secondary' : 'primary'}
+              className={`chat-page-training-complete${trainingSessionCompleted ? ' completed' : ''}`}
+              onClick={handleCompleteTrainingSession}
+              disabled={trainingSessionCompleting || analysis.analyzingRoom}
+            >
+              {trainingSessionCompleting ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
+              {trainingSessionCompleted ? tr('已结束', 'Ended') : tr('结束练习', 'End practice')}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -1786,59 +1711,6 @@ function ChatArea() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-      </div>
-
-      {isTrainingSession && (
-        <section className="chat-page-training-banner" data-testid="training-context-banner">
-          <div className="chat-page-training-top">
-            <Button
-              variant="secondary"
-              className="chat-page-training-back"
-              onClick={() => navigate(resolvedTrainingBackPath)}
-            >
-              <ArrowLeft size={15} />
-              {tr('返回', 'Back')}
-            </Button>
-
-            <div className="chat-page-training-copy">
-              <div className="chat-page-training-title-line">
-                <strong>{resolvedTrainingContextTitle}</strong>
-                {resolvedTrainingContextSubtitle && <span>{resolvedTrainingContextSubtitle}</span>}
-              </div>
-              {resolvedTrainingContextTags.length > 0 && (
-                <div className="chat-page-training-tags" aria-label={tr('练习标签', 'Practice tags')}>
-                  {resolvedTrainingContextTags.map((tag) => (
-                    <span className={tag.tone ? `tone-${tag.tone}` : undefined} key={`${tag.tone || 'tag'}:${tag.label}`}>
-                      {tag.label}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className={`chat-page-training-details-toggle${trainingSceneExpanded ? ' expanded' : ''}`}
-                aria-expanded={trainingSceneExpanded}
-                aria-controls="training-scene-details"
-                onClick={() => setTrainingSceneExpanded((v) => !v)}
-              >
-                <span>{trainingSceneExpanded ? tr('收起', 'Hide details') : tr('详情', 'Details')}</span>
-                <ChevronDown size={14} />
-              </Button>
-            </div>
-
-            <Button
-              variant={trainingSessionCompleted ? 'secondary' : 'primary'}
-              className={`chat-page-training-complete${trainingSessionCompleted ? ' completed' : ''}`}
-              onClick={handleCompleteTrainingSession}
-              disabled={trainingSessionCompleting || analysis.analyzingRoom}
-            >
-              {trainingSessionCompleting ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
-              {trainingSessionCompleted ? tr('已结束', 'Ended') : tr('结束练习', 'End practice')}
-            </Button>
-          </div>
-
           {isTrainingSession && (
             <div
               className={`chat-page-llm-selector${runtimeConfigExpanded ? ' expanded' : ' collapsed'}`}
@@ -1846,30 +1718,17 @@ function ChatArea() {
               aria-label={t('training.llm.runtimeSelectorLabel')}
             >
               <div className="chat-page-llm-summary">
-                <span className="chat-page-llm-selector-title">{t('training.llm.runtimeSelectorLabel')}</span>
-                <span className="chat-page-llm-summary-text">{llmRuntimeSummary}</span>
-                {llmDetailTags.length > 0 && (
-                  <span className="chat-page-llm-tags">
-                    {llmDetailTags.map((tag) => (
-                      <span
-                        key={tag.key}
-                        className={tag.tone === 'warning' ? 'warning' : undefined}
-                      >
-                        {tag.label}
-                      </span>
-                    ))}
-                  </span>
-                )}
                 <Button
                   variant="ghost"
-                  size="sm"
-                  className={`chat-page-runtime-toggle${runtimeConfigExpanded ? ' expanded' : ''}`}
+                  size="icon"
+                  className={`header-action-btn chat-page-runtime-toggle${runtimeConfigExpanded ? ' expanded' : ''}`}
+                  aria-label={runtimeConfigExpanded ? tr('收起配置', 'Hide config') : tr('配置', 'Config')}
                   aria-expanded={runtimeConfigExpanded}
                   aria-controls="training-runtime-fields"
+                  title={runtimeConfigExpanded ? tr('收起配置', 'Hide config') : tr('配置', 'Config')}
                   onClick={() => setRuntimeConfigExpanded((value) => !value)}
                 >
-                  <span>{runtimeConfigExpanded ? tr('收起配置', 'Hide config') : tr('配置', 'Config')}</span>
-                  <ChevronDown size={14} />
+                  <Settings size={15} />
                 </Button>
               </div>
               {runtimeConfigExpanded && (
@@ -1935,18 +1794,51 @@ function ChatArea() {
               )}
             </div>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`header-action-btn chat-page-context-toggle${showContextPanel ? ' active' : ''}`}
+            onClick={() => setShowContextPanel((value) => !value)}
+            aria-label={showContextPanel ? tr('收起侧边栏', 'Collapse sidebar') : tr('展开侧边栏', 'Expand sidebar')}
+            aria-expanded={showContextPanel}
+            title={showContextPanel ? tr('收起侧边栏', 'Collapse sidebar') : tr('展开侧边栏', 'Expand sidebar')}
+          >
+            {showContextPanel ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          </Button>
+        </div>
+      </div>
 
+      {isTrainingSession && (
+        <section className="chat-page-training-banner" data-testid="training-context-banner">
           <div
             id="training-scene-details"
-            className={`chat-page-training-scene${trainingSceneExpanded ? ' expanded' : ' collapsed'}`}
+            className={`chat-page-training-scene${trainingSceneDetailsVisible ? ' expanded' : ' collapsed'}`}
           >
-            {!trainingSceneExpanded && (
-              <p className="chat-page-training-scene-summary">
-                <strong>{tr('场景', 'Scene')}:</strong>
-                <span>{resolvedTrainingSceneSummary || resolvedTrainingContextDescription}</span>
+            <div className="chat-page-training-scene-summary">
+              <strong>{tr('场景', 'Scene')}:</strong>
+              <span>{resolvedTrainingSceneSummary || resolvedTrainingContextDescription}</span>
+              {hasTrainingSceneDetails && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`chat-page-training-details-toggle${trainingSceneDetailsVisible ? ' expanded' : ''}`}
+                  aria-label={trainingSceneDetailsVisible ? tr('收起', 'Hide details') : tr('详情', 'Details')}
+                  aria-expanded={trainingSceneDetailsVisible}
+                  aria-controls="training-scene-details"
+                  title={trainingSceneDetailsVisible ? tr('收起', 'Hide details') : tr('详情', 'Details')}
+                  onClick={() => setTrainingSceneExpanded((v) => !v)}
+                >
+                  <ChevronDown size={14} />
+                </Button>
+              )}
+            </div>
+            {resolvedTrainingSceneFocus && (
+              <p className="chat-page-training-scene-focus">
+                <strong>{tr('训练重点', 'Training focus')}:</strong>
+                <span>{resolvedTrainingSceneFocus}</span>
               </p>
             )}
-            {trainingSceneExpanded && (
+            {trainingSceneDetailsVisible && (
               <>
                 {resolvedTrainingContextCustomerProfile && (
                   <p>
@@ -1954,20 +1846,10 @@ function ChatArea() {
                     <span>{resolvedTrainingContextCustomerProfile}</span>
                   </p>
                 )}
-                <p>
-                  <strong>{tr('场景描述', 'Scenario')}:</strong>
-                  <span>{resolvedTrainingContextDescription}</span>
-                </p>
                 {resolvedTrainingContextPersonaStyle && (
                   <p>
                     <strong>{tr('角色状态', 'Persona stance')}:</strong>
                     <span>{resolvedTrainingContextPersonaStyle}</span>
-                  </p>
-                )}
-                {resolvedTrainingContextPoints && (
-                  <p>
-                    <strong>{tr('练习重点', 'Focus')}:</strong>
-                    <span>{resolvedTrainingContextPoints}</span>
                   </p>
                 )}
               </>
@@ -2349,14 +2231,6 @@ function ChatArea() {
           />
         </div>
 
-        {showEmotionSidebar && (
-          <EmotionSidebar
-            messages={chat.selectedRoom?.messages ?? []}
-            personaMap={displayPersonaMap}
-            onClose={() => setShowEmotionSidebar(false)}
-            onExpand={() => setShowEmotionCurve(true)}
-          />
-        )}
       </div>
       </div>
 
@@ -2364,7 +2238,8 @@ function ChatArea() {
       <ContextPanel
         personas={displayRoomPersonas}
         collapsed={!showContextPanel}
-        onToggle={() => setShowContextPanel((v) => !v)}
+        messages={chat.selectedRoom?.messages ?? []}
+        personaMap={displayPersonaMap}
         onExpandEmotion={() => setShowEmotionCurve(true)}
       />
 

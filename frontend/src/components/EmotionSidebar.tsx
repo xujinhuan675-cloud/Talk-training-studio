@@ -1,7 +1,7 @@
-// input: messages (Message[]), personaMap (Record<string, PersonaSummary>)
-// output: EmotionSidebar 实时情绪折线图侧边栏组件
+// input: messages (Message[]), personaMap (Record<string, PersonaSummary>), optional panel actions
+// output: LiveEmotionPanel 可复用实时情绪面板；EmotionSidebar 旧侧栏外壳
 // owner: wanhua.gu
-// pos: 前端组件 - 对话界面旁的实时情绪可视化面板；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+// pos: 前端组件 - 对话界面与右侧栏共用的实时情绪可视化面板；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 
 import { useMemo } from 'react'
 import {
@@ -21,7 +21,15 @@ import { Button } from './ui/button'
 import '../styles/panelControls.css'
 import './EmotionSidebar.css'
 
-interface Props {
+interface LiveEmotionPanelProps {
+  messages: Message[]
+  personaMap: Record<string, PersonaSummary>
+  onClose?: () => void
+  onExpand?: () => void
+  className?: string
+}
+
+interface EmotionSidebarProps {
   messages: Message[]
   personaMap: Record<string, PersonaSummary>
   onClose: () => void
@@ -46,7 +54,7 @@ interface ChartTooltipProps {
   payload?: readonly ChartTooltipItem[]
 }
 
-export default function EmotionSidebar({ messages, personaMap, onClose, onExpand }: Props) {
+export function LiveEmotionPanel({ messages, personaMap, onClose, onExpand, className }: LiveEmotionPanelProps) {
   const { tr } = useI18n()
   const { data, personaIds, latestScores } = useMemo(() => {
     const personaMsgs = messages.filter(
@@ -121,31 +129,37 @@ export default function EmotionSidebar({ messages, personaMap, onClose, onExpand
   }
 
   return (
-    <aside className="emotion-sidebar">
+    <section className={`emotion-live-panel${className ? ` ${className}` : ''}`}>
       <div className="es-header">
         <h4>{tr('实时情绪', 'Live Emotion')}</h4>
-        <div className="es-header-actions">
-          <Button
-            className="es-icon-btn panel-toggle panel-toggle--subtle"
-            variant="ghost"
-            size="icon"
-            onClick={onExpand}
-            title={tr('详细分析', 'Detailed analysis')}
-            aria-label={tr('详细分析', 'Detailed analysis')}
-          >
-            <Maximize2 size={14} />
-          </Button>
-          <Button
-            className="es-icon-btn panel-toggle"
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            title={tr('关闭', 'Close')}
-            aria-label={tr('关闭', 'Close')}
-          >
-            <PanelRightClose size={16} />
-          </Button>
-        </div>
+        {(onExpand || onClose) && (
+          <div className="es-header-actions">
+            {onExpand && (
+              <Button
+                className="es-icon-btn panel-toggle panel-toggle--subtle"
+                variant="ghost"
+                size="icon"
+                onClick={onExpand}
+                title={tr('详细分析', 'Detailed analysis')}
+                aria-label={tr('详细分析', 'Detailed analysis')}
+              >
+                <Maximize2 size={14} />
+              </Button>
+            )}
+            {onClose && (
+              <Button
+                className="es-icon-btn panel-toggle"
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                title={tr('关闭', 'Close')}
+                aria-label={tr('关闭', 'Close')}
+              >
+                <PanelRightClose size={16} />
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {data.length === 0 ? (
@@ -223,18 +237,19 @@ export default function EmotionSidebar({ messages, personaMap, onClose, onExpand
         </>
       )}
 
-      {/* Legend */}
-      <div className="es-legend">
-        {personaIds.map((pid) => (
-          <div key={pid} className="es-legend-item">
-            <span
-              className="es-legend-dot"
-              style={{ background: personaMap[pid]?.avatar_color || '#888' }}
-            />
-            <span>{personaMap[pid]?.name || pid}</span>
-          </div>
-        ))}
-      </div>
+    </section>
+  )
+}
+
+export default function EmotionSidebar({ messages, personaMap, onClose, onExpand }: EmotionSidebarProps) {
+  return (
+    <aside className="emotion-sidebar">
+      <LiveEmotionPanel
+        messages={messages}
+        personaMap={personaMap}
+        onClose={onClose}
+        onExpand={onExpand}
+      />
     </aside>
   )
 }

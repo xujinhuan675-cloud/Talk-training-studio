@@ -1,9 +1,7 @@
-import { PanelRightClose, PanelRightOpen } from 'lucide-react'
 import Avatar from '../Avatar'
-import { Button } from '../ui/button'
-import type { PersonaSummary } from '../../services/api'
+import { LiveEmotionPanel } from '../EmotionSidebar'
+import type { Message, PersonaSummary } from '../../services/api'
 import { useI18n } from '../../i18n'
-import '../../styles/panelControls.css'
 import './ContextPanel.css'
 
 export interface ContextPanelProps {
@@ -11,7 +9,10 @@ export interface ContextPanelProps {
   personas: PersonaSummary[]
   /** Collapse state */
   collapsed: boolean
-  onToggle: () => void
+  /** Room messages used by live emotion panel */
+  messages?: Message[]
+  /** Persona lookup for emotion lines */
+  personaMap?: Record<string, PersonaSummary>
   /** Open emotion curve modal */
   onExpandEmotion?: () => void
 }
@@ -33,43 +34,16 @@ function tagColor(tag: string): { bg: string; color: string } {
   return palette[Math.abs(hash) % palette.length]
 }
 
-/** Mini bar chart for emotion trend (placeholder data) */
-function EmotionMiniChart() {
-  const { tr } = useI18n()
-  const bars = [
-    { value: 0.3, label: tr('平静', 'Calm') },
-    { value: 0.6, label: tr('紧张', 'Tense') },
-    { value: 0.4, label: tr('缓和', 'Easing') },
-    { value: 0.8, label: tr('对抗', 'Opposed') },
-    { value: 0.5, label: tr('合作', 'Cooperative') },
-  ]
-  const intensityColor = (v: number) => {
-    if (v > 0.7) return 'var(--rose)'
-    if (v > 0.5) return 'var(--amber)'
-    return 'var(--green)'
-  }
-  return (
-    <div className="ctx-emotion-chart">
-      {bars.map((b, i) => (
-        <div key={i} className="ctx-emotion-bar-wrapper">
-          <div
-            className="ctx-emotion-bar"
-            style={{ height: `${b.value * 40}px`, background: intensityColor(b.value) }}
-          />
-          <span className="ctx-emotion-bar-label">{b.label}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 export default function ContextPanel({
   personas,
   collapsed,
-  onToggle,
+  messages = [],
+  personaMap = {},
   onExpandEmotion,
 }: ContextPanelProps) {
   const { tr } = useI18n()
+  if (collapsed) return null
+
   /* Placeholder score data -- will be replaced with real data later */
   const grade = 'B+'
   const metrics = [
@@ -81,20 +55,8 @@ export default function ContextPanel({
   const sessionXP = 120
 
   return (
-    <aside className={`context-panel${collapsed ? ' collapsed' : ''}`}>
-      <Button
-        aria-label={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}
-        className="ctx-toggle panel-toggle"
-        onClick={onToggle}
-        size="icon"
-        title={collapsed ? tr('展开面板', 'Expand panel') : tr('收起面板', 'Collapse panel')}
-        variant="secondary"
-      >
-        {collapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
-      </Button>
-
-      {!collapsed && (
-        <div className="ctx-body">
+    <aside className="context-panel">
+      <div className="ctx-body">
           {/* Opponent profiles */}
           {personas.map((p) => {
             const tags = PLACEHOLDER_TAGS[p.id] || [p.role || tr('未知角色', 'Unknown role')]
@@ -119,15 +81,12 @@ export default function ContextPanel({
           })}
 
           {/* Emotion trend */}
-          <div className="ctx-section">
-            <div className="ctx-section-title">{tr('情绪趋势', 'Emotion Trend')}</div>
-            <EmotionMiniChart />
-            {onExpandEmotion && (
-              <Button className="ctx-link-btn" onClick={onExpandEmotion} size="sm" variant="ghost">
-                {tr('查看详情 →', 'View details →')}
-              </Button>
-            )}
-          </div>
+          <LiveEmotionPanel
+            className="ctx-live-emotion"
+            messages={messages}
+            personaMap={personaMap}
+            onExpand={onExpandEmotion}
+          />
 
           {/* Live score */}
           <div className="ctx-section">
@@ -150,8 +109,7 @@ export default function ContextPanel({
             <span className="ctx-xp-label">{tr('本次经验', 'Session XP')}</span>
             <span className="ctx-xp-value">+{sessionXP} XP</span>
           </div>
-        </div>
-      )}
+      </div>
     </aside>
   )
 }
