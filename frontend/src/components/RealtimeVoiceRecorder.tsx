@@ -12,6 +12,7 @@ import {
   type RealtimeTranscriptRole,
   type RealtimeVoiceProfile,
 } from '../services/realtimeSession'
+import { logRealtimeClientEvent, type ClientRealtimeEventInput } from '../services/clientEventLogger'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
 
@@ -106,6 +107,19 @@ function realtimeRoleFromSender(senderType: unknown): RealtimeTranscriptRole {
   return normalized === 'persona' || normalized === 'assistant' ? 'assistant' : 'user'
 }
 
+function errorName(error: unknown): string | undefined {
+  return error instanceof Error && error.name ? error.name : undefined
+}
+
+function isMicrophonePermissionError(error: unknown): boolean {
+  const name = errorName(error)
+  return name === 'NotAllowedError' || name === 'PermissionDeniedError'
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
 export default function RealtimeVoiceRecorder({
   roomId,
   trainingSessionId,
@@ -129,9 +143,23 @@ export default function RealtimeVoiceRecorder({
   const outputAudioContextRef = useRef<AudioContext | null>(null)
   const outputAudioSourceRef = useRef<AudioBufferSourceNode | null>(null)
   const transcriptKeysRef = useRef<Set<string>>(new Set())
+  const inputSendErrorLoggedRef = useRef(false)
+  const startFailureLoggedRef = useRef(false)
   const [status, setStatus] = useState<RealtimeSessionStatus>('idle')
   const [preview, setPreview] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const logClientEvent = useCallback((
+    event: Omit<ClientRealtimeEventInput, 'trainingSessionId' | 'roomId' | 'provider' | 'realtimeProfile'>,
+  ) => {
+    void logRealtimeClientEvent({
+      trainingSessionId,
+      roomId,
+      provider: 'pipecat',
+      realtimeProfile: realtimeProfile || undefined,
+      ...event,
+    })
+  }, [realtimeProfile, roomId, trainingSessionId])
 
   const stopOutputAudio = useCallback(() => {
     outputAudioQueueRef.current?.clear()
@@ -154,6 +182,14 @@ export default function RealtimeVoiceRecorder({
   }, [])
 
   const closeRealtime = useCallback((nextStatus: RealtimeSessionStatus = 'closed') => {
+    const realtimeSession = realtimeSessionRef.current
+    const committedAudio = Boolean(realtimeSession?.isConnected)
+    const hadRealtimeState = Boolean(
+      realtimeSession
+      || localStreamRef.current
+      || inputAudioContextRef.current
+      || outputAudioContextRef.current,
+    )
     stopOutputAudio()
     inputAudioProcessorRef.current?.disconnect()
     inputAudioProcessorRef.current = null
@@ -161,7 +197,6 @@ export default function RealtimeVoiceRecorder({
     inputAudioSourceRef.current = null
     inputAudioSilenceRef.current?.disconnect()
     inputAudioSilenceRef.current = null
-    const realtimeSession = realtimeSessionRef.current
     realtimeSessionRef.current = null
     if (realtimeSession) {
       try {
@@ -184,7 +219,17 @@ export default function RealtimeVoiceRecorder({
     void outputAudioContextRef.current?.close().catch(() => {})
     outputAudioContextRef.current = null
     setStatus(nextStatus)
-  }, [stopOutputAudio])
+    if (hadRealtimeState) {
+      logClientEvent({
+        eventType: 'realtime.closed',
+        severity: nextStatus === 'error' ? 'error' : 'info',
+        payload: {
+          nextStatus,
+          committedAudio,
+        },
+      })
+    }
+  }, [logClientEvent, stopOutputAudio])
 
   useEffect(() => {
     return () => closeRealtime('closed')
@@ -269,15 +314,31 @@ export default function RealtimeVoiceRecorder({
       } else {
         await playBlobAudioOutput(event)
       }
+      logClientEvent({
+        eventType: 'audio.output_played',
+        payload: {
+          mimeType: event.mimeType,
+          sequence: event.sequence,
+          contextId: event.contextId,
+          sampleRate: event.sampleRate,
+          channels: event.channels,
+          audioBytes: event.audio.byteLength,
+        },
+      })
     } finally {
       setStatus((current) => (current === 'speaking' ? 'listening' : current))
     }
-  }, [playBlobAudioOutput, playPcmAudioOutput, tr])
+  }, [logClientEvent, playBlobAudioOutput, playPcmAudioOutput, tr])
 
   const handleAudioOutputPlaybackError = useCallback(() => {
     setError(tr('实时语音播放失败', 'Realtime audio playback failed'))
     setStatus('error')
-  }, [tr])
+    logClientEvent({
+      eventType: 'audio.output_playback_failed',
+      severity: 'error',
+      message: 'Realtime audio playback failed',
+    })
+  }, [logClientEvent, tr])
 
   useEffect(() => {
     const queue = new RealtimeAudioOutputQueue({
@@ -295,6 +356,18 @@ export default function RealtimeVoiceRecorder({
 
   const handleRealtimeEvent = useCallback((event: RealtimeServerEvent) => {
     if (event.type === 'audio.output') {
+      logClientEvent({
+        eventType: 'audio.output_received',
+        payload: {
+          mimeType: event.mimeType,
+          sequence: event.sequence,
+          contextId: event.contextId,
+          sampleRate: event.sampleRate,
+          channels: event.channels,
+          audioBytes: event.audio.byteLength,
+          status: event.status,
+        },
+      })
       outputAudioQueueRef.current?.enqueue(event)
       return
     }
@@ -302,6 +375,21 @@ export default function RealtimeVoiceRecorder({
       const message = typeof event.message === 'string' && event.message.trim()
         ? event.message
         : tr('Pipecat 实时通道错误', 'Pipecat realtime error')
+      logClientEvent({
+        eventType: 'realtime.server_error',
+        severity: 'error',
+        errorCategory: event.errorCategory,
+        message,
+        payload: {
+          code: event.code,
+          phase: event.phase,
+          provider: event.provider,
+          realtimeRuntime: event.realtimeRuntime,
+          sourceEventType: event.eventType,
+          retryable: event.retryable,
+          fatal: event.fatal,
+        },
+      })
       setError(message)
       setStatus('error')
       return
@@ -354,9 +442,18 @@ export default function RealtimeVoiceRecorder({
         transcriptKeysRef.current.add(key)
         setPreview(content)
         onPersistedTranscript?.(content, role)
+        logClientEvent({
+          eventType: 'transcript.persisted',
+          payload: {
+            messageId: message.id,
+            senderType: message.sender_type,
+            role,
+            persistedRoomId: message.room_id,
+          },
+        })
       }
     }
-  }, [onPersistedTranscript, tr])
+  }, [logClientEvent, onPersistedTranscript, tr])
 
   const startRealtime = useCallback(async () => {
     if (!roomId || !trainingSessionId || disabled) return
@@ -366,9 +463,31 @@ export default function RealtimeVoiceRecorder({
     setPreview(counterpartName ? tr('正在连接 {name}', 'Connecting to {name}', { name: counterpartName }) : '')
     setStatus('connecting')
     const audioContract = getRealtimeVoiceAudioContract(realtimeProfile)
+    startFailureLoggedRef.current = false
+    inputSendErrorLoggedRef.current = false
+    logClientEvent({
+      eventType: 'realtime.start_requested',
+      payload: {
+        realtimeProfile: audioContract.realtimeProfile,
+        latencyProfile: audioContract.latencyProfile,
+        inputSampleRate: audioContract.inputSampleRate,
+        outputSampleRate: audioContract.outputSampleRate,
+        roomId,
+        hasTranscriptMetadata: Boolean(transcriptMetadata),
+      },
+    })
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
+        startFailureLoggedRef.current = true
+        logClientEvent({
+          eventType: 'mic.unavailable',
+          severity: 'error',
+          message: 'getUserMedia unavailable',
+          payload: {
+            hasMediaDevices: Boolean(navigator.mediaDevices),
+          },
+        })
         throw new Error(tr('当前浏览器不可用麦克风录音', 'getUserMedia unavailable'))
       }
 
@@ -382,6 +501,13 @@ export default function RealtimeVoiceRecorder({
         onStatusChange: (nextStatus) => {
           setStatus(nextStatus)
           if (nextStatus === 'connected') {
+            logClientEvent({
+              eventType: 'realtime.ws_connected',
+              payload: {
+                status: nextStatus,
+                roomId,
+              },
+            })
             try {
               session.send({
                 type: 'session.start',
@@ -400,6 +526,16 @@ export default function RealtimeVoiceRecorder({
                 roomId,
               })
             } catch (sendError) {
+              logClientEvent({
+                eventType: 'realtime.configure_failed',
+                severity: 'error',
+                message: errorMessage(sendError, 'Realtime voice initialization failed'),
+                payload: {
+                  phase: 'session.configure',
+                  roomId,
+                  sessionId: trainingSessionId,
+                },
+              })
               setError(sendError instanceof Error ? sendError.message : tr('实时语音初始化失败', 'Realtime voice initialization failed'))
               setStatus('error')
             }
@@ -410,6 +546,14 @@ export default function RealtimeVoiceRecorder({
         },
         onEvent: handleRealtimeEvent,
         onError: (socketError) => {
+          logClientEvent({
+            eventType: 'realtime.ws_error',
+            severity: 'error',
+            message: socketError.message || 'Pipecat realtime channel error',
+            payload: {
+              name: socketError.name,
+            },
+          })
           setError(socketError.message || tr('Pipecat 实时通道错误', 'Pipecat realtime channel error'))
           setStatus('error')
         },
@@ -425,6 +569,15 @@ export default function RealtimeVoiceRecorder({
         },
       })
       localStreamRef.current = localStream
+      logClientEvent({
+        eventType: 'mic.capture_started',
+        payload: {
+          trackCount: localStream.getAudioTracks().length,
+          inputSampleRate: audioContract.inputSampleRate,
+          outputSampleRate: audioContract.outputSampleRate,
+          realtimeProfile: audioContract.realtimeProfile,
+        },
+      })
 
       const audioContext = createAudioContext()
       inputAudioContextRef.current = audioContext
@@ -450,6 +603,19 @@ export default function RealtimeVoiceRecorder({
         try {
           activeSession.send({ type: 'audio.input', audio, mimeType: 'audio/pcm' })
         } catch (sendError) {
+          if (!inputSendErrorLoggedRef.current) {
+            inputSendErrorLoggedRef.current = true
+            logClientEvent({
+              eventType: 'audio.input_send_failed',
+              severity: 'error',
+              message: errorMessage(sendError, 'Failed to send realtime audio'),
+              payload: {
+                sampleRate: audioContext.sampleRate,
+                outputSampleRate: audioContract.inputSampleRate,
+                audioBytes: audio.byteLength,
+              },
+            })
+          }
           setError(sendError instanceof Error ? sendError.message : tr('发送实时音频失败', 'Failed to send realtime audio'))
           setStatus('error')
         }
@@ -457,10 +623,30 @@ export default function RealtimeVoiceRecorder({
 
       session.connect()
     } catch (err) {
+      if (!startFailureLoggedRef.current) {
+        const failureMessage = errorMessage(err, 'Failed to start realtime voice agent')
+        const failureEventType = isMicrophonePermissionError(err)
+          ? 'mic.permission_denied'
+          : failureMessage.includes('getUserMedia unavailable')
+            ? 'mic.unavailable'
+            : 'realtime.start_failed'
+        startFailureLoggedRef.current = true
+        logClientEvent({
+          eventType: failureEventType,
+          severity: 'error',
+          message: failureMessage,
+          payload: {
+            errorName: errorName(err),
+            roomId,
+            trainingSessionId,
+            realtimeProfile: audioContract.realtimeProfile,
+          },
+        })
+      }
       closeRealtime('error')
       setError(err instanceof Error ? err.message : tr('启动实时语音教练失败', 'Failed to start realtime voice agent'))
     }
-  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, personaId, realtimeProfile, roomId, trainingSessionId, transcriptMetadata, tr])
+  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, logClientEvent, personaId, realtimeProfile, roomId, trainingSessionId, transcriptMetadata, tr])
 
   const active = status === 'connecting' || status === 'connected' || status === 'listening' || status === 'speaking'
   const label = statusLabel(status, error, tr)

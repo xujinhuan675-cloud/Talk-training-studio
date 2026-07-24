@@ -11,6 +11,7 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 - 文本侧优先对齐和迁移 LibreChat 的成熟能力。
 - 实时语音/多模态侧优先对齐和迁移 Pipecat 的成熟能力。
 - 语音体验允许两条画像并存：低成本、低延迟的转写式近实时链路，以及基于 Pipecat 的真正实时语音链路；两者都应接入同一训练闭环。
+- TalkWise 不以完整复制 Pipecat 平台为目标；目标是把语音、视频和多模态训练中不该自研的基础运行能力，优先站到 Pipecat 或同等级成熟方案上，必要时做 TalkWise 本地化适配。
 - TalkWise 当前训练能力保留为产品差异化：训练目标、persona/stakeholder、scenario、dispatcher、evaluation、growth/report、live guidance、训练复盘和能力沉淀。
 - TalkWise 当前核心不是绝对不可变。如果直接站在 LibreChat 或 Pipecat 之上改造更稳、更成熟、更利于长期扩展，可以重构、迁移或重建当前核心。
 - 所有模式最终应服务同一套训练产品闭环：训练目标 -> 场景模拟 -> 多模态对话 -> 实时提示 -> 结束复盘 -> 改进计划 -> 针对弱点继续训练。
@@ -54,6 +55,14 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 Pipecat 和当前项目语言栈一致时，可以优先直接使用其原生依赖或迁移其架构，而不是手写低成熟度替代品。
 
 同时不要把 Pipecat 视为必须替换所有语音链路的唯一答案。当前项目可以保留低成本、低延迟的转写式近实时链路；当它的体验满足训练目标时，优先把它作为经济型语音模式接入同一训练语义。Pipecat 主要承接需要真正实时语音、多模态、打断/turn detection 和更强 transport 能力的链路。
+
+Pipecat 迁移的定位必须保持清楚：迁移目标不是完整抄 Pipecat Cloud、RTVI、电话、WebRTC、avatar、worker bus、全 provider marketplace 等平台能力；迁移目标是 TalkWise 语音/视频训练链路用得上的成熟 runtime、transport、frame/event、turn/interruption、provider adapter、observability 和验收能力。凡是语音、视频、多模态训练的基础设施能力，默认不在 TalkWise 中重新造轮子；除非成熟方案太重、不可审计、与训练闭环冲突或当前阶段成本明显不划算，才允许自研或延后。
+
+后续推荐和排期应按这个顺序判断：
+
+- 先补齐当前两条 TalkWise 语音训练链路相关的完整能力：browser E2E、音频输入/输出、turn/interruption、transcript persistence、live guidance、latency/cost/error 诊断。
+- 再按训练产品需要迁入 WebRTC、视频、avatar、更多 provider、RTVI 事件子集或 Pipecat Cloud/worker 能力。
+- 不因为 Pipecat 有某项平台能力就直接加入核心路径；只有它能服务当前或明确下一阶段的训练闭环，才进入迁移范围。
 
 ### TalkWise 保留和可变的部分
 

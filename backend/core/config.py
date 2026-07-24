@@ -364,6 +364,13 @@ class Settings(BaseSettings):
         default=False, validation_alias=AliasChoices("LOG_REQUEST_BODY_ALLOW_MULTIPART")
     )
 
+    CLIENT_EVENT_LOGGING_ENABLED: bool = Field(
+        default=True, validation_alias=AliasChoices("CLIENT_EVENT_LOGGING_ENABLED")
+    )
+    CLIENT_EVENT_LOGGING_MAX_PAYLOAD_BYTES: int = Field(
+        default=4096, validation_alias=AliasChoices("CLIENT_EVENT_LOGGING_MAX_PAYLOAD_BYTES")
+    )
+
     # 文件日志配置
     LOG_FILE: Optional[str] = Field(default=None, validation_alias=AliasChoices("LOG_FILE"))
     LOG_LEVEL: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))

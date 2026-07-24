@@ -67,7 +67,9 @@ from application.ports.realtime import (
     RealtimeSessionBinding,
     build_realtime_readiness,
     classify_realtime_pipeline_start_error_message,
+    is_sensitive_realtime_metadata_key,
     normalize_realtime_runtime,
+    redact_realtime_secret_text,
     realtime_runtime_for_provider,
     sanitize_realtime_public_value,
 )
@@ -189,6 +191,41 @@ _PIPECAT_REALTIME_PROFILE_ALIASES = {
     "openai_speech_to_speech": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
 }
 _OPENAI_REALTIME_API_KEY_ENV_KEYS = OPENAI_REALTIME_API_KEY_ENV_KEYS
+_CLIENT_REALTIME_EVENT_TYPES = {
+    "realtime.start_requested",
+    "realtime.ws_connected",
+    "realtime.ws_error",
+    "realtime.configure_failed",
+    "realtime.start_failed",
+    "realtime.server_error",
+    "realtime.closed",
+    "mic.unavailable",
+    "mic.permission_denied",
+    "mic.capture_started",
+    "audio.input_send_failed",
+    "audio.output_received",
+    "audio.output_played",
+    "audio.output_playback_failed",
+    "transcript.persisted",
+}
+_CLIENT_REALTIME_EVENT_SEVERITIES = {"debug", "info", "warning", "error"}
+_CLIENT_EVENT_PAYLOAD_OMIT_KEYS = {
+    "audio",
+    "audiodata",
+    "buffer",
+    "blob",
+    "content",
+    "data",
+    "pcm",
+    "raw",
+    "samples",
+    "text",
+    "transcript",
+    "utterance",
+}
+_CLIENT_EVENT_PAYLOAD_STRING_MAX_CHARS = 512
+_CLIENT_EVENT_PAYLOAD_ARRAY_MAX_ITEMS = 20
+_CLIENT_EVENT_PAYLOAD_MAX_DEPTH = 5
 
 
 def _pipecat_realtime_profile_contract(
@@ -857,6 +894,21 @@ class PersistTrainingGuidanceEventsDTO(BaseModel):
     total_turn_count: int | None = Field(default=None, ge=0, le=10000)
     trigger: dict[str, object] | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class ClientRealtimeEventDTO(BaseModel):
+    event_type: str = Field(..., alias="eventType", min_length=1, max_length=120)
+    event_category: str | None = Field(default=None, alias="eventCategory", max_length=80)
+    severity: str = Field(default="info", min_length=1, max_length=20)
+    training_session_id: str | None = Field(
+        default=None, alias="trainingSessionId", max_length=120
+    )
+    room_id: int | str | None = Field(default=None, alias="roomId")
+    provider: str | None = Field(default="pipecat", max_length=80)
+    realtime_profile: str | None = Field(default=None, alias="realtimeProfile", max_length=80)
+    error_category: str | None = Field(default=None, alias="errorCategory", max_length=120)
+    message: str | None = Field(default=None, max_length=1000)
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 class MaterialReviewRequestDTO(BaseModel):
@@ -1846,6 +1898,124 @@ def _coerce_optional_room_id(value: object | None) -> int | None:
         return int(text)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="room_id must be numeric") from exc
+
+
+def _client_event_key_forms(key: object) -> tuple[str, str]:
+    lowered = str(key).strip().lower()
+    snake = "".join(ch if ch.isalnum() else "_" for ch in lowered).strip("_")
+    compact = "".join(ch for ch in lowered if ch.isalnum())
+    return snake, compact
+
+
+def _omit_client_event_payload_key(key: object) -> bool:
+    snake, compact = _client_event_key_forms(key)
+    return (
+        snake in _CLIENT_EVENT_PAYLOAD_OMIT_KEYS
+        or compact in _CLIENT_EVENT_PAYLOAD_OMIT_KEYS
+        or is_sensitive_realtime_metadata_key(key)
+        or snake.endswith(("_audio", "_blob", "_content", "_raw", "_text", "_transcript"))
+        or compact.endswith(("audio", "blob", "content", "raw", "text", "transcript"))
+    )
+
+
+def _truncate_client_event_text(value: str) -> str:
+    redacted = redact_realtime_secret_text(value)
+    if len(redacted) <= _CLIENT_EVENT_PAYLOAD_STRING_MAX_CHARS:
+        return redacted
+    return f"{redacted[:_CLIENT_EVENT_PAYLOAD_STRING_MAX_CHARS]}...[truncated]"
+
+
+def _sanitize_client_event_payload_value(value: object, *, depth: int = 0) -> object | None:
+    if depth > _CLIENT_EVENT_PAYLOAD_MAX_DEPTH:
+        return "[max_depth_exceeded]"
+    if isinstance(value, str):
+        return _truncate_client_event_text(value)
+    if isinstance(value, int | float | bool):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        sanitized: dict[str, object] = {}
+        for raw_key, nested_value in value.items():
+            if _omit_client_event_payload_key(raw_key):
+                continue
+            safe_value = _sanitize_client_event_payload_value(nested_value, depth=depth + 1)
+            if safe_value is not None:
+                sanitized[str(raw_key)] = safe_value
+        return sanitized
+    if isinstance(value, list | tuple):
+        sanitized_items: list[object] = []
+        for item in list(value)[:_CLIENT_EVENT_PAYLOAD_ARRAY_MAX_ITEMS]:
+            safe_item = _sanitize_client_event_payload_value(item, depth=depth + 1)
+            if safe_item is not None:
+                sanitized_items.append(safe_item)
+        omitted_items = len(value) - _CLIENT_EVENT_PAYLOAD_ARRAY_MAX_ITEMS
+        if omitted_items > 0:
+            sanitized_items.append({"truncated": True, "omittedItems": omitted_items})
+        return sanitized_items
+    return sanitize_realtime_public_value(value)
+
+
+def _safe_client_event_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    safe_payload = _sanitize_client_event_payload_value(payload)
+    if not isinstance(safe_payload, dict):
+        return {}
+
+    max_payload_bytes = max(256, int(settings.CLIENT_EVENT_LOGGING_MAX_PAYLOAD_BYTES))
+    serialized = json.dumps(safe_payload, ensure_ascii=False, sort_keys=True)
+    payload_bytes = len(serialized.encode("utf-8"))
+    if payload_bytes <= max_payload_bytes:
+        return safe_payload
+    return {
+        "truncated": True,
+        "payloadBytes": payload_bytes,
+        "maxPayloadBytes": max_payload_bytes,
+    }
+
+
+def _client_event_severity(value: object | None) -> str:
+    severity = _coerce_optional_text(value) or "info"
+    normalized = severity.lower()
+    if normalized not in _CLIENT_REALTIME_EVENT_SEVERITIES:
+        raise HTTPException(status_code=400, detail="Unsupported client event severity")
+    return normalized
+
+
+def _client_realtime_event_type(value: object | None) -> str:
+    event_type = _coerce_optional_text(value)
+    if event_type not in _CLIENT_REALTIME_EVENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported client realtime event type")
+    return event_type
+
+
+async def _resolve_client_event_training_scope(
+    body: ClientRealtimeEventDTO,
+    *,
+    svc: TrainingSessionService,
+    current_user: CurrentUser,
+) -> tuple[str | None, int | None]:
+    session_id = _coerce_optional_text(body.training_session_id)
+    room_id = _coerce_optional_room_id(body.room_id)
+    if session_id is None:
+        if room_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="trainingSessionId is required when logging room-scoped client events",
+            )
+        return None, None
+
+    session = await _require_accessible_training_session(
+        session_id,
+        svc=svc,
+        current_user=current_user,
+    )
+    session_room_id = _coerce_optional_room_id(getattr(session, "room_id", None))
+    if room_id is not None and session_room_id is not None and room_id != session_room_id:
+        raise HTTPException(
+            status_code=403,
+            detail="room_id does not match the accessible training session",
+        )
+    return session_id, room_id or session_room_id
 
 
 def _query_binding(websocket: WebSocket) -> tuple[str | None, int | None]:
@@ -2853,6 +3023,71 @@ async def get_realtime_capabilities(
     _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
     return success_response(data=_realtime_capabilities_response())
+
+
+@router.post(
+    "/client-events",
+    status_code=202,
+    summary="Record Training Studio browser runtime events",
+)
+async def record_training_client_event(
+    body: ClientRealtimeEventDTO,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    event_type = _client_realtime_event_type(body.event_type)
+    severity = _client_event_severity(body.severity)
+
+    if not settings.CLIENT_EVENT_LOGGING_ENABLED:
+        return success_response(
+            data={
+                "accepted": False,
+                "eventType": event_type,
+                "reason": "client_event_logging_disabled",
+            }
+        )
+
+    training_session_id, room_id = await _resolve_client_event_training_scope(
+        body,
+        svc=svc,
+        current_user=current_user,
+    )
+    payload = _safe_client_event_payload(body.payload)
+    client_event = {
+        "eventType": event_type,
+        "eventCategory": _coerce_optional_text(body.event_category) or "realtime_voice",
+        "severity": severity,
+        "trainingSessionId": training_session_id,
+        "roomId": room_id,
+        "provider": _coerce_optional_text(body.provider) or "pipecat",
+        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+        "realtimeProfile": _coerce_optional_text(body.realtime_profile),
+        "errorCategory": _coerce_optional_text(body.error_category),
+        "message": _truncate_client_event_text(body.message) if body.message else None,
+        "payload": payload,
+        "userId": current_user.user_id,
+        "teamId": current_user.team_id,
+        "systemRole": current_user.system_role,
+    }
+    log_kwargs = {"extra": {"client_event": client_event}}
+    if severity == "error":
+        logger.error("Training Studio client realtime event", **log_kwargs)
+    elif severity == "warning":
+        logger.warning("Training Studio client realtime event", **log_kwargs)
+    elif severity == "debug":
+        logger.debug("Training Studio client realtime event", **log_kwargs)
+    else:
+        logger.info("Training Studio client realtime event", **log_kwargs)
+
+    return success_response(
+        data={
+            "accepted": True,
+            "eventType": event_type,
+            "trainingSessionId": training_session_id,
+            "roomId": room_id,
+            "loggingScope": "training_realtime_voice",
+        }
+    )
 
 
 @router.get("/sessions/{session_id}/guidance", summary="Get Training Studio live guidance")

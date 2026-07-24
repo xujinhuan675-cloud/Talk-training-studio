@@ -545,3 +545,79 @@ focused 验证：
 - TalkWise 不需要完整 Pipecat 平台能力；需要的是两条训练语音链路相关且用得上的完整 runtime contract。
 - OpenAI realtime 不再作为独立 runtime 维护，只作为 Pipecat `speech_to_speech` profile 下的 service 能力进入。
 - `readyForCall=true` 仍只代表本地依赖和配置可发起调用，不代表真实浏览器生产验收完成。
+
+## 2026-07-24 Pipecat 迁移定位与后续推荐规则
+
+本节用于给后续 AI 和开发轮次提供稳定判断：TalkWise 不完整复制 Pipecat 平台，但语音、视频、多模态训练中属于基础设施的能力，不应继续自研低成熟度替代品。默认路线是优先采用 Pipecat 或同等级成熟方案；当产品语义、成本、验收方式或部署边界需要时，再做 TalkWise 本地化适配。
+
+### 迁移定位
+
+- TalkWise 的产品差异化是训练目标、persona/stakeholder、scenario、dispatcher、evaluation、growth/report、live guidance、训练复盘和能力沉淀。
+- Pipecat 承接的是语音/视频/多模态 runtime 底座：pipeline、frame/event、STT/TTS/LLM 编排、VAD、turn detection、interruption、transport、provider adapter、metrics/readiness/error taxonomy。
+- 不把 Pipecat Cloud、RTVI 全量协议、电话运营商、WebRTC/LiveKit/Daily、avatar/video、distributed workers、全 provider marketplace 一次性搬进 TalkWise 核心。
+- 只要某项 Pipecat 能力能直接提升 TalkWise 训练链路的实时性、稳定性、可观测性或可验收性，就优先作为迁移/本地化候选；否则进入迁移缺口和路线图，不进入当前核心路径。
+
+### 当前已经拿下的 Pipecat 能力
+
+| 能力域 | TalkWise 当前状态 | 判断 |
+|:---|:---|:---|
+| Pipeline / frame runtime | 已接 Pipecat `Pipeline`、frame、worker、processor、frame direction 等入口 | 已进入 runtime 核心，不是模拟壳 |
+| `cascade` 链路 | 浏览器麦克风 -> 16k PCM WebSocket -> Pipecat OpenAI STT -> OpenAI/OpenRouter LLM -> OpenAI TTS -> `audio.output` / `transcript.persisted` / live guidance | 已成为低成本近实时语音训练链路 |
+| `speech_to_speech` 链路 | 浏览器麦克风 -> 24k PCM WebSocket -> Pipecat OpenAI Realtime LLM service -> provider semantic VAD -> audio output / final transcript | 已成为 true realtime profile 的本地化运行契约 |
+| VAD / turn / interruption | 已接 Silero VAD、Pipecat user turn processor/strategies、turn/interruption/silence provider-neutral events | 已进入 TalkWise 事件语义，但还需真实语音体验验收 |
+| FastAPI WebSocket transport | 已由 Pipecat `FastAPIWebsocketTransport` 管 socket lifecycle | 可继续用于当前浏览器链路和 smoke 验收 |
+| Provider catalog | 已扫描本地 `pipecat-ai` service/transport/VAD/turn provider，并区分 `runtime_integrated` 与 `inventory_only` | 具备后续逐 provider 迁移的 source-of-truth inventory |
+| TalkWise 训练接入 | transcript、audio.output、live guidance、session binding 已回写训练闭环 | 符合“成熟 runtime + TalkWise 训练语义层”边界 |
+
+### 已有但尚未 production-ready 的能力
+
+| 缺口 | 当前判断 | 推荐动作 |
+|:---|:---|:---|
+| 浏览器真实 E2E | 当前 metadata 明确 `browserE2EVerified=false`；`readyForCall=true` 只说明依赖和配置可调用 | 先验收麦克风权限、PCM 输入、WebSocket 长连接、`audio.output` 播放、final transcript、live guidance、断线恢复 |
+| turn/interruption 体验 | 代码已有事件映射，但真实语音停顿、打断、沉默超时、provider semantic VAD 和 local VAD 顺序未验收 | 用真实浏览器语音场景建立验收脚本和可读事件日志 |
+| observability/metrics | 已有 telemetry summary / error taxonomy 骨架，但未达到完整 RTVI metrics 或生产 tracing | 聚合 session latency、turn latency、audio bytes、TTFB、profile cost、provider error 分类 |
+| `speech_to_speech` 产品入口 | route state/query/API 可切换，但默认入口未面向普通用户稳定开放 | 先完成 E2E 和成本评估，再决定入口、灰度和默认策略 |
+| provider adapter 深度 | 当前 runtime-integrated 主要是 OpenAI STT/TTS/LLM、OpenRouter LLM、Silero、FastAPI WebSocket | 后续按 STT、TTS、LLM、Realtime LLM、transport 分批迁移，逐个补 readiness 和 E2E |
+
+### Pipecat 有，但当前不应硬迁的能力
+
+这些能力不是“不需要”，而是“不进入当前两条核心语音训练链路的第一优先级”：
+
+| Pipecat 能力 | 不硬迁原因 | 进入条件 |
+|:---|:---|:---|
+| WebRTC / Daily / LiveKit / SmallWebRTC | 官方更适合 client realtime media，但当前双链路还缺 browser E2E，先换 transport 会放大变量 | 两条 WebSocket 链路验收稳定，且产品需要更低延迟、抗弱网、质量统计或视频 |
+| Telephony serializers | 适合电话客服、外呼和号码接入，不是当前浏览器训练默认场景 | 产品进入电话演练、客服外呼或 WhatsApp/电话渠道训练 |
+| Pipecat Cloud | 解决部署、伸缩、secret、session、monitoring，不是当前 runtime contract 缺口 | 本地链路 production-ready 后，需要弹性伸缩和区域部署 |
+| RTVI 全量客户端协议 | TalkWise 已有训练语义和 UI 事件，不应为了协议完整性重写前端 | 只迁 metrics、transcription、speaking、error、client/server message 等对训练链路有价值的子集 |
+| Avatar/video services | 视频虚拟人是训练体验扩展，不是当前语音双链路收口前提 | 产品明确进入视频模拟、虚拟 stakeholder、表情/口型同步训练 |
+| Worker bus / Redis / PGMQ | 当前单会话语音训练不需要先引入分布式复杂度 | 多 agent coach、并行评估、企业部署或高并发运行成为真实需求 |
+| 全 provider marketplace | 不同 provider 的 sample rate、voice、frame shape、turn detection、错误分类差异很大 | 每个 provider 有明确成本/质量收益，并完成 capability、adapter、secret-safe error、E2E 验收 |
+
+### 未实现但应列入迁移缺口的能力
+
+- WebRTC / Daily / LiveKit / SmallWebRTC 生产 transport。
+- Telephony / WhatsApp / 电话训练链路。
+- Pipecat Cloud 部署、session API、自动伸缩、secret、Datadog 等生产平台能力。
+- RTVI 标准事件的完整 client/server protocol、metrics 和 UI worker 能力。
+- 视频、avatar、vision、多模态训练链路。
+- 分布式 worker bus、RedisBus、PgmqBus、多 worker 协作。
+- 完整 STT/TTS/LLM/Realtime LLM provider adapter 覆盖。
+- 生产级 profile metrics：TTFB、processing latency、audio bytes、turn latency、provider cost、错误分类看板。
+
+### 后续推荐优先级
+
+1. 优先补齐当前两条 TalkWise 语音链路的 browser E2E、turn/interruption、audio output、transcript persistence、live guidance 和断线恢复。
+2. 补可观测性：按 profile 输出 latency/cost/error/turn/audio 诊断，让 `cascade` 与 `speech_to_speech` 的体验和成本可以被比较。
+3. 再扩 provider：每次只迁一个 STT/TTS/LLM/Realtime LLM provider，必须带 readiness、secret-safe error taxonomy、事件契约测试和真实 E2E。
+4. 再扩 transport：WebRTC / Daily / LiveKit 只有在浏览器语音链路稳定并且产品需要更强媒体质量时进入。
+5. 视频和 avatar 属于训练体验升级，但基础能力仍优先成熟方案或 Pipecat adapter，不在 TalkWise 内从零造视频 realtime runtime。
+
+参考来源：
+
+- Pipecat Pipeline & Frame Processing: https://docs.pipecat.ai/pipecat/learn/pipeline
+- Pipecat Transports: https://docs.pipecat.ai/pipecat/learn/transports
+- Pipecat Speech Input & Turn Detection: https://docs.pipecat.ai/pipecat/learn/speech-input
+- Pipecat Supported Services: https://docs.pipecat.ai/api-reference/server/services/supported-services
+- Pipecat RTVI Standard: https://docs.pipecat.ai/client/rtvi-standard
+- Pipecat Cloud: https://docs.pipecat.ai/pipecat-cloud/introduction
+- Pipecat Worker Bus: https://docs.pipecat.ai/pipecat/fundamentals/agent-bus

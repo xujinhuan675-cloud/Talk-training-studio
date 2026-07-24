@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -1778,3 +1779,125 @@ def test_realtime_demo_vertical_slice_creates_session_starts_room_and_persists_t
         assert adapter.closed is True
     finally:
         room_event_bus.unsubscribe(42, queue)
+
+
+def test_client_realtime_event_logs_safe_training_scope(monkeypatch) -> None:
+    app, _state = _make_bound_app()
+    captured: list[tuple[str, dict[str, object] | None]] = []
+
+    def _capture_info(message: str, *args, **kwargs) -> None:
+        captured.append((message, kwargs.get("extra")))
+
+    monkeypatch.setattr(training_studio_routes.settings, "CLIENT_EVENT_LOGGING_ENABLED", True)
+    monkeypatch.setattr(
+        training_studio_routes.settings,
+        "CLIENT_EVENT_LOGGING_MAX_PAYLOAD_BYTES",
+        4096,
+    )
+    monkeypatch.setattr(training_studio_routes.logger, "info", _capture_info)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/training-studio/client-events",
+        json={
+            "eventType": "audio.output_played",
+            "severity": "info",
+            "trainingSessionId": "session-1",
+            "roomId": 42,
+            "realtimeProfile": "speech_to_speech",
+            "message": "provider completed with sk-secret-should-not-appear",
+            "payload": {
+                "audioBytes": 2048,
+                "sampleRate": 24000,
+                "apiKey": "sk-secret-should-not-appear",
+                "transcript": "customer transcript should not be logged",
+                "nested": {
+                    "phase": "playback",
+                    "Authorization": "Bearer secret-should-not-appear",
+                    "message": "provider failed with api_key=sk-secret-should-not-appear",
+                    "text": "assistant transcript should not be logged",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["data"] == {
+        "accepted": True,
+        "eventType": "audio.output_played",
+        "trainingSessionId": "session-1",
+        "roomId": 42,
+        "loggingScope": "training_realtime_voice",
+    }
+    assert len(captured) == 1
+    message, extra = captured[0]
+    assert message == "Training Studio client realtime event"
+    assert extra is not None
+    logged = extra["client_event"]
+    assert logged["eventType"] == "audio.output_played"
+    assert logged["trainingSessionId"] == "session-1"
+    assert logged["roomId"] == 42
+    assert logged["realtimeProfile"] == "speech_to_speech"
+    assert logged["userId"] == "user-admin-001"
+    assert logged["payload"]["audioBytes"] == 2048
+    assert logged["payload"]["nested"]["phase"] == "playback"
+    assert logged["payload"]["nested"]["message"] == "provider failed with api_key=***"
+    serialized = json.dumps(logged, ensure_ascii=False)
+    assert "secret-should-not-appear" not in serialized
+    assert "transcript should not be logged" not in serialized
+
+
+def test_client_realtime_event_rejects_unknown_event_type() -> None:
+    app, _state = _make_bound_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/training-studio/client-events",
+        json={
+            "eventType": "unknown.event",
+            "trainingSessionId": "session-1",
+            "roomId": 42,
+            "payload": {},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported client realtime event type"
+
+
+def test_client_realtime_event_enforces_training_session_scope() -> None:
+    app, _state = _make_bound_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/training-studio/client-events",
+        headers={"X-Mock-User": "sales"},
+        json={
+            "eventType": "realtime.ws_error",
+            "severity": "error",
+            "trainingSessionId": "session-1",
+            "roomId": 42,
+            "payload": {"phase": "connect"},
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_client_realtime_event_rejects_room_mismatch() -> None:
+    app, _state = _make_bound_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/training-studio/client-events",
+        json={
+            "eventType": "realtime.ws_error",
+            "severity": "error",
+            "trainingSessionId": "session-1",
+            "roomId": 43,
+            "payload": {"phase": "connect"},
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "room_id does not match the accessible training session"
