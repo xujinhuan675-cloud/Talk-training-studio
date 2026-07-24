@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Mic, Square } from 'lucide-react'
 import {
   createRealtimeSession,
+  getRealtimeVoiceAudioContract,
   getTrainingRealtimeWebSocketUrl,
   RealtimeAudioOutputQueue,
   type RealtimeServerEvent,
@@ -9,6 +10,7 @@ import {
   type RealtimeAudioOutputEvent,
   type RealtimeSessionStatus,
   type RealtimeTranscriptRole,
+  type RealtimeVoiceProfile,
 } from '../services/realtimeSession'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
@@ -19,6 +21,7 @@ export interface RealtimeVoiceRecorderProps {
   disabled?: boolean
   personaId?: string | null
   counterpartName?: string
+  realtimeProfile?: RealtimeVoiceProfile | null
   transcriptMetadata?: Record<string, unknown>
   onPersistedTranscript?: (text: string, role: RealtimeTranscriptRole) => void
 }
@@ -109,6 +112,7 @@ export default function RealtimeVoiceRecorder({
   disabled,
   personaId,
   counterpartName,
+  realtimeProfile,
   transcriptMetadata,
   onPersistedTranscript,
 }: RealtimeVoiceRecorderProps) {
@@ -361,6 +365,7 @@ export default function RealtimeVoiceRecorder({
     setError(null)
     setPreview(counterpartName ? tr('正在连接 {name}', 'Connecting to {name}', { name: counterpartName }) : '')
     setStatus('connecting')
+    const audioContract = getRealtimeVoiceAudioContract(realtimeProfile)
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -372,6 +377,7 @@ export default function RealtimeVoiceRecorder({
           sessionId: trainingSessionId,
           roomId,
           audioFormat: 'pcm16',
+          profile: realtimeProfile,
         }),
         onStatusChange: (nextStatus) => {
           setStatus(nextStatus)
@@ -383,6 +389,9 @@ export default function RealtimeVoiceRecorder({
                 metadata: {
                   ...(transcriptMetadata || {}),
                   personaId: personaId || undefined,
+                  realtimeProfile: audioContract.realtimeProfile,
+                  inputSampleRate: audioContract.inputSampleRate,
+                  audioContract,
                 },
               })
               session.send({
@@ -437,7 +446,7 @@ export default function RealtimeVoiceRecorder({
         const activeSession = realtimeSessionRef.current
         if (activeSession !== session || !activeSession.isConnected) return
         const input = event.inputBuffer.getChannelData(0)
-        const audio = encodePcm16Mono(input, audioContext.sampleRate)
+        const audio = encodePcm16Mono(input, audioContext.sampleRate, audioContract.inputSampleRate)
         try {
           activeSession.send({ type: 'audio.input', audio, mimeType: 'audio/pcm' })
         } catch (sendError) {
@@ -451,7 +460,7 @@ export default function RealtimeVoiceRecorder({
       closeRealtime('error')
       setError(err instanceof Error ? err.message : tr('启动实时语音教练失败', 'Failed to start realtime voice agent'))
     }
-  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, personaId, roomId, trainingSessionId, transcriptMetadata, tr])
+  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, personaId, realtimeProfile, roomId, trainingSessionId, transcriptMetadata, tr])
 
   const active = status === 'connecting' || status === 'connected' || status === 'listening' || status === 'speaking'
   const label = statusLabel(status, error, tr)

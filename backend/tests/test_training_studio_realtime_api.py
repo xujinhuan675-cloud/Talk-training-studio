@@ -193,9 +193,7 @@ def _make_bound_app(
         user_id="user-admin-001",
         team_id="team-ops",
     )
-    session = asyncio.run(
-        session_service.create_session(resolved_payload)
-    )
+    session = asyncio.run(session_service.create_session(resolved_payload))
     if active:
         asyncio.run(
             session_service.start_session(
@@ -260,13 +258,10 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
             "sttAvailable": bool(getattr(capability, "stt_available", False)),
             "ttsAvailable": bool(getattr(capability, "tts_available", False)),
             "llmAvailable": bool(getattr(capability, "llm_available", False)),
-            "turnDetectionAvailable": bool(
-                getattr(capability, "turn_detection_available", False)
-            ),
+            "turnDetectionAvailable": bool(getattr(capability, "turn_detection_available", False)),
             "missingModules": [str(module) for module in capability.missing_modules],
             "optionalMissingModules": [
-                str(module)
-                for module in getattr(capability, "optional_missing_modules", ())
+                str(module) for module in getattr(capability, "optional_missing_modules", ())
             ],
             "error": capability.error,
         }
@@ -357,9 +352,16 @@ def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> No
     assert data["pipecat"]["error"] is None
     assert data["pipecat"]["readyForCall"] is True
     assert data["pipecat"]["productionReady"] is False
-    assert data["pipecat"]["productionReadiness"]["status"] == (
-        "browser_e2e_verification_required"
+    profiles = data["pipecat"]["profiles"]
+    assert profiles["default"] == "cascade"
+    assert profiles["cascade"]["contract"]["latencyProfile"] == "near_realtime"
+    assert profiles["cascade"]["audioContract"]["input"]["sampleRate"] == 16000
+    assert profiles["speech_to_speech"]["contract"]["latencyProfile"] == "true_realtime"
+    assert profiles["speech_to_speech"]["audioContract"]["input"]["sampleRate"] == 24000
+    assert profiles["speech_to_speech"]["contract"]["turnDetection"]["provider"] == (
+        "openai_realtime"
     )
+    assert data["pipecat"]["productionReadiness"]["status"] == ("browser_e2e_verification_required")
     assert data["pipecat"]["productionReadiness"]["blockingReasons"][0]["code"] == (
         "BROWSER_AUDIO_E2E_NOT_VERIFIED"
     )
@@ -964,6 +966,61 @@ def test_realtime_websocket_pipecat_provider_uses_openrouter_llm_metadata(
     assert adapter.closed is True
 
 
+def test_realtime_websocket_pipecat_provider_speech_to_speech_profile_metadata() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime"
+        "?session_id=session-1&room_id=42&provider=pipecat&profile=speech_to_speech"
+    ) as ws:
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        assert started["payload"]["realtimeProfile"] == "speech_to_speech"
+        assert started["payload"]["inputSampleRate"] == 24000
+        assert started["payload"]["audioContract"]["input"]["sampleRate"] == 24000
+        assert started["payload"]["profileContract"]["latencyProfile"] == "true_realtime"
+        assert listening["status"] == "listening"
+        ws.send_bytes(b"\x01\x02")
+        audio_event = ws.receive_json()
+        assert audio_event["type"] == "audio.input"
+        ws.send_json({"type": "session.close", "reason": "done"})
+        assert ws.receive_json()["type"] == "session.closed"
+
+    assert adapter.started_context is not None
+    assert adapter.started_context.metadata["realtimeProfile"] == "speech_to_speech"
+    assert adapter.started_config is not None
+    metadata = adapter.started_config.metadata
+    assert metadata["profile"] == "speech_to_speech"
+    assert metadata["realtimeProfile"] == "speech_to_speech"
+    assert metadata["inputSampleRate"] == 24000
+    assert metadata["outputSampleRate"] == 24000
+    assert "stt" not in metadata
+    assert "tts" not in metadata
+    assert "llm" not in metadata
+    assert "vad" not in metadata
+    assert metadata["context"] == {"provider": "pipecat", "realtimeServiceMode": True}
+    assert metadata["turnDetection"] == {
+        "provider": "openai",
+        "source": "openai_realtime",
+        "mode": "semantic_vad",
+    }
+    realtime_llm = metadata["realtimeLlm"]
+    assert isinstance(realtime_llm, dict)
+    assert realtime_llm["provider"] == "openai"
+    assert realtime_llm["model"] == settings.REALTIME_OPENAI_MODEL
+    assert realtime_llm["voice"] == settings.REALTIME_OPENAI_VOICE
+    assert realtime_llm["outputModalities"] == ["audio"]
+    assert metadata["profileContract"]["latencyProfile"] == "true_realtime"
+    assert metadata["audioContract"]["input"]["sampleRate"] == 24000
+    assert adapter.audio_chunks[0].metadata["realtimeProfile"] == "speech_to_speech"
+    assert adapter.audio_chunks[0].metadata["sampleRate"] == 24000
+
+
 def test_pipecat_realtime_llm_provider_detects_openrouter_compatible_base_url(
     monkeypatch,
 ) -> None:
@@ -1026,9 +1083,7 @@ def test_realtime_websocket_pipecat_provider_injects_recent_room_turns() -> None
         assert closed["type"] == "session.closed"
 
     assert adapter.started_context is not None
-    assert [
-        (turn["speaker"], turn["text"]) for turn in adapter.started_context.recent_turns
-    ] == [
+    assert [(turn["speaker"], turn["text"]) for turn in adapter.started_context.recent_turns] == [
         ("user", "Can we discuss renewal risk?"),
         ("counterpart", "I am worried the rollout is risky."),
     ]
@@ -1174,7 +1229,9 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
     assert state.messages[0].metadata["realtime"]["responseId"] == "response_pipecat_1"
 
 
-def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_final_transcript() -> None:
+def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_final_transcript() -> (
+    None
+):
     app, state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     output_audio = b"\x10\x20\x30"
@@ -1230,8 +1287,7 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
             "training.live_guidance.triggered"
         )
         assert any(
-            event["type"] == "status.changed" and event["status"] == "listening"
-            for event in events
+            event["type"] == "status.changed" and event["status"] == "listening" for event in events
         )
         assert audio_output["status"] == "speaking"
         assert audio_output["payload"]["audio"] == base64.b64encode(output_audio).decode("ascii")
@@ -1416,9 +1472,14 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline(monkeypa
         "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "transport": "websocket",
     }
-    assert adapter.audio_chunks == [
-        RealtimeAudioChunk(data=audio, mime_type="audio/pcm", sequence=1)
-    ]
+    assert len(adapter.audio_chunks) == 1
+    audio_chunk = adapter.audio_chunks[0]
+    assert audio_chunk.data == audio
+    assert audio_chunk.mime_type == "audio/pcm"
+    assert audio_chunk.sequence == 1
+    assert audio_chunk.metadata["realtimeProfile"] == "cascade"
+    assert audio_chunk.metadata["sampleRate"] == 16000
+    assert audio_chunk.metadata["audioContract"]["input"]["sampleRate"] == 16000
     assert adapter.commits == 1
     assert adapter.closed is True
 
@@ -1449,9 +1510,13 @@ def test_realtime_websocket_pipecat_provider_forwards_binary_audio_to_pipeline()
         closed = ws.receive_json()
         assert closed["type"] == "session.closed"
 
-    assert adapter.audio_chunks == [
-        RealtimeAudioChunk(data=audio, mime_type="audio/pcm", sequence=1)
-    ]
+    assert len(adapter.audio_chunks) == 1
+    audio_chunk = adapter.audio_chunks[0]
+    assert audio_chunk.data == audio
+    assert audio_chunk.mime_type == "audio/pcm"
+    assert audio_chunk.sequence == 1
+    assert audio_chunk.metadata["realtimeProfile"] == "cascade"
+    assert audio_chunk.metadata["sampleRate"] == 16000
     assert adapter.closed is True
 
 

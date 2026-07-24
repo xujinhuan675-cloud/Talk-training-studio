@@ -503,3 +503,45 @@ focused 验证：
 
 - 真实浏览器验证本轮不做。后续用连接浏览器或 FlowGuide 验证 Pipecat WebSocket 录音、音频输出和转写持久化的真实 UI 行为。
 - Text runtime / message-tree 的真实 UI reload/fork 操作 E2E 单独排期靠后；当前测试矩阵先覆盖服务契约和 branch metadata 不污染 scoring/growth/completion。
+
+## 2026-07-23 Pipecat 双链路本地化收口
+
+本轮按“只拿 TalkWise 两条语音训练链路用得上的完整能力，不迁完整平台”的边界推进。
+
+已落地：
+
+- `cascade` 近实时链路继续作为默认路径：浏览器麦克风 -> 16k PCM WebSocket -> Pipecat STT -> LLM -> TTS -> `audio.output` / `transcript.persisted` / `training.live_guidance.triggered`。
+- `speech_to_speech` 真实时链路进入本地化运行契约：浏览器麦克风 -> 24k PCM WebSocket -> Pipecat OpenAI Realtime LLM service -> provider semantic VAD / audio output / final transcript。
+- `/training-studio/realtime` 支持 `profile` / `realtimeProfile` / `realtime_profile`，并按 profile 写入 `inputSampleRate`、`audioContract`、`profileContract`、`latencyProfile`、`costProfile` 和 browser E2E 缺口。
+- 前端 `RealtimeVoiceRecorder` 支持 `realtimeProfile`，默认 `cascade` 不改变旧 URL 和 16k 输入；`speech_to_speech` / `true_realtime` 会追加 profile 并重采样为 24k PCM。
+- `ChatPage` 允许从 route state 或 query 读取 `realtimeProfile` / `voiceProfile`，用于把训练入口切到 true realtime 画像。
+- Pipecat capability / pipeline metadata 现在暴露两条链路各自的 readiness features、turn detection owner、audio contract、transcript persistence、audio output、live guidance 和 error taxonomy 骨架。
+- `RealtimeAudioChunk.metadata` 会携带 profile、sample rate 和 audio contract，真实 Pipecat frame 不再只依赖默认 16k。
+
+当前判断：
+
+- Pipecat realtime: 75-80%。这不是完整 Pipecat 平台迁移，但已经从 MVP 进入“双链路可配置、可诊断、可验收”的 TalkWise 自身链路迁移阶段。
+- `cascade` 链路：可继续作为低成本、低延迟、转写式近实时语音训练模式。
+- `speech_to_speech` 链路：已具备 true realtime profile、OpenAI realtime service 编排、24k audio contract、provider semantic VAD 和 TalkWise transcript/live guidance 接入边界。
+- 仍未声明 production-ready，因为真实浏览器麦克风权限、WebSocket 音频输入、音频播放、turn/interruption/silence、metrics/error taxonomy 还需要连接浏览器 E2E 验收。
+
+后续仍围绕这两条链路补齐的缺口：
+
+1. 真实浏览器 E2E：验证麦克风授权、音频输入、`audio.output` 播放、final transcript 持久化、live guidance 触发和断线恢复。
+2. Turn/interruption 体验验收：用真实语音确认打断、沉默超时、provider semantic VAD 与 local VAD 的事件顺序和 UI 状态。
+3. 聚合 tracing：把 session-level latency、audio bytes、turn latency、provider error taxonomy 和 profile/cost/latency 画像统一进可读诊断。
+4. 上层产品入口：是否默认开放 `speech_to_speech` 选择，需要等真实 E2E 和成本评估后再决定；当前只支持通过 route state/query 或后端 API 显式切换。
+
+列入“当前项目迁移缺口，以后做”，不进入本轮两条链路代码范围：
+
+- Pipecat WebRTC / LiveKit / Daily / telephony transport 生态。
+- Pipecat Cloud、RTVI 全量客户端协议和完整 observability 平台。
+- 视频 avatar、会议式多模态、分布式 workers、bus、Redis/PGMQ。
+- 全量 STT/TTS/LLM provider adapter；后续仍按 provider capability、readiness、secret-safe error taxonomy 和真实 E2E 逐个迁。
+- LibreChat 完整 OAuth/LDAP/2FA、admin panel、marketplace、artifact/code interpreter、完整 MCP lifecycle、Agent marketplace、通用 RAG/file search/web search/billing/moderation。
+
+本轮保留的判断：
+
+- TalkWise 不需要完整 Pipecat 平台能力；需要的是两条训练语音链路相关且用得上的完整 runtime contract。
+- OpenAI realtime 不再作为独立 runtime 维护，只作为 Pipecat `speech_to_speech` profile 下的 service 能力进入。
+- `readyForCall=true` 仍只代表本地依赖和配置可发起调用，不代表真实浏览器生产验收完成。

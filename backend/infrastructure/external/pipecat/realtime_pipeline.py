@@ -58,6 +58,8 @@ VAD_PROCESSOR_PIPECAT_MODULE = "pipecat.processors.audio.vad_processor"
 OPENAI_STT_PIPECAT_MODULE = "pipecat.services.openai.stt"
 OPENAI_TTS_PIPECAT_MODULE = "pipecat.services.openai.tts"
 OPENAI_LLM_PIPECAT_MODULE = "pipecat.services.openai.llm"
+OPENAI_REALTIME_LLM_PIPECAT_MODULE = "pipecat.services.openai.realtime.llm"
+OPENAI_REALTIME_EVENTS_PIPECAT_MODULE = "pipecat.services.openai.realtime.events"
 OPENROUTER_LLM_PIPECAT_MODULE = "pipecat.services.openrouter.llm"
 LLM_CONTEXT_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_context"
 LLM_RESPONSE_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_response_universal"
@@ -88,6 +90,23 @@ OPENROUTER_BASE_URL_ENV_KEYS = (
     "LLM__BASE_URL",
 )
 PIPECAT_SUPPORTED_LLM_PROVIDERS = {"openai", OPENROUTER_LLM_PROVIDER}
+PIPECAT_REALTIME_PROFILE_CASCADE = "cascade"
+PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH = "speech_to_speech"
+PIPECAT_REALTIME_PROFILE_ALIASES = {
+    "cascade": PIPECAT_REALTIME_PROFILE_CASCADE,
+    "cascaded": PIPECAT_REALTIME_PROFILE_CASCADE,
+    "chain": PIPECAT_REALTIME_PROFILE_CASCADE,
+    "near_realtime": PIPECAT_REALTIME_PROFILE_CASCADE,
+    "stt_llm_tts": PIPECAT_REALTIME_PROFILE_CASCADE,
+    "transcription_chain": PIPECAT_REALTIME_PROFILE_CASCADE,
+    "speech_to_speech": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "speech2speech": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "speechtospeech": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "true_realtime": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "realtime_llm": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "openai_realtime": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "openai_speech_to_speech": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+}
 PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "stt": "openai",
     "tts": "openai",
@@ -161,6 +180,20 @@ PIPECAT_REALTIME_BROWSER_AUDIO_E2E_SIGNALS = (
     "turn_interruption_silence_events",
     "realtime_metrics_and_error_taxonomy",
 )
+PIPECAT_REALTIME_PROFILE_AUDIO = {
+    PIPECAT_REALTIME_PROFILE_CASCADE: {
+        "inputSampleRate": 16000,
+        "outputSampleRate": 24000,
+        "inputEncoding": "pcm16",
+        "outputEncoding": "pcm16",
+    },
+    PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH: {
+        "inputSampleRate": 24000,
+        "outputSampleRate": 24000,
+        "inputEncoding": "pcm16",
+        "outputEncoding": "pcm16",
+    },
+}
 PIPECAT_REALTIME_FEATURE_REQUIREMENTS = {
     "stt": {
         "code": "PIPECAT_FEATURE_UNAVAILABLE",
@@ -180,6 +213,20 @@ PIPECAT_REALTIME_FEATURE_REQUIREMENTS = {
         "message": "Pipecat OpenAI LLM service is required before starting realtime calls",
         "modules": (
             OPENAI_LLM_PIPECAT_MODULE,
+            LLM_CONTEXT_PIPECAT_MODULE,
+            LLM_RESPONSE_PIPECAT_MODULE,
+        ),
+    },
+    "realtimeLlm": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": "realtimeLlm:openai",
+        "message": (
+            "Pipecat OpenAI Realtime LLM service is required before starting "
+            "speech-to-speech realtime calls"
+        ),
+        "modules": (
+            OPENAI_REALTIME_LLM_PIPECAT_MODULE,
+            OPENAI_REALTIME_EVENTS_PIPECAT_MODULE,
             LLM_CONTEXT_PIPECAT_MODULE,
             LLM_RESPONSE_PIPECAT_MODULE,
         ),
@@ -209,9 +256,7 @@ PIPECAT_REALTIME_FEATURE_REQUIREMENTS = {
 PIPECAT_OPENROUTER_LLM_FEATURE_REQUIREMENT = {
     "code": "PIPECAT_FEATURE_UNAVAILABLE",
     "feature": "llm:openrouter",
-    "message": (
-        "Pipecat OpenRouter LLM service is required before starting realtime calls"
-    ),
+    "message": ("Pipecat OpenRouter LLM service is required before starting realtime calls"),
     "modules": (
         OPENROUTER_LLM_PIPECAT_MODULE,
         LLM_CONTEXT_PIPECAT_MODULE,
@@ -223,6 +268,12 @@ PIPECAT_FEATURE_MODULE_HINTS = {
     "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
     "llm": (
         OPENAI_LLM_PIPECAT_MODULE,
+        LLM_CONTEXT_PIPECAT_MODULE,
+        LLM_RESPONSE_PIPECAT_MODULE,
+    ),
+    "realtimeLlm": (
+        OPENAI_REALTIME_LLM_PIPECAT_MODULE,
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE,
         LLM_CONTEXT_PIPECAT_MODULE,
         LLM_RESPONSE_PIPECAT_MODULE,
     ),
@@ -274,6 +325,28 @@ OPTIONAL_PIPECAT_FEATURE_SYMBOLS: Mapping[str, Mapping[str, tuple[str, ...]]] = 
             "LLMAssistantAggregatorParams",
         ),
     },
+    "realtimeLlm": {
+        OPENAI_REALTIME_LLM_PIPECAT_MODULE: ("OpenAIRealtimeLLMService",),
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE: (
+            "SessionProperties",
+            "AudioConfiguration",
+            "AudioInput",
+            "AudioOutput",
+            "InputAudioTranscription",
+            "InputAudioNoiseReduction",
+            "SemanticTurnDetection",
+            "TurnDetection",
+            "PCMAudioFormat",
+            "PCMUAudioFormat",
+            "PCMAAudioFormat",
+        ),
+        LLM_CONTEXT_PIPECAT_MODULE: ("LLMContext",),
+        LLM_RESPONSE_PIPECAT_MODULE: (
+            "LLMContextAggregatorPair",
+            "LLMUserAggregatorParams",
+            "LLMAssistantAggregatorParams",
+        ),
+    },
     "openrouter_llm": {OPENROUTER_LLM_PIPECAT_MODULE: ("OpenRouterLLMService",)},
     "turn_detection": {
         USER_TURN_PROCESSOR_PIPECAT_MODULE: ("UserTurnProcessor",),
@@ -299,6 +372,12 @@ OPTIONAL_PIPECAT_FEATURE_MODULES = {
         LLM_CONTEXT_PIPECAT_MODULE,
         LLM_RESPONSE_PIPECAT_MODULE,
     ),
+    "realtimeLlm": (
+        OPENAI_REALTIME_LLM_PIPECAT_MODULE,
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE,
+        LLM_CONTEXT_PIPECAT_MODULE,
+        LLM_RESPONSE_PIPECAT_MODULE,
+    ),
     "openrouter_llm": (OPENROUTER_LLM_PIPECAT_MODULE,),
     "turn_detection": (
         USER_TURN_PROCESSOR_PIPECAT_MODULE,
@@ -320,6 +399,7 @@ class PipecatCapability:
     stt_available: bool = False
     tts_available: bool = False
     llm_available: bool = False
+    openai_realtime_llm_available: bool = False
     openrouter_llm_available: bool = False
     turn_detection_available: bool = False
     optional_missing_modules: tuple[str, ...] = ()
@@ -360,11 +440,23 @@ class PipecatRuntime:
     OpenAIRealtimeSTTService: type | None = None
     OpenAITTSService: type | None = None
     OpenAILLMService: type | None = None
+    OpenAIRealtimeLLMService: type | None = None
     OpenRouterLLMService: type | None = None
     LLMContext: type | None = None
     LLMContextAggregatorPair: type | None = None
     LLMUserAggregatorParams: type | None = None
     LLMAssistantAggregatorParams: type | None = None
+    SessionProperties: type | None = None
+    AudioConfiguration: type | None = None
+    AudioInput: type | None = None
+    AudioOutput: type | None = None
+    InputAudioTranscription: type | None = None
+    InputAudioNoiseReduction: type | None = None
+    SemanticTurnDetection: type | None = None
+    TurnDetection: type | None = None
+    PCMAudioFormat: type | None = None
+    PCMUAudioFormat: type | None = None
+    PCMAAudioFormat: type | None = None
     UserTurnProcessor: type | None = None
     UserTurnStrategies: type | None = None
     ExternalUserTurnStrategies: type | None = None
@@ -597,6 +689,100 @@ def pipecat_realtime_smoke_contract(
     }
 
 
+def pipecat_realtime_profile_contracts() -> dict[str, Any]:
+    """Return TalkWise's public contract for the two Pipecat-owned voice chains."""
+
+    return {
+        PIPECAT_REALTIME_PROFILE_CASCADE: {
+            "profile": PIPECAT_REALTIME_PROFILE_CASCADE,
+            "pipeline": "stt_llm_tts_cascade",
+            "latencyProfile": "near_realtime",
+            "costProfile": "lower_cost_split_services",
+            "transport": "websocket",
+            "inputAudio": {
+                "encoding": "pcm16",
+                "sampleRate": 16000,
+                "channels": 1,
+                "source": "browser_microphone",
+            },
+            "outputAudio": {
+                "encoding": "pcm16",
+                "sampleRate": 24000,
+                "channels": 1,
+                "eventType": "audio.output",
+            },
+            "services": {
+                "stt": "openai",
+                "llm": "openai_or_openrouter",
+                "tts": "openai",
+                "vad": "silero",
+            },
+            "turnDetection": {
+                "owner": "pipecat",
+                "provider": "pipecat",
+                "mode": "vad_user_turn_processor",
+                "supportsInterruption": True,
+                "supportsSilenceTimeout": True,
+            },
+            "talkwiseIntegration": {
+                "transcriptPersistence": "TrainingTranscriptSink",
+                "audioOutputEvent": "audio.output",
+                "liveGuidanceEvent": "training.live_guidance.triggered",
+                "trainingSemantics": "TrainingVoiceContext",
+            },
+            "readinessFeatures": dict(PIPECAT_REALTIME_REQUIRED_FEATURES),
+            "browserE2E": {
+                "verified": False,
+                "requiredForProduction": True,
+                "requiredSignals": list(PIPECAT_REALTIME_BROWSER_AUDIO_E2E_SIGNALS),
+            },
+        },
+        PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH: {
+            "profile": PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+            "pipeline": "openai_realtime_speech_to_speech",
+            "latencyProfile": "true_realtime",
+            "costProfile": "premium_realtime_audio",
+            "transport": "websocket",
+            "inputAudio": {
+                "encoding": "pcm16",
+                "sampleRate": 24000,
+                "channels": 1,
+                "source": "browser_microphone",
+            },
+            "outputAudio": {
+                "encoding": "pcm16",
+                "sampleRate": 24000,
+                "channels": 1,
+                "eventType": "audio.output",
+            },
+            "services": {
+                "realtimeLlm": "openai",
+                "stt": "openai_realtime_transcription",
+                "tts": "openai_realtime_audio",
+            },
+            "turnDetection": {
+                "owner": "provider",
+                "provider": "openai_realtime",
+                "mode": "semantic_vad",
+                "supportsInterruption": True,
+                "supportsSilenceTimeout": True,
+            },
+            "talkwiseIntegration": {
+                "transcriptPersistence": "TrainingTranscriptSink",
+                "audioOutputEvent": "audio.output",
+                "liveGuidanceEvent": "training.live_guidance.triggered",
+                "trainingSemantics": "TrainingVoiceContext",
+            },
+            "readinessFeatures": {"realtimeLlm": "openai"},
+            "browserE2E": {
+                "verified": False,
+                "requiredForProduction": True,
+                "requiredSignals": list(PIPECAT_REALTIME_BROWSER_AUDIO_E2E_SIGNALS),
+            },
+        },
+    }
+
+
 def _pipecat_realtime_production_readiness(
     *,
     local_runtime_ready: bool,
@@ -635,9 +821,7 @@ def _pipecat_realtime_production_readiness(
         "status": (
             "ready"
             if ready_for_production
-            else "browser_e2e_verification_required"
-            if local_runtime_ready
-            else "runtime_blocked"
+            else "browser_e2e_verification_required" if local_runtime_ready else "runtime_blocked"
         ),
         "localRuntimeReady": bool(local_runtime_ready),
         "browserAudioE2EVerified": bool(browser_audio_e2e_verified),
@@ -852,15 +1036,56 @@ def _pipecat_capability_public_payload(capability: PipecatCapability) -> dict[st
         "sttAvailable": bool(capability.stt_available),
         "ttsAvailable": bool(capability.tts_available),
         "llmAvailable": bool(capability.llm_available),
+        "openaiRealtimeLlmAvailable": bool(capability.openai_realtime_llm_available),
         "openrouterLlmAvailable": bool(capability.openrouter_llm_available),
         "turnDetectionAvailable": bool(capability.turn_detection_available),
+        "profiles": _pipecat_realtime_profile_payload(capability),
         "missingModules": [str(module) for module in capability.missing_modules],
         "optionalMissingModules": [str(module) for module in capability.optional_missing_modules],
         "error": redact_realtime_secret_text(capability.error) if capability.error else None,
     }
 
 
+def _pipecat_realtime_profile_payload(capability: PipecatCapability) -> dict[str, Any]:
+    contracts = pipecat_realtime_profile_contracts()
+    cascade_ready = all(
+        (
+            capability.available,
+            capability.stt_available,
+            capability.tts_available,
+            capability.llm_available,
+            capability.vad_available,
+            capability.turn_detection_available,
+        )
+    )
+    speech_to_speech_ready = all(
+        (
+            capability.available,
+            capability.openai_realtime_llm_available,
+        )
+    )
+    return {
+        "default": PIPECAT_REALTIME_PROFILE_CASCADE,
+        "supported": [
+            PIPECAT_REALTIME_PROFILE_CASCADE,
+            PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+        ],
+        PIPECAT_REALTIME_PROFILE_CASCADE: {
+            "ready": cascade_ready,
+            "features": dict(PIPECAT_REALTIME_REQUIRED_FEATURES),
+            "contract": contracts[PIPECAT_REALTIME_PROFILE_CASCADE],
+        },
+        PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH: {
+            "ready": speech_to_speech_ready,
+            "features": {"realtimeLlm": "openai"},
+            "contract": contracts[PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH],
+        },
+    }
+
+
 def _pipecat_feature_available(capability: PipecatCapability, feature: str) -> bool:
+    if feature == "realtimeLlm":
+        return bool(capability.openai_realtime_llm_available)
     return bool(
         getattr(
             capability,
@@ -975,6 +1200,7 @@ def _optional_feature_status() -> dict[str, bool | tuple[str, ...]]:
         "stt_available": not missing_by_feature["stt"],
         "tts_available": not missing_by_feature["tts"],
         "llm_available": not missing_by_feature["llm"],
+        "openai_realtime_llm_available": not missing_by_feature["realtimeLlm"],
         "openrouter_llm_available": not missing_by_feature["openrouter_llm"],
         "turn_detection_available": not missing_by_feature["turn_detection"],
         "optional_missing_modules": tuple(
@@ -1005,6 +1231,24 @@ def _runtime_feature_status(
         "llm_available": bool(module_status.get("llm_available"))
         and runtime.OpenAILLMService is not None
         and getattr(runtime.OpenAILLMService, "Settings", None) is not None
+        and runtime.LLMContext is not None
+        and runtime.LLMContextAggregatorPair is not None
+        and runtime.LLMUserAggregatorParams is not None
+        and runtime.LLMAssistantAggregatorParams is not None,
+        "openai_realtime_llm_available": bool(module_status.get("openai_realtime_llm_available"))
+        and runtime.OpenAIRealtimeLLMService is not None
+        and getattr(runtime.OpenAIRealtimeLLMService, "Settings", None) is not None
+        and runtime.SessionProperties is not None
+        and runtime.AudioConfiguration is not None
+        and runtime.AudioInput is not None
+        and runtime.AudioOutput is not None
+        and runtime.InputAudioTranscription is not None
+        and runtime.InputAudioNoiseReduction is not None
+        and runtime.SemanticTurnDetection is not None
+        and runtime.TurnDetection is not None
+        and runtime.PCMAudioFormat is not None
+        and runtime.PCMUAudioFormat is not None
+        and runtime.PCMAAudioFormat is not None
         and runtime.LLMContext is not None
         and runtime.LLMContextAggregatorPair is not None
         and runtime.LLMUserAggregatorParams is not None
@@ -1065,6 +1309,21 @@ def _runtime_missing_optional_symbols(
         is None
     ):
         missing.append(_entrypoint(OPENAI_LLM_PIPECAT_MODULE, "OpenAILLMService.Settings"))
+    if (
+        runtime.OpenAIRealtimeLLMService is not None
+        and getattr(
+            runtime.OpenAIRealtimeLLMService,
+            "Settings",
+            None,
+        )
+        is None
+    ):
+        missing.append(
+            _entrypoint(
+                OPENAI_REALTIME_LLM_PIPECAT_MODULE,
+                "OpenAIRealtimeLLMService.Settings",
+            )
+        )
     if (
         runtime.OpenRouterLLMService is not None
         and getattr(
@@ -1142,8 +1401,42 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     )
     openai_tts = _optional_pipecat_symbol(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService")
     openai_llm = _optional_pipecat_symbol(OPENAI_LLM_PIPECAT_MODULE, "OpenAILLMService")
-    openrouter_llm = _optional_pipecat_symbol(
-        OPENROUTER_LLM_PIPECAT_MODULE, "OpenRouterLLMService"
+    openai_realtime_llm = _optional_pipecat_symbol(
+        OPENAI_REALTIME_LLM_PIPECAT_MODULE, "OpenAIRealtimeLLMService"
+    )
+    openrouter_llm = _optional_pipecat_symbol(OPENROUTER_LLM_PIPECAT_MODULE, "OpenRouterLLMService")
+    realtime_session_properties = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "SessionProperties"
+    )
+    realtime_audio_configuration = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "AudioConfiguration"
+    )
+    realtime_audio_input = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "AudioInput"
+    )
+    realtime_audio_output = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "AudioOutput"
+    )
+    realtime_input_audio_transcription = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "InputAudioTranscription"
+    )
+    realtime_input_audio_noise_reduction = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "InputAudioNoiseReduction"
+    )
+    realtime_semantic_turn_detection = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "SemanticTurnDetection"
+    )
+    realtime_turn_detection = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "TurnDetection"
+    )
+    realtime_pcm_audio_format = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "PCMAudioFormat"
+    )
+    realtime_pcmu_audio_format = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "PCMUAudioFormat"
+    )
+    realtime_pcma_audio_format = _optional_pipecat_symbol(
+        OPENAI_REALTIME_EVENTS_PIPECAT_MODULE, "PCMAAudioFormat"
     )
     llm_context = _optional_pipecat_symbol(LLM_CONTEXT_PIPECAT_MODULE, "LLMContext")
     llm_context_aggregator_pair = _optional_pipecat_symbol(
@@ -1222,11 +1515,23 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         OpenAIRealtimeSTTService=openai_realtime_stt,
         OpenAITTSService=openai_tts,
         OpenAILLMService=openai_llm,
+        OpenAIRealtimeLLMService=openai_realtime_llm,
         OpenRouterLLMService=openrouter_llm,
         LLMContext=llm_context,
         LLMContextAggregatorPair=llm_context_aggregator_pair,
         LLMUserAggregatorParams=llm_user_aggregator_params,
         LLMAssistantAggregatorParams=llm_assistant_aggregator_params,
+        SessionProperties=realtime_session_properties,
+        AudioConfiguration=realtime_audio_configuration,
+        AudioInput=realtime_audio_input,
+        AudioOutput=realtime_audio_output,
+        InputAudioTranscription=realtime_input_audio_transcription,
+        InputAudioNoiseReduction=realtime_input_audio_noise_reduction,
+        SemanticTurnDetection=realtime_semantic_turn_detection,
+        TurnDetection=realtime_turn_detection,
+        PCMAudioFormat=realtime_pcm_audio_format,
+        PCMUAudioFormat=realtime_pcmu_audio_format,
+        PCMAAudioFormat=realtime_pcma_audio_format,
         UserTurnProcessor=user_turn_processor,
         UserTurnStrategies=user_turn_strategies,
         ExternalUserTurnStrategies=external_user_turn_strategies,
@@ -1348,6 +1653,7 @@ def _pipecat_dependency_probe(
             "stt": bool(capability.stt_available),
             "tts": bool(capability.tts_available),
             "llm": bool(capability.llm_available),
+            "realtimeLlm": bool(capability.openai_realtime_llm_available),
             "vad": bool(capability.vad_available),
             "turnDetection": bool(capability.turn_detection_available),
         },
@@ -1551,6 +1857,15 @@ def _missing_modules_for_start_error(websocket: bool) -> tuple[str, ...]:
 
 def _requested_feature_metadata(config: RealtimePipelineConfig) -> dict[str, str | None]:
     metadata = dict(config.metadata)
+    if _pipecat_realtime_profile(config) == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
+        return {
+            "realtimeLlm": _realtime_llm_provider(metadata),
+            "vad": (
+                _feature_provider(metadata, "vad")
+                if _realtime_turn_detection_is_disabled(metadata)
+                else None
+            ),
+        }
     return {
         "stt": _feature_provider(metadata, "stt"),
         "tts": _feature_provider(metadata, "tts"),
@@ -1558,6 +1873,102 @@ def _requested_feature_metadata(config: RealtimePipelineConfig) -> dict[str, str
         "vad": _feature_provider(metadata, "vad"),
         "turnDetection": _feature_provider(metadata, "turnDetection", "turn_detection"),
     }
+
+
+def _pipecat_realtime_profile(config: RealtimePipelineConfig) -> str:
+    metadata = dict(config.metadata)
+    for key in (
+        "profile",
+        "realtimeProfile",
+        "realtime_profile",
+        "pipelineProfile",
+        "pipeline_profile",
+        "voiceProfile",
+        "voice_profile",
+    ):
+        if profile := _normalize_pipecat_realtime_profile(metadata.get(key)):
+            return profile
+
+    for key in ("talkwise", "realtime", "runtime"):
+        nested = metadata.get(key)
+        if isinstance(nested, Mapping):
+            for nested_key in (
+                "profile",
+                "realtimeProfile",
+                "realtime_profile",
+                "pipelineProfile",
+                "pipeline_profile",
+            ):
+                if profile := _normalize_pipecat_realtime_profile(nested.get(nested_key)):
+                    return profile
+    return PIPECAT_REALTIME_PROFILE_CASCADE
+
+
+def _normalize_pipecat_realtime_profile(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if not text or text in {"none", "false", "disabled", "default"}:
+        return None
+    compact = text.replace("_", "")
+    return PIPECAT_REALTIME_PROFILE_ALIASES.get(
+        text,
+        PIPECAT_REALTIME_PROFILE_ALIASES.get(compact),
+    )
+
+
+def _realtime_llm_provider(metadata: Mapping[str, Any]) -> str | None:
+    provider = _feature_provider(
+        metadata,
+        "realtimeLlm",
+        "realtime_llm",
+        "openaiRealtime",
+        "openai_realtime",
+    )
+    if provider is not None:
+        return provider
+    llm_provider = _feature_provider(metadata, "llm")
+    return llm_provider or "openai"
+
+
+def _realtime_llm_config(metadata: Mapping[str, Any]) -> Mapping[str, Any]:
+    return _feature_config(
+        metadata,
+        "realtimeLlm",
+        "realtime_llm",
+        "openaiRealtime",
+        "openai_realtime",
+        "llm",
+    )
+
+
+def _realtime_turn_detection_is_disabled(metadata: Mapping[str, Any]) -> bool:
+    raw_value = _realtime_turn_detection_raw_value(metadata)
+    if raw_value is False:
+        return True
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower().replace("-", "_").replace(" ", "_")
+        return normalized in {"false", "disabled", "none", "local", "manual"}
+    if isinstance(raw_value, Mapping):
+        mode = _metadata_text(raw_value, "mode", "type", "strategy")
+        provider = _metadata_text(raw_value, "provider", "source")
+        normalized = str(mode or provider or "").strip().lower().replace("-", "_")
+        return normalized in {"false", "disabled", "none", "local", "manual", "pipecat"}
+    return False
+
+
+def _realtime_turn_detection_raw_value(metadata: Mapping[str, Any]) -> object | None:
+    realtime_config = _realtime_llm_config(metadata)
+    for source in (realtime_config, metadata):
+        for key in (
+            "turnDetection",
+            "turn_detection",
+            "realtimeTurnDetection",
+            "realtime_turn_detection",
+        ):
+            if key in source:
+                return source[key]
+    return None
 
 
 def _classify_pipecat_start_error(message: str, *, websocket: bool) -> dict[str, object]:
@@ -1690,6 +2101,9 @@ def build_pipecat_voice_processors(
     validate_pipecat_voice_config(config)
     processors: list[Any] = []
     metadata = dict(config.metadata)
+    if _pipecat_realtime_profile(config) == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
+        return build_pipecat_speech_to_speech_processors(runtime, config, context=context)
+
     llm_provider = _feature_provider(metadata, "llm")
 
     if _feature_provider(metadata, "vad") == "silero":
@@ -1868,6 +2282,111 @@ def build_pipecat_voice_processors(
     return tuple(processors)
 
 
+def build_pipecat_speech_to_speech_processors(
+    runtime: PipecatRuntime,
+    config: RealtimePipelineConfig,
+    *,
+    context: TrainingVoiceContext | None = None,
+) -> tuple[Any, Any, Any]:
+    """Build Pipecat's OpenAI realtime speech-to-speech processor chain."""
+
+    metadata = dict(config.metadata)
+    realtime_config = _realtime_llm_config(metadata)
+    _ensure_realtime_llm_runtime_available(runtime)
+
+    api_key = _openai_api_key(metadata) or _metadata_text(
+        realtime_config,
+        "openaiApiKey",
+        "openai_api_key",
+        "apiKey",
+        "api_key",
+    )
+    if not api_key:
+        raise _missing_openai_api_key_error("realtimeLlm")
+
+    model = (
+        _metadata_text(realtime_config, "model")
+        or _metadata_text(
+            metadata,
+            "realtimeModel",
+            "realtime_model",
+            "openaiRealtimeModel",
+            "openai_realtime_model",
+            "model",
+        )
+        or config.model
+    )
+    system_instruction = _llm_system_instruction(context, config)
+    session_properties = _openai_realtime_session_properties(
+        runtime,
+        config=config,
+        metadata=metadata,
+        realtime_config=realtime_config,
+        system_instruction=system_instruction,
+    )
+    settings_kwargs: dict[str, Any] = {"session_properties": session_properties}
+    if model:
+        settings_kwargs["model"] = model
+    if system_instruction:
+        settings_kwargs["system_instruction"] = system_instruction
+    if (temperature := _metadata_float(realtime_config, "temperature")) is not None:
+        settings_kwargs["temperature"] = temperature
+    if (max_tokens := _metadata_int(realtime_config, "maxTokens", "max_tokens")) is not None:
+        settings_kwargs["max_tokens"] = max_tokens
+    if (top_p := _metadata_float(realtime_config, "topP", "top_p")) is not None:
+        settings_kwargs["top_p"] = top_p
+
+    service_kwargs: dict[str, Any] = {
+        "api_key": api_key,
+        "base_url": _metadata_text(realtime_config, "baseUrl", "base_url")
+        or _metadata_text(metadata, "realtimeBaseUrl", "realtime_base_url")
+        or "wss://api.openai.com/v1/realtime",
+        "settings": _service_settings(
+            runtime.OpenAIRealtimeLLMService,
+            _entrypoint(
+                OPENAI_REALTIME_LLM_PIPECAT_MODULE,
+                "OpenAIRealtimeLLMService",
+            ),
+            settings_kwargs,
+        ),
+        "start_audio_paused": _metadata_bool(
+            realtime_config,
+            "startAudioPaused",
+            "start_audio_paused",
+            default=False,
+        ),
+    }
+    if user_audio_preroll := _metadata_float(
+        realtime_config,
+        "userAudioPrerollSecs",
+        "user_audio_preroll_secs",
+    ):
+        service_kwargs["user_audio_preroll_secs"] = user_audio_preroll
+    if video_detail := _metadata_text(realtime_config, "videoFrameDetail", "video_frame_detail"):
+        service_kwargs["video_frame_detail"] = video_detail
+    if start_video_paused := _metadata_bool(
+        realtime_config,
+        "startVideoPaused",
+        "start_video_paused",
+        default=None,
+    ):
+        service_kwargs["start_video_paused"] = start_video_paused
+
+    llm = runtime.OpenAIRealtimeLLMService(**service_kwargs)
+    llm_context = runtime.LLMContext(messages=_llm_context_messages(context))
+    user_aggregator, assistant_aggregator = runtime.LLMContextAggregatorPair(
+        llm_context,
+        user_params=_realtime_llm_user_aggregator_params(
+            runtime,
+            metadata,
+            local_vad=_realtime_turn_detection_is_disabled(metadata),
+        ),
+        assistant_params=runtime.LLMAssistantAggregatorParams(),
+        realtime_service_mode=True,
+    )
+    return user_aggregator, llm, assistant_aggregator
+
+
 def build_pipecat_llm_processors(
     runtime: PipecatRuntime,
     config: RealtimePipelineConfig,
@@ -1964,6 +2483,7 @@ def pipecat_pipeline_capability(
 
     capability = get_pipecat_capability(require_websocket=websocket is not None)
     metadata = dict(config.metadata)
+    profile = _pipecat_realtime_profile(config)
     requested_features = _requested_feature_metadata(config)
     openai_requirements = _resolved_openai_runtime_requirements(
         model=config.model or _metadata_text(metadata, "model", "openaiModel", "openai_model"),
@@ -1974,22 +2494,35 @@ def pipecat_pipeline_capability(
         or _metadata_text(metadata, "outputAudioFormat", "output_audio_format"),
     )
     missing: list[str] = []
-    if _feature_provider(metadata, "stt") == "openai" and not capability.stt_available:
-        missing.append("stt:openai")
-    if _feature_provider(metadata, "tts") == "openai" and not capability.tts_available:
-        missing.append("tts:openai")
     llm_provider = _feature_provider(metadata, "llm")
-    if llm_provider == "openai" and not capability.llm_available:
-        missing.append("llm:openai")
-    if llm_provider == OPENROUTER_LLM_PROVIDER and not capability.openrouter_llm_available:
-        missing.append(_llm_feature(llm_provider))
-    if _feature_provider(metadata, "vad") == "silero" and not capability.vad_available:
-        missing.append("vad:silero")
-    if (
-        _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat"
-        and not capability.turn_detection_available
-    ):
-        missing.append("turnDetection:pipecat")
+    if profile == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
+        if (
+            _realtime_llm_provider(metadata) == "openai"
+            and not capability.openai_realtime_llm_available
+        ):
+            missing.append("realtimeLlm:openai")
+        if (
+            _realtime_turn_detection_is_disabled(metadata)
+            and _feature_provider(metadata, "vad") == "silero"
+            and not capability.vad_available
+        ):
+            missing.append("vad:silero")
+    else:
+        if _feature_provider(metadata, "stt") == "openai" and not capability.stt_available:
+            missing.append("stt:openai")
+        if _feature_provider(metadata, "tts") == "openai" and not capability.tts_available:
+            missing.append("tts:openai")
+        if llm_provider == "openai" and not capability.llm_available:
+            missing.append("llm:openai")
+        if llm_provider == OPENROUTER_LLM_PROVIDER and not capability.openrouter_llm_available:
+            missing.append(_llm_feature(llm_provider))
+        if _feature_provider(metadata, "vad") == "silero" and not capability.vad_available:
+            missing.append("vad:silero")
+        if (
+            _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat"
+            and not capability.turn_detection_available
+        ):
+            missing.append("turnDetection:pipecat")
     readiness = _pipecat_pipeline_readiness(
         capability,
         config=config,
@@ -2008,11 +2541,33 @@ def pipecat_pipeline_capability(
         core_available=capability.core_available,
         media_transport="pipecat.websocket" if websocket is not None else "talkwise.audio_chunks",
         runtime=REALTIME_RUNTIME_PIPECAT,
-        stt=_feature_provider(metadata, "stt"),
-        tts=_feature_provider(metadata, "tts"),
-        llm=llm_provider,
-        vad=_feature_provider(metadata, "vad"),
-        turn_detection=_feature_provider(metadata, "turnDetection", "turn_detection"),
+        stt=(
+            "openai_realtime"
+            if profile == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH
+            else _feature_provider(metadata, "stt")
+        ),
+        tts=(
+            "openai_realtime"
+            if profile == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH
+            else _feature_provider(metadata, "tts")
+        ),
+        llm=(
+            "openai_realtime"
+            if profile == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH
+            else llm_provider
+        ),
+        vad=(
+            _feature_provider(metadata, "vad")
+            if profile != PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH
+            or _realtime_turn_detection_is_disabled(metadata)
+            else None
+        ),
+        turn_detection=(
+            "openai_realtime"
+            if profile == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH
+            and not _realtime_turn_detection_is_disabled(metadata)
+            else _feature_provider(metadata, "turnDetection", "turn_detection")
+        ),
         missing_features=tuple(missing),
         ready_for_call=readiness.ready,
         readiness=readiness,
@@ -2024,9 +2579,13 @@ def pipecat_pipeline_capability(
             "sttAvailable": capability.stt_available,
             "ttsAvailable": capability.tts_available,
             "llmAvailable": capability.llm_available,
+            "openaiRealtimeLlmAvailable": capability.openai_realtime_llm_available,
             "openrouterLlmAvailable": capability.openrouter_llm_available,
             "vadAvailable": capability.vad_available,
             "turnDetectionAvailable": capability.turn_detection_available,
+            "profile": profile,
+            "profileContract": pipecat_realtime_profile_contracts()[profile],
+            "profiles": _pipecat_realtime_profile_payload(capability),
             "requestedFeatures": requested_features,
             "openaiRuntime": dict(openai_requirements),
             "productionReady": bool(production_readiness["readyForProduction"]),
@@ -2042,6 +2601,8 @@ def pipecat_pipeline_capability(
             "sttEntrypoint": OPENAI_STT_PIPECAT_MODULE,
             "ttsEntrypoint": OPENAI_TTS_PIPECAT_MODULE,
             "llmEntrypoint": OPENAI_LLM_PIPECAT_MODULE,
+            "realtimeLlmEntrypoint": OPENAI_REALTIME_LLM_PIPECAT_MODULE,
+            "realtimeEventsEntrypoint": OPENAI_REALTIME_EVENTS_PIPECAT_MODULE,
             "llmService": _llm_service_metadata(metadata),
             "turnDetectionEntrypoint": USER_TURN_PROCESSOR_PIPECAT_MODULE,
         },
@@ -2108,7 +2669,8 @@ def _pipecat_pipeline_readiness(
 
     metadata = dict(config.metadata)
     uses_openai_key = any(
-        requested_features.get(feature) == "openai" for feature in ("stt", "tts", "llm")
+        requested_features.get(feature) == "openai"
+        for feature in ("stt", "tts", "llm", "realtimeLlm")
     )
     uses_openrouter_key = requested_features.get("llm") == OPENROUTER_LLM_PROVIDER
     if uses_openai_key and not _openai_api_key(metadata):
@@ -3041,6 +3603,313 @@ def _llm_user_aggregator_params(
     return runtime.LLMUserAggregatorParams(**kwargs)
 
 
+def _ensure_realtime_llm_runtime_available(runtime: PipecatRuntime) -> None:
+    if runtime.OpenAIRealtimeLLMService is None:
+        raise _pipecat_feature_unavailable_error(
+            "Pipecat OpenAI realtime LLM service is unavailable",
+            feature="realtimeLlm:openai",
+            modules=(OPENAI_REALTIME_LLM_PIPECAT_MODULE,),
+        )
+    missing_context = (
+        runtime.LLMContext is None
+        or runtime.LLMContextAggregatorPair is None
+        or runtime.LLMUserAggregatorParams is None
+        or runtime.LLMAssistantAggregatorParams is None
+    )
+    if missing_context:
+        raise _pipecat_feature_unavailable_error(
+            "Pipecat realtime LLM context aggregators are unavailable",
+            feature="realtimeLlm:openai",
+            modules=(LLM_CONTEXT_PIPECAT_MODULE, LLM_RESPONSE_PIPECAT_MODULE),
+        )
+    event_symbols = (
+        runtime.SessionProperties,
+        runtime.AudioConfiguration,
+        runtime.AudioInput,
+        runtime.AudioOutput,
+        runtime.InputAudioTranscription,
+        runtime.InputAudioNoiseReduction,
+        runtime.SemanticTurnDetection,
+        runtime.TurnDetection,
+        runtime.PCMAudioFormat,
+        runtime.PCMUAudioFormat,
+        runtime.PCMAAudioFormat,
+    )
+    if any(symbol is None for symbol in event_symbols):
+        raise _pipecat_feature_unavailable_error(
+            "Pipecat OpenAI realtime event configuration classes are unavailable",
+            feature="realtimeLlm:openai",
+            modules=(OPENAI_REALTIME_EVENTS_PIPECAT_MODULE,),
+        )
+
+
+def _openai_realtime_session_properties(
+    runtime: PipecatRuntime,
+    *,
+    config: RealtimePipelineConfig,
+    metadata: Mapping[str, Any],
+    realtime_config: Mapping[str, Any],
+    system_instruction: str | None,
+) -> Any:
+    input_audio_format = _openai_realtime_audio_format(
+        runtime,
+        _metadata_text(realtime_config, "inputAudioFormat", "input_audio_format")
+        or config.input_audio_format
+        or _metadata_text(metadata, "inputAudioFormat", "input_audio_format"),
+    )
+    output_format_name = (
+        _metadata_text(realtime_config, "outputAudioFormat", "output_audio_format")
+        or config.output_audio_format
+        or _metadata_text(metadata, "outputAudioFormat", "output_audio_format")
+        or _metadata_text(realtime_config, "inputAudioFormat", "input_audio_format")
+        or config.input_audio_format
+        or _metadata_text(metadata, "inputAudioFormat", "input_audio_format")
+    )
+    output_audio_format = _openai_realtime_audio_format(runtime, output_format_name)
+    transcription = runtime.InputAudioTranscription(
+        model=(
+            _metadata_text(
+                realtime_config,
+                "transcriptionModel",
+                "transcription_model",
+            )
+            or _metadata_text(metadata, "transcriptionModel", "transcription_model")
+        ),
+        language=_metadata_text(realtime_config, "language")
+        or _metadata_text(metadata, "language"),
+        prompt=_metadata_text(realtime_config, "prompt")
+        or _metadata_text(metadata, "transcriptionPrompt", "transcription_prompt"),
+    )
+    noise_reduction = _openai_realtime_noise_reduction(runtime, metadata, realtime_config)
+    audio_input = runtime.AudioInput(
+        format=input_audio_format,
+        transcription=transcription,
+        noise_reduction=noise_reduction,
+        turn_detection=_openai_realtime_turn_detection(runtime, metadata),
+    )
+    audio_output = runtime.AudioOutput(
+        format=output_audio_format,
+        voice=(
+            config.voice
+            or _metadata_text(realtime_config, "voice")
+            or _metadata_text(metadata, "voice")
+        ),
+        speed=_metadata_float(realtime_config, "speed"),
+    )
+    kwargs: dict[str, Any] = {
+        "output_modalities": _realtime_output_modalities(realtime_config),
+        "audio": runtime.AudioConfiguration(input=audio_input, output=audio_output),
+    }
+    if model := (
+        _metadata_text(realtime_config, "model")
+        or _metadata_text(
+            metadata,
+            "realtimeModel",
+            "realtime_model",
+            "openaiRealtimeModel",
+            "openai_realtime_model",
+            "model",
+        )
+        or config.model
+    ):
+        kwargs["model"] = model
+    if system_instruction:
+        kwargs["instructions"] = system_instruction
+    max_output_tokens = _metadata_int(
+        realtime_config,
+        "maxOutputTokens",
+        "max_output_tokens",
+    )
+    if max_output_tokens is not None:
+        kwargs["max_output_tokens"] = max_output_tokens
+    if tool_choice := _metadata_text(realtime_config, "toolChoice", "tool_choice"):
+        kwargs["tool_choice"] = tool_choice
+    if include := _metadata_text_list(realtime_config, "include"):
+        kwargs["include"] = include
+    return runtime.SessionProperties(**kwargs)
+
+
+def _openai_realtime_audio_format(runtime: PipecatRuntime, value: object | None) -> Any:
+    normalized = _normalize_openai_realtime_audio_format_name(value)
+    if normalized == "pcm":
+        return runtime.PCMAudioFormat()
+    if normalized == "pcmu":
+        return runtime.PCMUAudioFormat()
+    if normalized == "pcma":
+        return runtime.PCMAAudioFormat()
+    raise ValueError(
+        "OpenAI realtime audio format must be pcm16, audio/pcm, audio/pcmu, or audio/pcma"
+    )
+
+
+def _normalize_openai_realtime_audio_format_name(value: object | None) -> str:
+    text = str(value or "pcm16").strip().lower().replace("-", "_")
+    compact = text.replace("_", "").replace("/", "")
+    if compact in {"pcm", "pcm16", "audiopcm", "linear16", "l16"}:
+        return "pcm"
+    if compact in {"pcmu", "audiopcmu", "g711ulaw", "ulaw", "mulaw"}:
+        return "pcmu"
+    if compact in {"pcma", "audiopcma", "g711alaw", "alaw"}:
+        return "pcma"
+    return text
+
+
+def _openai_realtime_noise_reduction(
+    runtime: PipecatRuntime,
+    metadata: Mapping[str, Any],
+    realtime_config: Mapping[str, Any],
+) -> Any | None:
+    noise_reduction = (
+        _metadata_text(realtime_config, "noiseReduction", "noise_reduction")
+        or _metadata_text(metadata, "noiseReduction", "noise_reduction")
+        or "near_field"
+    )
+    normalized = noise_reduction.strip().lower()
+    if normalized in {"none", "false", "disabled", "off"}:
+        return None
+    return runtime.InputAudioNoiseReduction(type=normalized)
+
+
+def _openai_realtime_turn_detection(
+    runtime: PipecatRuntime,
+    metadata: Mapping[str, Any],
+) -> Any:
+    raw_value = _realtime_turn_detection_raw_value(metadata)
+    if raw_value is None or raw_value is True:
+        return runtime.SemanticTurnDetection()
+    if raw_value is False:
+        return False
+    if isinstance(raw_value, str):
+        return _openai_realtime_turn_detection_from_name(runtime, raw_value)
+    if isinstance(raw_value, Mapping):
+        mode = _metadata_text(raw_value, "mode", "type", "strategy")
+        provider = _metadata_text(raw_value, "provider", "source")
+        selected = mode or provider or "semantic_vad"
+        normalized = selected.strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized in {"openai", "openai_realtime", "semantic", "semantic_vad"}:
+            return runtime.SemanticTurnDetection(
+                **_processor_kwargs(
+                    raw_value,
+                    allowed={
+                        "eagerness": "eagerness",
+                        "createResponse": "create_response",
+                        "create_response": "create_response",
+                        "interruptResponse": "interrupt_response",
+                        "interrupt_response": "interrupt_response",
+                    },
+                )
+            )
+        if normalized in {"server", "server_vad"}:
+            return runtime.TurnDetection(
+                **_processor_kwargs(
+                    raw_value,
+                    allowed={
+                        "threshold": "threshold",
+                        "prefixPaddingMs": "prefix_padding_ms",
+                        "prefix_padding_ms": "prefix_padding_ms",
+                        "silenceDurationMs": "silence_duration_ms",
+                        "silence_duration_ms": "silence_duration_ms",
+                    },
+                )
+            )
+        if normalized in {"false", "disabled", "none", "local", "manual", "pipecat"}:
+            return False
+    raise ValueError("OpenAI realtime turn detection must be semantic_vad, server_vad, or disabled")
+
+
+def _openai_realtime_turn_detection_from_name(runtime: PipecatRuntime, value: str) -> Any:
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"semantic", "semantic_vad", "openai", "openai_realtime", "true"}:
+        return runtime.SemanticTurnDetection()
+    if normalized in {"server", "server_vad"}:
+        return runtime.TurnDetection()
+    if normalized in {"false", "disabled", "none", "local", "manual", "pipecat"}:
+        return False
+    raise ValueError("OpenAI realtime turn detection must be semantic_vad, server_vad, or disabled")
+
+
+def _realtime_output_modalities(metadata: Mapping[str, Any]) -> list[str]:
+    values = _metadata_text_list(
+        metadata,
+        "outputModalities",
+        "output_modalities",
+        "modalities",
+    )
+    if not values:
+        return ["audio"]
+    normalized: list[str] = []
+    for value in values:
+        item = value.strip().lower()
+        if item == "both":
+            normalized.extend(["text", "audio"])
+            continue
+        if item not in {"text", "audio"}:
+            raise ValueError("OpenAI realtime output modalities must be text, audio, or both")
+        normalized.append(item)
+    return list(dict.fromkeys(normalized))
+
+
+def _metadata_text_list(metadata: Mapping[str, Any], *keys: str) -> list[str] | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            values = [item.strip() for item in value.split(",")]
+            return [item for item in values if item]
+        if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray | str):
+            values = [str(item).strip() for item in value]
+            return [item for item in values if item]
+    return None
+
+
+def _realtime_llm_user_aggregator_params(
+    runtime: PipecatRuntime,
+    metadata: Mapping[str, Any],
+    *,
+    local_vad: bool,
+) -> Any:
+    turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
+    kwargs: dict[str, Any] = {}
+    if local_vad:
+        if runtime.SileroVADAnalyzer is None:
+            raise _pipecat_feature_unavailable_error(
+                "Pipecat Silero VAD analyzer is unavailable for local realtime turns",
+                feature="vad:silero",
+                modules=(SILERO_VAD_PIPECAT_MODULE,),
+            )
+        vad_config = _feature_config(metadata, "vad")
+        vad_analyzer_kwargs: dict[str, Any] = {}
+        if sample_rate := _metadata_int(
+            vad_config,
+            "sampleRate",
+            "sample_rate",
+            "vadSampleRate",
+            "vad_sample_rate",
+        ):
+            vad_analyzer_kwargs["sample_rate"] = sample_rate
+        if vad_params := _vad_params(runtime, vad_config):
+            vad_analyzer_kwargs["params"] = vad_params
+        kwargs["vad_analyzer"] = runtime.SileroVADAnalyzer(**vad_analyzer_kwargs)
+    user_turn_stop_timeout = _metadata_float(
+        turn_config,
+        "userTurnStopTimeout",
+        "user_turn_stop_timeout",
+    )
+    if user_turn_stop_timeout is not None:
+        kwargs["user_turn_stop_timeout"] = user_turn_stop_timeout
+    user_idle_timeout = _metadata_float(
+        turn_config,
+        "userIdleTimeout",
+        "user_idle_timeout",
+    )
+    if user_idle_timeout is not None:
+        kwargs["user_idle_timeout"] = user_idle_timeout
+    if user_turn_strategies := _user_turn_strategies(runtime, turn_config):
+        kwargs["user_turn_strategies"] = user_turn_strategies
+    if completion_config := _user_turn_completion_config(runtime, turn_config):
+        kwargs["user_turn_completion_config"] = completion_config
+    return runtime.LLMUserAggregatorParams(**kwargs)
+
+
 def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
     return (
         _metadata_text(metadata, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
@@ -3089,16 +3958,13 @@ def _llm_api_key(
 ) -> str | None:
     if provider == OPENROUTER_LLM_PROVIDER:
         return _openrouter_api_key(metadata)
-    return (
-        _metadata_text(
-            llm_config,
-            "openaiApiKey",
-            "openai_api_key",
-            "apiKey",
-            "api_key",
-        )
-        or _openai_api_key(metadata)
-    )
+    return _metadata_text(
+        llm_config,
+        "openaiApiKey",
+        "openai_api_key",
+        "apiKey",
+        "api_key",
+    ) or _openai_api_key(metadata)
 
 
 def _llm_base_url(
@@ -3188,7 +4054,10 @@ def _llm_service_metadata(metadata: Mapping[str, Any]) -> dict[str, object]:
 
 def _pipecat_required_env(requested_features: Mapping[str, str | None]) -> tuple[str, ...]:
     env_keys: list[str] = []
-    if any(requested_features.get(feature) == "openai" for feature in ("stt", "tts", "llm")):
+    if any(
+        requested_features.get(feature) == "openai"
+        for feature in ("stt", "tts", "llm", "realtimeLlm")
+    ):
         env_keys.extend(OPENAI_API_KEY_ENV_KEYS)
     if requested_features.get("llm") == OPENROUTER_LLM_PROVIDER:
         env_keys.extend(OPENROUTER_API_KEY_ENV_KEYS)
@@ -3425,6 +4294,11 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
     """Validate supported Pipecat-owned voice chain options before constructing services."""
 
     metadata = dict(config.metadata)
+    _validate_pipecat_realtime_profile(metadata)
+    if _pipecat_realtime_profile(config) == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
+        _validate_pipecat_speech_to_speech_config(config)
+        return
+
     _validate_provider(metadata, "stt", supported={"openai"})
     _validate_provider(metadata, "tts", supported={"openai"})
     _validate_provider(metadata, "llm", supported=PIPECAT_SUPPORTED_LLM_PROVIDERS)
@@ -3467,6 +4341,123 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
     llm_temperature = _metadata_float(_feature_config(metadata, "llm"), "temperature")
     if llm_temperature is not None and not 0 <= llm_temperature <= 2:
         raise ValueError("OpenAI LLM temperature must be between 0 and 2")
+
+
+def _validate_pipecat_realtime_profile(metadata: Mapping[str, Any]) -> None:
+    for key in (
+        "profile",
+        "realtimeProfile",
+        "realtime_profile",
+        "pipelineProfile",
+        "pipeline_profile",
+        "voiceProfile",
+        "voice_profile",
+    ):
+        value = metadata.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or text.lower() in {"none", "false", "disabled", "default"}:
+            continue
+        if _normalize_pipecat_realtime_profile(text) is None:
+            supported = ", ".join(sorted(PIPECAT_REALTIME_PROFILE_ALIASES))
+            raise ValueError(
+                f"Unsupported Pipecat realtime profile '{text}'; expected one of: {supported}"
+            )
+
+
+def _validate_pipecat_speech_to_speech_config(config: RealtimePipelineConfig) -> None:
+    metadata = dict(config.metadata)
+    realtime_config = _realtime_llm_config(metadata)
+    provider = _realtime_llm_provider(metadata)
+    if provider != "openai":
+        raise ValueError(f"Unsupported Pipecat realtimeLlm provider '{provider}'; expected openai")
+
+    for value in (
+        _metadata_text(realtime_config, "inputAudioFormat", "input_audio_format")
+        or config.input_audio_format
+        or _metadata_text(metadata, "inputAudioFormat", "input_audio_format"),
+        _metadata_text(realtime_config, "outputAudioFormat", "output_audio_format")
+        or config.output_audio_format
+        or _metadata_text(metadata, "outputAudioFormat", "output_audio_format"),
+    ):
+        if value is not None:
+            normalized = _normalize_openai_realtime_audio_format_name(value)
+            if normalized not in {"pcm", "pcmu", "pcma"}:
+                raise ValueError(
+                    "OpenAI realtime audio format must be pcm16, audio/pcm, audio/pcmu, "
+                    "or audio/pcma"
+                )
+
+    noise_reduction = _metadata_text(
+        realtime_config, "noiseReduction", "noise_reduction"
+    ) or _metadata_text(metadata, "noiseReduction", "noise_reduction")
+    if noise_reduction is not None:
+        normalized_noise = noise_reduction.strip().lower()
+        if normalized_noise not in {"near_field", "far_field", "none", "false", "disabled", "off"}:
+            raise ValueError("OpenAI realtime noise reduction must be near_field or far_field")
+
+    if _realtime_turn_detection_raw_value(metadata) is not None:
+        _validate_openai_realtime_turn_detection_value(metadata)
+
+    if (
+        _realtime_turn_detection_is_disabled(metadata)
+        and _feature_provider(metadata, "vad") == "silero"
+    ):
+        vad_config = _feature_config(metadata, "vad")
+        vad_sample_rate = _metadata_int(
+            vad_config,
+            "sampleRate",
+            "sample_rate",
+            "vadSampleRate",
+            "vad_sample_rate",
+        ) or _metadata_int(metadata, "vadSampleRate", "vad_sample_rate")
+        if vad_sample_rate not in {None, 8000, 16000}:
+            raise ValueError("Silero VAD sample rate must be 8000 or 16000")
+
+    if (
+        speed := _metadata_float(realtime_config, "speed")
+    ) is not None and not 0.25 <= speed <= 4.0:
+        raise ValueError("OpenAI realtime output speed must be between 0.25 and 4.0")
+    temperature = _metadata_float(realtime_config, "temperature")
+    if temperature is not None and not 0 <= temperature <= 2:
+        raise ValueError("OpenAI realtime LLM temperature must be between 0 and 2")
+    _realtime_output_modalities(realtime_config)
+
+
+def _validate_openai_realtime_turn_detection_value(metadata: Mapping[str, Any]) -> None:
+    raw_value = _realtime_turn_detection_raw_value(metadata)
+    if raw_value is None or isinstance(raw_value, bool):
+        return
+    if isinstance(raw_value, str):
+        _openai_realtime_turn_detection_from_name(_NoopRealtimeTurnRuntime, raw_value)
+        return
+    if isinstance(raw_value, Mapping):
+        mode = _metadata_text(raw_value, "mode", "type", "strategy")
+        provider = _metadata_text(raw_value, "provider", "source")
+        selected = mode or provider or "semantic_vad"
+        normalized = selected.strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized in {
+            "openai",
+            "openai_realtime",
+            "semantic",
+            "semantic_vad",
+            "server",
+            "server_vad",
+            "false",
+            "disabled",
+            "none",
+            "local",
+            "manual",
+            "pipecat",
+        }:
+            return
+    raise ValueError("OpenAI realtime turn detection must be semantic_vad, server_vad, or disabled")
+
+
+class _NoopRealtimeTurnRuntime:
+    SemanticTurnDetection = object
+    TurnDetection = object
 
 
 def _validate_provider(
@@ -3532,13 +4523,22 @@ def pipecat_source_snapshot() -> Mapping[str, Any]:
         "ttsSettingsEntrypoint": ("pipecat.services.openai.tts.OpenAITTSService.Settings"),
         "llmEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService"),
         "llmSettingsEntrypoint": ("pipecat.services.openai.llm.OpenAILLMService.Settings"),
+        "openaiRealtimeLlmAdapter": {
+            "provider": "openai",
+            "serviceEntrypoint": ("pipecat.services.openai.realtime.llm.OpenAIRealtimeLLMService"),
+            "settingsEntrypoint": (
+                "pipecat.services.openai.realtime.llm.OpenAIRealtimeLLMService.Settings"
+            ),
+            "eventsEntrypoint": "pipecat.services.openai.realtime.events",
+            "mode": "native_pipecat_speech_to_speech_service",
+            "defaultTurnDetection": "semantic_vad",
+            "defaultAudioSampleRate": 24000,
+        },
         "openrouterLlmAdapter": {
             "provider": OPENROUTER_LLM_PROVIDER,
             "baseUrl": OPENROUTER_LLM_BASE_URL,
             "serviceEntrypoint": "pipecat.services.openrouter.llm.OpenRouterLLMService",
-            "settingsEntrypoint": (
-                "pipecat.services.openrouter.llm.OpenRouterLLMService.Settings"
-            ),
+            "settingsEntrypoint": ("pipecat.services.openrouter.llm.OpenRouterLLMService.Settings"),
             "mode": "native_pipecat_llm_service",
         },
         "providerCatalog": pipecat_provider_catalog(probe_imports=False),
@@ -3578,6 +4578,7 @@ __all__ = [
     "PipecatRuntime",
     "build_pipecat_pipeline_handle",
     "build_pipecat_llm_processors",
+    "build_pipecat_speech_to_speech_processors",
     "build_pipecat_voice_processors",
     "create_pipecat_realtime_pipeline",
     "create_talkwise_event_processor",
@@ -3586,6 +4587,7 @@ __all__ = [
     "is_pipecat_available",
     "pipecat_pipeline_capability",
     "pipecat_realtime_capability_response",
+    "pipecat_realtime_profile_contracts",
     "pipecat_realtime_readiness",
     "pipecat_realtime_smoke_contract",
     "pipecat_provider_catalog",

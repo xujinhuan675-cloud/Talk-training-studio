@@ -9,6 +9,23 @@ export type RealtimeSessionStatus =
   | 'closed'
   | 'error'
 
+export type RealtimeVoiceProfile = 'cascade' | 'speech_to_speech' | 'true_realtime'
+
+export type RealtimeVoiceCanonicalProfile = 'cascade' | 'speech_to_speech'
+
+export interface RealtimeVoiceAudioContract {
+  realtimeProfile: RealtimeVoiceProfile
+  canonicalProfile: RealtimeVoiceCanonicalProfile
+  inputSampleRate: number
+  outputSampleRate: number
+  channels: 1
+  audioFormat: 'pcm16'
+  inputMimeType: 'audio/pcm'
+  transport: 'websocket'
+  latencyProfile: 'near_realtime' | 'true_realtime'
+  turnDetection: 'local_vad' | 'server_semantic_vad'
+}
+
 export interface RealtimeAudioOutputPayload {
   audio: ArrayBuffer
   mimeType?: string
@@ -541,15 +558,57 @@ export function createRealtimeSession(options: RealtimeSessionOptions): Realtime
   return new RealtimeSession(options)
 }
 
+function normalizeRealtimeVoiceProfile(profile?: string | null): RealtimeVoiceProfile {
+  const normalized = profile?.trim().toLowerCase()
+  if (normalized === 'speech_to_speech' || normalized === 'speech2speech' || normalized === 'true_realtime') {
+    return normalized === 'true_realtime' ? 'true_realtime' : 'speech_to_speech'
+  }
+  return 'cascade'
+}
+
+export function getRealtimeVoiceAudioContract(profile?: string | null): RealtimeVoiceAudioContract {
+  const realtimeProfile = normalizeRealtimeVoiceProfile(profile)
+  const canonicalProfile = realtimeProfile === 'cascade' ? 'cascade' : 'speech_to_speech'
+  if (canonicalProfile === 'speech_to_speech') {
+    return {
+      realtimeProfile,
+      canonicalProfile,
+      inputSampleRate: 24000,
+      outputSampleRate: 24000,
+      channels: 1,
+      audioFormat: 'pcm16',
+      inputMimeType: 'audio/pcm',
+      transport: 'websocket',
+      latencyProfile: 'true_realtime',
+      turnDetection: 'server_semantic_vad',
+    }
+  }
+
+  return {
+    realtimeProfile: 'cascade',
+    canonicalProfile: 'cascade',
+    inputSampleRate: 16000,
+    outputSampleRate: 24000,
+    channels: 1,
+    audioFormat: 'pcm16',
+    inputMimeType: 'audio/pcm',
+    transport: 'websocket',
+    latencyProfile: 'near_realtime',
+    turnDetection: 'local_vad',
+  }
+}
+
 export function getTrainingRealtimeWebSocketUrl({
   sessionId,
   roomId,
   audioFormat,
+  profile,
 }: {
   sessionId?: string | number | null
   roomId?: string | number | null
   provider?: string | null
   audioFormat?: string | null
+  profile?: string | null
 } = {}): string {
   const base = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
   const params = new URLSearchParams()
@@ -562,6 +621,10 @@ export function getTrainingRealtimeWebSocketUrl({
   params.set('provider', 'pipecat')
   if (audioFormat !== undefined && audioFormat !== null && String(audioFormat).trim()) {
     params.set('audio_format', String(audioFormat).trim())
+  }
+  const realtimeProfile = normalizeRealtimeVoiceProfile(profile)
+  if (realtimeProfile !== 'cascade') {
+    params.set('profile', realtimeProfile)
   }
   const query = params.toString()
   return `${base}/api/v1/training-studio/realtime${query ? `?${query}` : ''}`

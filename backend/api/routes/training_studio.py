@@ -153,6 +153,7 @@ from domain.training_studio.storybank import JsonFileStoryBankStore, StoryBankSe
 from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
 from infrastructure.external.pipecat.realtime_pipeline import (
     pipecat_realtime_capability_response as build_pipecat_realtime_capability_response,
+    pipecat_realtime_profile_contracts,
     pipecat_realtime_smoke_contract,
 )
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
@@ -171,7 +172,101 @@ _PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "vad": "silero",
     "turnDetection": "pipecat",
 }
+_PIPECAT_REALTIME_PROFILE_CASCADE = "cascade"
+_PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH = "speech_to_speech"
+_PIPECAT_REALTIME_PROFILE_ALIASES = {
+    "cascade": _PIPECAT_REALTIME_PROFILE_CASCADE,
+    "cascaded": _PIPECAT_REALTIME_PROFILE_CASCADE,
+    "chain": _PIPECAT_REALTIME_PROFILE_CASCADE,
+    "near_realtime": _PIPECAT_REALTIME_PROFILE_CASCADE,
+    "stt_llm_tts": _PIPECAT_REALTIME_PROFILE_CASCADE,
+    "speech_to_speech": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "speech2speech": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "speechtospeech": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "true_realtime": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "realtime_llm": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "openai_realtime": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    "openai_speech_to_speech": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+}
 _OPENAI_REALTIME_API_KEY_ENV_KEYS = OPENAI_REALTIME_API_KEY_ENV_KEYS
+
+
+def _pipecat_realtime_profile_contract(
+    profile: str,
+    *,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    contracts = pipecat_realtime_profile_contracts()
+    selected = contracts.get(profile) or contracts[_PIPECAT_REALTIME_PROFILE_CASCADE]
+    contract = dict(selected)
+    for key in (
+        "inputAudio",
+        "outputAudio",
+        "services",
+        "turnDetection",
+        "talkwiseIntegration",
+        "readinessFeatures",
+        "browserE2E",
+    ):
+        value = selected.get(key)
+        if isinstance(value, Mapping):
+            contract[key] = dict(value)
+    browser_e2e = contract.get("browserE2E")
+    if isinstance(browser_e2e, dict) and isinstance(browser_e2e.get("requiredSignals"), list):
+        browser_e2e["requiredSignals"] = list(browser_e2e["requiredSignals"])
+    input_audio = contract.get("inputAudio")
+    if input_sample_rate is not None and isinstance(input_audio, dict):
+        input_audio["sampleRate"] = input_sample_rate
+    return contract
+
+
+def _pipecat_realtime_audio_contract(
+    profile: str,
+    *,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    contract = _pipecat_realtime_profile_contract(
+        profile,
+        input_sample_rate=input_sample_rate,
+    )
+    return {
+        "input": contract.get("inputAudio", {}),
+        "output": contract.get("outputAudio", {}),
+        "transport": "websocket.binary_frames",
+    }
+
+
+def _merge_pipecat_realtime_profile_contracts(
+    profiles: object,
+) -> dict[str, object]:
+    payload = dict(profiles) if isinstance(profiles, Mapping) else {}
+    payload.setdefault("default", _PIPECAT_REALTIME_PROFILE_CASCADE)
+    payload.setdefault(
+        "supported",
+        [
+            _PIPECAT_REALTIME_PROFILE_CASCADE,
+            _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+        ],
+    )
+    for profile in (
+        _PIPECAT_REALTIME_PROFILE_CASCADE,
+        _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+    ):
+        current = payload.get(profile)
+        item = dict(current) if isinstance(current, Mapping) else {}
+        contract = _pipecat_realtime_profile_contract(profile)
+        item.setdefault("contract", contract)
+        item.setdefault("latencyProfile", contract.get("latencyProfile"))
+        item.setdefault("costProfile", contract.get("costProfile"))
+        item.setdefault("audioContract", _pipecat_realtime_audio_contract(profile))
+        item.setdefault(
+            "browserE2E",
+            contract.get("browserE2E", {}),
+        )
+        payload[profile] = item
+    return payload
+
+
 _training_session_service = TrainingSessionService(uow_factory=SQLAlchemyUnitOfWork)
 _live_guidance_service = TrainingLiveGuidanceService()
 _live_guidance_llm_client: LLMPort | None = None
@@ -591,7 +686,9 @@ def get_training_scenario_config_service() -> TrainingScenarioConfigService:
     return _training_scenario_config_service
 
 
-def _scenario_templates_from_config(config: ScenarioConfigStateDTO) -> list[ScenarioTrainingTemplateDTO]:
+def _scenario_templates_from_config(
+    config: ScenarioConfigStateDTO,
+) -> list[ScenarioTrainingTemplateDTO]:
     return [
         ScenarioTrainingTemplateDTO(
             id=draft.id,
@@ -1476,7 +1573,33 @@ def _pipecat_realtime_llm_provider() -> str:
     return "openai"
 
 
-def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, object]:
+def _pipecat_realtime_pipeline_metadata(
+    binding: tuple[str, int],
+    *,
+    profile: str = _PIPECAT_REALTIME_PROFILE_CASCADE,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    if profile == _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
+        return _pipecat_speech_to_speech_pipeline_metadata(
+            binding,
+            input_sample_rate=input_sample_rate,
+        )
+    return _pipecat_cascade_pipeline_metadata(
+        binding,
+        input_sample_rate=input_sample_rate,
+    )
+
+
+def _pipecat_cascade_pipeline_metadata(
+    binding: tuple[str, int],
+    *,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    resolved_input_sample_rate = input_sample_rate or 16000
+    profile_contract = _pipecat_realtime_profile_contract(
+        _PIPECAT_REALTIME_PROFILE_CASCADE,
+        input_sample_rate=resolved_input_sample_rate,
+    )
     stt: dict[str, object] = {
         "provider": "openai",
         "turnDetection": "disabled",
@@ -1493,15 +1616,87 @@ def _pipecat_realtime_pipeline_metadata(binding: tuple[str, int]) -> dict[str, o
     return {
         "transport": "websocket",
         "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+        "profile": _PIPECAT_REALTIME_PROFILE_CASCADE,
+        "realtimeProfile": _PIPECAT_REALTIME_PROFILE_CASCADE,
         "transcriptionModel": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
-        "inputSampleRate": 16000,
+        "inputSampleRate": resolved_input_sample_rate,
         "outputSampleRate": 24000,
+        "inputAudioFormat": "pcm16",
+        "outputAudioFormat": "pcm16",
+        "audioContract": _pipecat_realtime_audio_contract(
+            _PIPECAT_REALTIME_PROFILE_CASCADE,
+            input_sample_rate=resolved_input_sample_rate,
+        ),
+        "profileContract": profile_contract,
+        "latencyProfile": profile_contract["latencyProfile"],
+        "costProfile": profile_contract["costProfile"],
+        "browserE2E": profile_contract["browserE2E"],
+        "readinessFeatures": profile_contract["readinessFeatures"],
         "stt": stt,
         "llm": llm,
         "context": {"provider": "pipecat", "realtimeServiceMode": False},
         "tts": {"provider": "openai"},
         "vad": {"provider": "silero", "source": "pipecat", "sampleRate": 16000},
         "turnDetection": {"provider": "pipecat", "source": "pipecat"},
+        "talkwise": {
+            "trainingSessionId": binding[0],
+            "roomId": binding[1],
+            "provider": "pipecat",
+            "runtime": "realtime_voice",
+            "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+            "transport": "websocket",
+        },
+    }
+
+
+def _pipecat_speech_to_speech_pipeline_metadata(
+    binding: tuple[str, int],
+    *,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    resolved_input_sample_rate = input_sample_rate or 24000
+    profile_contract = _pipecat_realtime_profile_contract(
+        _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+        input_sample_rate=resolved_input_sample_rate,
+    )
+    turn_detection = {
+        "provider": "openai",
+        "source": "openai_realtime",
+        "mode": "semantic_vad",
+    }
+    realtime_llm: dict[str, object] = {
+        "provider": "openai",
+        "model": settings.REALTIME_OPENAI_MODEL,
+        "voice": settings.REALTIME_OPENAI_VOICE,
+        "turnDetection": turn_detection,
+        "noiseReduction": "near_field",
+        "outputModalities": ["audio"],
+    }
+    if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
+        realtime_llm["transcriptionModel"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
+
+    return {
+        "transport": "websocket",
+        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+        "profile": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+        "realtimeProfile": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+        "transcriptionModel": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+        "inputSampleRate": resolved_input_sample_rate,
+        "outputSampleRate": 24000,
+        "inputAudioFormat": settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
+        "outputAudioFormat": settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
+        "audioContract": _pipecat_realtime_audio_contract(
+            _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+            input_sample_rate=resolved_input_sample_rate,
+        ),
+        "profileContract": profile_contract,
+        "latencyProfile": profile_contract["latencyProfile"],
+        "costProfile": profile_contract["costProfile"],
+        "browserE2E": profile_contract["browserE2E"],
+        "readinessFeatures": profile_contract["readinessFeatures"],
+        "realtimeLlm": realtime_llm,
+        "context": {"provider": "pipecat", "realtimeServiceMode": True},
+        "turnDetection": turn_detection,
         "talkwise": {
             "trainingSessionId": binding[0],
             "roomId": binding[1],
@@ -1552,7 +1747,9 @@ def _pipecat_unavailable_capability_response(
         "sttAvailable": False,
         "ttsAvailable": False,
         "llmAvailable": False,
+        "openaiRealtimeLlmAvailable": False,
         "turnDetectionAvailable": False,
+        "profiles": _merge_pipecat_realtime_profile_contracts(None),
         "missingModules": list(modules),
         "optionalMissingModules": [],
         "error": message,
@@ -1609,6 +1806,7 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
             code="PIPECAT_CAPABILITY_ERROR",
         )
     data = dict(response)
+    data["profiles"] = _merge_pipecat_realtime_profile_contracts(data.get("profiles"))
     data["smoke"] = _provider_neutral_realtime_smoke_contract(data.get("smoke"))
     return data
 
@@ -1663,6 +1861,80 @@ def _query_realtime_provider(websocket: WebSocket) -> str:
         return "pipecat"
     normalized = provider.lower().replace("-", "_")
     return "pipecat" if normalized in {"pipecat", "pipecat_pipeline"} else normalized
+
+
+def _query_realtime_profile(websocket: WebSocket) -> str:
+    profile = _coerce_optional_text(
+        websocket.query_params.get("profile")
+        or websocket.query_params.get("realtimeProfile")
+        or websocket.query_params.get("realtime_profile")
+    )
+    if profile is None:
+        return _PIPECAT_REALTIME_PROFILE_CASCADE
+    normalized = profile.lower().replace("-", "_").replace(" ", "_")
+    compact = normalized.replace("_", "")
+    selected = _PIPECAT_REALTIME_PROFILE_ALIASES.get(
+        normalized,
+        _PIPECAT_REALTIME_PROFILE_ALIASES.get(compact),
+    )
+    if selected is None:
+        allowed = ", ".join(sorted(_PIPECAT_REALTIME_PROFILE_ALIASES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Realtime profile must be one of: {allowed}",
+        )
+    return selected
+
+
+def _default_realtime_input_sample_rate(profile: str) -> int:
+    if profile == _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
+        return 24000
+    return 16000
+
+
+def _query_realtime_input_sample_rate(websocket: WebSocket, *, profile: str) -> int:
+    value = (
+        websocket.query_params.get("input_sample_rate")
+        or websocket.query_params.get("inputSampleRate")
+        or websocket.query_params.get("sample_rate")
+        or websocket.query_params.get("sampleRate")
+    )
+    if value is None:
+        return _default_realtime_input_sample_rate(profile)
+    sample_rate = _coerce_optional_int(value)
+    if sample_rate is None or sample_rate < 8000 or sample_rate > 48000:
+        raise HTTPException(
+            status_code=400,
+            detail="Realtime input sample rate must be between 8000 and 48000 Hz",
+        )
+    return sample_rate
+
+
+def _realtime_audio_chunk_metadata(
+    *,
+    profile: str,
+    input_sample_rate: int,
+    payload: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    sample_rate = input_sample_rate
+    channels = 1
+    if payload is not None:
+        sample_rate = (
+            _coerce_optional_int(payload.get("sampleRate") or payload.get("sample_rate"))
+            or input_sample_rate
+        )
+        channels = _coerce_optional_int(payload.get("channels") or payload.get("numChannels")) or 1
+    return {
+        "profile": profile,
+        "realtimeProfile": profile,
+        "sampleRate": sample_rate,
+        "inputSampleRate": sample_rate,
+        "channels": channels,
+        "audioContract": _pipecat_realtime_audio_contract(
+            profile,
+            input_sample_rate=sample_rate,
+        ),
+    }
 
 
 def _uses_pipecat_realtime(provider: str) -> bool:
@@ -1728,6 +2000,7 @@ async def _build_realtime_voice_context(
     binding: tuple[str, int],
     *,
     provider: str,
+    realtime_profile: str = _PIPECAT_REALTIME_PROFILE_CASCADE,
     svc: TrainingSessionService,
     uow_factory: Callable[..., AbstractUnitOfWork],
     current_user: CurrentUser,
@@ -1746,6 +2019,7 @@ async def _build_realtime_voice_context(
             "transport": "websocket",
             "provider": provider,
             "realtimeRuntime": realtime_runtime_for_provider(provider),
+            "realtimeProfile": realtime_profile,
             "roomId": binding[1],
         },
     )
@@ -2785,7 +3059,9 @@ async def get_catalog(
 
 @router.get("/scenario-templates", summary="Get scenario training templates")
 async def get_scenario_templates(
-    scenario_config_svc: TrainingScenarioConfigService = Depends(get_training_scenario_config_service),
+    scenario_config_svc: TrainingScenarioConfigService = Depends(
+        get_training_scenario_config_service
+    ),
 ):
     config = scenario_config_svc.get_config()
     templates = _scenario_templates_from_config(config)
@@ -3276,6 +3552,8 @@ async def realtime_training_session(
     await websocket.accept()
     query_session_id, query_room_id = _query_binding(websocket)
     provider = _query_realtime_provider(websocket)
+    realtime_profile = _query_realtime_profile(websocket)
+    input_sample_rate = _query_realtime_input_sample_rate(websocket, profile=realtime_profile)
     session = RealtimeSession(session_id=query_session_id)
     binding: tuple[str, int] | None = None
     pipeline_runner: RealtimePipelineSessionRunner | None = None
@@ -3331,6 +3609,7 @@ async def realtime_training_session(
         voice_context = await _build_realtime_voice_context(
             active_binding,
             provider=provider,
+            realtime_profile=realtime_profile,
             svc=svc,
             uow_factory=uow_factory,
             current_user=current_user,
@@ -3352,7 +3631,11 @@ async def realtime_training_session(
             output_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
             instructions=_default_realtime_agent_instructions(),
             context_metadata=voice_context["metadata"],
-            config_metadata=_pipecat_realtime_pipeline_metadata(active_binding),
+            config_metadata=_pipecat_realtime_pipeline_metadata(
+                active_binding,
+                profile=realtime_profile,
+                input_sample_rate=input_sample_rate,
+            ),
         )
         pipeline_runner = runner
 
@@ -3375,6 +3658,16 @@ async def realtime_training_session(
             "transport": "websocket",
             "provider": provider,
             "realtimeRuntime": realtime_runtime_for_provider(provider),
+            "realtimeProfile": realtime_profile,
+            "inputSampleRate": input_sample_rate,
+            "audioContract": _pipecat_realtime_audio_contract(
+                realtime_profile,
+                input_sample_rate=input_sample_rate,
+            ),
+            "profileContract": _pipecat_realtime_profile_contract(
+                realtime_profile,
+                input_sample_rate=input_sample_rate,
+            ),
         }
         if binding is not None:
             start_metadata.update({"trainingSessionId": binding[0], "roomId": binding[1]})
@@ -3397,6 +3690,10 @@ async def realtime_training_session(
                         data=audio_bytes,
                         mime_type="audio/pcm",
                         sequence=session.input_sequence,
+                        metadata=_realtime_audio_chunk_metadata(
+                            profile=realtime_profile,
+                            input_sample_rate=input_sample_rate,
+                        ),
                     )
                 )
                 pipeline_runner.raise_if_failed()
@@ -3466,6 +3763,11 @@ async def realtime_training_session(
                         data=audio_bytes,
                         mime_type=mime_type,
                         sequence=session.input_sequence,
+                        metadata=_realtime_audio_chunk_metadata(
+                            profile=realtime_profile,
+                            input_sample_rate=input_sample_rate,
+                            payload=payload,
+                        ),
                     )
                 )
                 pipeline_runner.raise_if_failed()

@@ -46,6 +46,8 @@ _RUNTIME_INTEGRATED_MODULES = {
     "pipecat.services.openai.stt": "runtime_integrated",
     "pipecat.services.openai.tts": "runtime_integrated",
     "pipecat.services.openai.llm": "runtime_integrated",
+    "pipecat.services.openai.realtime.llm": "runtime_integrated",
+    "pipecat.services.openai.realtime.events": "runtime_integrated",
     "pipecat.services.openrouter.llm": "runtime_integrated",
     "pipecat.transports.websocket.fastapi": "runtime_integrated",
     "pipecat.turns.user_turn_processor": "runtime_integrated",
@@ -144,7 +146,9 @@ def pipecat_integrated_provider_modules() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=2)
-def _iter_pipecat_provider_entries_cached(probe_imports: bool) -> tuple[PipecatProviderCatalogEntry, ...]:
+def _iter_pipecat_provider_entries_cached(
+    probe_imports: bool,
+) -> tuple[PipecatProviderCatalogEntry, ...]:
     return tuple(_discover_pipecat_provider_entries(probe_imports=probe_imports))
 
 

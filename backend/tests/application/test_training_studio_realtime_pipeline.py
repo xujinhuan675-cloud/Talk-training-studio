@@ -105,6 +105,59 @@ class _FakeOpenRouterLLMService(_FakePipecatService):
     pass
 
 
+class _FakeOpenAIRealtimeLLMService(_FakePipecatService):
+    pass
+
+
+class _FakeRealtimeEventConfig:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class _FakeSessionProperties(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakeAudioConfiguration(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakeAudioInput(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakeAudioOutput(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakeInputAudioTranscription(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakeInputAudioNoiseReduction(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakeSemanticTurnDetection(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakeTurnDetection(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakePCMAudioFormat(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakePCMUAudioFormat(_FakeRealtimeEventConfig):
+    pass
+
+
+class _FakePCMAAudioFormat(_FakeRealtimeEventConfig):
+    pass
+
+
 class _FakeVADAnalyzer:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -197,11 +250,23 @@ def _fake_pipecat_runtime() -> pipecat_adapter.PipecatRuntime:
         OpenAIRealtimeSTTService=_FakeOpenAIRealtimeSTTService,
         OpenAITTSService=_FakeOpenAITTSService,
         OpenAILLMService=_FakePipecatService,
+        OpenAIRealtimeLLMService=_FakeOpenAIRealtimeLLMService,
         OpenRouterLLMService=_FakeOpenRouterLLMService,
         LLMContext=_FakeLLMContext,
         LLMContextAggregatorPair=_FakeLLMContextAggregatorPair,
         LLMUserAggregatorParams=_FakeLLMUserAggregatorParams,
         LLMAssistantAggregatorParams=_FakeLLMAssistantAggregatorParams,
+        SessionProperties=_FakeSessionProperties,
+        AudioConfiguration=_FakeAudioConfiguration,
+        AudioInput=_FakeAudioInput,
+        AudioOutput=_FakeAudioOutput,
+        InputAudioTranscription=_FakeInputAudioTranscription,
+        InputAudioNoiseReduction=_FakeInputAudioNoiseReduction,
+        SemanticTurnDetection=_FakeSemanticTurnDetection,
+        TurnDetection=_FakeTurnDetection,
+        PCMAudioFormat=_FakePCMAudioFormat,
+        PCMUAudioFormat=_FakePCMUAudioFormat,
+        PCMAAudioFormat=_FakePCMAAudioFormat,
         UserTurnProcessor=_FakeUserTurnProcessor,
         UserTurnStrategies=_FakeUserTurnStrategies,
         ExternalUserTurnStrategies=_FakeUserTurnStrategies,
@@ -293,6 +358,149 @@ def test_pipecat_voice_processors_build_openrouter_llm_with_openai_stt_tts():
     assert processors[2].context.messages == [
         {"role": "user", "content": "Can we discuss renewal risk?"}
     ]
+
+
+def test_pipecat_voice_processors_build_speech_to_speech_without_stt_tts_vad():
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        model="gpt-realtime-test",
+        voice="alloy",
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+        instructions="Stay in role as the counterpart.",
+        metadata={
+            "profile": "speech_to_speech",
+            "openaiApiKey": "sk-openai-test",
+            "realtimeLlm": {
+                "provider": "openai",
+                "model": "gpt-realtime-test",
+                "transcriptionModel": "gpt-4o-mini-transcribe",
+                "turnDetection": {"mode": "semantic_vad", "eagerness": "auto"},
+                "noiseReduction": "near_field",
+                "outputModalities": ["audio"],
+            },
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(
+        _fake_pipecat_runtime(),
+        config,
+        context=_voice_context(),
+    )
+
+    assert [type(processor) for processor in processors] == [
+        _FakeLLMUserAggregator,
+        _FakeOpenAIRealtimeLLMService,
+        _FakeLLMAssistantAggregator,
+    ]
+    assert not any(
+        isinstance(
+            processor,
+            (_FakeOpenAIRealtimeSTTService, _FakeOpenAITTSService, _FakeVADProcessor),
+        )
+        for processor in processors
+    )
+    assert processors[0].context.messages == [
+        {"role": "user", "content": "Can we discuss renewal risk?"}
+    ]
+
+    llm = processors[1]
+    assert llm.kwargs["api_key"] == "sk-openai-test"
+    llm_settings = llm.kwargs["settings"].kwargs
+    assert llm_settings["model"] == "gpt-realtime-test"
+    assert "Stay in role as the counterpart." in llm_settings["system_instruction"]
+    session_properties = llm_settings["session_properties"]
+    assert isinstance(session_properties, _FakeSessionProperties)
+    assert session_properties.kwargs["output_modalities"] == ["audio"]
+    audio = session_properties.kwargs["audio"]
+    audio_input = audio.kwargs["input"]
+    audio_output = audio.kwargs["output"]
+    assert isinstance(audio_input.kwargs["format"], _FakePCMAudioFormat)
+    assert isinstance(audio_output.kwargs["format"], _FakePCMAudioFormat)
+    assert isinstance(audio_input.kwargs["turn_detection"], _FakeSemanticTurnDetection)
+    assert audio_input.kwargs["turn_detection"].kwargs["eagerness"] == "auto"
+    assert isinstance(audio_input.kwargs["noise_reduction"], _FakeInputAudioNoiseReduction)
+    assert audio_input.kwargs["noise_reduction"].kwargs["type"] == "near_field"
+    assert audio_input.kwargs["transcription"].kwargs["model"] == "gpt-4o-mini-transcribe"
+    assert audio_output.kwargs["voice"] == "alloy"
+    assert processors[0].params.kwargs == {}
+
+
+def test_pipecat_voice_config_rejects_openrouter_llm_for_speech_to_speech_profile():
+    with pytest.raises(
+        ValueError,
+        match="Unsupported Pipecat realtimeLlm provider 'openrouter'; expected openai",
+    ):
+        pipecat_adapter.validate_pipecat_voice_config(
+            RealtimePipelineConfig(
+                provider="pipecat",
+                metadata={
+                    "profile": "speech_to_speech",
+                    "llm": {"provider": "openrouter"},
+                },
+            )
+        )
+
+
+def test_pipecat_pipeline_capability_reports_speech_to_speech_profile(monkeypatch):
+    monkeypatch.setattr(
+        pipecat_adapter,
+        "get_pipecat_capability",
+        lambda require_websocket=False: pipecat_adapter.PipecatCapability(
+            available=True,
+            core_available=True,
+            websocket_available=require_websocket,
+            stt_available=False,
+            tts_available=False,
+            llm_available=False,
+            openai_realtime_llm_available=True,
+            openrouter_llm_available=False,
+            vad_available=False,
+            turn_detection_available=False,
+        ),
+    )
+
+    capability = pipecat_adapter.pipecat_pipeline_capability(
+        runtime=_fake_pipecat_runtime(),
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            model="gpt-realtime-test",
+            voice="alloy",
+            input_audio_format="pcm16",
+            metadata={
+                "profile": "true_realtime",
+                "openaiApiKey": "sk-openai-test",
+                "realtimeLlm": {
+                    "provider": "openai",
+                    "model": "gpt-realtime-test",
+                    "turnDetection": "semantic_vad",
+                },
+            },
+        ),
+    )
+
+    assert capability.ready_for_call is True
+    assert capability.missing_features == ()
+    assert capability.stt == "openai_realtime"
+    assert capability.tts == "openai_realtime"
+    assert capability.llm == "openai_realtime"
+    assert capability.vad is None
+    assert capability.turn_detection == "openai_realtime"
+    assert capability.metadata["profile"] == "speech_to_speech"
+    assert capability.metadata["requestedFeatures"] == {
+        "realtimeLlm": "openai",
+        "vad": None,
+    }
+    assert capability.metadata["profileContract"]["latencyProfile"] == "true_realtime"
+    assert capability.metadata["profileContract"]["inputAudio"]["sampleRate"] == 24000
+    assert capability.metadata["profiles"]["speech_to_speech"]["contract"]["services"] == {
+        "realtimeLlm": "openai",
+        "stt": "openai_realtime_transcription",
+        "tts": "openai_realtime_audio",
+    }
+    assert capability.metadata["profiles"]["cascade"]["contract"]["latencyProfile"] == (
+        "near_realtime"
+    )
 
 
 def test_pipecat_pipeline_capability_reports_openrouter_llm_readiness(monkeypatch):

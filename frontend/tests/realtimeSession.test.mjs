@@ -96,6 +96,48 @@ test('getTrainingRealtimeWebSocketUrl builds a bound training realtime endpoint'
   )
 })
 
+test('getTrainingRealtimeWebSocketUrl appends non-default realtime voice profiles', () => {
+  const url = realtimeSession.getTrainingRealtimeWebSocketUrl({
+    sessionId: 'session-1',
+    roomId: 42,
+    audioFormat: 'pcm16',
+    profile: 'speech_to_speech',
+  })
+
+  assert.equal(
+    url,
+    'wss://demo.example/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat&audio_format=pcm16&profile=speech_to_speech',
+  )
+})
+
+test('getRealtimeVoiceAudioContract keeps cascade at 16k and true realtime at 24k', () => {
+  assert.deepEqual(realtimeSession.getRealtimeVoiceAudioContract(), {
+    realtimeProfile: 'cascade',
+    canonicalProfile: 'cascade',
+    inputSampleRate: 16000,
+    outputSampleRate: 24000,
+    channels: 1,
+    audioFormat: 'pcm16',
+    inputMimeType: 'audio/pcm',
+    transport: 'websocket',
+    latencyProfile: 'near_realtime',
+    turnDetection: 'local_vad',
+  })
+
+  assert.deepEqual(realtimeSession.getRealtimeVoiceAudioContract('true_realtime'), {
+    realtimeProfile: 'true_realtime',
+    canonicalProfile: 'speech_to_speech',
+    inputSampleRate: 24000,
+    outputSampleRate: 24000,
+    channels: 1,
+    audioFormat: 'pcm16',
+    inputMimeType: 'audio/pcm',
+    transport: 'websocket',
+    latencyProfile: 'true_realtime',
+    turnDetection: 'server_semantic_vad',
+  })
+})
+
 test('RealtimeSession sends session control events as JSON frames', () => {
   let socket
   const statuses = []

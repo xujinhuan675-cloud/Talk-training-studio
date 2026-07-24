@@ -118,6 +118,7 @@ import {
   getScenarioCategoryLabel,
   getScenarioDifficultyLabel,
 } from '../utils/scenarioLabels'
+import type { RealtimeVoiceProfile } from '../services/realtimeSession'
 import '../App.css'
 import '../styles/panelControls.css'
 import './ChatPage.css'
@@ -155,6 +156,41 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function getStateStringValue(state: unknown, key: string): string | null {
   const value = asRecord(state)?.[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalizeRouteRealtimeVoiceProfile(value: string | null): RealtimeVoiceProfile | null {
+  const normalized = value?.trim().toLowerCase().replace(/[-\s]/g, '_')
+  if (!normalized) return null
+  if (normalized === 'cascade' || normalized === 'near_realtime' || normalized === 'stt_llm_tts') {
+    return 'cascade'
+  }
+  if (
+    normalized === 'true_realtime'
+    || normalized === 'speech_to_speech'
+    || normalized === 'speech2speech'
+    || normalized === 'speechtospeech'
+    || normalized === 'realtime_llm'
+    || normalized === 'openai_realtime'
+    || normalized === 'openai_speech_to_speech'
+  ) {
+    return normalized === 'true_realtime' ? 'true_realtime' : 'speech_to_speech'
+  }
+  return null
+}
+
+function getRealtimeVoiceProfileFromLocation(search: string, state: unknown): RealtimeVoiceProfile | null {
+  const stateValue = getStateStringValue(state, 'realtimeProfile')
+    ?? getStateStringValue(state, 'realtime_profile')
+    ?? getStateStringValue(state, 'voiceProfile')
+    ?? getStateStringValue(state, 'voice_profile')
+  const params = new URLSearchParams(search)
+  return normalizeRouteRealtimeVoiceProfile(
+    stateValue
+      ?? params.get('realtimeProfile')
+      ?? params.get('realtime_profile')
+      ?? params.get('voiceProfile')
+      ?? params.get('voice_profile'),
+  )
 }
 
 function getStateStringArrayValue(state: unknown, key: string): string[] {
@@ -481,6 +517,7 @@ function ChatArea() {
   const interactionMode = getInteractionModeFromLocation(location.search, location.state)
   const trainingSessionId = getTrainingSessionIdFromLocation(location.search, location.state)
   const trainingProfile = getTrainingProfileFromLocation(location.search, location.state)
+  const realtimeVoiceProfile = getRealtimeVoiceProfileFromLocation(location.search, location.state)
   const trainingFeedbackMode = getTrainingFeedbackModeFromLocation(location.search, location.state)
   const liveCoachLanguagePair = getLiveCoachLanguagePairFromLocation(location.search, location.state)
   const routeReplyLanguage = normalizeTrainingReplyLanguage(
@@ -2136,12 +2173,13 @@ function ChatArea() {
             <span>{realtimeBarCopy}</span>
           </div>
           <RealtimeVoiceRecorder
-            key={`${trainingSessionId || 'no-session'}:${selectedRoomId || 'no-room'}`}
+            key={`${trainingSessionId || 'no-session'}:${selectedRoomId || 'no-room'}:${realtimeVoiceProfile || 'cascade'}`}
             roomId={selectedRoomId}
             trainingSessionId={trainingSessionId}
             disabled={chat.sending}
             personaId={primaryPersona?.id || null}
             counterpartName={counterpartName}
+            realtimeProfile={realtimeVoiceProfile}
             transcriptMetadata={realtimeTranscriptMetadata}
             onPersistedTranscript={handleRealtimeTranscriptPersisted}
           />
