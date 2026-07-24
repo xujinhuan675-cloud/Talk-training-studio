@@ -53,6 +53,15 @@ import {
   saveVoiceConfig,
   type VoicePreferenceConfig,
 } from '../services/voiceConfig'
+import {
+  LLM_PROVIDER_PRESETS,
+  REALTIME_PROVIDER_PRESETS,
+  STT_PROVIDER_PRESETS,
+  TTS_PROVIDER_PRESETS,
+  providerPresetByValue,
+  type VoiceProviderPreset,
+  type VoiceProviderStatus,
+} from '../services/voiceProviderPresets'
 import ConfirmDialog from '../components/layout/ConfirmDialog'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../components/ui/dialog'
 import { Button } from '../components/ui/button'
@@ -1000,6 +1009,7 @@ function OrganizationsTab() {
 // ---------------------------------------------------------------------------
 
 interface VoicePreferenceForm {
+  llmProvider: string
   llmBaseUrl: string
   llmDefaultModel: string
   llmWireApi: string
@@ -1013,6 +1023,8 @@ interface VoicePreferenceForm {
   sttModel: string
   sttUseTtsApiKey: boolean
   sttApiKey: string
+  realtimeProvider: string
+  realtimeBaseUrl: string
   realtimeApiKey: string
   realtimeModel: string
   realtimeVoice: string
@@ -1020,6 +1032,7 @@ interface VoicePreferenceForm {
 }
 
 const DEFAULT_VOICE_FORM: VoicePreferenceForm = {
+  llmProvider: 'flowguide',
   llmBaseUrl: 'https://ai.flowguide.cc',
   llmDefaultModel: 'gpt-5.5',
   llmWireApi: 'responses',
@@ -1033,27 +1046,32 @@ const DEFAULT_VOICE_FORM: VoicePreferenceForm = {
   sttModel: 'openai/whisper-1',
   sttUseTtsApiKey: true,
   sttApiKey: '',
+  realtimeProvider: 'openai',
+  realtimeBaseUrl: 'https://api.openai.com/v1/realtime/calls',
   realtimeApiKey: '',
-  realtimeModel: 'gpt-realtime',
+  realtimeModel: 'gpt-realtime-2.1',
   realtimeVoice: 'marin',
   realtimeTranscriptionModel: 'gpt-realtime-whisper',
 }
 
 function toVoiceForm(config: VoicePreferenceConfig): VoicePreferenceForm {
   return {
-    llmBaseUrl: config.llm_base_url || DEFAULT_VOICE_FORM.llmBaseUrl,
+    llmProvider: config.llm_provider || DEFAULT_VOICE_FORM.llmProvider,
+    llmBaseUrl: config.llm_base_url ?? DEFAULT_VOICE_FORM.llmBaseUrl,
     llmDefaultModel: config.llm_default_model || DEFAULT_VOICE_FORM.llmDefaultModel,
     llmWireApi: config.llm_wire_api || DEFAULT_VOICE_FORM.llmWireApi,
     llmApiKey: '',
     ttsProvider: config.tts_provider || DEFAULT_VOICE_FORM.ttsProvider,
-    ttsBaseUrl: config.tts_base_url || DEFAULT_VOICE_FORM.ttsBaseUrl,
+    ttsBaseUrl: config.tts_base_url ?? DEFAULT_VOICE_FORM.ttsBaseUrl,
     ttsModel: config.tts_model || DEFAULT_VOICE_FORM.ttsModel,
     ttsApiKey: '',
     sttProvider: config.stt_provider || DEFAULT_VOICE_FORM.sttProvider,
-    sttBaseUrl: config.stt_base_url || DEFAULT_VOICE_FORM.sttBaseUrl,
+    sttBaseUrl: config.stt_base_url ?? DEFAULT_VOICE_FORM.sttBaseUrl,
     sttModel: config.stt_model || DEFAULT_VOICE_FORM.sttModel,
-    sttUseTtsApiKey: config.stt_use_tts_api_key || config.stt_api_key_source !== 'stt',
+    sttUseTtsApiKey: config.stt_use_tts_api_key,
     sttApiKey: '',
+    realtimeProvider: config.realtime_provider || DEFAULT_VOICE_FORM.realtimeProvider,
+    realtimeBaseUrl: config.realtime_base_url ?? DEFAULT_VOICE_FORM.realtimeBaseUrl,
     realtimeApiKey: '',
     realtimeModel: config.realtime_model || DEFAULT_VOICE_FORM.realtimeModel,
     realtimeVoice: config.realtime_voice || DEFAULT_VOICE_FORM.realtimeVoice,
@@ -1067,59 +1085,51 @@ type VoiceModuleTone = 'ready' | 'warning' | 'blocked' | 'neutral'
 interface VoiceProviderOption {
   value: string
   label: string
-  status: 'runtime' | 'pipecat' | 'inventory'
+  status: VoiceProviderStatus
   disabled?: boolean
 }
 
-const RUNTIME_TTS_PROVIDERS: VoiceProviderOption[] = [
-  { value: 'openrouter', label: 'OpenRouter', status: 'runtime' },
-  { value: 'minimax', label: 'MiniMax', status: 'runtime' },
-  { value: 'elevenlabs', label: 'ElevenLabs', status: 'runtime' },
-]
-
-const RUNTIME_STT_PROVIDERS: VoiceProviderOption[] = [
-  { value: 'whisper', label: 'Whisper compatible', status: 'runtime' },
-  { value: 'minimax', label: 'MiniMax', status: 'runtime' },
-]
-
-const TTS_PROVIDER_DEFAULTS: Record<string, Partial<VoicePreferenceForm>> = {
-  openrouter: {
-    ttsBaseUrl: 'https://openrouter.ai/api/v1',
-    ttsModel: 'mistralai/voxtral-mini-tts-2603',
-  },
-  minimax: {
-    ttsBaseUrl: 'https://api.minimax.io/v1',
-    ttsModel: 'speech-2.8-hd',
-  },
-  elevenlabs: {
-    ttsBaseUrl: 'https://api.elevenlabs.io/v1',
-    ttsModel: 'eleven_multilingual_v2',
-  },
+function providerOptionsFromPresets(presets: VoiceProviderPreset[]): VoiceProviderOption[] {
+  return presets.map((preset) => ({
+    value: preset.value,
+    label: preset.label,
+    status: preset.status,
+  }))
 }
 
-const STT_PROVIDER_DEFAULTS: Record<string, Partial<VoicePreferenceForm>> = {
-  whisper: {
-    sttBaseUrl: 'https://openrouter.ai/api/v1',
-    sttModel: 'openai/whisper-1',
-  },
-  minimax: {
-    sttBaseUrl: 'https://api.minimax.io/v1',
-    sttModel: 'speech-01',
-  },
-}
+const BUILT_IN_LLM_PROVIDERS = providerOptionsFromPresets(LLM_PROVIDER_PRESETS)
+const BUILT_IN_TTS_PROVIDERS = providerOptionsFromPresets(TTS_PROVIDER_PRESETS)
+const BUILT_IN_STT_PROVIDERS = providerOptionsFromPresets(STT_PROVIDER_PRESETS)
+const BUILT_IN_REALTIME_PROVIDERS = providerOptionsFromPresets(REALTIME_PROVIDER_PRESETS)
 
 function titleCaseProvider(value: string): string {
   const known: Record<string, string> = {
     openai: 'OpenAI',
+    flowguide: 'FlowGuide gateway',
     openrouter: 'OpenRouter',
     minimax: 'MiniMax',
     elevenlabs: 'ElevenLabs',
+    assemblyai: 'AssemblyAI',
+    anthropic: 'Anthropic',
+    cartesia: 'Cartesia',
+    cerebras: 'Cerebras',
     deepgram: 'Deepgram',
+    deepseek: 'DeepSeek',
     whisper: 'Whisper compatible',
     google: 'Google',
     azure: 'Azure',
     aws: 'AWS',
     groq: 'Groq',
+    hume: 'Hume',
+    lmnt: 'LMNT',
+    mistral: 'Mistral',
+    ollama: 'Ollama',
+    perplexity: 'Perplexity',
+    qwen: 'Qwen',
+    rime: 'Rime',
+    soniox: 'Soniox',
+    speechmatics: 'Speechmatics',
+    together: 'Together AI',
     xai: 'xAI',
     websocket: 'WebSocket',
     silero: 'Silero',
@@ -1143,7 +1153,11 @@ function providerOptionsFromCatalog(
   channel: PipecatProviderCatalogChannelSummary | null,
   runtimeProviders: VoiceProviderOption[],
 ): VoiceProviderOption[] {
-  const runtimeValues = new Set(runtimeProviders.map((option) => option.value))
+  const optionAliases = (value: string): string[] => {
+    if (value === 'openai') return ['openai', 'openai.realtime', 'openai_realtime']
+    return [value]
+  }
+  const runtimeValues = new Set(runtimeProviders.flatMap((option) => optionAliases(option.value)))
   const pipecatOptions = Array.from(new Set(channel?.runtimeIntegrated ?? []))
     .filter((provider) => !runtimeValues.has(provider))
     .sort((a, b) => a.localeCompare(b))
@@ -1173,14 +1187,6 @@ function voiceProviderLabel(provider: string, options: VoiceProviderOption[]): s
 function countCatalogProviders(channel: PipecatProviderCatalogChannelSummary | null): string {
   if (!channel) return '0'
   return String(channel.providers?.length ?? channel.count ?? 0)
-}
-
-function llmEndpointLabel(baseUrl: string): string {
-  const lower = baseUrl.toLowerCase()
-  if (lower.includes('openrouter.ai')) return 'OpenRouter compatible'
-  if (lower.includes('openai.com')) return 'OpenAI compatible'
-  if (lower.includes('flowguide')) return 'FlowGuide gateway'
-  return 'Custom compatible endpoint'
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -1267,6 +1273,7 @@ function ConfigTab() {
     setNotice(null)
     try {
       const payload = {
+        llm_provider: form.llmProvider,
         llm_base_url: form.llmBaseUrl,
         llm_default_model: form.llmDefaultModel,
         llm_wire_api: form.llmWireApi,
@@ -1280,6 +1287,8 @@ function ConfigTab() {
         stt_model: form.sttModel,
         stt_use_tts_api_key: form.sttUseTtsApiKey,
         ...(!form.sttUseTtsApiKey && form.sttApiKey.trim() ? { stt_api_key: form.sttApiKey.trim() } : {}),
+        realtime_provider: form.realtimeProvider,
+        realtime_base_url: form.realtimeBaseUrl,
         realtime_model: form.realtimeModel,
         realtime_voice: form.realtimeVoice,
         realtime_transcription_model: form.realtimeTranscriptionModel,
@@ -1305,28 +1314,64 @@ function ConfigTab() {
   const vadChannel = providerCatalogChannel(catalog, 'vad')
   const turnChannel = providerCatalogChannel(catalog, 'turn_detection')
 
+  const llmProviderOptions = [
+    ...BUILT_IN_LLM_PROVIDERS,
+    ...providerOptionsFromCatalog(llmChannel, BUILT_IN_LLM_PROVIDERS),
+  ]
   const ttsProviderOptions = [
-    ...RUNTIME_TTS_PROVIDERS,
-    ...providerOptionsFromCatalog(ttsChannel, RUNTIME_TTS_PROVIDERS),
+    ...BUILT_IN_TTS_PROVIDERS,
+    ...providerOptionsFromCatalog(ttsChannel, BUILT_IN_TTS_PROVIDERS),
   ]
   const sttProviderOptions = [
-    ...RUNTIME_STT_PROVIDERS,
-    ...providerOptionsFromCatalog(sttChannel, RUNTIME_STT_PROVIDERS),
+    ...BUILT_IN_STT_PROVIDERS,
+    ...providerOptionsFromCatalog(sttChannel, BUILT_IN_STT_PROVIDERS),
+  ]
+  const realtimeProviderOptions = [
+    ...BUILT_IN_REALTIME_PROVIDERS,
+    ...providerOptionsFromCatalog(realtimeChannel, BUILT_IN_REALTIME_PROVIDERS),
   ]
 
+  const applyLlmProvider = (provider: string) => {
+    const preset = providerPresetByValue('llm', provider)
+    if (!preset) return
+    updateForm({
+      llmProvider: provider,
+      llmBaseUrl: preset.baseUrl,
+      llmDefaultModel: preset.model,
+      llmWireApi: preset.wireApi || DEFAULT_VOICE_FORM.llmWireApi,
+    })
+  }
+
   const applyTtsProvider = (provider: string) => {
-    if (!RUNTIME_TTS_PROVIDERS.some((option) => option.value === provider)) return
+    const preset = providerPresetByValue('tts', provider)
+    if (!preset) return
     updateForm({
       ttsProvider: provider,
-      ...(TTS_PROVIDER_DEFAULTS[provider] ?? {}),
+      ttsBaseUrl: preset.baseUrl,
+      ttsModel: preset.model,
     })
   }
 
   const applySttProvider = (provider: string) => {
-    if (!RUNTIME_STT_PROVIDERS.some((option) => option.value === provider)) return
+    const preset = providerPresetByValue('stt', provider)
+    if (!preset) return
     updateForm({
       sttProvider: provider,
-      ...(STT_PROVIDER_DEFAULTS[provider] ?? {}),
+      sttBaseUrl: preset.baseUrl,
+      sttModel: preset.model,
+      sttUseTtsApiKey: Boolean(preset.reuseTtsKey),
+    })
+  }
+
+  const applyRealtimeProvider = (provider: string) => {
+    const preset = providerPresetByValue('realtime', provider)
+    if (!preset) return
+    updateForm({
+      realtimeProvider: provider,
+      realtimeBaseUrl: preset.baseUrl,
+      realtimeModel: preset.model,
+      realtimeVoice: preset.realtimeVoice || form.realtimeVoice,
+      realtimeTranscriptionModel: preset.realtimeTranscriptionModel || form.realtimeTranscriptionModel,
     })
   }
 
@@ -1335,6 +1380,16 @@ function ConfigTab() {
     if (tone === 'warning') return tr('需配置', 'Needs config')
     if (tone === 'blocked') return tr('未接入', 'Not wired')
     return tr('只读', 'Read-only')
+  }
+
+  const toneForProvider = (
+    provider: string,
+    channel: 'llm' | 'stt' | 'tts' | 'realtime',
+    configured: boolean,
+  ): VoiceModuleTone => {
+    const preset = providerPresetByValue(channel, provider)
+    if (preset && preset.status !== 'runtime') return 'blocked'
+    return configured ? 'ready' : 'warning'
   }
 
   const voiceModules: Array<{
@@ -1353,12 +1408,12 @@ function ConfigTab() {
       icon: <KeyRound size={18} />,
       title: tr('LLM 回复生成', 'LLM response generation'),
       subtitle: tr('组合语音和实时语音都会用到的回复模型', 'Response model used by turn-based and realtime voice'),
-      provider: llmEndpointLabel(form.llmBaseUrl),
+      provider: voiceProviderLabel(form.llmProvider, llmProviderOptions),
       model: form.llmDefaultModel,
-      catalog: tr('Pipecat LLM：{count} 个 provider，已接入 OpenAI / OpenRouter', 'Pipecat LLM: {count} providers, OpenAI / OpenRouter wired', {
+      catalog: tr('Pipecat LLM：{count} 个 provider，已接入 OpenAI / OpenRouter，其它已预置', 'Pipecat LLM: {count} providers, OpenAI / OpenRouter wired; other presets are saved for adapters', {
         count: countCatalogProviders(llmChannel),
       }),
-      tone: config?.llm_api_key_configured ? 'ready' : 'warning',
+      tone: toneForProvider(form.llmProvider, 'llm', Boolean(config?.llm_api_key_configured)),
       note: config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : configStatusText,
     },
     {
@@ -1368,10 +1423,10 @@ function ConfigTab() {
       subtitle: tr('回合制语音的录音转文字模块', 'Recording-to-text module for turn-based voice'),
       provider: voiceProviderLabel(form.sttProvider, sttProviderOptions),
       model: form.sttModel,
-      catalog: tr('Pipecat STT：{count} 个 provider，当前回合制只接入 Whisper / MiniMax', 'Pipecat STT: {count} providers, turn-based runtime supports Whisper / MiniMax', {
+      catalog: tr('Pipecat STT：{count} 个 provider，已预置；当前运行态只接入 OpenAI/Whisper compatible', 'Pipecat STT: {count} providers preset; current runtime supports OpenAI/Whisper compatible', {
         count: countCatalogProviders(sttChannel),
       }),
-      tone: config?.stt_api_key_source === 'missing' ? 'warning' : 'ready',
+      tone: toneForProvider(form.sttProvider, 'stt', Boolean(config && config.stt_api_key_source !== 'missing')),
       note: config ? sourceText(config.stt_api_key_source) : configStatusText,
     },
     {
@@ -1381,10 +1436,10 @@ function ConfigTab() {
       subtitle: tr('回合制语音的文字转语音模块', 'Text-to-speech module for turn-based voice'),
       provider: voiceProviderLabel(form.ttsProvider, ttsProviderOptions),
       model: form.ttsModel,
-      catalog: tr('Pipecat TTS：{count} 个 provider，当前回合制接入 OpenRouter / MiniMax / ElevenLabs', 'Pipecat TTS: {count} providers, turn-based runtime supports OpenRouter / MiniMax / ElevenLabs', {
+      catalog: tr('Pipecat TTS：{count} 个 provider，已预置；当前回合制接入 OpenRouter / MiniMax / ElevenLabs', 'Pipecat TTS: {count} providers preset; turn-based runtime supports OpenRouter / MiniMax / ElevenLabs', {
         count: countCatalogProviders(ttsChannel),
       }),
-      tone: config?.tts_api_key_configured ? 'ready' : 'warning',
+      tone: toneForProvider(form.ttsProvider, 'tts', Boolean(config?.tts_api_key_configured)),
       note: config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : configStatusText,
     },
     {
@@ -1392,12 +1447,14 @@ function ConfigTab() {
       icon: <Radio size={18} />,
       title: tr('Realtime 实时语音', 'Realtime voice'),
       subtitle: tr('Pipecat 实时语音会话：连续音频、打断、实时输出', 'Pipecat session for continuous audio, interruption, and realtime output'),
-      provider: 'Pipecat / OpenAI services',
+      provider: voiceProviderLabel(form.realtimeProvider, realtimeProviderOptions),
       model: form.realtimeModel,
-      catalog: tr('Pipecat realtime：{count} 个 provider，当前运行态仍是 OpenAI 服务组合', 'Pipecat realtime: {count} providers, current runtime still uses OpenAI service composition', {
+      catalog: tr('Pipecat realtime：{count} 个 provider，已预置；当前运行态仍是 OpenAI 服务组合', 'Pipecat realtime: {count} providers preset; current runtime still uses OpenAI service composition', {
         count: countCatalogProviders(realtimeChannel),
       }),
-      tone: realtimeCapabilities?.pipecat.readyForCall ? 'ready' : (config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'),
+      tone: form.realtimeProvider === 'openai'
+        ? (realtimeCapabilities?.pipecat.readyForCall ? 'ready' : (config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'))
+        : 'blocked',
       note: config ? sourceText(config.realtime_api_key_source) : configStatusText,
     },
     {
@@ -1428,8 +1485,8 @@ function ConfigTab() {
       {options.map((option) => (
         <option key={`${option.status}:${option.value}`} value={option.value} disabled={option.disabled}>
           {option.label}
-          {option.status === 'pipecat' ? ` · ${tr('Pipecat runtime', 'Pipecat runtime')}` : ''}
-          {option.status === 'inventory' ? ` · ${tr('Pipecat 待接入', 'Pipecat inventory')}` : ''}
+          {option.status === 'pipecat' ? ` - ${tr('Pipecat runtime', 'Pipecat runtime')}` : ''}
+          {option.status === 'inventory' ? ` - ${tr('待接入', 'Adapter pending')}` : ''}
         </option>
       ))}
     </Select>
@@ -1457,11 +1514,41 @@ function ConfigTab() {
     )
   }
 
+  const renderProviderPresetNote = (
+    channel: 'llm' | 'stt' | 'tts' | 'realtime',
+    provider: string,
+  ) => {
+    const preset = providerPresetByValue(channel, provider)
+    if (!preset) return null
+    if (preset.status === 'runtime') {
+      return (
+        <p className="settings-voice-note">
+          {tr('URL、模型和接口已预置；API Key 需要手动填写。', 'URL, model, and API shape are preset; enter the API key manually.')}
+        </p>
+      )
+    }
+    if (preset.status === 'pipecat') {
+      return (
+        <p className="settings-voice-note settings-voice-note-warning">
+          {preset.note || tr('该 provider 已在 Pipecat 运行层出现，但当前设置模块还没有完整 adapter。', 'This provider is present in the Pipecat runtime layer, but this settings module does not have a full adapter yet.')}
+        </p>
+      )
+    }
+    return (
+      <p className="settings-voice-note settings-voice-note-warning">
+        {preset.note || tr('该 provider 已预置并可保存配置，但当前运行态还没有 adapter。', 'This provider is preset and can be saved, but the active runtime adapter is not wired yet.')}
+      </p>
+    )
+  }
+
   const renderModuleConfig = () => {
     if (!activeModuleMeta) return null
     if (activeModule === 'llm') {
       return (
         <>
+          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
+            {renderProviderSelect(form.llmProvider, llmProviderOptions, applyLlmProvider)}
+          </Field>
           <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
             <Input value={form.llmBaseUrl} onChange={(e) => updateForm({ llmBaseUrl: e.target.value })} />
           </Field>
@@ -1484,6 +1571,7 @@ function ConfigTab() {
             />
           </Field>
           {renderCatalogSummary(llmChannel, 'Pipecat LLM')}
+          {renderProviderPresetNote('llm', form.llmProvider)}
         </>
       )
     }
@@ -1509,6 +1597,7 @@ function ConfigTab() {
             />
           </Field>
           {renderCatalogSummary(ttsChannel, 'Pipecat TTS')}
+          {renderProviderPresetNote('tts', form.ttsProvider)}
         </>
       )
     }
@@ -1543,18 +1632,25 @@ function ConfigTab() {
             </Field>
           )}
           {renderCatalogSummary(sttChannel, 'Pipecat STT')}
+          {renderProviderPresetNote('stt', form.sttProvider)}
         </>
       )
     }
     if (activeModule === 'realtime') {
       return (
         <>
-          <Field className="settings-voice-field" label={tr('Pipecat OpenAI 服务密钥', 'Pipecat OpenAI service key')}>
+          <Field className="settings-voice-field" label={tr('服务商', 'Provider')}>
+            {renderProviderSelect(form.realtimeProvider, realtimeProviderOptions, applyRealtimeProvider)}
+          </Field>
+          <Field className="settings-voice-field" label={tr('基础 URL', 'Base URL')}>
+            <Input value={form.realtimeBaseUrl} onChange={(e) => updateForm({ realtimeBaseUrl: e.target.value })} />
+          </Field>
+          <Field className="settings-voice-field" label={tr('Realtime API 密钥', 'Realtime API Key')}>
             <Input
               type="password"
               value={form.realtimeApiKey}
               onChange={(e) => updateForm({ realtimeApiKey: e.target.value })}
-              placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('填写 Pipecat OpenAI 服务 key', 'Enter a Pipecat OpenAI service key')}
+              placeholder={config?.realtime_effective_api_key_configured ? keyText(true, config.realtime_api_key_preview) : tr('需要时手动填写 key', 'Enter the key manually when needed')}
               autoComplete="off"
             />
           </Field>
@@ -1571,6 +1667,7 @@ function ConfigTab() {
             {tr('Realtime 不是单纯 TTS；它是 Pipecat 管道里的连续音频、VAD、turn 和音频输出组合。', 'Realtime is not plain TTS; it is continuous audio, VAD, turn handling, and output audio inside the Pipecat pipeline.')}
           </p>
           {renderCatalogSummary(realtimeChannel, 'Pipecat realtime')}
+          {renderProviderPresetNote('realtime', form.realtimeProvider)}
         </>
       )
     }

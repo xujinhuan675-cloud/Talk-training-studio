@@ -412,6 +412,11 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
     env_file = tmp_path / ".env"
     env_file.write_text("SECRET_KEY=test-secret\nVOICE__TTS_PROVIDER=minimax\n", encoding="utf-8")
     voice_env_keys = [
+        "LLM__PROVIDER",
+        "LLM__BASE_URL",
+        "LLM__DEFAULT_MODEL",
+        "LLM__WIRE_API",
+        "LLM__API_KEY",
         "VOICE__TTS_PROVIDER",
         "VOICE__TTS_BASE_URL",
         "VOICE__TTS_MODEL",
@@ -420,6 +425,9 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         "VOICE__STT_BASE_URL",
         "VOICE__STT_MODEL",
         "VOICE__STT_API_KEY",
+        "REALTIME_PROVIDER",
+        "REALTIME_API_KEY",
+        "REALTIME_BASE_URL",
         "REALTIME_OPENAI_API_KEY",
         "REALTIME_OPENAI_MODEL",
         "REALTIME_OPENAI_VOICE",
@@ -430,6 +438,9 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
     original_voice = settings.voice.model_copy(deep=True)
     original_realtime = {
         "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
+        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
+        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
+        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
         "REALTIME_OPENAI_MODEL": settings.REALTIME_OPENAI_MODEL,
         "REALTIME_OPENAI_VOICE": settings.REALTIME_OPENAI_VOICE,
         "REALTIME_OPENAI_TRANSCRIPTION_MODEL": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
@@ -461,7 +472,7 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
             stt_model="whisper-1",
         )
         settings.REALTIME_OPENAI_API_KEY = None
-        settings.REALTIME_OPENAI_MODEL = "gpt-realtime"
+        settings.REALTIME_OPENAI_MODEL = "gpt-realtime-2.1"
         settings.REALTIME_OPENAI_VOICE = "marin"
         settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
 
@@ -470,6 +481,7 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
             headers={"X-Mock-User": "admin"},
             json={
                 "llm_base_url": "https://ai.flowguide.cc",
+                "llm_provider": "flowguide",
                 "llm_default_model": "gpt-5.5",
                 "llm_wire_api": "responses",
                 "llm_api_key": "sk-flowguide-9999",
@@ -481,8 +493,10 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
                 "stt_base_url": "https://openrouter.ai/api/v1",
                 "stt_model": "openai/whisper-1",
                 "stt_use_tts_api_key": True,
+                "realtime_provider": "openai",
+                "realtime_base_url": "https://api.openai.com/v1/realtime/calls",
                 "realtime_api_key": "sk-realtime-5678",
-                "realtime_model": "gpt-realtime",
+                "realtime_model": "gpt-realtime-2.1",
                 "realtime_voice": "marin",
                 "realtime_transcription_model": "gpt-realtime-whisper",
             },
@@ -490,12 +504,15 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
 
         assert resp.status_code == 200
         data = resp.json()["data"]
+        assert data["llm_provider"] == "flowguide"
         assert data["llm_base_url"] == "https://ai.flowguide.cc"
         assert data["llm_default_model"] == "gpt-5.5"
         assert data["llm_api_key_preview"] == "***9999"
         assert data["tts_provider"] == "openrouter"
         assert data["tts_api_key_preview"] == "***1234"
         assert data["stt_api_key_source"] == "tts"
+        assert data["realtime_provider"] == "openai"
+        assert data["realtime_base_url"] == "https://api.openai.com/v1/realtime/calls"
         assert data["realtime_api_key_preview"] == "***5678"
         assert "sk-openrouter-1234" not in resp.text
         assert "sk-realtime-5678" not in resp.text
@@ -503,6 +520,7 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         assert reloads == [True, True]
 
         env_text = env_file.read_text(encoding="utf-8")
+        assert "LLM__PROVIDER=flowguide" in env_text
         assert "LLM__BASE_URL=https://ai.flowguide.cc" in env_text
         assert "LLM__DEFAULT_MODEL=gpt-5.5" in env_text
         assert "LLM__WIRE_API=responses" in env_text
@@ -510,12 +528,17 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         assert "VOICE__TTS_PROVIDER=openrouter" in env_text
         assert "VOICE__TTS_API_KEY=sk-openrouter-1234" in env_text
         assert "VOICE__STT_API_KEY=" in env_text
+        assert "REALTIME_PROVIDER=openai" in env_text
+        assert "REALTIME_BASE_URL=https://api.openai.com/v1/realtime/calls" in env_text
         assert "REALTIME_OPENAI_API_KEY=sk-realtime-5678" in env_text
         assert settings.llm.api_key == "sk-flowguide-9999"
+        assert settings.llm.provider == "flowguide"
         assert settings.llm.base_url == "https://ai.flowguide.cc"
         assert settings.llm.default_model == "gpt-5.5"
         assert settings.voice.tts_provider == "openrouter"
         assert settings.voice.stt_api_key == "sk-openrouter-1234"
+        assert settings.REALTIME_PROVIDER == "openai"
+        assert settings.REALTIME_BASE_URL == "https://api.openai.com/v1/realtime/calls"
         assert settings.REALTIME_OPENAI_API_KEY == "sk-realtime-5678"
     finally:
         settings.llm = original_llm
@@ -558,6 +581,125 @@ def test_voice_config_reports_openrouter_tts_reusing_openrouter_llm_key() -> Non
     finally:
         settings.llm = original_llm
         settings.voice = original_voice
+
+
+def test_voice_config_does_not_reuse_llm_key_for_inventory_stt_provider() -> None:
+    original_llm = settings.llm
+    original_voice = settings.voice
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-llm-shared",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="openrouter",
+        tts_api_key=None,
+        tts_base_url="https://openrouter.ai/api/v1",
+        tts_model="mistralai/voxtral-mini-tts-2603",
+        stt_provider="deepgram",
+        stt_api_key=None,
+        stt_base_url="https://api.deepgram.com/v1",
+        stt_model="nova-3",
+    )
+
+    try:
+        dto = training_studio_routes._voice_config_response()
+
+        assert dto.stt_provider == "deepgram"
+        assert dto.stt_api_key_configured is False
+        assert dto.stt_api_key_source == "missing"
+        assert dto.stt_use_tts_api_key is False
+    finally:
+        settings.llm = original_llm
+        settings.voice = original_voice
+
+
+def test_voice_config_reports_generic_realtime_provider_key() -> None:
+    original_llm = settings.llm
+    original_realtime = {
+        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
+        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
+        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
+        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
+    }
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-llm-fallback",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+    )
+    settings.REALTIME_PROVIDER = "google.gemini_live"
+    settings.REALTIME_API_KEY = "sk-gemini-live"
+    settings.REALTIME_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    settings.REALTIME_OPENAI_API_KEY = None
+
+    try:
+        dto = training_studio_routes._voice_config_response()
+
+        assert dto.realtime_provider == "google.gemini_live"
+        assert dto.realtime_base_url == "https://generativelanguage.googleapis.com/v1beta"
+        assert dto.realtime_api_key_configured is True
+        assert dto.realtime_effective_api_key_configured is True
+        assert dto.realtime_api_key_preview == "***live"
+        assert dto.realtime_api_key_source == "realtime"
+    finally:
+        settings.llm = original_llm
+        for key, value in original_realtime.items():
+            setattr(settings, key, value)
+
+
+def test_voice_config_does_not_reuse_llm_key_for_non_openai_realtime_provider() -> None:
+    original_llm = settings.llm
+    original_realtime = {
+        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
+        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
+        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
+        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
+    }
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-llm-fallback",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+    )
+    settings.REALTIME_PROVIDER = "xai.realtime"
+    settings.REALTIME_API_KEY = None
+    settings.REALTIME_BASE_URL = "https://api.x.ai/v1"
+    settings.REALTIME_OPENAI_API_KEY = None
+
+    try:
+        dto = training_studio_routes._voice_config_response()
+
+        assert dto.realtime_provider == "xai.realtime"
+        assert dto.realtime_api_key_configured is False
+        assert dto.realtime_effective_api_key_configured is False
+        assert dto.realtime_api_key_preview is None
+        assert dto.realtime_api_key_source == "missing"
+    finally:
+        settings.llm = original_llm
+        for key, value in original_realtime.items():
+            setattr(settings, key, value)
+
+
+def test_openai_realtime_key_accepts_generic_key_for_openai_provider() -> None:
+    original_llm = settings.llm
+    original_realtime = {
+        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
+        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
+        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
+    }
+    settings.llm = LLMSettings(provider="openai", api_key=None, default_model="gpt-4o-mini")
+    settings.REALTIME_PROVIDER = "openai"
+    settings.REALTIME_API_KEY = "sk-generic-openai"
+    settings.REALTIME_OPENAI_API_KEY = None
+
+    try:
+        assert training_studio_routes._openai_realtime_api_key() == "sk-generic-openai"
+    finally:
+        settings.llm = original_llm
+        for key, value in original_realtime.items():
+            setattr(settings, key, value)
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ interface ApiResponse<T> {
 }
 
 export interface VoicePreferenceConfig {
+  llm_provider: string
   llm_base_url: string | null
   llm_default_model: string
   llm_wire_api: string
@@ -28,6 +29,8 @@ export interface VoicePreferenceConfig {
   realtime_effective_api_key_configured: boolean
   realtime_api_key_preview: string | null
   realtime_api_key_source: 'realtime' | 'llm' | 'missing'
+  realtime_provider: string
+  realtime_base_url: string | null
   realtime_model: string
   realtime_voice: string
   realtime_transcription_model: string | null
@@ -35,6 +38,7 @@ export interface VoicePreferenceConfig {
 }
 
 export interface VoicePreferenceUpdate {
+  llm_provider?: string
   llm_base_url?: string | null
   llm_default_model?: string
   llm_wire_api?: string
@@ -53,6 +57,8 @@ export interface VoicePreferenceUpdate {
   stt_use_tts_api_key?: boolean
   realtime_api_key?: string
   clear_realtime_api_key?: boolean
+  realtime_provider?: string
+  realtime_base_url?: string | null
   realtime_model?: string
   realtime_voice?: string
   realtime_transcription_model?: string | null

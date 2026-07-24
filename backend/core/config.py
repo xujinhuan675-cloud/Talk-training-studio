@@ -326,8 +326,18 @@ class Settings(BaseSettings):
     REALTIME_OPENAI_API_KEY: Optional[str] = Field(
         default=None, validation_alias=AliasChoices("REALTIME_OPENAI_API_KEY")
     )
+    REALTIME_PROVIDER: str = Field(
+        default="openai", validation_alias=AliasChoices("REALTIME_PROVIDER")
+    )
+    REALTIME_API_KEY: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("REALTIME_API_KEY")
+    )
+    REALTIME_BASE_URL: Optional[str] = Field(
+        default="https://api.openai.com/v1/realtime/calls",
+        validation_alias=AliasChoices("REALTIME_BASE_URL"),
+    )
     REALTIME_OPENAI_MODEL: str = Field(
-        default="gpt-realtime", validation_alias=AliasChoices("REALTIME_OPENAI_MODEL")
+        default="gpt-realtime-2.1", validation_alias=AliasChoices("REALTIME_OPENAI_MODEL")
     )
     REALTIME_OPENAI_CALL_URL: str = Field(
         default="https://api.openai.com/v1/realtime/calls",
@@ -441,9 +451,13 @@ class Settings(BaseSettings):
             self.llm.wire_api = (
                 self.OPENAI_COMPATIBLE_WIRE_API or self.OPENAI_WIRE_API or self.llm.wire_api
             )
-        if not self.voice.stt_api_key:
+        stt_provider = (
+            self.voice.stt_provider or ""
+        ).strip().lower().replace("-", "_").replace(" ", "_")
+        stt_can_reuse_shared_key = stt_provider in {"minimax", "openai", "whisper"}
+        if not self.voice.stt_api_key and stt_can_reuse_shared_key:
             self.voice.stt_api_key = self.voice.tts_api_key or self.llm.api_key
-        if not self.voice.stt_base_url:
+        if not self.voice.stt_base_url and stt_can_reuse_shared_key:
             self.voice.stt_base_url = self.llm.base_url
         return self
 

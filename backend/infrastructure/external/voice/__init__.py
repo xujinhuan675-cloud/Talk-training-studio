@@ -124,7 +124,12 @@ async def init_tts_client() -> None:
                 **({"base_url": tts_base_url} if tts_base_url else {}),
             )
         else:
-            raise ValueError(f"Unknown TTS provider: {voice_cfg.tts_provider}")
+            logger.warning(
+                "tts_client_skipped",
+                provider=voice_cfg.tts_provider,
+                reason="TTS provider preset is saved, but no runtime adapter is wired",
+            )
+            return
 
         logger.info(
             "tts_client_initialized",
@@ -179,7 +184,7 @@ async def init_stt_client() -> None:
         return
 
     try:
-        if voice_cfg.stt_provider in ("minimax", "whisper"):
+        if voice_cfg.stt_provider in ("minimax", "openai", "whisper"):
             from .minimax_stt import MinimaxSTTProvider
 
             _stt_client = MinimaxSTTProvider(
@@ -188,7 +193,12 @@ async def init_stt_client() -> None:
                 model=voice_cfg.stt_model,
             )
         else:
-            raise ValueError(f"Unknown STT provider: {voice_cfg.stt_provider}")
+            logger.warning(
+                "stt_client_skipped",
+                provider=voice_cfg.stt_provider,
+                reason="STT provider preset is saved, but no runtime adapter is wired",
+            )
+            return
 
         logger.info("stt_client_initialized", provider=voice_cfg.stt_provider)
     except Exception as exc:
