@@ -62,6 +62,21 @@ const expectedAuthHeaders = {
   'X-Team-Id': 'team-ops',
 }
 
+function createStorage(initialEntries = {}) {
+  const entries = new Map(Object.entries(initialEntries))
+  return {
+    getItem(key) {
+      return entries.has(key) ? entries.get(key) : null
+    },
+    setItem(key, value) {
+      entries.set(key, String(value))
+    },
+    removeItem(key) {
+      entries.delete(key)
+    },
+  }
+}
+
 function installFetchStub(data = { session_id: 'session-1', mode: 'voice', status: 'created' }) {
   const calls = []
   globalThis.fetch = async (url, init = {}) => {
@@ -72,6 +87,19 @@ function installFetchStub(data = { session_id: 'session-1', mode: 'voice', statu
     }
   }
   return calls
+}
+
+function streamResponseFromText(text) {
+  const encoder = new TextEncoder()
+  return {
+    ok: true,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(text))
+        controller.close()
+      },
+    }),
+  }
 }
 
 test('createTrainingSession posts to the sessions collection with JSON body', async () => {
@@ -343,7 +371,7 @@ test('requestTrainingGuidance posts guidance context and returns response data',
   assert.deepEqual(result, data)
 })
 
-test('getTrainingGuidanceStreamUrl builds an EventSource endpoint', () => {
+test('getTrainingGuidanceStreamUrl builds a guidance stream endpoint', () => {
   const url = trainingSession.getTrainingGuidanceStreamUrl('session 1', {
     message_limit: 25,
     poll_interval_ms: 750,
@@ -353,6 +381,112 @@ test('getTrainingGuidanceStreamUrl builds an EventSource endpoint', () => {
     url,
     '/api/v1/training-studio/sessions/session%201/guidance/stream?mock_user=admin&message_limit=25&poll_interval_ms=750',
   )
+})
+
+test('startTrainingGuidanceStream parses SSE frames and sends mock auth headers', async () => {
+  const calls = []
+  const snapshot = {
+    session_id: 'session 1',
+    events: [
+      {
+        event_type: 'coaching_tip',
+        severity: 'warning',
+        title: 'Clarify',
+        message: 'Ask for a concrete number.',
+        suggested_text: null,
+        metadata: {},
+        created_at: '2026-07-14T08:00:00Z',
+      },
+    ],
+  }
+  const guidanceError = { message: 'temporary guidance failure' }
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return streamResponseFromText(
+      `event: guidance_snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`
+      + `event: guidance_error\ndata: ${JSON.stringify(guidanceError)}\n\n`,
+    )
+  }
+
+  const snapshots = []
+  const errors = []
+  await trainingSession.startTrainingGuidanceStream(
+    'session 1',
+    { message_limit: 25, poll_interval_ms: 750 },
+    {
+      onSnapshot: (data) => snapshots.push(data),
+      onGuidanceError: (data) => errors.push(data),
+    },
+  )
+
+  assert.equal(
+    calls[0].url,
+    '/api/v1/training-studio/sessions/session%201/guidance/stream?mock_user=admin&message_limit=25&poll_interval_ms=750',
+  )
+  assert.deepEqual(calls[0].init.headers, {
+    ...expectedAuthHeaders,
+    Accept: 'text/event-stream',
+  })
+  assert.deepEqual(snapshots, [snapshot])
+  assert.deepEqual(errors, [guidanceError])
+})
+
+test('startTrainingGuidanceStream uses NewAPI cookie session without token query leakage', async () => {
+  const previousWindow = globalThis.window
+  const newapiState = {
+    status: 'authenticated',
+    provider: 'newapi',
+    newapiUser: {
+      provider: 'newapi',
+      user_id: 'newapi:42',
+      username: 'alice',
+      display_name: 'Alice Zhang',
+      system_role: 'staff',
+      business_role: 'sales',
+      team_id: 'newapi:paid',
+      team_name: 'paid',
+    },
+  }
+  globalThis.window = {
+    localStorage: createStorage(),
+    sessionStorage: createStorage({
+      'talkwise.auth.state': JSON.stringify(newapiState),
+    }),
+  }
+
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return streamResponseFromText(
+      `event: guidance_snapshot\ndata: ${JSON.stringify({ session_id: 'session 1', events: [] })}\n\n`,
+    )
+  }
+
+  try {
+    await trainingSession.startTrainingGuidanceStream(
+      'session 1',
+      { message_limit: 1 },
+      {
+        onSnapshot: () => {},
+        onGuidanceError: () => {},
+      },
+    )
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalThis.window
+    } else {
+      globalThis.window = previousWindow
+    }
+  }
+
+  assert.equal(
+    calls[0].url,
+    '/api/v1/training-studio/sessions/session%201/guidance/stream?message_limit=1',
+  )
+  assert.deepEqual(calls[0].init.headers, {
+    Accept: 'text/event-stream',
+  })
+  assert.equal(calls[0].url.includes('newapi-token'), false)
 })
 
 test('getTrainingConversationBranchInfo extracts selected path metadata from a session', () => {

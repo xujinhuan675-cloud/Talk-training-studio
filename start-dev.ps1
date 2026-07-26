@@ -721,6 +721,27 @@ Ensure-EnvValue $RootEnvPath "BACKEND_PORT" "8012"
 Ensure-EnvValue $RootEnvPath "FRONTEND_PORT" "5177"
 Ensure-EnvValue $RootEnvPath "SECRET_KEY" "dev-secret-change-me"
 Ensure-EnvValue $RootEnvPath "DEBUG" "true"
+Ensure-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
+Ensure-EnvValue $RootEnvPath "NEWAPI_ACCESS_TOKEN" ""
+Ensure-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "https://newapi.flowguide.cc/v1"
+Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_ENABLED" "false"
+Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK" "false"
+Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_TIMEOUT_SECONDS" "5"
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" ""
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH" "/api/talkwise/auth/exchange"
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" ""
+Ensure-EnvValue $RootEnvPath "TALKWISE_SESSION_COOKIE_NAME" "talkwise_session"
+Ensure-EnvValue $RootEnvPath "TALKWISE_SESSION_TTL_SECONDS" "28800"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" "false"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "https://newapi.flowguide.cc/login"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "external"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" "https://newapi.flowguide.cc"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "https://newapi.flowguide.cc/usage-logs/common"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "https://newapi.flowguide.cc/keys"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" ""
 
 $pgUser = Get-EnvValue $RootEnvPath "POSTGRES_USER" "stakecoach"
 $pgPassword = Get-EnvValue $RootEnvPath "POSTGRES_PASSWORD" "stakecoach_dev_password"
@@ -747,6 +768,27 @@ $backendUrl = "http://127.0.0.1:$backendPort"
 $backendLogPath = Join-Path $LogDir "backend-dev.log"
 $frontendLogPath = Join-Path $LogDir "frontend-dev.log"
 $corsOriginsValue = "[`"http://127.0.0.1:$frontendPort`",`"http://localhost:$frontendPort`",`"http://127.0.0.1:$backendPort`",`"http://localhost:$backendPort`"]"
+$newApiBaseUrl = Get-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
+$newApiAccessToken = Get-EnvValue $RootEnvPath "NEWAPI_ACCESS_TOKEN" ""
+$newApiGatewayBaseUrl = Get-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "$newApiBaseUrl/v1"
+$newApiAuthEnabled = Get-EnvValue $RootEnvPath "NEWAPI_AUTH_ENABLED" "false"
+$newApiAuthAllowMockFallback = Get-EnvValue $RootEnvPath "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK" "false"
+$newApiAuthTimeoutSeconds = Get-EnvValue $RootEnvPath "NEWAPI_AUTH_TIMEOUT_SECONDS" "5"
+$newApiTalkwiseClientId = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
+$newApiTalkwiseClientSecret = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" ""
+$newApiTalkwiseAuthExchangePath = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH" "/api/talkwise/auth/exchange"
+$newApiTalkwiseRedirectUri = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" ""
+$talkwiseSessionCookieName = Get-EnvValue $RootEnvPath "TALKWISE_SESSION_COOKIE_NAME" "talkwise_session"
+$talkwiseSessionTtlSeconds = Get-EnvValue $RootEnvPath "TALKWISE_SESSION_TTL_SECONDS" "28800"
+$viteNewApiBaseUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" $newApiBaseUrl
+$viteNewApiAuthEnabled = Get-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" $newApiAuthEnabled
+$viteNewApiLoginUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "$newApiBaseUrl/login"
+$viteNewApiLoginMode = Get-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "external"
+$viteNewApiConsoleUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" $newApiBaseUrl
+$viteNewApiUsageUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "$newApiBaseUrl/usage-logs/common"
+$viteNewApiApiKeysUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "$newApiBaseUrl/keys"
+$viteNewApiTalkwiseClientId = Get-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_CLIENT_ID" $newApiTalkwiseClientId
+$viteNewApiTalkwiseRedirectUri = Get-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" $newApiTalkwiseRedirectUri
 
 Set-EnvValue $BackendEnvPath "SECRET_KEY" "dev-secret-change-me"
 Set-EnvValue $BackendEnvPath "DEBUG" "true"
@@ -756,8 +798,29 @@ Set-EnvValue $BackendEnvPath "PORT" "$backendPort"
 Set-EnvValue $BackendEnvPath "DATABASE__URL" $databaseUrl
 Set-EnvValue $BackendEnvPath "CORS_ORIGINS" $corsOriginsValue
 Set-EnvValue $BackendEnvPath "STORAGE__LOCAL_BASE_PATH" "./storage"
+Set-EnvValue $BackendEnvPath "NEWAPI_BASE_URL" $newApiBaseUrl
+Set-EnvValue $BackendEnvPath "NEWAPI_ACCESS_TOKEN" $newApiAccessToken
+Set-EnvValue $BackendEnvPath "NEWAPI_GATEWAY_BASE_URL" $newApiGatewayBaseUrl
+Set-EnvValue $BackendEnvPath "NEWAPI_AUTH_ENABLED" $newApiAuthEnabled
+Set-EnvValue $BackendEnvPath "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK" $newApiAuthAllowMockFallback
+Set-EnvValue $BackendEnvPath "NEWAPI_AUTH_TIMEOUT_SECONDS" $newApiAuthTimeoutSeconds
+Set-EnvValue $BackendEnvPath "NEWAPI_TALKWISE_CLIENT_ID" $newApiTalkwiseClientId
+Set-EnvValue $BackendEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" $newApiTalkwiseClientSecret
+Set-EnvValue $BackendEnvPath "NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH" $newApiTalkwiseAuthExchangePath
+Set-EnvValue $BackendEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" $newApiTalkwiseRedirectUri
+Set-EnvValue $BackendEnvPath "TALKWISE_SESSION_COOKIE_NAME" $talkwiseSessionCookieName
+Set-EnvValue $BackendEnvPath "TALKWISE_SESSION_TTL_SECONDS" $talkwiseSessionTtlSeconds
 
 Set-EnvValue $FrontendEnvPath "VITE_API_URL" $backendUrl
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_BASE_URL" $viteNewApiBaseUrl
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_AUTH_ENABLED" $viteNewApiAuthEnabled
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_LOGIN_URL" $viteNewApiLoginUrl
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_LOGIN_MODE" $viteNewApiLoginMode
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_CONSOLE_URL" $viteNewApiConsoleUrl
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_USAGE_URL" $viteNewApiUsageUrl
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_API_KEYS_URL" $viteNewApiApiKeysUrl
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_TALKWISE_CLIENT_ID" $viteNewApiTalkwiseClientId
+Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" $viteNewApiTalkwiseRedirectUri
 
 if ($UsePostgres) {
     try {
@@ -833,6 +896,10 @@ Write-Host "Frontend: $frontendUrl"
 Write-Host "Backend docs: $backendUrl/docs"
 Write-Host "Backend health: $backendUrl/health/live"
 Write-Host "Frontend API proxy health: $frontendUrl/health/live"
+Write-Host "NewAPI console: $viteNewApiConsoleUrl"
+Write-Host "NewAPI API keys: $viteNewApiApiKeysUrl"
+Write-Host "NewAPI usage: $viteNewApiUsageUrl"
+Write-Host "NewAPI gateway: $newApiGatewayBaseUrl"
 Write-Host "Logs: $LogDir"
 Write-Host ""
 if (-not $usingSqlite) {

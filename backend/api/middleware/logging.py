@@ -6,6 +6,7 @@
 import time
 from typing import Any
 import json
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -41,7 +42,22 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     }
 
     # 敏感字段，日志中需要脱敏
-    SENSITIVE_FIELDS = {"password", "secret", "api_key", "old_password", "new_password"}
+    SENSITIVE_FIELDS = {
+        "password",
+        "secret",
+        "client_secret",
+        "api_key",
+        "newapi_token",
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "talkwise_code",
+        "code",
+        "authorization",
+        "old_password",
+        "new_password",
+    }
 
     def __init__(self, app: ASGIApp):
         super().__init__(app)
@@ -110,7 +126,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         info = {
             "method": request.method,
             "path": request.url.path,
-            "query_params": dict(request.query_params),
+            "query_params": self._sanitize_data(dict(request.query_params)),
         }
 
         # 添加路径参数
@@ -139,7 +155,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         # 添加来源
         referer = request.headers.get("Referer")
         if referer:
-            info["referer"] = referer
+            info["referer"] = self._sanitize_url(referer)
 
         return info
 
@@ -212,7 +228,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         try:
             if isinstance(data, dict):
                 return {
-                    k: ("***" if k.lower() in self.SENSITIVE_FIELDS else self._sanitize_data(v))
+                    k: ("***" if self._is_sensitive_field(k) else self._sanitize_data(v))
                     for k, v in data.items()
                 }
             if isinstance(data, list):
@@ -222,6 +238,45 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             return data
         except Exception:
             return data
+
+    def _sanitize_url(self, value: str) -> str:
+        try:
+            parts = urlsplit(value)
+            query = self._sanitize_param_string(parts.query)
+            fragment = self._sanitize_fragment(parts.fragment)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, query, fragment))
+        except Exception:
+            return value
+
+    def _sanitize_fragment(self, value: str) -> str:
+        if not value:
+            return value
+        prefix, separator, params = value.partition("?")
+        if separator:
+            return f"{prefix}?{self._sanitize_param_string(params)}"
+        if "=" in value:
+            return self._sanitize_param_string(value)
+        return value
+
+    def _sanitize_param_string(self, value: str) -> str:
+        if not value:
+            return value
+        pairs = parse_qsl(value, keep_blank_values=True)
+        if not pairs:
+            return value
+        sanitized = [
+            (key, "***" if self._is_sensitive_field(key) else item_value)
+            for key, item_value in pairs
+        ]
+        return urlencode(sanitized, safe="*")
+
+    def _is_sensitive_field(self, key: object) -> bool:
+        normalized = str(key).strip().lower()
+        return (
+            normalized in self.SENSITIVE_FIELDS
+            or normalized.endswith("_token")
+            or normalized.endswith("_secret")
+        )
 
     def _log_response(self, response: Response, duration: float, request_info: dict):
         """

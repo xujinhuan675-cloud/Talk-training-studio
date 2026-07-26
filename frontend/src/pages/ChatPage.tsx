@@ -65,10 +65,10 @@ import { createDefaultConversation } from '../services/defaultConversation'
 import {
   completeTrainingSession,
   buildTrainingCompletionBranchMetadata,
-  getTrainingGuidanceStreamUrl,
   getTrainingSessionReport,
   persistTrainingGuidanceEvents,
   requestTrainingGuidance,
+  startTrainingGuidanceStream,
   type GuideEventDTO,
   type TrainingSessionReportDTO,
   type TrainingGuidanceResponse,
@@ -455,7 +455,7 @@ function ChatArea() {
   const guidanceLastRequestedAtRef = React.useRef(0)
   const lastAutoGuidanceMessageKeyRef = React.useRef<string | null>(null)
   const persistedGuidanceSignatureRef = React.useRef<string | null>(null)
-  const guidanceEventSourceRef = React.useRef<EventSource | null>(null)
+  const guidanceStreamAbortRef = React.useRef<AbortController | null>(null)
   const guidanceStreamVersionRef = React.useRef(0)
   const initialRouteMessageKeyRef = React.useRef<string | null>(null)
   const trainingMode = getTrainingModeFromLocation(location.search, location.state)
@@ -759,10 +759,10 @@ function ChatArea() {
       window.clearTimeout(guidanceTimerRef.current)
       guidanceTimerRef.current = null
     }
-    if (guidanceEventSourceRef.current) {
+    if (guidanceStreamAbortRef.current) {
       guidanceStreamVersionRef.current += 1
-      guidanceEventSourceRef.current.close()
-      guidanceEventSourceRef.current = null
+      guidanceStreamAbortRef.current.abort()
+      guidanceStreamAbortRef.current = null
     }
   }, [trainingSessionId])
 
@@ -771,86 +771,90 @@ function ChatArea() {
       if (guidanceTimerRef.current !== null) {
         window.clearTimeout(guidanceTimerRef.current)
       }
-      if (guidanceEventSourceRef.current) {
+      if (guidanceStreamAbortRef.current) {
         guidanceStreamVersionRef.current += 1
-        guidanceEventSourceRef.current.close()
-        guidanceEventSourceRef.current = null
+        guidanceStreamAbortRef.current.abort()
+        guidanceStreamAbortRef.current = null
       }
     }
   }, [])
 
   useEffect(() => {
     if (!trainingGuidanceEnabled || !trainingSessionId) {
-      if (guidanceEventSourceRef.current) {
+      if (guidanceStreamAbortRef.current) {
         guidanceStreamVersionRef.current += 1
-        guidanceEventSourceRef.current.close()
-        guidanceEventSourceRef.current = null
+        guidanceStreamAbortRef.current.abort()
+        guidanceStreamAbortRef.current = null
       }
       setGuidanceLoading(false)
       setGuidanceStreamConnected(false)
       return
     }
-    if (guidanceEventSourceRef.current) {
+    if (guidanceStreamAbortRef.current) {
       guidanceStreamVersionRef.current += 1
-      guidanceEventSourceRef.current.close()
-      guidanceEventSourceRef.current = null
+      guidanceStreamAbortRef.current.abort()
+      guidanceStreamAbortRef.current = null
     }
 
     const streamVersion = guidanceStreamVersionRef.current + 1
     guidanceStreamVersionRef.current = streamVersion
-    const es = new EventSource(getTrainingGuidanceStreamUrl(trainingSessionId, {
-      message_limit: 50,
-      poll_interval_ms: 1000,
-    }))
-    guidanceEventSourceRef.current = es
+    const abortController = new AbortController()
+    guidanceStreamAbortRef.current = abortController
     setGuidanceLoading(true)
     setGuidanceError(null)
 
     const isCurrentStream = () =>
-      guidanceEventSourceRef.current === es && guidanceStreamVersionRef.current === streamVersion
+      guidanceStreamAbortRef.current === abortController
+      && guidanceStreamVersionRef.current === streamVersion
+      && !abortController.signal.aborted
 
-    es.addEventListener('guidance_snapshot', (event) => {
+    void startTrainingGuidanceStream(
+      trainingSessionId,
+      {
+        message_limit: 50,
+        poll_interval_ms: 1000,
+      },
+      {
+        onSnapshot: (data: TrainingGuidanceResponse) => {
+          if (!isCurrentStream()) return
+          setGuidanceStreamConnected(true)
+          setGuidanceLoading(false)
+          setGuidanceError(null)
+          setGuidanceEvents(data.events)
+          if (
+            (isDrillFeedbackMode && data.events.length > 0)
+            || data.events.some((item) => item.severity !== 'info')
+          ) {
+            setGuidanceOpen(true)
+          }
+        },
+        onGuidanceError: (data: unknown) => {
+          if (!isCurrentStream()) return
+          setGuidanceError(getErrorMessage(data, tr('实时提示流失败', 'Live guidance stream failed')))
+          setGuidanceLoading(false)
+          setGuidanceStreamConnected(false)
+        },
+      },
+      abortController.signal,
+    ).then(() => {
       if (!isCurrentStream()) return
-      try {
-        const data: TrainingGuidanceResponse = JSON.parse(event.data)
-        setGuidanceStreamConnected(true)
-        setGuidanceLoading(false)
-        setGuidanceError(null)
-        setGuidanceEvents(data.events)
-        if (
-          (isDrillFeedbackMode && data.events.length > 0)
-          || data.events.some((item) => item.severity !== 'info')
-        ) {
-          setGuidanceOpen(true)
-        }
-      } catch {
-        setGuidanceError(tr('实时提示流失败', 'Live guidance stream failed'))
-      }
-    })
-
-    es.addEventListener('guidance_error', (event) => {
-      if (!isCurrentStream()) return
-      try {
-        const data = JSON.parse(event.data)
-        setGuidanceError(getErrorMessage(data, tr('实时提示流失败', 'Live guidance stream failed')))
-      } catch {
-        setGuidanceError(tr('实时提示流失败', 'Live guidance stream failed'))
-      }
+      guidanceStreamAbortRef.current = null
       setGuidanceLoading(false)
       setGuidanceStreamConnected(false)
-    })
-
-    es.onerror = () => {
-      if (!isCurrentStream()) return
+    }).catch((error: unknown) => {
+      const abortError = error instanceof Error && error.name === 'AbortError'
+      if (abortError || !isCurrentStream()) return
+      guidanceStreamAbortRef.current = null
       setGuidanceLoading(false)
       setGuidanceStreamConnected(false)
-    }
+      setGuidanceError(getErrorMessage(error, tr('实时提示流失败', 'Live guidance stream failed')))
+    })
 
     return () => {
       guidanceStreamVersionRef.current += 1
-      es.close()
-      if (guidanceEventSourceRef.current === es) {
-        guidanceEventSourceRef.current = null
+      abortController.abort()
+      if (guidanceStreamAbortRef.current === abortController) {
+        guidanceStreamAbortRef.current = null
       }
       setGuidanceStreamConnected(false)
     }

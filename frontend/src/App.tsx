@@ -5,7 +5,7 @@ import { AppProvider } from './contexts/AppContext'
 import { AuthProvider, useAuthContext } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { I18nProvider, useI18n } from './i18n'
-import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from './services/auth'
+import { MANAGEMENT_SYSTEM_ROLES, NEWAPI_AUTH_ENABLED, type SystemRole } from './services/auth'
 import { APP_ROUTES } from './appRoutes'
 import {
   createRedirectTarget,
@@ -16,6 +16,7 @@ import {
 import { getDocumentTitle } from './routeTitles'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
+const LoginPage = lazy(() => import('./pages/LoginPage'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const TrainingStudioPage = lazy(() => import('./pages/TrainingStudioPage'))
 const ScenarioTrainingPage = lazy(() => import('./pages/ScenarioTrainingPage'))
@@ -75,6 +76,21 @@ function managementOnly(element: ReactNode) {
   return <RequireSystemRole roles={MANAGEMENT_SYSTEM_ROLES}>{element}</RequireSystemRole>
 }
 
+function RequireAuthentication({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  const { currentUser, status } = useAuthContext()
+
+  if (status === 'loading') {
+    return <RouteLoadingFallback />
+  }
+
+  if (NEWAPI_AUTH_ENABLED && !currentUser) {
+    return <Navigate to={APP_ROUTES.login} replace state={{ from: location }} />
+  }
+
+  return <>{children}</>
+}
+
 function RedirectTo({ to }: { to: string }) {
   const location = useLocation()
   const redirectTarget = createRedirectTarget(to, location)
@@ -107,11 +123,11 @@ function App() {
     <I18nProvider>
       <ThemeProvider>
         <AuthProvider>
-          <AppProvider>
-            <DocumentTitleSync />
-            <Suspense fallback={<RouteLoadingFallback />}>
-              <Routes>
-                <Route element={<Layout />}>
+          <DocumentTitleSync />
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <Routes>
+              <Route path="login" element={<LoginPage />} />
+              <Route element={<RequireAuthentication><AppProvider><Layout /></AppProvider></RequireAuthentication>}>
                   <Route index element={<HomePage />} />
                   <Route path="practice" element={<Outlet />}>
                     <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
@@ -141,7 +157,6 @@ function App() {
                 </Route>
               </Routes>
             </Suspense>
-          </AppProvider>
         </AuthProvider>
       </ThemeProvider>
     </I18nProvider>

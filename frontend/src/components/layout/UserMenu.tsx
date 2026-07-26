@@ -1,7 +1,14 @@
 import React from 'react'
-import { Check, ChevronDown, LogOut, UserRound } from 'lucide-react'
+import { Check, ChevronDown, ExternalLink, KeyRound, Loader2, LogOut, UserRound } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
-import { getUserDisplayRoleName } from '../../services/auth'
+import {
+  buildNewApiLoginUrl,
+  getUserDisplayRoleName,
+  NEWAPI_API_KEYS_URL,
+  NEWAPI_AUTH_ENABLED,
+  NEWAPI_CONSOLE_URL,
+  NEWAPI_USAGE_URL,
+} from '../../services/auth'
 import { useI18n } from '../../i18n'
 import { Button } from '../ui/button'
 import {
@@ -17,13 +24,38 @@ import {
 import './UserMenu.css'
 
 const UserMenu: React.FC = () => {
-  const { currentUser, users, switchUser, signOut } = useAuthContext()
+  const { currentUser, users, connectNewApiToken, switchUser, signOut } = useAuthContext()
   const { tr } = useI18n()
+  const [tokenInput, setTokenInput] = React.useState('')
+  const [connectError, setConnectError] = React.useState<string | null>(null)
+  const [isConnecting, setIsConnecting] = React.useState(false)
 
   const userName = currentUser?.name ?? tr('未登录', 'Signed out')
   const roleName = currentUser ? getUserDisplayRoleName(currentUser) : tr('选择一个模拟用户', 'Choose a mock user')
   const avatarInitial = currentUser?.avatarInitial ?? '?'
-  const currentUserValue = currentUser?.id ?? ''
+  const currentUserValue = currentUser?.authProvider === 'mock' ? currentUser.id : ''
+  const isNewApiUser = currentUser?.authProvider === 'newapi'
+  const newApiLoginUrl = React.useMemo(() => buildNewApiLoginUrl(), [])
+
+  const handleNewApiSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const token = tokenInput.trim()
+    if (!token) {
+      setConnectError(tr('请输入 NewAPI token', 'Enter a NewAPI token'))
+      return
+    }
+    setConnectError(null)
+    setIsConnecting(true)
+    try {
+      await connectNewApiToken(token, 'session')
+      setTokenInput('')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr('连接失败', 'Connection failed')
+      setConnectError(message)
+    } finally {
+      setIsConnecting(false)
+    }
+  }
 
   return (
     <DropdownMenu>
@@ -45,35 +77,115 @@ const UserMenu: React.FC = () => {
       </Button>
 
       <DropdownMenuContent className="user-menu-popover" align="end">
-        <DropdownMenuLabel className="user-menu-heading">{tr('切换用户', 'Switch user')}</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          className="user-menu-options"
-          value={currentUserValue}
-          aria-label={tr('模拟用户', 'Mock users')}
+        {!NEWAPI_AUTH_ENABLED ? (
+          <>
+            <DropdownMenuLabel className="user-menu-heading">{tr('模拟用户', 'Mock users')}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              className="user-menu-options"
+              value={currentUserValue}
+              aria-label={tr('模拟用户', 'Mock users')}
+            >
+              {users.map((user) => {
+                const selected = currentUser?.authProvider === 'mock' && currentUser.id === user.id
+                return (
+                  <DropdownMenuRadioItem
+                    key={user.id}
+                    value={user.id}
+                    className={`user-menu-option${selected ? ' selected' : ''}`}
+                    onSelect={() => {
+                      switchUser(user.id)
+                    }}
+                  >
+                    <span className="user-menu-option-avatar" aria-hidden="true">
+                      {user.avatarInitial}
+                    </span>
+                    <span className="user-menu-option-copy">
+                      <span className="user-menu-option-name">{user.name}</span>
+                      <span className="user-menu-option-role">{getUserDisplayRoleName(user)}</span>
+                    </span>
+                    {selected ? <Check size={15} aria-hidden="true" /> : null}
+                  </DropdownMenuRadioItem>
+                )
+              })}
+            </DropdownMenuRadioGroup>
+
+            <DropdownMenuSeparator className="user-menu-divider" />
+          </>
+        ) : null}
+
+        <form
+          className="user-menu-newapi"
+          onSubmit={handleNewApiSubmit}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+          }}
         >
-          {users.map((user) => {
-            const selected = currentUser?.id === user.id
-            return (
-              <DropdownMenuRadioItem
-                key={user.id}
-                value={user.id}
-                className={`user-menu-option${selected ? ' selected' : ''}`}
-                onSelect={() => {
-                  switchUser(user.id)
-                }}
-              >
-                <span className="user-menu-option-avatar" aria-hidden="true">
-                  {user.avatarInitial}
-                </span>
-                <span className="user-menu-option-copy">
-                  <span className="user-menu-option-name">{user.name}</span>
-                  <span className="user-menu-option-role">{getUserDisplayRoleName(user)}</span>
-                </span>
-                {selected ? <Check size={15} aria-hidden="true" /> : null}
-              </DropdownMenuRadioItem>
-            )
-          })}
-        </DropdownMenuRadioGroup>
+          <div className="user-menu-newapi-header">
+            <span className="user-menu-newapi-title">
+              <KeyRound size={14} aria-hidden="true" />
+              <span>NewAPI</span>
+            </span>
+            <a
+              className="user-menu-newapi-link"
+              href={newApiLoginUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={tr('打开 NewAPI', 'Open NewAPI')}
+              title={newApiLoginUrl}
+            >
+              <ExternalLink size={14} aria-hidden="true" />
+            </a>
+          </div>
+
+          <div className="user-menu-newapi-links">
+            <a href={NEWAPI_CONSOLE_URL} target="_blank" rel="noreferrer">
+              <ExternalLink size={13} aria-hidden="true" />
+              <span>{tr('控制台', 'Console')}</span>
+            </a>
+            <a href={NEWAPI_API_KEYS_URL} target="_blank" rel="noreferrer">
+              <KeyRound size={13} aria-hidden="true" />
+              <span>API Keys</span>
+            </a>
+            <a href={NEWAPI_USAGE_URL} target="_blank" rel="noreferrer">
+              <ExternalLink size={13} aria-hidden="true" />
+              <span>{tr('用量', 'Usage')}</span>
+            </a>
+          </div>
+
+          {isNewApiUser ? (
+            <div className="user-menu-newapi-current">
+              <span className="user-menu-newapi-dot" aria-hidden="true" />
+              <span>{currentUser?.username}</span>
+            </div>
+          ) : null}
+
+          <input
+            className="user-menu-newapi-input"
+            type="password"
+            value={tokenInput}
+            autoComplete="off"
+            placeholder={tr('Access token', 'Access token')}
+            aria-label={tr('NewAPI access token', 'NewAPI access token')}
+            onChange={(event) => {
+              setTokenInput(event.target.value)
+            }}
+          />
+          <Button
+            className="user-menu-newapi-submit"
+            type="submit"
+            variant="secondary"
+            size="sm"
+            disabled={isConnecting}
+          >
+            {isConnecting ? <Loader2 size={14} aria-hidden="true" /> : <KeyRound size={14} aria-hidden="true" />}
+            <span>{isConnecting ? tr('连接中', 'Connecting') : tr('连接', 'Connect')}</span>
+          </Button>
+          {connectError ? (
+            <div className="user-menu-newapi-error" role="alert">
+              {connectError}
+            </div>
+          ) : null}
+        </form>
 
         <DropdownMenuSeparator className="user-menu-divider" />
 

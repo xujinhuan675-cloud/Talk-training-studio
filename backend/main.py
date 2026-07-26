@@ -12,6 +12,7 @@ from starlette.responses import HTMLResponse
 from api.middleware import LoggingMiddleware, RequestIDMiddleware, PrometheusMiddleware
 from api.middleware.locale import LocaleMiddleware
 from api.routes import chat as chat_routes
+from api.routes import auth as auth_routes
 from api.routes import conversations as conversations_routes
 from api.routes import files as files_routes
 from api.routes import health as health_routes
@@ -219,6 +220,7 @@ register_exception_handlers(app)
 
 # 注册路由
 app.include_router(storage_routes.router, prefix="/api/v1")
+app.include_router(auth_routes.router, prefix="/api/v1")
 app.include_router(files_routes.router, prefix="/api/v1")
 app.include_router(conversations_routes.router, prefix="/api/v1")
 app.include_router(chat_routes.router, prefix="/api/v1")

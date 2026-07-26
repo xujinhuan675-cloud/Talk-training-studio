@@ -64,3 +64,50 @@ def test_settings_loads_capability_inventory_from_nested_env(
         }
     ]
     assert settings.capability_inventory.agent_config_scan_limit == 3
+
+
+def test_settings_uses_newapi_access_token_as_llm_gateway_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "LLM__API_KEY",
+        "LLM__BASE_URL",
+        "OPENAI_COMPATIBLE_API_KEY",
+        "OPENAI_COMPATIBLE_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("NEWAPI_BASE_URL", "https://newapi.example")
+    monkeypatch.setenv("NEWAPI_ACCESS_TOKEN", "newapi-token")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm.api_key == "newapi-token"
+    assert settings.llm.base_url == "https://newapi.example/v1"
+
+
+def test_settings_uses_explicit_newapi_gateway_base_url_for_llm_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "LLM__API_KEY",
+        "LLM__BASE_URL",
+        "OPENAI_COMPATIBLE_API_KEY",
+        "OPENAI_COMPATIBLE_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("NEWAPI_BASE_URL", "https://newapi.example")
+    monkeypatch.setenv("NEWAPI_GATEWAY_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("NEWAPI_ACCESS_TOKEN", "newapi-token")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm.api_key == "newapi-token"
+    assert settings.llm.base_url == "https://gateway.example/v1"

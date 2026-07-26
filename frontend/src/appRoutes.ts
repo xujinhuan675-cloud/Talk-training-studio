@@ -1,4 +1,5 @@
 export const APP_ROUTES = {
+  login: '/login',
   workbench: '/',
   practice: '/practice',
   practiceScenarios: '/practice/scenarios',

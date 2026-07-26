@@ -1,10 +1,15 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import {
   canAccessManagementFeatures,
   canAccessMemberWorkspace,
   canAccessTeamLeaderboard,
+  clearBrowserAuthSession,
+  connectNewApiAccessToken,
+  connectNewApiAuthorizationCode,
+  connectNewApiBrowserSession,
   createAuthenticatedState,
   createSignedOutState,
+  fetchCurrentAuthSession,
   getMockUsers,
   hasAnySystemRole as authHasAnySystemRole,
   loadInitialAuthState,
@@ -12,22 +17,28 @@ import {
   type AuthState,
   type AuthStorageScope,
   type AuthUser,
+  type MockAuthUser,
   type MockUserId,
   type SystemRole,
 } from '../services/auth'
 
 export interface AuthContextValue {
   status: AuthState['status']
+  isLoading: boolean
   currentUser: AuthUser | null
-  users: AuthUser[]
+  users: MockAuthUser[]
   isAdmin: boolean
   isLeader: boolean
   isStaff: boolean
   canManageTeam: boolean
   canViewTeamLeaderboard: boolean
   canUseMemberWorkspace: boolean
+  connectNewApiCode: (code: string, redirectUri?: string | null, scope?: AuthStorageScope) => Promise<AuthUser>
+  connectNewApiToken: (accessToken: string, scope?: AuthStorageScope) => Promise<AuthUser>
+  connectStoredNewApiSession: () => Promise<AuthState | null>
+  refreshSession: () => Promise<AuthState>
   switchUser: (userId: MockUserId, scope?: AuthStorageScope) => void
-  signOut: (scope?: AuthStorageScope) => void
+  signOut: (scope?: AuthStorageScope) => Promise<void>
   hasSystemRole: (role: SystemRole) => boolean
   hasAnySystemRole: (roles: readonly SystemRole[]) => boolean
 }
@@ -38,16 +49,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>(loadInitialAuthState)
   const users = useMemo(() => getMockUsers(), [])
 
+  const refreshSession = useCallback(async () => {
+    const nextState = await fetchCurrentAuthSession(authState)
+    setAuthState(nextState)
+    if (nextState.status === 'authenticated' && nextState.provider === 'newapi') {
+      persistAuthState(nextState, 'session')
+    }
+    return nextState
+  }, [authState])
+
   const switchUser = useCallback((userId: MockUserId, scope: AuthStorageScope = 'local') => {
     const nextState = createAuthenticatedState(userId)
     setAuthState(nextState)
     persistAuthState(nextState, scope)
   }, [])
 
-  const signOut = useCallback((scope: AuthStorageScope = 'local') => {
+  const connectNewApiToken = useCallback(async (accessToken: string, scope: AuthStorageScope = 'session') => {
+    const nextState = await connectNewApiAccessToken(accessToken)
+    setAuthState(nextState)
+    persistAuthState(nextState, scope)
+    if (!nextState.user) {
+      throw new Error('NewAPI session did not return a user')
+    }
+    return nextState.user
+  }, [])
+
+  const connectNewApiCode = useCallback(
+    async (code: string, redirectUri?: string | null, scope: AuthStorageScope = 'session') => {
+      const nextState = await connectNewApiAuthorizationCode(code, redirectUri)
+      setAuthState(nextState)
+      persistAuthState(nextState, scope)
+      if (!nextState.user) {
+        throw new Error('NewAPI session did not return a user')
+      }
+      return nextState.user
+    },
+    [],
+  )
+
+  const connectStoredNewApiSession = useCallback(async () => {
+    const nextState = await connectNewApiBrowserSession()
+    if (!nextState) return null
+    setAuthState(nextState)
+    persistAuthState(nextState, 'session')
+    return nextState
+  }, [])
+
+  const signOut = useCallback(async (scope: AuthStorageScope = 'local') => {
     const nextState = createSignedOutState()
     setAuthState(nextState)
     persistAuthState(nextState, scope)
+    await clearBrowserAuthSession()
+  }, [])
+
+  useEffect(() => {
+    if (authState.provider !== 'newapi' && authState.status !== 'loading') return
+    let cancelled = false
+    void connectNewApiBrowserSession()
+      .then((browserState) => browserState ?? fetchCurrentAuthSession(authState))
+      .then((nextState) => {
+        if (cancelled) return
+        setAuthState(nextState)
+        if (nextState.status === 'authenticated' && nextState.provider === 'newapi') {
+          persistAuthState(nextState, 'session')
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        const nextState = createSignedOutState()
+        setAuthState(nextState)
+        persistAuthState(nextState, 'session')
+      })
+    return () => {
+      cancelled = true
+    }
+    // Run once on mount using the stored initial auth state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const hasSystemRole = useCallback(
@@ -62,6 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       status: authState.status,
+      isLoading: authState.status === 'loading',
       currentUser: authState.user,
       users,
       isAdmin: authState.user?.systemRole === 'admin',
@@ -70,12 +148,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canManageTeam: canAccessManagementFeatures(authState.user),
       canViewTeamLeaderboard: canAccessTeamLeaderboard(authState.user),
       canUseMemberWorkspace: canAccessMemberWorkspace(authState.user),
+      connectNewApiCode,
+      connectNewApiToken,
+      connectStoredNewApiSession,
+      refreshSession,
       switchUser,
       signOut,
       hasSystemRole,
       hasAnySystemRole,
     }),
-    [authState.status, authState.user, hasAnySystemRole, hasSystemRole, signOut, switchUser, users],
+    [
+      authState.status,
+      authState.user,
+      connectNewApiCode,
+      connectNewApiToken,
+      connectStoredNewApiSession,
+      hasAnySystemRole,
+      hasSystemRole,
+      refreshSession,
+      signOut,
+      switchUser,
+      users,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

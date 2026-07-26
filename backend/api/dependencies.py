@@ -5,7 +5,7 @@ API 依赖项
 import time
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException, Query, Request
+from fastapi import Cookie, Depends, Header, HTTPException, Query, Request
 
 from application.services.file_asset_service import FileAssetApplicationService
 from application.services.idempotency_service import IdempotencyService
@@ -28,6 +28,14 @@ from infrastructure.external.llm import get_llm_client, get_anthropic_client
 from infrastructure.external.voice import get_tts_client, get_stt_client
 from infrastructure.adapters.storage_port import StorageProviderPortAdapter
 from infrastructure.adapters.idempotency_store import RedisIdempotencyStore
+from infrastructure.external.newapi_auth import (
+    NewAPIAuthError,
+    NewAPIAuthUnavailableError,
+    NewAPIIdentity,
+    exchange_newapi_authorization_code,
+    fetch_newapi_identity,
+)
+from infrastructure.auth_session import current_user_from_session_cookie
 from core.config import settings
 
 
@@ -36,8 +44,18 @@ class CurrentUser:
     user_id: str
     system_role: str
     team_id: str | None = None
+    team_name: str | None = None
     username: str | None = None
+    display_name: str | None = None
     business_role: str | None = None
+    newapi_group: str | None = None
+    quota_remaining: int | None = None
+    quota_used: int | None = None
+    quota_total: int | None = None
+    request_count: int | None = None
+    subscription_plan: str | None = None
+    subscription_status: str | None = None
+    newapi_gateway_base_url: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -100,7 +118,107 @@ def _coerce_optional_text(value: object | None) -> str | None:
     return text or None
 
 
+def extract_bearer_token(authorization: str | None) -> str | None:
+    value = _coerce_optional_text(authorization)
+    if not value:
+        return None
+    scheme, separator, token = value.partition(" ")
+    if separator and scheme.lower() == "bearer":
+        return token.strip() or None
+    return None
+
+
+def _has_mock_auth_signal(*values: object | None) -> bool:
+    return any(_coerce_optional_text(value) for value in values)
+
+
+def _system_role_from_newapi_role(role: int) -> str:
+    if role >= settings.NEWAPI_ROOT_ROLE_VALUE:
+        return "admin"
+    if role >= settings.NEWAPI_ADMIN_ROLE_VALUE:
+        return "leader"
+    return "staff"
+
+
+def _current_user_from_newapi_identity(identity: NewAPIIdentity) -> CurrentUser:
+    group = _coerce_optional_text(identity.group)
+    team_id = _coerce_optional_text(identity.team_id)
+    team_name = _coerce_optional_text(identity.team_name)
+    gateway_base_url = _coerce_optional_text(identity.gateway_base_url)
+    quota_remaining = identity.quota
+    quota_used = identity.used_quota
+    quota_total = (
+        quota_remaining + quota_used
+        if quota_remaining is not None and quota_used is not None
+        else None
+    )
+    return CurrentUser(
+        user_id=f"newapi:{identity.id}",
+        username=identity.username,
+        display_name=identity.display_name,
+        system_role=_system_role_from_newapi_role(identity.role),
+        business_role=settings.NEWAPI_DEFAULT_BUSINESS_ROLE,
+        team_id=team_id or (f"newapi:{group}" if group else settings.NEWAPI_DEFAULT_TEAM_ID),
+        team_name=team_name or group,
+        newapi_group=group,
+        quota_remaining=quota_remaining,
+        quota_used=quota_used,
+        quota_total=quota_total,
+        request_count=identity.request_count,
+        subscription_plan=identity.subscription_plan,
+        subscription_status=identity.subscription_status,
+        newapi_gateway_base_url=gateway_base_url or settings.NEWAPI_GATEWAY_BASE_URL,
+    )
+
+
+async def get_current_user_from_newapi_token(access_token: str) -> CurrentUser:
+    try:
+        identity = await fetch_newapi_identity(
+            access_token,
+            base_url=settings.NEWAPI_BASE_URL,
+            timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
+        )
+    except NewAPIAuthUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="NewAPI authentication service unavailable",
+        ) from exc
+    except NewAPIAuthError as exc:
+        raise HTTPException(status_code=401, detail="Invalid NewAPI access token") from exc
+    return _current_user_from_newapi_identity(identity)
+
+
+async def get_current_user_from_newapi_code(
+    code: str,
+    *,
+    redirect_uri: str | None = None,
+) -> CurrentUser:
+    try:
+        identity = await exchange_newapi_authorization_code(
+            code,
+            base_url=settings.NEWAPI_BASE_URL,
+            client_id=settings.NEWAPI_TALKWISE_CLIENT_ID,
+            client_secret=settings.NEWAPI_TALKWISE_CLIENT_SECRET,
+            redirect_uri=redirect_uri or settings.NEWAPI_TALKWISE_REDIRECT_URI,
+            exchange_path=settings.NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH,
+            timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
+        )
+    except NewAPIAuthUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="NewAPI authentication service unavailable",
+        ) from exc
+    except NewAPIAuthError as exc:
+        raise HTTPException(status_code=401, detail="Invalid NewAPI authorization code") from exc
+    return _current_user_from_newapi_identity(identity)
+
+
 async def get_current_user(
+    talkwise_session: str | None = Cookie(
+        default=None,
+        alias=settings.TALKWISE_SESSION_COOKIE_NAME,
+    ),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_mock_user: str | None = Header(default=None, alias="X-Mock-User"),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_user_role: str | None = Header(default=None, alias="X-User-Role"),
@@ -112,6 +230,32 @@ async def get_current_user(
     q_system_role: str | None = Query(default=None, alias="auth_role"),
     q_team_id: str | None = Query(default=None, alias="auth_team_id"),
 ) -> CurrentUser:
+    session_user = current_user_from_session_cookie(talkwise_session)
+    if session_user is not None:
+        return session_user
+
+    bearer_token = extract_bearer_token(authorization)
+    if bearer_token:
+        try:
+            return await get_current_user_from_newapi_token(bearer_token)
+        except HTTPException:
+            if settings.NEWAPI_AUTH_ENABLED or not _has_mock_auth_signal(
+                x_mock_user,
+                x_user_id,
+                x_user_role,
+                x_system_role,
+                x_role,
+                x_team_id,
+                q_mock_user,
+                q_user_id,
+                q_system_role,
+                q_team_id,
+            ):
+                raise
+
+    if settings.NEWAPI_AUTH_ENABLED and not settings.NEWAPI_AUTH_ALLOW_MOCK_FALLBACK:
+        raise HTTPException(status_code=401, detail="NewAPI access token required")
+
     mock_key = (
         _coerce_optional_text(x_mock_user)
         or _coerce_optional_text(q_mock_user)
@@ -127,7 +271,11 @@ async def get_current_user(
             username=base.username,
             system_role=base.system_role,
             business_role=base.business_role,
-            team_id=_coerce_optional_text(x_team_id) or _coerce_optional_text(q_team_id) or base.team_id,
+            team_id=(
+                _coerce_optional_text(x_team_id)
+                or _coerce_optional_text(q_team_id)
+                or base.team_id
+            ),
         )
 
     role = (

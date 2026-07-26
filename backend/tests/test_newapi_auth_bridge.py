@@ -1,0 +1,312 @@
+from __future__ import annotations
+
+import pytest
+from fastapi import HTTPException
+from starlette.responses import Response
+
+from api import dependencies as deps
+from api.routes import auth as auth_routes
+from infrastructure.external.newapi_auth import NewAPIAuthError, NewAPIIdentity
+from infrastructure.auth_session import create_session_cookie_value, session_cookie_options
+
+
+async def _resolve_user(**overrides):
+    params = {
+        "talkwise_session": None,
+        "authorization": None,
+        "x_mock_user": None,
+        "x_user_id": None,
+        "x_user_role": None,
+        "x_system_role": None,
+        "x_role": None,
+        "x_team_id": None,
+        "q_mock_user": None,
+        "q_user_id": None,
+        "q_system_role": None,
+        "q_team_id": None,
+    }
+    params.update(overrides)
+    return await deps.get_current_user(**params)
+
+
+def test_extract_bearer_token_accepts_case_insensitive_scheme() -> None:
+    assert deps.extract_bearer_token("bearer live-token") == "live-token"
+    assert deps.extract_bearer_token("Bearer   spaced-token  ") == "spaced-token"
+    assert deps.extract_bearer_token("Token live-token") is None
+    assert deps.extract_bearer_token("Bearer") is None
+
+
+@pytest.mark.asyncio
+async def test_newapi_bearer_token_maps_to_talkwise_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch_identity(access_token: str, *, base_url: str, timeout_seconds: float):
+        assert access_token == "live-token"
+        assert base_url == "https://newapi.example"
+        assert timeout_seconds == 2.5
+        return NewAPIIdentity(
+            id=42,
+            username="alice",
+            display_name="Alice Zhang",
+            role=100,
+            status=1,
+            group="paid",
+            quota=1200,
+            used_quota=300,
+            request_count=12,
+            subscription_plan="pro",
+            subscription_status="active",
+            gateway_base_url="https://gateway.example/v1",
+        )
+
+    monkeypatch.setattr(deps.settings, "NEWAPI_BASE_URL", "https://newapi.example")
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_TIMEOUT_SECONDS", 2.5)
+    monkeypatch.setattr(deps, "fetch_newapi_identity", fake_fetch_identity)
+
+    current_user = await _resolve_user(authorization="Bearer live-token")
+
+    assert current_user.user_id == "newapi:42"
+    assert current_user.username == "alice"
+    assert current_user.display_name == "Alice Zhang"
+    assert current_user.system_role == "admin"
+    assert current_user.business_role == "sales"
+    assert current_user.team_id == "newapi:paid"
+    assert current_user.quota_remaining == 1200
+    assert current_user.quota_used == 300
+    assert current_user.quota_total == 1500
+    assert current_user.subscription_plan == "pro"
+    assert current_user.subscription_status == "active"
+    assert current_user.newapi_gateway_base_url == "https://gateway.example/v1"
+
+
+@pytest.mark.asyncio
+async def test_newapi_authorization_code_exchange_maps_control_plane_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_exchange_code(
+        code: str,
+        *,
+        base_url: str,
+        client_id: str,
+        client_secret: str | None,
+        redirect_uri: str | None,
+        exchange_path: str,
+        timeout_seconds: float,
+    ):
+        assert code == "handoff-code"
+        assert base_url == "https://newapi.example"
+        assert client_id == "talkwise-prod"
+        assert client_secret == "client-secret"
+        assert redirect_uri == "https://talkwise.example/login"
+        assert exchange_path == "/api/talkwise/auth/exchange"
+        assert timeout_seconds == 3.0
+        return NewAPIIdentity(
+            id=88,
+            username="carol",
+            display_name="Carol Chen",
+            role=10,
+            status=1,
+            group="premium",
+            team_id="team-acme",
+            team_name="Acme Revenue",
+            quota=900,
+            used_quota=100,
+            request_count=7,
+            subscription_plan="enterprise",
+            subscription_status="active",
+            gateway_base_url="https://gateway.example/v1",
+        )
+
+    monkeypatch.setattr(deps.settings, "NEWAPI_BASE_URL", "https://newapi.example")
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_TIMEOUT_SECONDS", 3.0)
+    monkeypatch.setattr(deps.settings, "NEWAPI_TALKWISE_CLIENT_ID", "talkwise-prod")
+    monkeypatch.setattr(deps.settings, "NEWAPI_TALKWISE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(deps.settings, "NEWAPI_TALKWISE_REDIRECT_URI", None)
+    monkeypatch.setattr(
+        deps.settings,
+        "NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH",
+        "/api/talkwise/auth/exchange",
+    )
+    monkeypatch.setattr(deps, "exchange_newapi_authorization_code", fake_exchange_code)
+
+    current_user = await deps.get_current_user_from_newapi_code(
+        "handoff-code",
+        redirect_uri="https://talkwise.example/login",
+    )
+
+    assert current_user.user_id == "newapi:88"
+    assert current_user.username == "carol"
+    assert current_user.system_role == "leader"
+    assert current_user.team_id == "team-acme"
+    assert current_user.team_name == "Acme Revenue"
+    assert current_user.newapi_group == "premium"
+    assert current_user.quota_remaining == 900
+    assert current_user.quota_used == 100
+    assert current_user.quota_total == 1000
+    assert current_user.request_count == 7
+    assert current_user.subscription_plan == "enterprise"
+    assert current_user.subscription_status == "active"
+    assert current_user.newapi_gateway_base_url == "https://gateway.example/v1"
+
+
+@pytest.mark.asyncio
+async def test_newapi_exchange_route_sets_talkwise_session_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_user_from_code(code: str, *, redirect_uri: str | None = None):
+        assert code == "handoff-code"
+        assert redirect_uri == "https://talkwise.example/login"
+        return deps.CurrentUser(
+            user_id="newapi:88",
+            username="carol",
+            display_name="Carol Chen",
+            system_role="leader",
+            business_role="sales",
+            team_id="team-acme",
+            team_name="Acme Revenue",
+            quota_remaining=900,
+            quota_used=100,
+            quota_total=1000,
+            subscription_plan="enterprise",
+            subscription_status="active",
+        )
+
+    monkeypatch.setattr(auth_routes, "get_current_user_from_newapi_code", fake_get_user_from_code)
+    response = Response()
+
+    result = await auth_routes.exchange_newapi_session(
+        auth_routes.NewAPIExchangeRequest(
+            code="handoff-code",
+            redirect_uri="https://talkwise.example/login",
+        ),
+        response,
+    )
+
+    assert result.data is not None
+    assert result.data.user_id == "newapi:88"
+    assert result.data.team_name == "Acme Revenue"
+    assert result.data.quota_remaining == 900
+    assert result.data.subscription_plan == "enterprise"
+    set_cookie = response.headers["set-cookie"]
+    assert deps.settings.TALKWISE_SESSION_COOKIE_NAME in set_cookie
+    assert "HttpOnly" in set_cookie
+
+
+@pytest.mark.asyncio
+async def test_newapi_exchange_route_requires_code_or_token() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_routes.exchange_newapi_session(
+            auth_routes.NewAPIExchangeRequest(),
+            Response(),
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "NewAPI authorization code or access token required"
+
+
+@pytest.mark.asyncio
+async def test_newapi_admin_maps_to_talkwise_leader(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch_identity(access_token: str, *, base_url: str, timeout_seconds: float):
+        return NewAPIIdentity(id=7, username="manager", display_name=None, role=10)
+
+    monkeypatch.setattr(deps, "fetch_newapi_identity", fake_fetch_identity)
+
+    current_user = await _resolve_user(authorization="Bearer manager-token")
+
+    assert current_user.system_role == "leader"
+    assert current_user.team_id == deps.settings.NEWAPI_DEFAULT_TEAM_ID
+
+
+@pytest.mark.asyncio
+async def test_newapi_auth_enabled_requires_bearer_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ENABLED", True)
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_user(x_mock_user="admin")
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "NewAPI access token required"
+
+
+@pytest.mark.asyncio
+async def test_mock_default_still_works_when_newapi_auth_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ENABLED", False)
+
+    current_user = await _resolve_user()
+
+    assert current_user.user_id == "user-admin-001"
+    assert current_user.system_role == "admin"
+
+
+@pytest.mark.asyncio
+async def test_invalid_newapi_bearer_token_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch_identity(access_token: str, *, base_url: str, timeout_seconds: float):
+        raise NewAPIAuthError("rejected")
+
+    monkeypatch.setattr(deps, "fetch_newapi_identity", fake_fetch_identity)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_user(authorization="Bearer bad-token")
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid NewAPI access token"
+
+
+@pytest.mark.asyncio
+async def test_talkwise_session_cookie_maps_to_current_user_when_newapi_auth_is_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ENABLED", True)
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", False)
+
+    cookie_value = create_session_cookie_value(
+        deps.CurrentUser(
+            user_id="newapi:42",
+            username="alice",
+            display_name="Alice Zhang",
+            system_role="leader",
+            business_role="sales",
+            team_id="newapi:paid",
+            team_name="paid",
+            quota_remaining=100,
+            quota_used=50,
+            quota_total=150,
+        )
+    )
+
+    current_user = await _resolve_user(talkwise_session=cookie_value)
+
+    assert current_user.user_id == "newapi:42"
+    assert current_user.username == "alice"
+    assert current_user.system_role == "leader"
+    assert current_user.team_id == "newapi:paid"
+    assert current_user.team_name == "paid"
+    assert current_user.quota_remaining == 100
+    assert current_user.quota_total == 150
+
+
+@pytest.mark.asyncio
+async def test_tampered_talkwise_session_cookie_is_rejected_when_newapi_auth_is_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ENABLED", True)
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", False)
+
+    cookie_value = create_session_cookie_value(
+        deps.CurrentUser(user_id="newapi:42", username="alice", system_role="leader")
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_user(talkwise_session=f"{cookie_value}tampered")
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "NewAPI access token required"
+
+
+def test_session_cookie_options_are_httponly() -> None:
+    options = session_cookie_options()
+
+    assert options["key"] == deps.settings.TALKWISE_SESSION_COOKIE_NAME
+    assert options["httponly"] is True
+    assert options["samesite"] == "lax"

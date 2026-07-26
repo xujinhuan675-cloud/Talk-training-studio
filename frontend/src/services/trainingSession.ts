@@ -183,6 +183,11 @@ export interface TrainingGuidanceStreamOptions {
   poll_interval_ms?: number
 }
 
+export interface TrainingGuidanceStreamHandlers {
+  onSnapshot: (data: TrainingGuidanceResponse) => void
+  onGuidanceError: (data: unknown) => void
+}
+
 export interface TrainingMaterialAssetSummaryDTO {
   id: number
   key: string
@@ -920,6 +925,93 @@ export function getTrainingGuidanceStreamUrl(
   }
   const query = params.toString()
   return `${sessionUrl(sessionId, '/guidance/stream')}${query ? `?${query}` : ''}`
+}
+
+export async function startTrainingGuidanceStream(
+  sessionId: TrainingSessionId,
+  options: TrainingGuidanceStreamOptions,
+  handlers: TrainingGuidanceStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const resp = await fetch(
+    getTrainingGuidanceStreamUrl(sessionId, options),
+    withAuthHeaders({
+      headers: { Accept: 'text/event-stream' },
+      signal,
+    }),
+  )
+  if (!resp.ok) {
+    throw await readError(resp, `Failed to stream training guidance: ${resp.status}`)
+  }
+  if (!resp.body) {
+    throw new Error('Training guidance stream has no response body')
+  }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      buffer = drainTrainingGuidanceSseBuffer(buffer, handlers)
+    }
+    if (buffer.trim()) {
+      drainTrainingGuidanceSseBuffer(`${buffer}\n\n`, handlers)
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      // Reader may already be released if the stream was aborted.
+    }
+  }
+}
+
+function drainTrainingGuidanceSseBuffer(
+  buffer: string,
+  handlers: TrainingGuidanceStreamHandlers,
+): string {
+  let remaining = buffer
+  let sepIdx: number
+  while ((sepIdx = remaining.indexOf('\n\n')) !== -1) {
+    const frame = remaining.slice(0, sepIdx)
+    remaining = remaining.slice(sepIdx + 2)
+    handleTrainingGuidanceSseFrame(frame, handlers)
+  }
+  return remaining
+}
+
+function handleTrainingGuidanceSseFrame(
+  frame: string,
+  handlers: TrainingGuidanceStreamHandlers,
+): void {
+  let eventName = 'message'
+  const dataLines: string[] = []
+  for (const rawLine of frame.replace(/\r/g, '').split('\n')) {
+    if (rawLine.startsWith('event:')) {
+      eventName = rawLine.slice(6).trim()
+    } else if (rawLine.startsWith('data:')) {
+      dataLines.push(rawLine.slice(5).trimStart())
+    }
+  }
+  if (dataLines.length === 0) return
+
+  const payload = dataLines.join('\n')
+  let data: unknown
+  try {
+    data = JSON.parse(payload)
+  } catch {
+    data = payload
+  }
+
+  if (eventName === 'guidance_snapshot') {
+    handlers.onSnapshot(data as TrainingGuidanceResponse)
+  } else if (eventName === 'guidance_error') {
+    handlers.onGuidanceError(data)
+  }
 }
 
 export async function listTrainingSessions(

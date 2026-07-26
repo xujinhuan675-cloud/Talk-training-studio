@@ -250,6 +250,73 @@ class Settings(BaseSettings):
     )
 
     # CORS配置
+    # NewAPI dashboard authentication. Disabled by default so local mock auth
+    # and the existing test suite keep working until a deployment opts in.
+    NEWAPI_BASE_URL: str = Field(
+        default="https://newapi.flowguide.cc",
+        validation_alias=AliasChoices("NEWAPI_BASE_URL"),
+    )
+    NEWAPI_ACCESS_TOKEN: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("NEWAPI_ACCESS_TOKEN"),
+    )
+    NEWAPI_GATEWAY_BASE_URL: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("NEWAPI_GATEWAY_BASE_URL"),
+    )
+    NEWAPI_AUTH_ENABLED: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("NEWAPI_AUTH_ENABLED"),
+    )
+    NEWAPI_AUTH_ALLOW_MOCK_FALLBACK: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("NEWAPI_AUTH_ALLOW_MOCK_FALLBACK"),
+    )
+    NEWAPI_AUTH_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices("NEWAPI_AUTH_TIMEOUT_SECONDS"),
+    )
+    NEWAPI_TALKWISE_CLIENT_ID: str = Field(
+        default="talkwise",
+        validation_alias=AliasChoices("NEWAPI_TALKWISE_CLIENT_ID"),
+    )
+    NEWAPI_TALKWISE_CLIENT_SECRET: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("NEWAPI_TALKWISE_CLIENT_SECRET"),
+    )
+    NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH: str = Field(
+        default="/api/talkwise/auth/exchange",
+        validation_alias=AliasChoices("NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH"),
+    )
+    NEWAPI_TALKWISE_REDIRECT_URI: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("NEWAPI_TALKWISE_REDIRECT_URI"),
+    )
+    TALKWISE_SESSION_COOKIE_NAME: str = Field(
+        default="talkwise_session",
+        validation_alias=AliasChoices("TALKWISE_SESSION_COOKIE_NAME"),
+    )
+    TALKWISE_SESSION_TTL_SECONDS: int = Field(
+        default=8 * 60 * 60,
+        validation_alias=AliasChoices("TALKWISE_SESSION_TTL_SECONDS"),
+    )
+    NEWAPI_ADMIN_ROLE_VALUE: int = Field(
+        default=10,
+        validation_alias=AliasChoices("NEWAPI_ADMIN_ROLE_VALUE"),
+    )
+    NEWAPI_ROOT_ROLE_VALUE: int = Field(
+        default=100,
+        validation_alias=AliasChoices("NEWAPI_ROOT_ROLE_VALUE"),
+    )
+    NEWAPI_DEFAULT_BUSINESS_ROLE: str = Field(
+        default="sales",
+        validation_alias=AliasChoices("NEWAPI_DEFAULT_BUSINESS_ROLE"),
+    )
+    NEWAPI_DEFAULT_TEAM_ID: str = Field(
+        default="newapi",
+        validation_alias=AliasChoices("NEWAPI_DEFAULT_TEAM_ID"),
+    )
+
     CORS_ORIGINS: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:8000"],
         validation_alias=AliasChoices("CORS_ORIGINS"),
@@ -440,9 +507,15 @@ class Settings(BaseSettings):
 
         llm_defaults = LLMSettings()
         if not self.llm.api_key:
-            self.llm.api_key = self.OPENAI_COMPATIBLE_API_KEY or self.OPENAI_API_KEY
+            self.llm.api_key = (
+                self.OPENAI_COMPATIBLE_API_KEY
+                or self.NEWAPI_ACCESS_TOKEN
+                or self.OPENAI_API_KEY
+            )
         if not self.llm.base_url:
             self.llm.base_url = self.OPENAI_COMPATIBLE_BASE_URL or self.OPENAI_BASE_URL
+            if not self.llm.base_url and self.NEWAPI_ACCESS_TOKEN:
+                self.llm.base_url = self.NEWAPI_GATEWAY_BASE_URL or f"{self.NEWAPI_BASE_URL.rstrip('/')}/v1"
         if self.llm.default_model == llm_defaults.default_model:
             self.llm.default_model = (
                 self.OPENAI_COMPATIBLE_MODEL or self.OPENAI_MODEL or self.llm.default_model
