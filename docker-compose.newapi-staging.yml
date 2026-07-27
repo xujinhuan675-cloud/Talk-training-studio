@@ -1,0 +1,98 @@
+services:
+  new-api:
+    image: ${NEWAPI_IMAGE:-ghcr.io/xujinhuan675-cloud/talkwise-newapi:talkwise-auth-handoff-210b1ad}
+    container_name: talkwise_newapi_staging
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      - "${NEWAPI_HOST_PORT:-3000}:3000"
+    environment:
+      SQL_DSN: postgresql://${NEWAPI_POSTGRES_USER:-newapi}:${NEWAPI_POSTGRES_PASSWORD:?Set NEWAPI_POSTGRES_PASSWORD in .env}@new-api-postgres:5432/${NEWAPI_POSTGRES_DB:-newapi}
+      REDIS_CONN_STRING: redis://:${NEWAPI_REDIS_PASSWORD:?Set NEWAPI_REDIS_PASSWORD in .env}@new-api-redis:6379
+      TZ: ${TZ:-Asia/Shanghai}
+      ERROR_LOG_ENABLED: ${NEWAPI_ERROR_LOG_ENABLED:-true}
+      BATCH_UPDATE_ENABLED: ${NEWAPI_BATCH_UPDATE_ENABLED:-true}
+      NODE_NAME: ${NEWAPI_NODE_NAME:-talkwise-newapi-staging}
+      SESSION_SECRET: ${NEWAPI_SESSION_SECRET:?Set NEWAPI_SESSION_SECRET in .env}
+      SESSION_COOKIE_SECURE: ${NEWAPI_SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_TRUSTED_URL: ${NEWAPI_SESSION_COOKIE_TRUSTED_URL:-}
+      TRUSTED_PROXIES: ${NEWAPI_TRUSTED_PROXIES:-}
+      TALKWISE_CLIENT_ID: ${NEWAPI_TALKWISE_CLIENT_ID:-talkwise}
+      TALKWISE_CLIENT_SECRET: ${NEWAPI_TALKWISE_CLIENT_SECRET:?Set NEWAPI_TALKWISE_CLIENT_SECRET in .env}
+      TALKWISE_REDIRECT_URIS: ${NEWAPI_TALKWISE_REDIRECT_URIS:-http://127.0.0.1:5177/login,http://localhost:5177/login,http://127.0.0.1:5178/login,http://localhost:5178/login}
+      TALKWISE_GATEWAY_BASE_URL: ${NEWAPI_PUBLIC_GATEWAY_BASE_URL:-http://127.0.0.1:3000/v1}
+    volumes:
+      - newapi_data:/data
+      - newapi_logs:/app/logs
+    depends_on:
+      new-api-postgres:
+        condition: service_healthy
+      new-api-redis:
+        condition: service_started
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  new-api-postgres:
+    image: postgres:15-alpine
+    container_name: talkwise_newapi_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${NEWAPI_POSTGRES_USER:-newapi}
+      POSTGRES_PASSWORD: ${NEWAPI_POSTGRES_PASSWORD:?Set NEWAPI_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${NEWAPI_POSTGRES_DB:-newapi}
+    volumes:
+      - newapi_postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NEWAPI_POSTGRES_USER:-newapi} -d ${NEWAPI_POSTGRES_DB:-newapi}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  new-api-redis:
+    image: redis:7-alpine
+    container_name: talkwise_newapi_redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${NEWAPI_REDIS_PASSWORD:?Set NEWAPI_REDIS_PASSWORD in .env}"]
+    networks:
+      - app-network
+
+  app:
+    environment:
+      NEWAPI_BASE_URL: ${NEWAPI_INTERNAL_BASE_URL:-http://new-api:3000}
+      NEWAPI_GATEWAY_BASE_URL: ${NEWAPI_PUBLIC_GATEWAY_BASE_URL:-http://127.0.0.1:3000/v1}
+      NEWAPI_AUTH_ENABLED: ${NEWAPI_AUTH_ENABLED:-true}
+      NEWAPI_AUTH_ALLOW_MOCK_FALLBACK: ${NEWAPI_AUTH_ALLOW_MOCK_FALLBACK:-false}
+      NEWAPI_TALKWISE_CLIENT_ID: ${NEWAPI_TALKWISE_CLIENT_ID:-talkwise}
+      NEWAPI_TALKWISE_CLIENT_SECRET: ${NEWAPI_TALKWISE_CLIENT_SECRET:?Set NEWAPI_TALKWISE_CLIENT_SECRET in .env}
+      NEWAPI_TALKWISE_REDIRECT_URI: ${NEWAPI_TALKWISE_REDIRECT_URI:-http://127.0.0.1:5177/login}
+      OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-http://new-api:3000/v1}
+    depends_on:
+      new-api:
+        condition: service_healthy
+
+  grpc:
+    environment:
+      NEWAPI_BASE_URL: ${NEWAPI_INTERNAL_BASE_URL:-http://new-api:3000}
+      NEWAPI_GATEWAY_BASE_URL: ${NEWAPI_PUBLIC_GATEWAY_BASE_URL:-http://127.0.0.1:3000/v1}
+      NEWAPI_AUTH_ENABLED: ${NEWAPI_AUTH_ENABLED:-true}
+      NEWAPI_AUTH_ALLOW_MOCK_FALLBACK: ${NEWAPI_AUTH_ALLOW_MOCK_FALLBACK:-false}
+      NEWAPI_TALKWISE_CLIENT_ID: ${NEWAPI_TALKWISE_CLIENT_ID:-talkwise}
+      NEWAPI_TALKWISE_CLIENT_SECRET: ${NEWAPI_TALKWISE_CLIENT_SECRET:?Set NEWAPI_TALKWISE_CLIENT_SECRET in .env}
+      NEWAPI_TALKWISE_REDIRECT_URI: ${NEWAPI_TALKWISE_REDIRECT_URI:-http://127.0.0.1:5177/login}
+      OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-http://new-api:3000/v1}
+    depends_on:
+      new-api:
+        condition: service_healthy
+
+volumes:
+  newapi_data:
+  newapi_logs:
+  newapi_postgres_data:

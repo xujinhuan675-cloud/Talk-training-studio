@@ -32,6 +32,7 @@ from infrastructure.external.newapi_auth import (
     NewAPIAuthError,
     NewAPIAuthUnavailableError,
     NewAPIIdentity,
+    authenticate_newapi_credentials,
     exchange_newapi_authorization_code,
     fetch_newapi_identity,
 )
@@ -133,10 +134,8 @@ def _has_mock_auth_signal(*values: object | None) -> bool:
 
 
 def _system_role_from_newapi_role(role: int) -> str:
-    if role >= settings.NEWAPI_ROOT_ROLE_VALUE:
-        return "admin"
     if role >= settings.NEWAPI_ADMIN_ROLE_VALUE:
-        return "leader"
+        return "admin"
     return "staff"
 
 
@@ -185,6 +184,28 @@ async def get_current_user_from_newapi_token(access_token: str) -> CurrentUser:
         ) from exc
     except NewAPIAuthError as exc:
         raise HTTPException(status_code=401, detail="Invalid NewAPI access token") from exc
+    return _current_user_from_newapi_identity(identity)
+
+
+async def get_current_user_from_newapi_credentials(username: str, password: str) -> CurrentUser:
+    try:
+        identity = await authenticate_newapi_credentials(
+            username,
+            password,
+            base_url=settings.NEWAPI_BASE_URL,
+            login_path=settings.NEWAPI_LOGIN_PATH,
+            timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
+        )
+    except NewAPIAuthUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="NewAPI authentication service unavailable",
+        ) from exc
+    except NewAPIAuthError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid NewAPI username or password",
+        ) from exc
     return _current_user_from_newapi_identity(identity)
 
 

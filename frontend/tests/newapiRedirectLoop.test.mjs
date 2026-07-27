@@ -40,3 +40,13 @@ test('LoginPage blocks auto sign-in while suppressed and clears it for user-init
   assert.match(source, /clearNewApiAutoSignInSuppression\(\)/)
   assert.match(source, /onClick=\{allowNewApiSignIn\}/)
 })
+
+test('LoginPage uses an embedded NewAPI shell instead of an external sign-in link', () => {
+  const source = readSource('src/pages/LoginPage.tsx')
+
+  assert.match(source, /login-newapi-shell/)
+  assert.match(source, /shouldUseEmbeddedShell/)
+  assert.doesNotMatch(source, /login-newapi-link/)
+  assert.doesNotMatch(source, /Open NewAPI sign-in/)
+  assert.doesNotMatch(source, /打开 NewAPI 登录页/)
+})

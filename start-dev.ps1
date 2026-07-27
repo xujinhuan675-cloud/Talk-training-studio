@@ -736,7 +736,7 @@ Ensure-EnvValue $RootEnvPath "TALKWISE_SESSION_TTL_SECONDS" "28800"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" "false"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "https://newapi.flowguide.cc/login"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "external"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "embedded"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" "https://newapi.flowguide.cc"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "https://newapi.flowguide.cc/usage-logs/common"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "https://newapi.flowguide.cc/keys"
@@ -783,7 +783,7 @@ $talkwiseSessionTtlSeconds = Get-EnvValue $RootEnvPath "TALKWISE_SESSION_TTL_SEC
 $viteNewApiBaseUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" $newApiBaseUrl
 $viteNewApiAuthEnabled = Get-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" $newApiAuthEnabled
 $viteNewApiLoginUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "$newApiBaseUrl/login"
-$viteNewApiLoginMode = Get-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "external"
+$viteNewApiLoginMode = Get-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "embedded"
 $viteNewApiConsoleUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" $newApiBaseUrl
 $viteNewApiUsageUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "$newApiBaseUrl/usage-logs/common"
 $viteNewApiApiKeysUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "$newApiBaseUrl/keys"

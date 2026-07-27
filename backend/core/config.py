@@ -288,6 +288,10 @@ class Settings(BaseSettings):
         default="/api/talkwise/auth/exchange",
         validation_alias=AliasChoices("NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH"),
     )
+    NEWAPI_LOGIN_PATH: str = Field(
+        default="/api/user/login",
+        validation_alias=AliasChoices("NEWAPI_LOGIN_PATH"),
+    )
     NEWAPI_TALKWISE_REDIRECT_URI: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("NEWAPI_TALKWISE_REDIRECT_URI"),

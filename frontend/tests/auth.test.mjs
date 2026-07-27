@@ -107,6 +107,7 @@ test('newapi authenticated state uses server session instead of stored bearer to
       business_role: 'sales',
       team_id: 'newapi:paid',
       team_name: 'paid',
+      newapi_group: 'paid',
       newapi_gateway_base_url: 'https://gateway.example/v1',
       quota_remaining: 900,
       quota_used: 100,
@@ -119,6 +120,7 @@ test('newapi authenticated state uses server session instead of stored bearer to
   assert.equal(state.status, 'authenticated')
   assert.equal(state.provider, 'newapi')
   assert.equal(state.user.name, 'Alice Zhang')
+  assert.equal(state.user.newapiGroup, 'paid')
   assert.equal(state.user.newapiGatewayBaseUrl, 'https://gateway.example/v1')
   assert.equal(state.user.quotaRemaining, 900)
   assert.equal(state.user.quotaTotal, 1000)
@@ -132,6 +134,7 @@ test('newapi authenticated state uses server session instead of stored bearer to
   const restored = auth.loadInitialAuthState()
   assert.equal(restored.provider, 'newapi')
   assert.equal(restored.user.userId, 'newapi:42')
+  assert.equal(restored.user.newapiGroup, 'paid')
   assert.deepEqual(auth.getAuthRequestHeaders(restored), {})
   assert.equal(sessionStorage.getItem('talkwise.auth.state').includes('newapi-token'), false)
 })
@@ -486,6 +489,131 @@ test('fetchCurrentAuthSession restores a NewAPI user from the HttpOnly session c
   assert.deepEqual(calls[0].init.headers, {})
   assert.equal(state.provider, 'newapi')
   assert.equal(state.user.userId, 'newapi:42')
+})
+
+test('fetchCurrentTeamMembers uses the NewAPI cookie session and normalizes members', async () => {
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 0,
+        data: {
+          team: { id: 'newapi:paid', name: 'paid', group: 'paid' },
+          members: [
+            {
+              id: 42,
+              user_id: 42,
+              username: 'alice',
+              display_name: 'Alice Zhang',
+              system_role: 'admin',
+              group: 'paid',
+              team_id: 'newapi:paid',
+              team_name: 'paid',
+              quota_remaining: 900,
+              quota_used: 100,
+              quota_total: 1000,
+              request_count: 12,
+              in_team: true,
+            },
+          ],
+          total: 1,
+        },
+      }),
+    }
+  }
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-team-members')
+  const payload = await auth.fetchCurrentTeamMembers()
+
+  assert.equal(calls[0].url, '/api/v1/auth/newapi/team/members')
+  assert.equal(calls[0].init.method, 'GET')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+  assert.equal(calls[0].init.headers, undefined)
+  assert.equal(payload.team.group, 'paid')
+  assert.equal(payload.members[0].userId, 42)
+  assert.equal(payload.members[0].displayName, 'Alice Zhang')
+  assert.equal(payload.members[0].quotaTotal, 1000)
+})
+
+test('searchNewApiTeamUsers trims keywords and uses the cookie session', async () => {
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 0,
+        data: {
+          team: { id: 'newapi:paid', name: 'paid', group: 'paid' },
+          users: [
+            {
+              id: 7,
+              user_id: 7,
+              username: 'bob',
+              display_name: 'Bob Li',
+              system_role: 'staff',
+              group: 'free',
+              team_id: 'newapi:free',
+              team_name: 'free',
+              in_team: false,
+            },
+          ],
+          total: 1,
+        },
+      }),
+    }
+  }
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-team-search')
+  const payload = await auth.searchNewApiTeamUsers('  bob  ', 10)
+
+  assert.equal(calls[0].url, '/api/v1/auth/newapi/team/users/search?keyword=bob&limit=10')
+  assert.equal(calls[0].init.method, 'GET')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+  assert.equal(calls[0].init.headers, undefined)
+  assert.equal(payload.users[0].userId, 7)
+  assert.equal(payload.users[0].inTeam, false)
+})
+
+test('assignNewApiTeamMember posts only the NewAPI user id with the cookie session', async () => {
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 0,
+        data: {
+          id: 7,
+          user_id: 7,
+          username: 'bob',
+          display_name: 'Bob Li',
+          system_role: 'staff',
+          group: 'paid',
+          team_id: 'newapi:paid',
+          team_name: 'paid',
+          in_team: true,
+        },
+      }),
+    }
+  }
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-team-assign')
+  const member = await auth.assignNewApiTeamMember(7)
+
+  assert.equal(calls[0].url, '/api/v1/auth/newapi/team/members')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
+  assert.deepEqual(JSON.parse(calls[0].init.body), { user_id: 7 })
+  assert.equal(member.userId, 7)
+  assert.equal(member.group, 'paid')
+  assert.equal(member.inTeam, true)
 })
 
 test('legacy mock user ids are cleared instead of mapped', async () => {

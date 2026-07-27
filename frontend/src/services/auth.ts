@@ -26,6 +26,7 @@ export interface AuthUser {
   teamName: string
   avatarInitial: string
   newapiBaseUrl?: string | null
+  newapiGroup?: string | null
   newapiGatewayBaseUrl?: string | null
   quotaRemaining?: number | null
   quotaUsed?: number | null
@@ -60,6 +61,41 @@ export interface NewApiSessionUser {
   subscription_status?: string | null
 }
 
+export interface AuthTeam {
+  id: string
+  name: string
+  group: string
+}
+
+export interface AuthTeamMember {
+  id: number
+  userId: number
+  username: string
+  displayName: string | null
+  email: string | null
+  systemRole: SystemRole | null
+  group: string | null
+  teamId: string | null
+  teamName: string | null
+  quotaRemaining: number | null
+  quotaUsed: number | null
+  quotaTotal: number | null
+  requestCount: number | null
+  inTeam: boolean
+}
+
+export interface AuthTeamMembersPayload {
+  team: AuthTeam
+  members: AuthTeamMember[]
+  total: number
+}
+
+export interface AuthTeamUserSearchPayload {
+  team: AuthTeam
+  users: AuthTeamMember[]
+  total: number
+}
+
 export interface AuthState {
   status: AuthStatus
   provider: AuthProviderKind | null
@@ -77,6 +113,41 @@ interface ApiResponse<T> {
   code?: number
   message?: string
   data?: T
+}
+
+interface AuthTeamDTO {
+  id?: string | null
+  name?: string | null
+  group?: string | null
+}
+
+interface AuthTeamMemberDTO {
+  id?: number | null
+  user_id?: number | null
+  username?: string | null
+  display_name?: string | null
+  email?: string | null
+  system_role?: string | null
+  group?: string | null
+  team_id?: string | null
+  team_name?: string | null
+  quota_remaining?: number | null
+  quota_used?: number | null
+  quota_total?: number | null
+  request_count?: number | null
+  in_team?: boolean | null
+}
+
+interface AuthTeamMembersDTO {
+  team?: AuthTeamDTO | null
+  members?: AuthTeamMemberDTO[] | null
+  total?: number | null
+}
+
+interface AuthTeamUserSearchDTO {
+  team?: AuthTeamDTO | null
+  users?: AuthTeamMemberDTO[] | null
+  total?: number | null
 }
 
 export const AUTH_STORAGE_KEY = 'talkwise.auth.state'
@@ -278,6 +349,33 @@ export async function connectNewApiAccessToken(accessToken: string): Promise<Aut
   return nextState
 }
 
+export async function connectNewApiCredentials(username: string, password: string): Promise<AuthState> {
+  const loginUsername = username.trim()
+  if (!loginUsername || !password) {
+    throw new Error('NewAPI username and password are required')
+  }
+
+  const resp = await fetch('/api/v1/auth/newapi/login', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username: loginUsername, password }),
+  })
+  if (!resp.ok) {
+    throw await readAuthError(resp, `Failed to sign in with NewAPI: ${resp.status}`)
+  }
+
+  const json = (await resp.json()) as ApiResponse<NewApiSessionUser>
+  if (!json.data) {
+    throw new Error(json.message || 'Failed to sign in with NewAPI')
+  }
+  const nextState = createNewApiAuthenticatedState(json.data)
+  clearNewApiAutoSignInSuppression()
+  return nextState
+}
+
 export async function connectNewApiAuthorizationCode(
   code: string,
   redirectUri?: string | null,
@@ -421,6 +519,86 @@ export async function fetchCurrentAuthSession(state: AuthState = loadInitialAuth
   return createAuthenticatedState(normalizeMockUserId(json.data.username) ?? DEFAULT_MOCK_USER_ID)
 }
 
+export async function fetchCurrentTeamMembers(): Promise<AuthTeamMembersPayload> {
+  const resp = await fetch('/api/v1/auth/newapi/team/members', {
+    method: 'GET',
+    credentials: 'same-origin',
+  })
+  if (!resp.ok) {
+    throw await readAuthError(resp, `Failed to load NewAPI team members: ${resp.status}`)
+  }
+
+  const json = (await resp.json()) as ApiResponse<AuthTeamMembersDTO>
+  if (!json.data) {
+    throw new Error(json.message || 'Failed to load NewAPI team members')
+  }
+  const team = normalizeTeamDTO(json.data.team)
+  const members = (json.data.members ?? []).map((member) => normalizeTeamMemberDTO(member, team))
+  return {
+    team,
+    members,
+    total: normalizeNullableNumber(json.data.total) ?? members.length,
+  }
+}
+
+export async function searchNewApiTeamUsers(
+  keyword: string,
+  limit = 20,
+): Promise<AuthTeamUserSearchPayload> {
+  const searchKeyword = keyword.trim()
+  if (!searchKeyword) {
+    throw new Error('Search keyword is required')
+  }
+
+  const params = new URLSearchParams({
+    keyword: searchKeyword,
+    limit: String(limit),
+  })
+  const resp = await fetch(`/api/v1/auth/newapi/team/users/search?${params.toString()}`, {
+    method: 'GET',
+    credentials: 'same-origin',
+  })
+  if (!resp.ok) {
+    throw await readAuthError(resp, `Failed to search NewAPI users: ${resp.status}`)
+  }
+
+  const json = (await resp.json()) as ApiResponse<AuthTeamUserSearchDTO>
+  if (!json.data) {
+    throw new Error(json.message || 'Failed to search NewAPI users')
+  }
+  const team = normalizeTeamDTO(json.data.team)
+  const users = (json.data.users ?? []).map((user) => normalizeTeamMemberDTO(user, team))
+  return {
+    team,
+    users,
+    total: normalizeNullableNumber(json.data.total) ?? users.length,
+  }
+}
+
+export async function assignNewApiTeamMember(userId: number): Promise<AuthTeamMember> {
+  if (!Number.isFinite(userId) || userId <= 0) {
+    throw new Error('NewAPI user id is required')
+  }
+
+  const resp = await fetch('/api/v1/auth/newapi/team/members', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ user_id: userId }),
+  })
+  if (!resp.ok) {
+    throw await readAuthError(resp, `Failed to assign NewAPI team member: ${resp.status}`)
+  }
+
+  const json = (await resp.json()) as ApiResponse<AuthTeamMemberDTO>
+  if (!json.data) {
+    throw new Error(json.message || 'Failed to assign NewAPI team member')
+  }
+  return normalizeTeamMemberDTO(json.data)
+}
+
 export async function clearBrowserAuthSession(): Promise<void> {
   await fetch('/api/v1/auth/logout', {
     method: 'POST',
@@ -538,6 +716,7 @@ function createNewApiUser(user: NewApiSessionUser): AuthUser {
     teamName,
     avatarInitial: avatarInitialFor(displayName),
     newapiBaseUrl: normalizeText(user.newapi_base_url) || NEWAPI_BASE_URL,
+    newapiGroup: normalizeText(user.newapi_group),
     newapiGatewayBaseUrl: normalizeText(user.newapi_gateway_base_url),
     quotaRemaining: normalizeNullableNumber(user.quota_remaining),
     quotaUsed: normalizeNullableNumber(user.quota_used),
@@ -559,6 +738,7 @@ function toNewApiStoredUser(user: AuthUser): NewApiSessionUser {
     team_id: user.teamId,
     team_name: user.teamName,
     newapi_base_url: user.newapiBaseUrl || NEWAPI_BASE_URL,
+    newapi_group: user.newapiGroup,
     newapi_gateway_base_url: user.newapiGatewayBaseUrl,
     quota_remaining: user.quotaRemaining,
     quota_used: user.quotaUsed,
@@ -566,6 +746,46 @@ function toNewApiStoredUser(user: AuthUser): NewApiSessionUser {
     request_count: user.requestCount,
     subscription_plan: user.subscriptionPlan,
     subscription_status: user.subscriptionStatus,
+  }
+}
+
+function normalizeTeamDTO(team: AuthTeamDTO | null | undefined): AuthTeam {
+  const group = normalizeText(team?.group) || 'newapi'
+  return {
+    id: normalizeText(team?.id) || `newapi:${group}`,
+    name: normalizeText(team?.name) || group,
+    group,
+  }
+}
+
+function normalizeTeamMemberDTO(
+  member: AuthTeamMemberDTO,
+  fallbackTeam?: AuthTeam,
+): AuthTeamMember {
+  const userId = normalizeNullableNumber(member.user_id ?? member.id)
+  if (userId === null) {
+    throw new Error('NewAPI team member response missing user id')
+  }
+  const username = normalizeText(member.username)
+  if (!username) {
+    throw new Error('NewAPI team member response missing username')
+  }
+  const group = normalizeText(member.group) || fallbackTeam?.group || null
+  return {
+    id: userId,
+    userId,
+    username,
+    displayName: normalizeText(member.display_name),
+    email: normalizeText(member.email),
+    systemRole: normalizeSystemRole(member.system_role),
+    group,
+    teamId: normalizeText(member.team_id) || (group ? `newapi:${group}` : (fallbackTeam?.id ?? null)),
+    teamName: normalizeText(member.team_name) || group || (fallbackTeam?.name ?? null),
+    quotaRemaining: normalizeNullableNumber(member.quota_remaining),
+    quotaUsed: normalizeNullableNumber(member.quota_used),
+    quotaTotal: normalizeNullableNumber(member.quota_total),
+    requestCount: normalizeNullableNumber(member.request_count),
+    inTeam: Boolean(member.in_team),
   }
 }
 

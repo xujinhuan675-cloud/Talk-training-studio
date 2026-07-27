@@ -8,6 +8,7 @@ import {
   connectNewApiAccessToken,
   connectNewApiAuthorizationCode,
   connectNewApiBrowserSession,
+  connectNewApiCredentials as connectNewApiCredentialsService,
   createAuthenticatedState,
   createSignedOutState,
   fetchCurrentAuthSession,
@@ -35,6 +36,7 @@ export interface AuthContextValue {
   canManageTeam: boolean
   canViewTeamLeaderboard: boolean
   canUseMemberWorkspace: boolean
+  connectNewApiCredentials: (username: string, password: string, scope?: AuthStorageScope) => Promise<AuthUser>
   connectNewApiCode: (code: string, redirectUri?: string | null, scope?: AuthStorageScope) => Promise<AuthUser>
   connectNewApiToken: (accessToken: string, scope?: AuthStorageScope) => Promise<AuthUser>
   connectStoredNewApiSession: () => Promise<AuthState | null>
@@ -80,6 +82,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     return nextState.user
   }, [])
+
+  const connectNewApiCredentials = useCallback(
+    async (username: string, password: string, scope: AuthStorageScope = 'session') => {
+      const nextState = await connectNewApiCredentialsService(username, password)
+      setAuthState(nextState)
+      persistAuthState(nextState, scope)
+      if (!nextState.user) {
+        throw new Error('NewAPI session did not return a user')
+      }
+      return nextState.user
+    },
+    [],
+  )
 
   const connectNewApiCode = useCallback(
     async (code: string, redirectUri?: string | null, scope: AuthStorageScope = 'session') => {
@@ -158,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canManageTeam: canAccessManagementFeatures(authState.user),
       canViewTeamLeaderboard: canAccessTeamLeaderboard(authState.user),
       canUseMemberWorkspace: canAccessMemberWorkspace(authState.user),
+      connectNewApiCredentials,
       connectNewApiCode,
       connectNewApiToken,
       connectStoredNewApiSession,
@@ -171,6 +187,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authState.status,
       authState.user,
       connectNewApiCode,
+      connectNewApiCredentials,
       connectNewApiToken,
       connectStoredNewApiSession,
       hasAnySystemRole,

@@ -71,30 +71,11 @@
   line-height: 1.5;
 }
 
-.login-newapi-link,
 .login-submit {
   width: 100%;
   min-height: 38px;
   justify-content: center;
   gap: 8px;
-}
-
-.login-newapi-link {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 800;
-  text-decoration: none;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-}
-
-.login-newapi-link:hover {
-  border-color: var(--border-accent);
-  background: var(--green-soft);
 }
 
 .login-status {
@@ -114,13 +95,13 @@
   animation: login-spin 0.8s linear infinite;
 }
 
-.login-embedded-shell {
+.login-newapi-shell {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.login-embedded-shell iframe {
+.login-newapi-shell iframe {
   width: 100%;
   height: min(680px, calc(100vh - 32px));
   border: 1px solid var(--border);

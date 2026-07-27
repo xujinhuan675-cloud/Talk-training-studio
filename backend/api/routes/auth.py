@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from api.dependencies import (
@@ -10,12 +10,22 @@ from api.dependencies import (
     extract_bearer_token,
     get_current_user,
     get_current_user_from_newapi_code,
+    get_current_user_from_newapi_credentials,
     get_current_user_from_newapi_token,
 )
 from core.config import settings
 from core.response import Response as ApiResponse
 from core.response import success_response
 from infrastructure.auth_session import create_session_cookie_value, session_cookie_options
+from infrastructure.external.newapi_auth import (
+    NewAPIAuthError,
+    NewAPIAuthUnavailableError,
+    NewAPITeam,
+    NewAPITeamMember,
+    assign_newapi_team_member as assign_newapi_team_member_control,
+    fetch_newapi_team_members,
+    search_newapi_team_users as search_newapi_team_users_control,
+)
 
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -45,6 +55,50 @@ class NewAPIExchangeRequest(BaseModel):
     code: str | None = None
     access_token: str | None = None
     redirect_uri: str | None = None
+
+
+class NewAPILoginRequest(BaseModel):
+    username: str | None = None
+    password: str | None = None
+
+
+class AuthTeamDTO(BaseModel):
+    id: str
+    name: str
+    group: str
+
+
+class AuthTeamMemberDTO(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    display_name: str | None = None
+    email: str | None = None
+    system_role: str | None = None
+    group: str | None = None
+    team_id: str | None = None
+    team_name: str | None = None
+    quota_remaining: int | None = None
+    quota_used: int | None = None
+    quota_total: int | None = None
+    request_count: int | None = None
+    in_team: bool = False
+
+
+class AuthTeamMembersDTO(BaseModel):
+    team: AuthTeamDTO
+    members: list[AuthTeamMemberDTO]
+    total: int
+
+
+class AuthTeamUserSearchDTO(BaseModel):
+    team: AuthTeamDTO
+    users: list[AuthTeamMemberDTO]
+    total: int
+
+
+class AuthTeamMemberAssignRequest(BaseModel):
+    user_id: int
 
 
 def _auth_user_payload(current_user: CurrentUser) -> AuthUserDTO:
@@ -79,6 +133,68 @@ def _optional_text(value: object | None) -> str | None:
     return text or None
 
 
+def _newapi_group_for_current_user(current_user: CurrentUser) -> str:
+    if not current_user.user_id.startswith("newapi:"):
+        raise HTTPException(
+            status_code=400,
+            detail="NewAPI team membership is only available for NewAPI sessions",
+        )
+    group = _optional_text(current_user.newapi_group)
+    team_id = _optional_text(current_user.team_id)
+    if not group and team_id and team_id.startswith("newapi:"):
+        group = _optional_text(team_id[len("newapi:") :])
+    if not group:
+        raise HTTPException(status_code=400, detail="NewAPI team group is not available")
+    return group
+
+
+def _require_team_manager(current_user: CurrentUser) -> None:
+    if current_user.system_role not in {"admin", "leader"}:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+def _system_role_from_newapi_member_role(role: int | None) -> str | None:
+    if role is None:
+        return None
+    if role >= settings.NEWAPI_ADMIN_ROLE_VALUE:
+        return "admin"
+    return "staff"
+
+
+def _team_payload(team: NewAPITeam) -> AuthTeamDTO:
+    return AuthTeamDTO(id=team.id, name=team.name, group=team.group)
+
+
+def _team_member_payload(member: NewAPITeamMember) -> AuthTeamMemberDTO:
+    quota_total = (
+        member.quota + member.used_quota
+        if member.quota is not None and member.used_quota is not None
+        else None
+    )
+    return AuthTeamMemberDTO(
+        id=member.id,
+        user_id=member.id,
+        username=member.username,
+        display_name=member.display_name,
+        email=member.email,
+        system_role=_system_role_from_newapi_member_role(member.role),
+        group=member.group,
+        team_id=member.team_id,
+        team_name=member.team_name,
+        quota_remaining=member.quota,
+        quota_used=member.used_quota,
+        quota_total=quota_total,
+        request_count=member.request_count,
+        in_team=member.in_team,
+    )
+
+
+def _newapi_team_http_exception(exc: NewAPIAuthError) -> HTTPException:
+    if isinstance(exc, NewAPIAuthUnavailableError):
+        return HTTPException(status_code=503, detail="NewAPI team service unavailable")
+    return HTTPException(status_code=502, detail="NewAPI team request was rejected")
+
+
 def _set_talkwise_session_cookie(response: Response, current_user: CurrentUser) -> None:
     response.set_cookie(
         value=create_session_cookie_value(current_user),
@@ -100,6 +216,31 @@ async def create_newapi_session(
         raise HTTPException(status_code=401, detail="NewAPI access token required")
 
     current_user = await get_current_user_from_newapi_token(access_token)
+    _set_talkwise_session_cookie(response, current_user)
+    return success_response(
+        data=_auth_user_payload(current_user),
+        message="NewAPI session verified",
+    )
+
+
+@router.post(
+    "/newapi/login",
+    summary="Sign in with NewAPI username and password",
+    response_model=ApiResponse[AuthUserDTO],
+)
+async def create_newapi_login_session(
+    payload: NewAPILoginRequest,
+    response: Response,
+):
+    username = _optional_text(payload.username)
+    password = payload.password or ""
+    if not username or not password:
+        raise HTTPException(
+            status_code=422,
+            detail="NewAPI username and password are required",
+        )
+
+    current_user = await get_current_user_from_newapi_credentials(username, password)
     _set_talkwise_session_cookie(response, current_user)
     return success_response(
         data=_auth_user_payload(current_user),
@@ -141,6 +282,98 @@ async def exchange_newapi_session(
     return success_response(
         data=_auth_user_payload(current_user),
         message="NewAPI session verified",
+    )
+
+
+@router.get(
+    "/newapi/team/members",
+    summary="List the current NewAPI group members",
+    response_model=ApiResponse[AuthTeamMembersDTO],
+)
+async def list_newapi_team_members(current_user: CurrentUser = Depends(get_current_user)):
+    group = _newapi_group_for_current_user(current_user)
+    try:
+        result = await fetch_newapi_team_members(
+            group=group,
+            base_url=settings.NEWAPI_BASE_URL,
+            client_id=settings.NEWAPI_TALKWISE_CLIENT_ID,
+            client_secret=settings.NEWAPI_TALKWISE_CLIENT_SECRET,
+            timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
+        )
+    except NewAPIAuthError as exc:
+        raise _newapi_team_http_exception(exc) from exc
+
+    return success_response(
+        data=AuthTeamMembersDTO(
+            team=_team_payload(result.team),
+            members=[_team_member_payload(member) for member in result.members],
+            total=result.total,
+        ),
+        message="NewAPI team members loaded",
+    )
+
+
+@router.get(
+    "/newapi/team/users/search",
+    summary="Search NewAPI users for assignment to the current group",
+    response_model=ApiResponse[AuthTeamUserSearchDTO],
+)
+async def search_newapi_team_users(
+    keyword: str = Query(..., min_length=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_team_manager(current_user)
+    group = _newapi_group_for_current_user(current_user)
+    try:
+        result = await search_newapi_team_users_control(
+            group=group,
+            keyword=keyword,
+            base_url=settings.NEWAPI_BASE_URL,
+            client_id=settings.NEWAPI_TALKWISE_CLIENT_ID,
+            client_secret=settings.NEWAPI_TALKWISE_CLIENT_SECRET,
+            timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
+            limit=limit,
+        )
+    except NewAPIAuthError as exc:
+        raise _newapi_team_http_exception(exc) from exc
+
+    return success_response(
+        data=AuthTeamUserSearchDTO(
+            team=_team_payload(result.team),
+            users=[_team_member_payload(user) for user in result.users],
+            total=result.total,
+        ),
+        message="NewAPI users loaded",
+    )
+
+
+@router.post(
+    "/newapi/team/members",
+    summary="Assign a NewAPI user to the current group",
+    response_model=ApiResponse[AuthTeamMemberDTO],
+)
+async def assign_newapi_team_member(
+    payload: AuthTeamMemberAssignRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_team_manager(current_user)
+    group = _newapi_group_for_current_user(current_user)
+    try:
+        member = await assign_newapi_team_member_control(
+            group=group,
+            user_id=payload.user_id,
+            base_url=settings.NEWAPI_BASE_URL,
+            client_id=settings.NEWAPI_TALKWISE_CLIENT_ID,
+            client_secret=settings.NEWAPI_TALKWISE_CLIENT_SECRET,
+            timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
+        )
+    except NewAPIAuthError as exc:
+        raise _newapi_team_http_exception(exc) from exc
+
+    return success_response(
+        data=_team_member_payload(member),
+        message="NewAPI team member assigned",
     )
 
 

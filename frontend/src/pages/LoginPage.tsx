@@ -1,5 +1,5 @@
 import React from 'react'
-import { ExternalLink, KeyRound, Loader2, RefreshCw } from 'lucide-react'
+import { KeyRound, Loader2, RefreshCw } from 'lucide-react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n } from '../i18n'
@@ -46,8 +46,8 @@ const LoginPage: React.FC = () => {
   )
   const canAutoUseNewApi = NEWAPI_AUTH_ENABLED && !autoSignInSuppressed
   const isRedirectLogin = canAutoUseNewApi && NEWAPI_LOGIN_MODE === 'redirect'
-  const shouldEmbedNewApi = canAutoUseNewApi && NEWAPI_LOGIN_MODE === 'embedded'
-  const shouldShowNewApiLink = !isRedirectLogin && !shouldEmbedNewApi
+  const shouldUseEmbeddedShell = canAutoUseNewApi && NEWAPI_LOGIN_MODE === 'embedded'
+  const shouldShowReconnect = NEWAPI_AUTH_ENABLED && autoSignInSuppressed
   const shouldShowTokenFallback = !NEWAPI_AUTH_ENABLED
   const shouldWaitForAuthSession = canAutoUseNewApi && status === 'loading'
 
@@ -108,12 +108,12 @@ const LoginPage: React.FC = () => {
   )
 
   React.useEffect(() => {
-    if (!shouldEmbedNewApi) return undefined
+    if (!shouldUseEmbeddedShell) return undefined
     window.addEventListener('message', handleNewApiHandoffMessage)
     return () => {
       window.removeEventListener('message', handleNewApiHandoffMessage)
     }
-  }, [handleNewApiHandoffMessage, shouldEmbedNewApi])
+  }, [handleNewApiHandoffMessage, shouldUseEmbeddedShell])
 
   React.useEffect(() => {
     if (
@@ -149,16 +149,35 @@ const LoginPage: React.FC = () => {
     window.location.assign(loginUrl)
   }, [loginUrl])
 
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const token = tokenInput.trim()
+    if (!token) {
+      setError(tr('请输入 NewAPI token', 'Enter a NewAPI token'))
+      return
+    }
+    setError(null)
+    setIsConnecting(true)
+    try {
+      await connectNewApiToken(token, 'session')
+      setTokenInput('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tr('登录失败', 'Sign-in failed'))
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
   if (currentUser) {
     return <Navigate to={redirectTarget} replace />
   }
 
-  if (shouldEmbedNewApi) {
+  if (shouldUseEmbeddedShell) {
     return (
       <main className="login-page login-page--embedded" aria-labelledby="login-page-title">
         <section className="login-panel login-panel--embedded">
           <h1 id="login-page-title" className="sr-only">Sign in</h1>
-          <div className="login-embedded-shell">
+          <div className="login-newapi-shell">
             <iframe
               title="NewAPI sign-in"
               src={loginUrl}
@@ -191,12 +210,7 @@ const LoginPage: React.FC = () => {
           {error ? (
             <>
               <div className="login-error" role="alert">{error}</div>
-              <Button
-                className="login-refresh-session"
-                type="button"
-                variant="secondary"
-                onClick={retryRedirect}
-              >
+              <Button className="login-refresh-session" type="button" variant="secondary" onClick={retryRedirect}>
                 <RefreshCw size={16} aria-hidden="true" />
                 <span>{tr('重试 NewAPI 登录', 'Retry NewAPI sign-in')}</span>
               </Button>
@@ -216,25 +230,6 @@ const LoginPage: React.FC = () => {
     )
   }
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const token = tokenInput.trim()
-    if (!token) {
-      setError(tr('请输入 NewAPI token', 'Enter a NewAPI token'))
-      return
-    }
-    setError(null)
-    setIsConnecting(true)
-    try {
-      await connectNewApiToken(token, 'session')
-      setTokenInput('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : tr('登录失败', 'Sign-in failed'))
-    } finally {
-      setIsConnecting(false)
-    }
-  }
-
   return (
     <main className="login-page" aria-labelledby="login-page-title">
       <section className="login-panel">
@@ -244,33 +239,11 @@ const LoginPage: React.FC = () => {
           <p>{tr('使用 NewAPI 账号进入训练工作台。', 'Use your NewAPI account to enter the training workspace.')}</p>
         </div>
 
-        {shouldEmbedNewApi ? (
-          <div className="login-embedded-shell">
-            <iframe
-              title="NewAPI sign-in"
-              src={loginUrl}
-              onLoad={() => {
-                void tryConnectStoredSession()
-              }}
-            />
-            <Button
-              className="login-refresh-session"
-              type="button"
-              variant="secondary"
-              disabled={isAutoConnecting}
-              onClick={() => {
-                void tryConnectStoredSession()
-              }}
-            >
-              {isAutoConnecting ? <Loader2 size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
-              <span>{tr('已登录，继续', 'Continue after sign-in')}</span>
-            </Button>
-          </div>
-        ) : shouldShowNewApiLink ? (
-          <a className="login-newapi-link" href={loginUrl} rel="noreferrer" onClick={allowNewApiSignIn}>
-            <ExternalLink size={16} aria-hidden="true" />
-            <span>{tr('打开 NewAPI 登录页', 'Open NewAPI sign-in')}</span>
-          </a>
+        {shouldShowReconnect ? (
+          <Button className="login-submit" type="button" variant="secondary" onClick={allowNewApiSignIn}>
+            <RefreshCw size={16} aria-hidden="true" />
+            <span>{tr('继续 NewAPI 登录', 'Continue NewAPI sign-in')}</span>
+          </Button>
         ) : null}
 
         {isAutoConnecting ? (

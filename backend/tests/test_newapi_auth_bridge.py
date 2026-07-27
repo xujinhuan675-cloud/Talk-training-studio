@@ -6,8 +6,15 @@ from starlette.responses import Response
 
 from api import dependencies as deps
 from api.routes import auth as auth_routes
-from infrastructure.external.newapi_auth import NewAPIAuthError, NewAPIIdentity
 from infrastructure.auth_session import create_session_cookie_value, session_cookie_options
+from infrastructure.external.newapi_auth import (
+    NewAPIAuthError,
+    NewAPIIdentity,
+    NewAPITeam,
+    NewAPITeamMember,
+    NewAPITeamMembersResult,
+    NewAPITeamUserSearchResult,
+)
 
 
 async def _resolve_user(**overrides):
@@ -134,7 +141,7 @@ async def test_newapi_authorization_code_exchange_maps_control_plane_claims(
 
     assert current_user.user_id == "newapi:88"
     assert current_user.username == "carol"
-    assert current_user.system_role == "leader"
+    assert current_user.system_role == "admin"
     assert current_user.team_id == "team-acme"
     assert current_user.team_name == "Acme Revenue"
     assert current_user.newapi_group == "premium"
@@ -203,7 +210,210 @@ async def test_newapi_exchange_route_requires_code_or_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_newapi_admin_maps_to_talkwise_leader(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_newapi_team_members_route_uses_current_users_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch_team_members(
+        *,
+        group: str,
+        base_url: str,
+        client_id: str,
+        client_secret: str | None,
+        timeout_seconds: float,
+        limit: int | None = 100,
+    ):
+        assert group == "paid"
+        assert base_url == "https://newapi.example"
+        assert client_id == "talkwise-prod"
+        assert client_secret == "client-secret"
+        assert timeout_seconds == 3.0
+        assert limit == 100
+        return NewAPITeamMembersResult(
+            team=NewAPITeam(id="newapi:paid", name="paid", group="paid"),
+            members=[
+                NewAPITeamMember(
+                    id=42,
+                    username="alice",
+                    display_name="Alice Zhang",
+                    role=10,
+                    status=1,
+                    group="paid",
+                    team_id="newapi:paid",
+                    team_name="paid",
+                    quota=120,
+                    used_quota=30,
+                    request_count=8,
+                    in_team=True,
+                )
+            ],
+            total=1,
+        )
+
+    monkeypatch.setattr(auth_routes.settings, "NEWAPI_BASE_URL", "https://newapi.example")
+    monkeypatch.setattr(auth_routes.settings, "NEWAPI_AUTH_TIMEOUT_SECONDS", 3.0)
+    monkeypatch.setattr(auth_routes.settings, "NEWAPI_TALKWISE_CLIENT_ID", "talkwise-prod")
+    monkeypatch.setattr(auth_routes.settings, "NEWAPI_TALKWISE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(auth_routes, "fetch_newapi_team_members", fake_fetch_team_members)
+
+    result = await auth_routes.list_newapi_team_members(
+        current_user=deps.CurrentUser(
+            user_id="newapi:42",
+            username="alice",
+            system_role="staff",
+            team_id="newapi:paid",
+            team_name="paid",
+            newapi_group="paid",
+        )
+    )
+
+    assert result.data is not None
+    assert result.data.team.id == "newapi:paid"
+    assert result.data.members[0].user_id == 42
+    assert result.data.members[0].system_role == "admin"
+    assert result.data.members[0].quota_total == 150
+
+
+@pytest.mark.asyncio
+async def test_newapi_team_members_route_requires_newapi_group() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_routes.list_newapi_team_members(
+            current_user=deps.CurrentUser(
+                user_id="newapi:42",
+                username="alice",
+                system_role="staff",
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "NewAPI team group is not available"
+
+
+@pytest.mark.asyncio
+async def test_newapi_team_user_search_requires_manager() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_routes.search_newapi_team_users(
+            keyword="bob",
+            limit=20,
+            current_user=deps.CurrentUser(
+                user_id="newapi:42",
+                username="alice",
+                system_role="staff",
+                team_id="newapi:paid",
+                newapi_group="paid",
+            ),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Insufficient permissions"
+
+
+@pytest.mark.asyncio
+async def test_newapi_team_user_search_uses_current_users_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_search_team_users(
+        *,
+        group: str,
+        keyword: str,
+        base_url: str,
+        client_id: str,
+        client_secret: str | None,
+        timeout_seconds: float,
+        limit: int | None = 20,
+    ):
+        assert group == "paid"
+        assert keyword == "bob"
+        assert limit == 10
+        return NewAPITeamUserSearchResult(
+            team=NewAPITeam(id="newapi:paid", name="paid", group="paid"),
+            users=[
+                NewAPITeamMember(
+                    id=7,
+                    username="bob",
+                    display_name="Bob Li",
+                    role=1,
+                    status=1,
+                    group="free",
+                    team_id="newapi:free",
+                    team_name="free",
+                    in_team=False,
+                )
+            ],
+            total=1,
+        )
+
+    monkeypatch.setattr(auth_routes, "search_newapi_team_users_control", fake_search_team_users)
+
+    result = await auth_routes.search_newapi_team_users(
+        keyword="bob",
+        limit=10,
+        current_user=deps.CurrentUser(
+            user_id="newapi:42",
+            username="alice",
+            system_role="leader",
+            team_id="newapi:paid",
+            newapi_group="paid",
+        ),
+    )
+
+    assert result.data is not None
+    assert result.data.team.group == "paid"
+    assert result.data.users[0].user_id == 7
+    assert result.data.users[0].group == "free"
+    assert result.data.users[0].in_team is False
+
+
+@pytest.mark.asyncio
+async def test_newapi_team_member_assign_uses_current_users_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_assign_team_member(
+        *,
+        group: str,
+        user_id: int,
+        base_url: str,
+        client_id: str,
+        client_secret: str | None,
+        timeout_seconds: float,
+    ):
+        assert group == "paid"
+        assert user_id == 7
+        return NewAPITeamMember(
+            id=7,
+            username="bob",
+            display_name="Bob Li",
+            role=1,
+            status=1,
+            group="paid",
+            team_id="newapi:paid",
+            team_name="paid",
+            quota=10,
+            used_quota=2,
+            in_team=True,
+        )
+
+    monkeypatch.setattr(auth_routes, "assign_newapi_team_member_control", fake_assign_team_member)
+
+    result = await auth_routes.assign_newapi_team_member(
+        auth_routes.AuthTeamMemberAssignRequest(user_id=7),
+        current_user=deps.CurrentUser(
+            user_id="newapi:42",
+            username="alice",
+            system_role="admin",
+            team_id="newapi:paid",
+            newapi_group="paid",
+        ),
+    )
+
+    assert result.data is not None
+    assert result.data.user_id == 7
+    assert result.data.group == "paid"
+    assert result.data.team_id == "newapi:paid"
+    assert result.data.quota_total == 12
+
+
+@pytest.mark.asyncio
+async def test_newapi_admin_maps_to_talkwise_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_fetch_identity(access_token: str, *, base_url: str, timeout_seconds: float):
         return NewAPIIdentity(id=7, username="manager", display_name=None, role=10)
 
@@ -211,7 +421,7 @@ async def test_newapi_admin_maps_to_talkwise_leader(monkeypatch: pytest.MonkeyPa
 
     current_user = await _resolve_user(authorization="Bearer manager-token")
 
-    assert current_user.system_role == "leader"
+    assert current_user.system_role == "admin"
     assert current_user.team_id == deps.settings.NEWAPI_DEFAULT_TEAM_ID
 
 

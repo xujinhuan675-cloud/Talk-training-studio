@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   Plus,
   Pencil,
@@ -19,6 +19,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   Cable,
+  Search,
+  UserPlus,
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppContext } from '../contexts/AppContext'
@@ -77,7 +79,14 @@ import {
 } from '../services/trainingStudio'
 import { useI18n, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
-import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
+import {
+  MANAGEMENT_SYSTEM_ROLES,
+  assignNewApiTeamMember,
+  fetchCurrentTeamMembers,
+  searchNewApiTeamUsers,
+  type AuthTeam,
+  type AuthTeamMember,
+} from '../services/auth'
 import './SettingsPage.css'
 
 /** Reusable confirm dialog state hook */
@@ -106,19 +115,20 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-type TabKey = 'personas' | 'scenarios' | 'organizations' | 'config'
+type TabKey = 'personas' | 'scenarios' | 'members' | 'organizations' | 'config'
 type SettingsTabKey = TabKey | 'training'
 
 const TABS: { key: SettingsTabKey; labelKey: TranslationKey; icon: React.ReactNode }[] = [
   { key: 'personas', labelKey: 'settings.tabs.personas', icon: <Users size={14} /> },
   { key: 'scenarios', labelKey: 'settings.tabs.scenarios', icon: <Layers size={14} /> },
+  { key: 'members', labelKey: 'settings.tabs.members', icon: <UserPlus size={14} /> },
   { key: 'organizations', labelKey: 'settings.tabs.organizations', icon: <Building2 size={14} /> },
   { key: 'training', labelKey: 'settings.tabs.training', icon: <ClipboardList size={14} /> },
   { key: 'config', labelKey: 'settings.tabs.config', icon: <KeyRound size={14} /> },
 ]
 
-const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'config']
-const PERSONAL_SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios']
+const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'members', 'organizations', 'config']
+const PERSONAL_SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'members']
 const PERSONAL_SETTINGS_TABS = new Set<SettingsTabKey>(PERSONAL_SETTINGS_TAB_KEYS)
 
 export function SettingsShell({
@@ -574,6 +584,291 @@ function ScenariosTab() {
         </div>
       )}
       <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={t('common.delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Team Members Tab
+// ---------------------------------------------------------------------------
+
+function formatMemberNumber(value: number | null | undefined): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return new Intl.NumberFormat().format(value)
+}
+
+function teamMemberDisplayName(member: AuthTeamMember): string {
+  return member.displayName?.trim() || member.username || `User #${member.userId}`
+}
+
+function teamMemberAvatarColor(member: AuthTeamMember): string {
+  if (member.systemRole === 'admin') return '#2563EB'
+  if (member.systemRole === 'leader') return '#0F766E'
+  return '#64748B'
+}
+
+function TeamMemberRow({
+  member,
+  action,
+}: {
+  member: AuthTeamMember
+  action?: React.ReactNode
+}) {
+  const { tr } = useI18n()
+  const displayName = teamMemberDisplayName(member)
+  const subtitle = member.email || (member.displayName && member.username !== member.displayName ? member.username : '')
+  const quotaRemaining = formatMemberNumber(member.quotaRemaining)
+  const quotaUsed = formatMemberNumber(member.quotaUsed)
+  const requestCount = formatMemberNumber(member.requestCount)
+
+  return (
+    <div className="settings-list-item settings-member-row">
+      <div className="settings-item-avatar">
+        <Avatar name={displayName} color={teamMemberAvatarColor(member)} size={40} />
+      </div>
+      <div className="settings-item-info settings-member-info">
+        <div className="settings-item-name">{displayName}</div>
+        {subtitle && <div className="settings-item-role">{subtitle}</div>}
+        <div className="settings-member-chips">
+          {member.systemRole && (
+            <span className="settings-member-chip">{member.systemRole}</span>
+          )}
+          {member.group && (
+            <span className="settings-member-chip">{tr('组 {group}', 'Group {group}', { group: member.group })}</span>
+          )}
+          {quotaRemaining && (
+            <span className="settings-member-chip">{tr('余额 {count}', 'Balance {count}', { count: quotaRemaining })}</span>
+          )}
+          {quotaUsed && (
+            <span className="settings-member-chip">{tr('已用 {count}', 'Used {count}', { count: quotaUsed })}</span>
+          )}
+          {requestCount && (
+            <span className="settings-member-chip">{tr('请求 {count}', 'Requests {count}', { count: requestCount })}</span>
+          )}
+        </div>
+      </div>
+      {action && <div className="settings-member-actions">{action}</div>}
+    </div>
+  )
+}
+
+function TeamMembersTab() {
+  const { t, tr } = useI18n()
+  const { currentUser, hasAnySystemRole, refreshSession } = useAuthContext()
+  const isNewApiSession = currentUser?.authProvider === 'newapi'
+  const canManageMembers = isNewApiSession && hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
+
+  const [team, setTeam] = useState<AuthTeam | null>(null)
+  const [members, setMembers] = useState<AuthTeamMember[]>([])
+  const [totalMembers, setTotalMembers] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [searchResults, setSearchResults] = useState<AuthTeamMember[]>([])
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [hasSearched, setHasSearched] = useState(false)
+  const [assigningUserId, setAssigningUserId] = useState<number | null>(null)
+
+  const loadMembers = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    setNotice(null)
+    try {
+      if (!isNewApiSession) {
+        setTeam(null)
+        setMembers([])
+        setTotalMembers(0)
+        return
+      }
+      const payload = await fetchCurrentTeamMembers()
+      setTeam(payload.team)
+      setMembers(payload.members)
+      setTotalMembers(payload.total)
+    } catch (err) {
+      setTeam(null)
+      setMembers([])
+      setTotalMembers(0)
+      setError(getErrorMessage(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [isNewApiSession])
+
+  useEffect(() => {
+    void loadMembers()
+  }, [loadMembers])
+
+  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const keyword = searchKeyword.trim()
+    setSearchError(null)
+    setNotice(null)
+    setHasSearched(Boolean(keyword))
+    if (!keyword) {
+      setSearchResults([])
+      return
+    }
+    setSearching(true)
+    try {
+      const payload = await searchNewApiTeamUsers(keyword, 20)
+      setTeam(payload.team)
+      setSearchResults(payload.users)
+    } catch (err) {
+      setSearchResults([])
+      setSearchError(getErrorMessage(err))
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleAssign = async (userId: number) => {
+    setAssigningUserId(userId)
+    setSearchError(null)
+    setNotice(null)
+    try {
+      const assigned = await assignNewApiTeamMember(userId)
+      setSearchResults((current) =>
+        current.map((member) =>
+          member.userId === userId
+            ? {
+                ...member,
+                group: assigned.group,
+                teamId: assigned.teamId,
+                teamName: assigned.teamName,
+                inTeam: true,
+              }
+            : member,
+        ),
+      )
+      await loadMembers()
+      await refreshSession().catch(() => undefined)
+      setNotice(tr('成员已加入当前团队。', 'Member added to the current team.'))
+    } catch (err) {
+      setSearchError(getErrorMessage(err))
+    } finally {
+      setAssigningUserId(null)
+    }
+  }
+
+  const teamName = team?.name || currentUser?.teamName || tr('当前团队', 'Current team')
+  const groupName = team?.group || currentUser?.newapiGroup || ''
+  const memberCount = totalMembers || members.length
+
+  if (!isNewApiSession) {
+    return (
+      <>
+        <div className="settings-section-header">
+          <h3 className="settings-section-title">{tr('成员', 'Members')}</h3>
+        </div>
+        <div className="settings-empty">
+          <div className="settings-empty-icon">
+            <Users size={36} />
+          </div>
+          <p>{tr('请使用 NewAPI 登录后查看真实团队成员。', 'Sign in with NewAPI to view real team members.')}</p>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <h3 className="settings-section-title">{tr('成员', 'Members')}</h3>
+        <Button className="settings-header-button" variant="secondary" onClick={loadMembers} disabled={loading}>
+          <RefreshCw size={14} />
+          {t('common.refresh')}
+        </Button>
+      </div>
+
+      <div className="settings-members-summary">
+        <div className="settings-members-summary-main">
+          <span className="settings-members-summary-label">{tr('NewAPI 团队', 'NewAPI team')}</span>
+          <strong>{teamName}</strong>
+          {groupName && <span className="settings-members-summary-group">{tr('组 {group}', 'Group {group}', { group: groupName })}</span>}
+        </div>
+        <div className="settings-members-stat">
+          <span>{tr('成员数', 'Members')}</span>
+          <strong>{memberCount}</strong>
+        </div>
+      </div>
+
+      {notice && <div className="settings-success">{notice}</div>}
+      {error && <div className="settings-error">{error}</div>}
+
+      {loading ? (
+        <div className="settings-empty">
+          <div className="settings-empty-icon">
+            <Users size={36} />
+          </div>
+          <p>{t('common.loading')}</p>
+        </div>
+      ) : (
+        <div className="settings-list">
+          {members.length === 0 && !error && (
+            <div className="settings-empty">
+              <div className="settings-empty-icon">
+                <Users size={36} />
+              </div>
+              <p>{tr('当前团队暂无成员。', 'No members in the current team yet.')}</p>
+            </div>
+          )}
+          {members.map((member) => (
+            <TeamMemberRow key={member.userId} member={member} />
+          ))}
+        </div>
+      )}
+
+      {canManageMembers && (
+        <div className="settings-form-panel settings-member-search-panel">
+          <h4>{tr('添加成员', 'Add member')}</h4>
+          <form className="settings-member-search-form" onSubmit={handleSearch}>
+            <Input
+              type="search"
+              value={searchKeyword}
+              onChange={(event) => {
+                setSearchKeyword(event.target.value)
+                setSearchError(null)
+              }}
+              placeholder={tr('搜索 NewAPI 用户名或邮箱', 'Search NewAPI username or email')}
+            />
+            <Button variant="primary" type="submit" disabled={searching || !searchKeyword.trim()}>
+              <Search size={14} />
+              {searching ? t('common.loading') : tr('搜索', 'Search')}
+            </Button>
+          </form>
+          {searchError && <div className="settings-error">{searchError}</div>}
+          <div className="settings-member-search-results">
+            {searchResults.map((member) => (
+              <TeamMemberRow
+                key={member.userId}
+                member={member}
+                action={
+                  <Button
+                    variant={member.inTeam ? 'secondary' : 'primary'}
+                    size="sm"
+                    disabled={member.inTeam || assigningUserId !== null}
+                    onClick={() => handleAssign(member.userId)}
+                  >
+                    <UserPlus size={14} />
+                    {member.inTeam
+                      ? tr('已在团队', 'In team')
+                      : assigningUserId === member.userId
+                        ? t('common.saving')
+                        : tr('加入', 'Add')}
+                  </Button>
+                }
+              />
+            ))}
+            {hasSearched && !searching && searchResults.length === 0 && !searchError && (
+              <div className="settings-empty settings-member-search-empty">
+                <p>{tr('没有找到可添加的 NewAPI 用户。', 'No matching NewAPI users found.')}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   )
 }
@@ -1813,6 +2108,7 @@ const SettingsPage: React.FC = () => {
     <SettingsShell activeTab={activeTab} canUseManagementTabs={canUseManagementTabs}>
       {activeTab === 'personas' && <PersonasTab />}
       {activeTab === 'scenarios' && <ScenariosTab />}
+      {activeTab === 'members' && <TeamMembersTab />}
       {canUseManagementTabs && activeTab === 'organizations' && <OrganizationsTab />}
       {canUseManagementTabs && activeTab === 'config' && <ConfigTab />}
     </SettingsShell>
