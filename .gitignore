@@ -164,6 +164,7 @@ graphify-out/
 outside-project/
 
 # Local dev runtime artifacts
+.codex-run/
 .codex-*.err
 backend/data/default_config_seed.json
 backend/data/personas/bp-*.md
