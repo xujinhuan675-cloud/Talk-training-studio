@@ -1598,6 +1598,11 @@
   display: none;
 }
 
+.chat-page-left-scrim,
+.chat-page-left-edge-tab {
+  display: none;
+}
+
 /* ================================================
    Responsive: Tablet (768-1023px)
    ================================================ */
@@ -1648,9 +1653,73 @@
     border-right: none;
   }
 
-  /* When a room is selected, hide the room list */
+  /* When a room is selected, expose the room list as a swipeable drawer. */
   .chat-page.has-room .chat-page-left {
-    display: none;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 95;
+    display: flex;
+    width: min(86vw, 320px);
+    min-width: 0;
+    max-width: 320px;
+    border-right: 1px solid var(--border);
+    box-shadow: 18px 0 44px rgba(15, 23, 42, 0.18);
+    transform: translateX(-102%);
+    transition: transform 0.18s ease;
+  }
+
+  .chat-page.has-room.mobile-list-open .chat-page-left {
+    transform: translateX(0);
+  }
+
+  .chat-page.has-room .chat-page-left.collapsed {
+    width: min(86vw, 320px);
+    min-width: 0;
+  }
+
+  .chat-page.has-room .chat-page-left.collapsed .chat-page-left-header {
+    justify-content: space-between;
+    padding: 10px 10px 4px 14px;
+  }
+
+  .chat-page.has-room .chat-page-left.collapsed .chat-page-left-header span {
+    display: inline;
+  }
+
+  .chat-page-left-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: block;
+    border: 0;
+    background: rgba(15, 23, 42, 0.28);
+    cursor: pointer;
+  }
+
+  .chat-page-left-edge-tab {
+    position: fixed;
+    top: 50%;
+    left: 0;
+    z-index: 60;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 52px;
+    border: 1px solid var(--border);
+    border-left: 0;
+    border-radius: 0 8px 8px 0;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-50%);
+    cursor: pointer;
+  }
+
+  .chat-page-left-edge-tab:hover,
+  .chat-page-left-edge-tab:focus-visible {
+    color: var(--green);
+    outline: none;
   }
 
   /* Center: full-screen chat */

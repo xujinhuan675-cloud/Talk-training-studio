@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   Plus,
   Pencil,
@@ -13,6 +13,7 @@ import {
   Mic,
   Radio,
   RefreshCw,
+  RotateCcw,
   Save,
   KeyRound,
   ChevronRight,
@@ -21,6 +22,7 @@ import {
   Cable,
   Search,
   UserPlus,
+  X,
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppContext } from '../contexts/AppContext'
@@ -77,7 +79,7 @@ import {
   type PipecatProviderCatalogSummary,
   type RealtimeCapabilities,
 } from '../services/trainingStudio'
-import { useI18n, type TranslationKey } from '../i18n'
+import { useI18n, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import {
   MANAGEMENT_SYSTEM_ROLES,
@@ -113,6 +115,198 @@ function useConfirmDialog() {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function personaDisplayKey(persona: PersonaSummary): string {
+  return `${persona.name.trim().toLocaleLowerCase()}::${persona.role.trim().toLocaleLowerCase()}`
+}
+
+function dedupePersonasForDisplay(personas: PersonaSummary[]): PersonaSummary[] {
+  const visibleByKey = new Map<string, PersonaSummary>()
+  for (const persona of personas) {
+    const key = personaDisplayKey(persona)
+    const current = visibleByKey.get(key)
+    if (!current || (!current.supports_v2 && persona.supports_v2)) {
+      visibleByKey.set(key, persona)
+    }
+  }
+  return Array.from(visibleByKey.values())
+}
+
+function matchesSearchQuery(values: Array<string | null | undefined>, query: string): boolean {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return true
+  return values.some((value) => value?.toLocaleLowerCase().includes(normalizedQuery))
+}
+
+type AudienceFilter = 'all' | 'sales' | 'customer_service' | 'management' | 'hr_interview' | 'negotiation' | 'general'
+type BusinessAudienceFilter = Exclude<AudienceFilter, 'all'>
+
+const AUDIENCE_FILTERS: readonly AudienceFilter[] = [
+  'all',
+  'sales',
+  'customer_service',
+  'management',
+  'hr_interview',
+  'negotiation',
+  'general',
+]
+
+const BUSINESS_AUDIENCE_FILTERS: readonly BusinessAudienceFilter[] = [
+  'sales',
+  'customer_service',
+  'management',
+  'hr_interview',
+  'negotiation',
+  'general',
+]
+
+const BUSINESS_AUDIENCE_KEYWORDS: Record<BusinessAudienceFilter, readonly string[]> = {
+  sales: [
+    '销售',
+    '售前',
+    '客户经理',
+    '客户拜访',
+    '线索',
+    '商机',
+    '成交',
+    '异议',
+    'sales',
+    'account executive',
+    'business development',
+    'prospect',
+    'lead',
+    'objection',
+    'closing',
+  ],
+  customer_service: [
+    '客服',
+    '售后',
+    '投诉',
+    '工单',
+    '客户成功',
+    '服务',
+    '续费',
+    '退费',
+    '满意度',
+    'support',
+    'customer service',
+    'customer success',
+    'complaint',
+    'ticket',
+    'refund',
+  ],
+  management: [
+    '管理',
+    '管理者',
+    '经理',
+    '主管',
+    '团队',
+    '下属',
+    '直属',
+    '绩效',
+    '反馈',
+    '辅导',
+    '1:1',
+    'leader',
+    'manager',
+    'performance',
+    'feedback',
+    'coaching',
+  ],
+  hr_interview: [
+    'hr',
+    '人力',
+    '招聘',
+    '面试',
+    '候选人',
+    '入职',
+    'offer',
+    'interview',
+    'recruit',
+    'hiring',
+    'candidate',
+  ],
+  negotiation: [
+    '谈判',
+    '议价',
+    '报价',
+    '价格',
+    '采购',
+    '合同',
+    '让步',
+    '博弈',
+    'negotiation',
+    'negotiate',
+    'price',
+    'pricing',
+    'procurement',
+    'contract',
+  ],
+  general: [],
+}
+
+function inferBusinessAudienceValues(values: Array<string | null | undefined>): BusinessAudienceFilter[] {
+  const text = values
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(' ')
+    .toLocaleLowerCase()
+
+  // Short-term inference is centralized here so future explicit audience/use/department fields can replace it.
+  const inferred = BUSINESS_AUDIENCE_FILTERS
+    .filter((filter) => filter !== 'general')
+    .filter((filter) => BUSINESS_AUDIENCE_KEYWORDS[filter].some((keyword) => text.includes(keyword.toLocaleLowerCase())))
+
+  return inferred.length ? inferred : ['general']
+}
+
+function matchesAudienceFilter(values: Array<string | null | undefined>, filter: AudienceFilter): boolean {
+  return filter === 'all' || inferBusinessAudienceValues(values).includes(filter)
+}
+
+function countAudienceFilters<T>(
+  items: T[],
+  valuesForItem: (item: T) => Array<string | null | undefined>,
+): Record<AudienceFilter, number> {
+  const counts = Object.fromEntries(AUDIENCE_FILTERS.map((filter) => [filter, 0])) as Record<AudienceFilter, number>
+  counts.all = items.length
+
+  items.forEach((item) => {
+    inferBusinessAudienceValues(valuesForItem(item)).forEach((filter) => {
+      counts[filter] += 1
+    })
+  })
+
+  return counts
+}
+
+function personaAudienceValues(persona: PersonaSummary): Array<string | null | undefined> {
+  return [persona.name, persona.role]
+}
+
+function scenarioAudienceValues(
+  scenario: Scenario,
+  personaLookup: Map<string, PersonaSummary>,
+): Array<string | null | undefined> {
+  return [
+    scenario.name,
+    scenario.description,
+    scenario.context_prompt,
+    ...scenario.suggested_persona_ids.flatMap((pid) => {
+      const persona = personaLookup.get(pid)
+      return persona ? [persona.name, persona.role] : [pid]
+    }),
+  ]
+}
+
+function audienceFilterLabel(filter: AudienceFilter, count: number, tr: TranslateInline): string {
+  if (filter === 'all') return tr('全部类型', 'All types')
+  if (filter === 'sales') return tr('销售 {count}', 'Sales {count}', { count })
+  if (filter === 'customer_service') return tr('客服 {count}', 'Customer service {count}', { count })
+  if (filter === 'management') return tr('管理者 {count}', 'Managers {count}', { count })
+  if (filter === 'hr_interview') return tr('HR/面试 {count}', 'HR / Interview {count}', { count })
+  if (filter === 'negotiation') return tr('谈判 {count}', 'Negotiation {count}', { count })
+  return tr('通用 {count}', 'General {count}', { count })
 }
 
 type TabKey = 'personas' | 'scenarios' | 'members' | 'organizations' | 'config'
@@ -188,11 +382,27 @@ function PersonasTab() {
   const navigate = useNavigate()
   const { t, tr } = useI18n()
   const { personaMap, currentOrg, reloadPersonas } = useAppContext()
-  const personas = Object.values(personaMap)
   const dialog = useConfirmDialog()
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<PersonaSummary | null>(null)
+  const [personaQuery, setPersonaQuery] = useState('')
+  const [personaAudience, setPersonaAudience] = useState<AudienceFilter>('all')
+
+  const displayPersonas = useMemo(() => dedupePersonasForDisplay(Object.values(personaMap)), [personaMap])
+  const personaAudienceCounts = useMemo(
+    () => countAudienceFilters(displayPersonas, personaAudienceValues),
+    [displayPersonas],
+  )
+  const visiblePersonas = useMemo(() => displayPersonas.filter((persona) => {
+    const values = personaAudienceValues(persona)
+    return matchesAudienceFilter(values, personaAudience) && matchesSearchQuery(values, personaQuery)
+  }), [displayPersonas, personaAudience, personaQuery])
+  const hasPersonaFilter = Boolean(personaQuery.trim()) || personaAudience !== 'all'
+  const personaAudienceOptions = AUDIENCE_FILTERS.map((filter) => ({
+    value: filter,
+    label: audienceFilterLabel(filter, personaAudienceCounts[filter], tr),
+  }))
 
   const startCreate = () => {
     setEditing(null)
@@ -223,8 +433,7 @@ function PersonasTab() {
 
   return (
     <>
-      <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('角色', 'Personas')}</h3>
+      <div className="settings-section-header actions-only">
         <div className="settings-header-actions">
           <Button
             variant="secondary"
@@ -242,16 +451,55 @@ function PersonasTab() {
         </div>
       </div>
 
+      <div className="settings-form-panel settings-list-filter-panel">
+        <h4>{tr('查找角色', 'Find personas')}</h4>
+        <form className="settings-member-search-form settings-list-filter-form" onSubmit={(event) => event.preventDefault()}>
+          <Input
+            type="search"
+            aria-label={tr('筛选角色', 'Filter personas')}
+            value={personaQuery}
+            onChange={(e) => setPersonaQuery(e.target.value)}
+            placeholder={tr('筛选角色名称或定位', 'Filter persona name or role')}
+          />
+          <label className="settings-list-filter-select">
+            <ClipboardList size={15} aria-hidden="true" />
+            <Select
+              aria-label={tr('角色适用对象', 'Persona audience')}
+              value={personaAudience}
+              onChange={(event) => setPersonaAudience(event.target.value as AudienceFilter)}
+            >
+              {personaAudienceOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!hasPersonaFilter}
+            onClick={() => {
+              setPersonaQuery('')
+              setPersonaAudience('all')
+            }}
+          >
+            <RotateCcw size={14} />
+            {tr('重置', 'Reset')}
+          </Button>
+        </form>
+      </div>
+
       <div className="settings-list">
-        {personas.length === 0 && (
+        {visiblePersonas.length === 0 && (
           <div className="settings-empty">
             <div className="settings-empty-icon">
               <Users size={36} />
             </div>
-            <p>{tr('暂无角色', 'No personas yet')}</p>
+            <p>{hasPersonaFilter ? tr('没有匹配的角色', 'No matching personas') : tr('暂无角色', 'No personas yet')}</p>
           </div>
         )}
-        {personas.map((p) => (
+        {visiblePersonas.map((p) => (
           <div
             key={p.id}
             className={`settings-list-item${editing?.id === p.id ? ' selected' : ''}`}
@@ -331,6 +579,8 @@ function ScenariosTab() {
   const [allPersonas, setAllPersonas] = useState<PersonaSummary[]>([])
   const [editing, setEditing] = useState<Scenario | null>(null)
   const [isNew, setIsNew] = useState(false)
+  const [scenarioQuery, setScenarioQuery] = useState('')
+  const [scenarioAudience, setScenarioAudience] = useState<AudienceFilter>('all')
 
   // Form state
   const [name, setName] = useState('')
@@ -341,6 +591,25 @@ function ScenariosTab() {
   const [submitting, setSubmitting] = useState(false)
 
   const showForm = isNew || editing !== null
+  const scenarioPersonaLookup = useMemo(() => {
+    const lookup = new Map<string, PersonaSummary>()
+    Object.values(personaMap).forEach((persona) => lookup.set(persona.id, persona))
+    allPersonas.forEach((persona) => lookup.set(persona.id, persona))
+    return lookup
+  }, [allPersonas, personaMap])
+  const scenarioAudienceCounts = useMemo(
+    () => countAudienceFilters(scenarios, (scenario) => scenarioAudienceValues(scenario, scenarioPersonaLookup)),
+    [scenarioPersonaLookup, scenarios],
+  )
+  const visibleScenarios = useMemo(() => scenarios.filter((scenario) => {
+    const values = scenarioAudienceValues(scenario, scenarioPersonaLookup)
+    return matchesAudienceFilter(values, scenarioAudience) && matchesSearchQuery(values, scenarioQuery)
+  }), [scenarioAudience, scenarioPersonaLookup, scenarioQuery, scenarios])
+  const hasScenarioFilter = Boolean(scenarioQuery.trim()) || scenarioAudience !== 'all'
+  const scenarioAudienceOptions = AUDIENCE_FILTERS.map((filter) => ({
+    value: filter,
+    label: audienceFilterLabel(filter, scenarioAudienceCounts[filter], tr),
+  }))
 
   const loadData = async () => {
     try {
@@ -452,16 +721,55 @@ function ScenariosTab() {
         </Button>
       </div>
 
+      <div className="settings-form-panel settings-list-filter-panel">
+        <h4>{tr('查找对话场景', 'Find room scenarios')}</h4>
+        <form className="settings-member-search-form settings-list-filter-form" onSubmit={(event) => event.preventDefault()}>
+          <Input
+            type="search"
+            aria-label={tr('筛选对话场景', 'Filter room scenarios')}
+            value={scenarioQuery}
+            onChange={(e) => setScenarioQuery(e.target.value)}
+            placeholder={tr('筛选场景名称、描述或角色', 'Filter scenario name, description, or persona')}
+          />
+          <label className="settings-list-filter-select">
+            <Layers size={15} aria-hidden="true" />
+            <Select
+              aria-label={tr('对话场景适用对象', 'Room scenario audience')}
+              value={scenarioAudience}
+              onChange={(event) => setScenarioAudience(event.target.value as AudienceFilter)}
+            >
+              {scenarioAudienceOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!hasScenarioFilter}
+            onClick={() => {
+              setScenarioQuery('')
+              setScenarioAudience('all')
+            }}
+          >
+            <RotateCcw size={14} />
+            {tr('重置', 'Reset')}
+          </Button>
+        </form>
+      </div>
+
       <div className="settings-list">
-        {scenarios.length === 0 && !showForm && (
+        {visibleScenarios.length === 0 && (
           <div className="settings-empty">
             <div className="settings-empty-icon">
               <Layers size={36} />
             </div>
-            <p>{tr('暂无对话场景', 'No room scenarios yet')}</p>
+            <p>{hasScenarioFilter ? tr('没有匹配的对话场景', 'No matching room scenarios') : tr('暂无对话场景', 'No room scenarios yet')}</p>
           </div>
         )}
-        {scenarios.map((s) => (
+        {visibleScenarios.map((s) => (
           <div
             key={s.id}
             className={`settings-list-item${editing?.id === s.id ? ' selected' : ''}`}
@@ -515,57 +823,73 @@ function ScenariosTab() {
         ))}
       </div>
 
-      {showForm && (
-        <div className="settings-form-panel">
-          <h4>{isNew ? tr('新建对话场景', 'New room scenario') : tr('编辑对话场景', 'Edit room scenario')}</h4>
-
-          <Field className="field-label" label={tr('名称', 'Name')}>
-            <Input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={tr('对话场景名称', 'Room scenario name')}
-              autoFocus
-            />
-          </Field>
-
-          <Field className="field-label" label={tr('描述（可选）', 'Description (optional)')}>
-            <Input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={tr('短描述', 'Short description')}
-            />
-          </Field>
-
-          <Field className="field-label" label={tr('上下文', 'Context')}>
-            <Textarea
-              value={contextPrompt}
-              onChange={(e) => setContextPrompt(e.target.value)}
-              placeholder={tr('对话背景和约束', 'Conversation context and constraints')}
-            />
-          </Field>
-
-          <div className="field-label" style={{ marginBottom: 4 }}>{tr('关联角色', 'Linked Personas')}</div>
-          <div className="settings-checkbox-list">
-            {allPersonas.map((p) => (
-              <label key={p.id} className="settings-checkbox-item">
-                <Checkbox
-                  checked={suggestedPersonaIds.includes(p.id)}
-                  onChange={() => togglePersona(p.id)}
-                />
-                <span
-                  className="settings-checkbox-color"
-                  style={{ backgroundColor: p.avatar_color || '#999' }}
-                />
-                <span>{p.name}</span>
-              </label>
-            ))}
+      <Dialog open={showForm} onOpenChange={(open) => { if (!open) handleCancel() }}>
+        <DialogContent className="settings-scenario-dialog" aria-describedby={undefined}>
+          <div className="settings-scenario-dialog-title">
+            <DialogTitle className="settings-scenario-dialog-heading">
+              {isNew ? tr('新建对话场景', 'New room scenario') : tr('编辑对话场景', 'Edit room scenario')}
+            </DialogTitle>
+            <Button
+              className="settings-scenario-dialog-close"
+              variant="ghost"
+              size="icon"
+              onClick={handleCancel}
+              title={tr('关闭', 'Close')}
+              aria-label={tr('关闭', 'Close')}
+            >
+              <X size={16} />
+            </Button>
           </div>
 
-          {error && <div className="settings-error">{error}</div>}
+          <div className="settings-scenario-dialog-body">
+            <Field className="field-label" label={tr('名称', 'Name')}>
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={tr('对话场景名称', 'Room scenario name')}
+                autoFocus
+              />
+            </Field>
 
-          <div className="settings-form-actions">
+            <Field className="field-label" label={tr('描述（可选）', 'Description (optional)')}>
+              <Input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={tr('短描述', 'Short description')}
+              />
+            </Field>
+
+            <Field className="field-label" label={tr('上下文', 'Context')}>
+              <Textarea
+                value={contextPrompt}
+                onChange={(e) => setContextPrompt(e.target.value)}
+                placeholder={tr('对话背景和约束', 'Conversation context and constraints')}
+              />
+            </Field>
+
+            <div className="field-label settings-linked-personas-label">{tr('关联角色', 'Linked Personas')}</div>
+            <div className="settings-checkbox-list">
+              {allPersonas.map((p) => (
+                <label key={p.id} className="settings-checkbox-item">
+                  <Checkbox
+                    checked={suggestedPersonaIds.includes(p.id)}
+                    onChange={() => togglePersona(p.id)}
+                  />
+                  <span
+                    className="settings-checkbox-color"
+                    style={{ backgroundColor: p.avatar_color || '#999' }}
+                  />
+                  <span>{p.name}</span>
+                </label>
+              ))}
+            </div>
+
+            {error && <div className="settings-error">{error}</div>}
+          </div>
+
+          <div className="settings-form-actions settings-scenario-dialog-actions">
             {editing && (
               <Button className="btn-delete" variant="danger" onClick={handleDelete} disabled={submitting}>
                 {t('common.delete')}
@@ -581,8 +905,8 @@ function ScenariosTab() {
               {submitting ? t('common.saving') : t('common.save')}
             </Button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog open={dialog.open} title={dialog.title} message={dialog.message} confirmLabel={t('common.delete')} danger onConfirm={dialog.confirm} onCancel={dialog.close} />
     </>
   )
@@ -1483,15 +1807,6 @@ function providerOptionsFromCatalog(
   return [...pipecatOptions, ...inventoryOptions]
 }
 
-function voiceProviderLabel(provider: string, options: VoiceProviderOption[]): string {
-  return options.find((option) => option.value === provider)?.label ?? titleCaseProvider(provider)
-}
-
-function countCatalogProviders(channel: PipecatProviderCatalogChannelSummary | null): string {
-  if (!channel) return '0'
-  return String(channel.providers?.length ?? channel.count ?? 0)
-}
-
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: number | undefined
   const timeout = new Promise<never>((_, reject) => {
@@ -1561,15 +1876,6 @@ function ConfigTab() {
       ? tr('已配置 {preview}', 'Configured {preview}', { preview: preview || '' })
       : t('common.notConfigured')
   )
-
-  const sourceText = (source: string) => {
-    if (source === 'tts') return tr('复用 TTS key', 'Reuses TTS key')
-    if (source === 'llm') return tr('回退到 LLM key', 'Falls back to LLM key')
-    if (source === 'realtime') return tr('使用 Pipecat 实时服务专用 key', 'Uses dedicated Pipecat realtime service key')
-    if (source === 'stt') return tr('使用 STT 专用 key', 'Uses dedicated STT key')
-    return t('common.notConfigured')
-  }
-  const configStatusText = loading ? t('common.loading') : t('common.notConfigured')
 
   const handleSave = async () => {
     setSaving(true)
@@ -1700,80 +2006,50 @@ function ConfigTab() {
     icon: React.ReactNode
     title: string
     subtitle: string
-    provider: string
     model: string
-    catalog: string
     tone: VoiceModuleTone
-    note: string
   }> = [
     {
       key: 'llm',
       icon: <KeyRound size={18} />,
       title: tr('LLM 回复生成', 'LLM response generation'),
       subtitle: tr('组合语音和实时语音都会用到的回复模型', 'Response model used by turn-based and realtime voice'),
-      provider: voiceProviderLabel(form.llmProvider, llmProviderOptions),
       model: form.llmDefaultModel,
-      catalog: tr('Pipecat LLM：{count} 个 provider，已接入 OpenAI / OpenRouter，其它已预置', 'Pipecat LLM: {count} providers, OpenAI / OpenRouter wired; other presets are saved for adapters', {
-        count: countCatalogProviders(llmChannel),
-      }),
       tone: toneForProvider(form.llmProvider, 'llm', Boolean(config?.llm_api_key_configured)),
-      note: config ? keyText(config.llm_api_key_configured, config.llm_api_key_preview) : configStatusText,
     },
     {
       key: 'stt',
       icon: <Mic size={18} />,
       title: tr('STT 语音识别', 'STT speech recognition'),
       subtitle: tr('回合制语音的录音转文字模块', 'Recording-to-text module for turn-based voice'),
-      provider: voiceProviderLabel(form.sttProvider, sttProviderOptions),
       model: form.sttModel,
-      catalog: tr('Pipecat STT：{count} 个 provider，已预置；当前运行态只接入 OpenAI/Whisper compatible', 'Pipecat STT: {count} providers preset; current runtime supports OpenAI/Whisper compatible', {
-        count: countCatalogProviders(sttChannel),
-      }),
       tone: toneForProvider(form.sttProvider, 'stt', Boolean(config && config.stt_api_key_source !== 'missing')),
-      note: config ? sourceText(config.stt_api_key_source) : configStatusText,
     },
     {
       key: 'tts',
       icon: <Volume2 size={18} />,
       title: tr('TTS 语音合成', 'TTS speech synthesis'),
       subtitle: tr('回合制语音的文字转语音模块', 'Text-to-speech module for turn-based voice'),
-      provider: voiceProviderLabel(form.ttsProvider, ttsProviderOptions),
       model: form.ttsModel,
-      catalog: tr('Pipecat TTS：{count} 个 provider，已预置；当前回合制接入 OpenRouter / MiniMax / ElevenLabs', 'Pipecat TTS: {count} providers preset; turn-based runtime supports OpenRouter / MiniMax / ElevenLabs', {
-        count: countCatalogProviders(ttsChannel),
-      }),
       tone: toneForProvider(form.ttsProvider, 'tts', Boolean(config?.tts_api_key_configured)),
-      note: config ? keyText(config.tts_api_key_configured, config.tts_api_key_preview) : configStatusText,
     },
     {
       key: 'realtime',
       icon: <Radio size={18} />,
       title: tr('Realtime 实时语音', 'Realtime voice'),
       subtitle: tr('Pipecat 实时语音会话：连续音频、打断、实时输出', 'Pipecat session for continuous audio, interruption, and realtime output'),
-      provider: voiceProviderLabel(form.realtimeProvider, realtimeProviderOptions),
       model: form.realtimeModel,
-      catalog: tr('Pipecat realtime：{count} 个 provider，已预置；当前运行态仍是 OpenAI 服务组合', 'Pipecat realtime: {count} providers preset; current runtime still uses OpenAI service composition', {
-        count: countCatalogProviders(realtimeChannel),
-      }),
       tone: form.realtimeProvider === 'openai'
         ? (realtimeCapabilities?.pipecat.readyForCall ? 'ready' : (config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'))
         : 'blocked',
-      note: config ? sourceText(config.realtime_api_key_source) : configStatusText,
     },
     {
       key: 'transport',
       icon: <Cable size={18} />,
       title: tr('Transport / VAD / Turn', 'Transport / VAD / Turn'),
       subtitle: tr('实时链路的传输、端点检测和回合判断', 'Transport, voice activity detection, and turn detection for realtime voice'),
-      provider: 'WebSocket + Silero + Pipecat turn strategies',
       model: tr('固定运行组件', 'Fixed runtime components'),
-      catalog: tr('Transport {transport} 个、VAD {vad} 个、Turn {turn} 个；当前只运行 WebSocket / Silero / Pipecat turn', 'Transport {transport}, VAD {vad}, Turn {turn}; current runtime uses WebSocket / Silero / Pipecat turn', {
-        transport: countCatalogProviders(transportChannel),
-        vad: countCatalogProviders(vadChannel),
-        turn: countCatalogProviders(turnChannel),
-      }),
       tone: realtimeCapabilities?.pipecat.websocketAvailable && realtimeCapabilities?.pipecat.vadAvailable && realtimeCapabilities?.pipecat.turnDetectionAvailable ? 'ready' : 'warning',
-      note: tr('配置只读，后续按 provider adapter 切片开放', 'Read-only until provider adapters are wired slice by slice'),
     },
   ]
 
@@ -1992,16 +2268,28 @@ function ConfigTab() {
     <>
       <div className="settings-section-header">
         <h3 className="settings-section-title">{tr('AI 服务', 'AI Services')}</h3>
-        <Button
-          className="settings-header-button"
-          variant="secondary"
-          size="sm"
-          onClick={loadConfig}
-          disabled={loading || saving}
-        >
-          <RefreshCw size={14} />
-          {loading ? t('common.loading') : t('common.refresh')}
-        </Button>
+        <div className="settings-header-actions">
+          <Button
+            className="settings-header-button"
+            variant="secondary"
+            size="sm"
+            onClick={loadConfig}
+            disabled={loading || saving}
+          >
+            <RefreshCw size={14} />
+            {loading ? t('common.loading') : t('common.refresh')}
+          </Button>
+          <Button
+            className="settings-header-button settings-reset-button"
+            variant="secondary"
+            size="sm"
+            onClick={loadConfig}
+            disabled={loading || saving}
+          >
+            <RotateCcw size={14} />
+            {tr('重置', 'Reset')}
+          </Button>
+        </div>
       </div>
 
       {notice && (
@@ -2034,12 +2322,9 @@ function ConfigTab() {
                 </span>
               </span>
               <span className="settings-voice-module-subtitle">{module.subtitle}</span>
-              <span className="settings-voice-module-catalog">{module.catalog}</span>
             </span>
             <span className="settings-voice-module-meta">
-              <span>{module.provider}</span>
               <strong>{module.model}</strong>
-              <small>{module.note}</small>
             </span>
             <ChevronRight size={18} className="settings-voice-module-chevron" />
           </button>
@@ -2050,6 +2335,16 @@ function ConfigTab() {
         <DialogContent className="settings-voice-dialog">
           {activeModuleMeta && (
             <>
+              <Button
+                className="settings-voice-dialog-close"
+                variant="ghost"
+                size="icon"
+                onClick={() => setActiveModule(null)}
+                title={tr('关闭', 'Close')}
+                aria-label={tr('关闭', 'Close')}
+              >
+                <X size={16} />
+              </Button>
               <div className="settings-voice-dialog-title">
                 <span className="settings-voice-module-icon">{activeModuleMeta.icon}</span>
                 <div>
@@ -2063,9 +2358,6 @@ function ConfigTab() {
                 {renderModuleConfig()}
               </div>
               <div className="dialog-actions settings-voice-dialog-actions">
-                <Button variant="secondary" onClick={() => setActiveModule(null)}>
-                  {tr('关闭', 'Close')}
-                </Button>
                 <Button variant="primary" onClick={() => { setActiveModule(null); handleSave() }} disabled={loading || saving}>
                   <Save size={14} />
                   {saving ? t('common.saving') : tr('保存并应用', 'Save and Apply')}
@@ -2077,10 +2369,6 @@ function ConfigTab() {
       </Dialog>
 
       <div className="settings-form-actions settings-voice-actions">
-        <Button variant="secondary" onClick={loadConfig} disabled={loading || saving}>
-          <RefreshCw size={14} />
-          {tr('还原', 'Reset')}
-        </Button>
         <Button variant="primary" onClick={handleSave} disabled={loading || saving}>
           <Save size={14} />
           {saving ? t('common.saving') : tr('保存并应用', 'Save and Apply')}

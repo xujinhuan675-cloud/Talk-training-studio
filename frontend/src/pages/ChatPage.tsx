@@ -2409,10 +2409,33 @@ export default function ChatPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [roomListCollapsed, setRoomListCollapsed] = useState(false)
+  const [roomListMobileOpen, setRoomListMobileOpen] = useState(false)
   const [newConversationDraft, setNewConversationDraft] = useState('')
   const [newConversationState, setNewConversationState] = useState<NewConversationState>({ status: 'idle' })
   const newConversationRunIdRef = React.useRef(0)
+  const roomListTouchStartRef = React.useRef<{ x: number; y: number } | null>(null)
   const showDefaultRouteState = !roomId && !hasRoomIdParam
+
+  const isMobileViewport = React.useCallback(() => (
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  ), [])
+
+  const openMobileRoomList = React.useCallback(() => {
+    setRoomListCollapsed(false)
+    setRoomListMobileOpen(true)
+  }, [])
+
+  const closeMobileRoomList = React.useCallback(() => {
+    setRoomListMobileOpen(false)
+  }, [])
+
+  const toggleRoomList = React.useCallback(() => {
+    if (isMobileViewport() && roomListMobileOpen) {
+      closeMobileRoomList()
+      return
+    }
+    setRoomListCollapsed((value) => !value)
+  }, [closeMobileRoomList, isMobileViewport, roomListMobileOpen])
 
   const handleNewConversationInputChange = React.useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setNewConversationDraft(event.target.value)
@@ -2452,6 +2475,37 @@ export default function ChatPage() {
     }
   }, [hasRoomIdParam])
 
+  useEffect(() => {
+    closeMobileRoomList()
+  }, [closeMobileRoomList, roomId])
+
+  const handleRoomListTouchStart = React.useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1 || !roomId || !isMobileViewport()) return
+    const touch = event.touches[0]
+    roomListTouchStartRef.current = { x: touch.clientX, y: touch.clientY }
+  }, [isMobileViewport, roomId])
+
+  const handleRoomListTouchEnd = React.useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const start = roomListTouchStartRef.current
+    roomListTouchStartRef.current = null
+    if (!start || !roomId || !isMobileViewport()) return
+
+    const touch = event.changedTouches[0]
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
+    if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.35) return
+
+    if (dx > 0 && !roomListMobileOpen && start.x <= 36) {
+      openMobileRoomList()
+    } else if (dx < 0 && roomListMobileOpen) {
+      closeMobileRoomList()
+    }
+  }, [closeMobileRoomList, isMobileViewport, openMobileRoomList, roomId, roomListMobileOpen])
+
+  const handleRoomListTouchCancel = React.useCallback(() => {
+    roomListTouchStartRef.current = null
+  }, [])
+
   const handleNewConversationKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -2460,7 +2514,31 @@ export default function ChatPage() {
   }, [startNewDefaultConversation])
 
   return (
-    <div className={`chat-page${roomId || showDefaultRouteState ? ' has-room' : ''}`}>
+    <div
+      className={`chat-page${roomId || showDefaultRouteState ? ' has-room' : ''}${roomListMobileOpen ? ' mobile-list-open' : ''}`}
+      onTouchStart={handleRoomListTouchStart}
+      onTouchEnd={handleRoomListTouchEnd}
+      onTouchCancel={handleRoomListTouchCancel}
+    >
+      {roomListMobileOpen && (
+        <button
+          type="button"
+          className="chat-page-left-scrim"
+          aria-label={tr('收起会话列表', 'Close room list')}
+          onClick={closeMobileRoomList}
+        />
+      )}
+      {roomId && !roomListMobileOpen && (
+        <button
+          type="button"
+          className="chat-page-left-edge-tab"
+          aria-label={tr('展开会话列表', 'Open room list')}
+          title={tr('展开会话列表', 'Open room list')}
+          onClick={openMobileRoomList}
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      )}
       {/* Left column: room list */}
       <div className={`chat-page-left${roomListCollapsed ? ' collapsed' : ''}`}>
         <div className="chat-page-left-header">
@@ -2470,8 +2548,8 @@ export default function ChatPage() {
             size="icon"
             className="chat-page-left-toggle panel-toggle"
             aria-label={roomListCollapsed ? tr('展开会话列表', 'Expand room list') : tr('收起会话列表', 'Collapse room list')}
-            aria-expanded={!roomListCollapsed}
-            onClick={() => setRoomListCollapsed((value) => !value)}
+            aria-expanded={!roomListCollapsed || roomListMobileOpen}
+            onClick={toggleRoomList}
             title={roomListCollapsed ? tr('展开会话列表', 'Expand room list') : tr('收起会话列表', 'Collapse room list')}
           >
             {roomListCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -2481,10 +2559,12 @@ export default function ChatPage() {
           <RoomList
             selectedRoomId={roomId}
             onSelectRoom={(room: ChatRoom) => {
+              closeMobileRoomList()
               navigate(APP_ROUTES.conversation(room.id))
             }}
             onRoomDeleted={(id) => {
               if (roomId === id) {
+                closeMobileRoomList()
                 navigate(APP_ROUTES.conversations)
               }
             }}

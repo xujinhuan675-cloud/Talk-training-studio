@@ -2,6 +2,33 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+:root,
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.32) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.26);
+  background-clip: padding-box;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  background-clip: padding-box;
+}
+
 body {
   font-family: var(--font-sans);
   font-size: var(--font-size-body);

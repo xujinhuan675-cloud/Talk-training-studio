@@ -16,8 +16,16 @@ import {
   getScenarioTrainingProgress,
   scenarioTrainingCatalog,
   type ScenarioLeaderboardProgressUser,
+  type ScenarioLeaderboardUser,
 } from '../data/trainingScenarios'
-import { getUserDisplayRoleName, type AuthUser } from '../services/auth'
+import {
+  fetchCurrentTeamMembers,
+  getSystemRoleDisplayName,
+  getUserDisplayRoleName,
+  type AuthTeam,
+  type AuthTeamMember,
+  type AuthUser,
+} from '../services/auth'
 import { useI18n, type Locale, type TranslateInline } from '../i18n'
 import {
   getScenarioDifficultyLabel,
@@ -27,9 +35,12 @@ import { APP_ROUTES } from '../appRoutes'
 import { Button } from '../components/ui/button'
 import { Select } from '../components/ui/form'
 import { PageHeader, PageShell } from '../components/ui/page'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import './ScenarioLeaderboardPage.css'
 
 const PROGRESS_STORAGE_PREFIX = 'talkwise.scenarioTraining.progress.v1'
+
+type LeaderboardViewTab = 'overview' | 'unfinished' | 'insights' | 'personal'
 
 function formatScore(score: number | null | undefined): string {
   return typeof score === 'number' ? String(score) : '--'
@@ -57,13 +68,47 @@ function visibleUsersForViewer(users: AuthUser[], currentUser: AuthUser | null):
   return users.filter((user) => user.teamId === currentUser.teamId)
 }
 
-function buildProgressUsers(users: AuthUser[], currentUser: AuthUser | null): ScenarioLeaderboardProgressUser[] {
-  return users.map((user) => ({
+function authUserToLeaderboardUser(user: AuthUser): ScenarioLeaderboardUser {
+  return {
     userId: user.userId,
     name: user.name,
     teamId: user.teamId,
     teamName: user.teamName,
     roleName: getUserDisplayRoleName(user),
+  }
+}
+
+function teamMemberDisplayName(member: AuthTeamMember): string {
+  return member.displayName?.trim() || member.username || `User #${member.userId}`
+}
+
+function newApiMemberToLeaderboardUser(
+  member: AuthTeamMember,
+  currentUser: AuthUser | null,
+  team: AuthTeam | null,
+): ScenarioLeaderboardUser {
+  const group = member.group || team?.group || currentUser?.newapiGroup || ''
+  const teamId = member.teamId || team?.id || currentUser?.teamId || (group ? `newapi:${group}` : 'newapi')
+  const teamName = member.teamName || team?.name || currentUser?.teamName || teamId
+  return {
+    userId: `newapi:${member.userId}`,
+    name: teamMemberDisplayName(member),
+    teamId,
+    teamName,
+    roleName: member.systemRole ? getSystemRoleDisplayName(member.systemRole) : undefined,
+  }
+}
+
+function buildProgressUsers(
+  users: ScenarioLeaderboardUser[],
+  currentUser: AuthUser | null,
+): ScenarioLeaderboardProgressUser[] {
+  return users.map((user) => ({
+    userId: user.userId,
+    name: user.name,
+    teamId: user.teamId,
+    teamName: user.teamName,
+    roleName: user.roleName,
     progress: getScenarioTrainingProgress({ userId: user.userId, teamId: user.teamId }),
     useCatalogFallback: user.userId === currentUser?.userId,
   }))
@@ -74,10 +119,54 @@ export default function ScenarioLeaderboardPage() {
   const { currentUser, users } = useAuthContext()
   const [progressVersion, setProgressVersion] = useState(0)
   const [selectedUserId, setSelectedUserId] = useState(currentUser?.userId ?? '')
+  const [newApiTeam, setNewApiTeam] = useState<AuthTeam | null>(null)
+  const [newApiTeamUsers, setNewApiTeamUsers] = useState<ScenarioLeaderboardUser[]>([])
+  const [teamMembersLoading, setTeamMembersLoading] = useState(false)
+  const [teamMembersError, setTeamMembersError] = useState<string | null>(null)
+  const [activeBoardTab, setActiveBoardTab] = useState<LeaderboardViewTab>('overview')
+  const isNewApiSession = currentUser?.authProvider === 'newapi'
 
   useEffect(() => {
     if (currentUser?.userId) setSelectedUserId(currentUser.userId)
   }, [currentUser?.userId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!isNewApiSession) {
+      setNewApiTeam(null)
+      setNewApiTeamUsers([])
+      setTeamMembersLoading(false)
+      setTeamMembersError(null)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setTeamMembersLoading(true)
+    setTeamMembersError(null)
+    void fetchCurrentTeamMembers()
+      .then((payload) => {
+        if (cancelled) return
+        setNewApiTeam(payload.team)
+        setNewApiTeamUsers(payload.members.map((member) => (
+          newApiMemberToLeaderboardUser(member, currentUser, payload.team)
+        )))
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setNewApiTeam(null)
+        setNewApiTeamUsers(currentUser ? [authUserToLeaderboardUser(currentUser)] : [])
+        setTeamMembersError(error instanceof Error ? error.message : tr('团队成员加载失败', 'Failed to load team members'))
+      })
+      .finally(() => {
+        if (!cancelled) setTeamMembersLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentUser, isNewApiSession, tr])
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -89,21 +178,32 @@ export default function ScenarioLeaderboardPage() {
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
 
-  const visibleAuthUsers = useMemo(
-    () => visibleUsersForViewer(users, currentUser),
-    [currentUser, users],
+  const visibleTeamUsers = useMemo(
+    () => {
+      if (isNewApiSession) {
+        return newApiTeamUsers.length
+          ? newApiTeamUsers
+          : currentUser
+            ? [authUserToLeaderboardUser(currentUser)]
+            : []
+      }
+      return visibleUsersForViewer(users, currentUser).map(authUserToLeaderboardUser)
+    },
+    [currentUser, isNewApiSession, newApiTeamUsers, users],
   )
   const isManagementView = currentUser?.systemRole === 'admin' || currentUser?.systemRole === 'leader'
   const selectedUser = isManagementView
-    ? visibleAuthUsers.find((user) => user.userId === selectedUserId)
-      ?? currentUser
-      ?? visibleAuthUsers[0]
+    ? visibleTeamUsers.find((user) => user.userId === selectedUserId)
+      ?? visibleTeamUsers[0]
+      ?? (currentUser ? authUserToLeaderboardUser(currentUser) : null)
       ?? null
     : currentUser
+      ? authUserToLeaderboardUser(currentUser)
+      : null
   const progressUsers = useMemo(() => {
     void progressVersion
-    return buildProgressUsers(visibleAuthUsers, currentUser)
-  }, [currentUser, progressVersion, visibleAuthUsers])
+    return buildProgressUsers(visibleTeamUsers, currentUser)
+  }, [currentUser, progressVersion, visibleTeamUsers])
   const summary = useMemo(
     () => buildScenarioLeaderboardSummary(scenarioTrainingCatalog, progressUsers, selectedUser?.userId),
     [progressUsers, selectedUser?.userId],
@@ -113,9 +213,11 @@ export default function ScenarioLeaderboardPage() {
   const personalMissingRequired = personal
     ? Math.max(0, personal.totalRequired - personal.completedRequired)
     : 0
-  const teamLabel = currentUser?.systemRole === 'admin'
-    ? tr('全部团队', 'All teams')
-    : currentUser?.teamName ?? selectedUser?.teamName ?? tr('当前团队', 'Current team')
+  const teamLabel = isNewApiSession
+    ? newApiTeam?.name ?? currentUser?.teamName ?? selectedUser?.teamName ?? tr('当前团队', 'Current team')
+    : currentUser?.systemRole === 'admin'
+      ? tr('全部团队', 'All teams')
+      : currentUser?.teamName ?? selectedUser?.teamName ?? tr('当前团队', 'Current team')
   const pageTitle = isManagementView ? t('common.teamBoard') : tr('我的进度', 'My progress')
   const pageDescription = isManagementView
     ? tr(
@@ -124,6 +226,12 @@ export default function ScenarioLeaderboardPage() {
       { team: teamLabel },
     )
     : tr('查看你的必练完成、团队差距和后续练习方向。', 'Review your required completion, team gaps, and next practice focus.')
+  const boardTabOptions = [
+    { value: 'overview' as const, label: tr('概览', 'Overview') },
+    { value: 'unfinished' as const, label: tr('未达标 {count}', 'Not qualified {count}', { count: team.unfinishedAll }) },
+    { value: 'insights' as const, label: tr('薄弱项', 'Insights') },
+    { value: 'personal' as const, label: tr('成员表现', 'Member performance') },
+  ]
 
   return (
     <PageShell className="scenario-leaderboard-page">
@@ -132,22 +240,6 @@ export default function ScenarioLeaderboardPage() {
         description={pageDescription}
         actions={(
           <div className="scenario-leaderboard-actions">
-            {isManagementView && visibleAuthUsers.length > 1 && (
-              <label className="scenario-leaderboard-select">
-                <span>{tr('成员', 'Member')}</span>
-                <Select
-                  aria-label={tr('成员', 'Member')}
-                  value={selectedUser?.userId ?? ''}
-                  onChange={(event) => setSelectedUserId(event.target.value)}
-                >
-                  {visibleAuthUsers.map((user) => (
-                    <option key={user.userId} value={user.userId}>
-                      {user.name} · {user.teamName}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            )}
             <Button asChild variant="secondary" className="scenario-leaderboard-link">
               <Link to={APP_ROUTES.practiceScenarios}>
                 <ClipboardList size={16} />
@@ -159,13 +251,28 @@ export default function ScenarioLeaderboardPage() {
         )}
       />
 
+      {teamMembersLoading && isNewApiSession && (
+        <div className="scenario-leaderboard-banner">
+          <Users size={16} />
+          {tr('正在加载当前团队成员。', 'Loading current team members.')}
+        </div>
+      )}
+      {teamMembersError && isNewApiSession && (
+        <div className="scenario-leaderboard-banner">
+          <AlertCircle size={16} />
+          {tr('当前团队成员加载失败，已暂时显示当前登录成员：{message}', 'Current team members failed to load; showing the signed-in member for now: {message}', {
+            message: teamMembersError,
+          })}
+        </div>
+      )}
+
       {isManagementView ? (
         <>
           <section className="scenario-leaderboard-metrics" aria-label={tr('团队训练指标', 'Team training metrics')}>
             <div>
-              <small>{tr('参与成员', 'Participants')}</small>
-              <strong>{team.participants}</strong>
-              <span>{tr('有训练记录', 'With progress')}</span>
+              <small>{tr('当前成员', 'Members')}</small>
+              <strong>{summary.totalUsers}</strong>
+              <span>{tr('{count} 人有训练记录', '{count} with progress', { count: team.participants })}</span>
             </div>
             <div>
               <small>{tr('已达标', 'Qualified')}</small>
@@ -184,40 +291,55 @@ export default function ScenarioLeaderboardPage() {
             </div>
           </section>
 
-          <section className="scenario-leaderboard-grid">
-            <div className="scenario-leaderboard-panel">
-              <div className="scenario-leaderboard-panel-head">
-                <h2>
-                  <Medal size={17} />
-                  {tr('排行', 'Ranking')}
-                </h2>
-                <span>{tr('达标后入榜', 'Qualified users only')}</span>
-              </div>
-              {team.ranks.length ? (
-                <div className="scenario-leaderboard-table">
-                  {team.ranks.map((row) => (
-                    <article className={`scenario-leaderboard-row${row.isCurrentUser ? ' selected' : ''}`} key={row.userId}>
-                      <span className="rank">#{row.rank}</span>
-                      <div className="person">
-                        <strong>{row.name}</strong>
-                        <small>
-                          {row.teamName} · {row.roleName || tr('成员', 'Member')} · {tr('已练 {count}', '{count} practiced', { count: row.practicedCount })}
-                        </small>
-                      </div>
-                      <span className="score">{formatScore(row.averageScore)}</span>
-                      <span className="completion">{row.completedRequired}/{row.totalRequired}</span>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <p className="scenario-leaderboard-empty">
-                  <AlertCircle size={16} />
-                  {tr('暂无入榜成员', 'No qualified members')}
-                </p>
-              )}
-            </div>
+          <div className="scenario-leaderboard-view-nav">
+            <SegmentedControl
+              ariaLabel={tr('团队看板视图', 'Team board view')}
+              size="sm"
+              className="scenario-leaderboard-view-tabs"
+              value={activeBoardTab}
+              onValueChange={setActiveBoardTab}
+              options={boardTabOptions}
+            />
+          </div>
 
-            <aside className="scenario-leaderboard-side">
+          {activeBoardTab === 'overview' && (
+            <section className="scenario-leaderboard-grid scenario-leaderboard-grid--overview">
+              <div className="scenario-leaderboard-panel">
+                <div className="scenario-leaderboard-panel-head">
+                  <h2>
+                    <Medal size={17} />
+                    {tr('排行', 'Ranking')}
+                  </h2>
+                  <span>{tr('达标后入榜', 'Qualified users only')}</span>
+                </div>
+                {team.ranks.length ? (
+                  <div className="scenario-leaderboard-table">
+                    {team.ranks.map((row) => (
+                      <article className={`scenario-leaderboard-row${row.isCurrentUser ? ' selected' : ''}`} key={row.userId}>
+                        <span className="rank">#{row.rank}</span>
+                        <div className="person">
+                          <strong>{row.name}</strong>
+                          <small>
+                            {row.teamName} · {row.roleName || tr('成员', 'Member')} · {tr('已练 {count}', '{count} practiced', { count: row.practicedCount })}
+                          </small>
+                        </div>
+                        <span className="score">{formatScore(row.averageScore)}</span>
+                        <span className="completion">{row.completedRequired}/{row.totalRequired}</span>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="scenario-leaderboard-empty">
+                    <AlertCircle size={16} />
+                    {tr('暂无入榜成员', 'No qualified members')}
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
+          {activeBoardTab === 'insights' && (
+            <aside className="scenario-leaderboard-side scenario-leaderboard-side--tab">
               <section>
                 <h2>
                   <BarChart3 size={16} />
@@ -267,46 +389,48 @@ export default function ScenarioLeaderboardPage() {
                 )}
               </section>
             </aside>
-          </section>
+          )}
 
-          <section className="scenario-leaderboard-panel">
-            <div className="scenario-leaderboard-panel-head">
-              <h2>
-                <ListIcon />
-                {tr('未达标名单', 'Not qualified')}
-              </h2>
-              <span>{tr('{count} 人', '{count} users', { count: team.unfinishedAll })}</span>
-            </div>
-            {team.unfinished.length ? (
-              <div className="unfinished-table">
-                {team.unfinished.map((row) => (
-                  <article className={`unfinished-row${row.isCurrentUser ? ' selected' : ''}`} key={row.userId}>
-                    <div className="person">
-                      <strong>{row.name}</strong>
-                      <small>{row.teamName} · {getScenarioStatusLabel(row.status, tr)}</small>
-                    </div>
-                    <div className="unfinished-progress">
-                      <span>{row.completedRequired}/{row.totalRequired}</span>
-                      <div>
-                        <b style={{ width: completionWidth(row.completionRate) }} />
-                      </div>
-                    </div>
-                    <div className="unfinished-missing">
-                      {row.unfinishedRequired.length
-                        ? row.unfinishedRequired.map((scenario) => scenario.title).join(tr('、', ', '))
-                        : tr('必练已完成，等待入榜', 'Required complete; waiting for ranking')}
-                    </div>
-                    <span className="score">{formatScore(row.averageScore)}</span>
-                  </article>
-                ))}
+          {activeBoardTab === 'unfinished' && (
+            <section className="scenario-leaderboard-panel">
+              <div className="scenario-leaderboard-panel-head">
+                <h2>
+                  <ListIcon />
+                  {tr('未达标名单', 'Not qualified')}
+                </h2>
+                <span>{tr('{count} 人', '{count} users', { count: team.unfinishedAll })}</span>
               </div>
-            ) : (
-              <p className="scenario-leaderboard-empty">
-                <CheckCircle2 size={16} />
-                {tr('全部成员已达标', 'All members qualified')}
-              </p>
-            )}
-          </section>
+              {team.unfinished.length ? (
+                <div className="unfinished-table">
+                  {team.unfinished.map((row) => (
+                    <article className={`unfinished-row${row.isCurrentUser ? ' selected' : ''}`} key={row.userId}>
+                      <div className="person">
+                        <strong>{row.name}</strong>
+                        <small>{row.teamName} · {getScenarioStatusLabel(row.status, tr)}</small>
+                      </div>
+                      <div className="unfinished-progress">
+                        <span>{row.completedRequired}/{row.totalRequired}</span>
+                        <div>
+                          <b style={{ width: completionWidth(row.completionRate) }} />
+                        </div>
+                      </div>
+                      <div className="unfinished-missing">
+                        {row.unfinishedRequired.length
+                          ? row.unfinishedRequired.map((scenario) => scenario.title).join(tr('、', ', '))
+                          : tr('必练已完成，等待入榜', 'Required complete; waiting for ranking')}
+                      </div>
+                      <span className="score">{formatScore(row.averageScore)}</span>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="scenario-leaderboard-empty">
+                  <CheckCircle2 size={16} />
+                  {tr('全部成员已达标', 'All members qualified')}
+                </p>
+              )}
+            </section>
+          )}
         </>
       ) : (
         <section className="scenario-leaderboard-metrics scenario-leaderboard-metrics--personal" aria-label={tr('我的训练指标', 'My training metrics')}>
@@ -341,105 +465,124 @@ export default function ScenarioLeaderboardPage() {
         </section>
       )}
 
-      <section className="scenario-leaderboard-personal">
-        <div className="scenario-leaderboard-panel-head">
-          <h2>
-            <Users size={17} />
-            {isManagementView ? tr('成员表现', 'Member performance') : tr('我的表现', 'My performance')}
-          </h2>
-          <span>{personal?.user.name ?? tr('暂无成员', 'No member')}</span>
-        </div>
+      {(!isManagementView || activeBoardTab === 'personal') && (
+        <section className="scenario-leaderboard-personal">
+          <div className="scenario-leaderboard-panel-head">
+            <h2>
+              <Users size={17} />
+              {isManagementView ? tr('成员表现', 'Member performance') : tr('我的表现', 'My performance')}
+            </h2>
+            {isManagementView && visibleTeamUsers.length > 1 ? (
+              <label className="scenario-leaderboard-select scenario-leaderboard-member-select">
+                <span>{tr('成员', 'Member')}</span>
+                <Select
+                  aria-label={tr('成员', 'Member')}
+                  value={selectedUser?.userId ?? ''}
+                  onChange={(event) => setSelectedUserId(event.target.value)}
+                >
+                  {visibleTeamUsers.map((user) => (
+                    <option key={user.userId} value={user.userId}>
+                      {user.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : (
+              <span>{personal?.user.name ?? tr('暂无成员', 'No member')}</span>
+            )}
+          </div>
 
-        {personal ? (
-          <>
-            <div className="personal-summary">
-              <div className="personal-identity">
-                <span>{personal.user.name.slice(0, 1)}</span>
+          {personal ? (
+            <>
+              <div className="personal-summary">
+                <div className="personal-identity">
+                  <span>{personal.user.name.slice(0, 1)}</span>
+                  <div>
+                    <strong>{personal.user.name}</strong>
+                    <small>{personal.user.teamName} · {personal.user.roleName || tr('成员', 'Member')}</small>
+                  </div>
+                </div>
                 <div>
-                  <strong>{personal.user.name}</strong>
-                  <small>{personal.user.teamName} · {personal.user.roleName || tr('成员', 'Member')}</small>
+                  <small>{tr('排名', 'Rank')}</small>
+                  <strong>{personal.rank ? `#${personal.rank}` : '--'}</strong>
+                </div>
+                <div>
+                  <small>{tr('必练均分', 'Required average')}</small>
+                  <strong>{formatScore(personal.averageScore)}</strong>
+                </div>
+                <div>
+                  <small>{tr('总均分', 'Overall average')}</small>
+                  <strong>{formatScore(personal.overallAverage)}</strong>
+                </div>
+                <div>
+                  <small>{tr('最近练习', 'Latest practice')}</small>
+                  <strong>{formatDate(personal.latestPracticedAt, tr, locale)}</strong>
                 </div>
               </div>
-              <div>
-                <small>{tr('排名', 'Rank')}</small>
-                <strong>{personal.rank ? `#${personal.rank}` : '--'}</strong>
-              </div>
-              <div>
-                <small>{tr('必练均分', 'Required average')}</small>
-                <strong>{formatScore(personal.averageScore)}</strong>
-              </div>
-              <div>
-                <small>{tr('总均分', 'Overall average')}</small>
-                <strong>{formatScore(personal.overallAverage)}</strong>
-              </div>
-              <div>
-                <small>{tr('最近练习', 'Latest practice')}</small>
-                <strong>{formatDate(personal.latestPracticedAt, tr, locale)}</strong>
-              </div>
-            </div>
 
-            {personal.status !== 'ranked' && (
-              <div className="scenario-leaderboard-banner">
-                <AlertCircle size={16} />
-                {personalMissingRequired > 0
-                  ? tr('还有 {count} 个必练未完成：{items}', '{count} required scenarios left: {items}', {
-                    count: personalMissingRequired,
-                    items: personal.unfinishedRequired.map((scenario) => scenario.title).join(tr('、', ', ')),
-                  })
-                  : tr('等待评分刷新后入榜。', 'Waiting for score refresh to rank.')}
-              </div>
-            )}
+              {personal.status !== 'ranked' && (
+                <div className="scenario-leaderboard-banner">
+                  <AlertCircle size={16} />
+                  {personalMissingRequired > 0
+                    ? tr('还有 {count} 个必练未完成：{items}', '{count} required scenarios left: {items}', {
+                      count: personalMissingRequired,
+                      items: personal.unfinishedRequired.map((scenario) => scenario.title).join(tr('、', ', ')),
+                    })
+                    : tr('等待评分刷新后入榜。', 'Waiting for score refresh to rank.')}
+                </div>
+              )}
 
-            <div className="personal-grid">
-              <section>
-                <h3>{tr('维度评分', 'Dimension scores')}</h3>
-                {personal.abilityProfile.length ? (
-                  <div className="ability-list">
-                    {personal.abilityProfile.map((dimension) => (
-                      <div key={dimension.dimensionId}>
-                        <span>{dimension.name}</span>
-                        <strong className={dimension.isWeak ? 'warn' : ''}>{dimension.averageScore}</strong>
-                        <em>{tr('{count} 条评分', '{count} scores', { count: dimension.sampleCount })}</em>
-                        <b style={{ width: completionWidth(dimension.averageScore) }} />
-                      </div>
+              <div className="personal-grid">
+                <section>
+                  <h3>{tr('维度评分', 'Dimension scores')}</h3>
+                  {personal.abilityProfile.length ? (
+                    <div className="ability-list">
+                      {personal.abilityProfile.map((dimension) => (
+                        <div key={dimension.dimensionId}>
+                          <span>{dimension.name}</span>
+                          <strong className={dimension.isWeak ? 'warn' : ''}>{dimension.averageScore}</strong>
+                          <em>{tr('{count} 条评分', '{count} scores', { count: dimension.sampleCount })}</em>
+                          <b style={{ width: completionWidth(dimension.averageScore) }} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="scenario-leaderboard-empty">{tr('暂无评分数据', 'No score data')}</p>
+                  )}
+                </section>
+
+                <section>
+                  <h3>{tr('场景数据', 'Scenario data')}</h3>
+                  <div className="personal-scenario-list">
+                    {personal.scenarioStats.map((scenario) => (
+                      <article key={scenario.scenarioId}>
+                        <div>
+                          <strong>{scenario.title}</strong>
+                          <small>
+                            {scenario.required ? tr('必练', 'Required') : tr('选练', 'Optional')}
+                            {' · '}
+                            {getScenarioDifficultyLabel(scenario.difficulty, tr)}
+                            {' · '}
+                            {getScenarioStatusLabel(scenario.status, tr)}
+                          </small>
+                        </div>
+                        <span>{formatScore(scenario.score)}</span>
+                        <small>
+                          {tr('团队 {score}', 'Team {score}', { score: formatScore(scenario.teamAverage) })}
+                          {' · '}
+                          {tr('差值 {gap}', 'Gap {gap}', { gap: formatGap(scenario.gap) })}
+                        </small>
+                      </article>
                     ))}
                   </div>
-                ) : (
-                  <p className="scenario-leaderboard-empty">{tr('暂无评分数据', 'No score data')}</p>
-                )}
-              </section>
-
-              <section>
-                <h3>{tr('场景数据', 'Scenario data')}</h3>
-                <div className="personal-scenario-list">
-                  {personal.scenarioStats.map((scenario) => (
-                    <article key={scenario.scenarioId}>
-                      <div>
-                        <strong>{scenario.title}</strong>
-                        <small>
-                          {scenario.required ? tr('必练', 'Required') : tr('选练', 'Optional')}
-                          {' · '}
-                          {getScenarioDifficultyLabel(scenario.difficulty, tr)}
-                          {' · '}
-                          {getScenarioStatusLabel(scenario.status, tr)}
-                        </small>
-                      </div>
-                      <span>{formatScore(scenario.score)}</span>
-                      <small>
-                        {tr('团队 {score}', 'Team {score}', { score: formatScore(scenario.teamAverage) })}
-                        {' · '}
-                        {tr('差值 {gap}', 'Gap {gap}', { gap: formatGap(scenario.gap) })}
-                      </small>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            </div>
-          </>
-        ) : (
-          <p className="scenario-leaderboard-empty">{tr('暂无成员', 'No member')}</p>
-        )}
-      </section>
+                </section>
+              </div>
+            </>
+          ) : (
+            <p className="scenario-leaderboard-empty">{tr('暂无成员', 'No member')}</p>
+          )}
+        </section>
+      )}
     </PageShell>
   )
 }

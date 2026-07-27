@@ -20,3 +20,12 @@ test('ScenarioTrainingPage exposes only top-level training modes', () => {
   assert.doesNotMatch(source, /training\.mode\.realtime\.label/)
   assert.doesNotMatch(source, /useState<ScenarioLaunchMode>/)
 })
+
+test('ScenarioTrainingPage relies on the shared global scrollbar style', () => {
+  const indexCss = readSource('src/index.css')
+  const pageCss = readSource('src/pages/ScenarioTrainingPage.css')
+
+  assert.match(indexCss, /scrollbar-width:\s*thin/)
+  assert.match(indexCss, /\*::-webkit-scrollbar/)
+  assert.doesNotMatch(pageCss, /::-webkit-scrollbar|scrollbar-width|scrollbar-color/)
+})

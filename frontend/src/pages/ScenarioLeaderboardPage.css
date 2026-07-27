@@ -6,6 +6,8 @@
 
 .scenario-leaderboard-metrics,
 .scenario-leaderboard-grid,
+.scenario-leaderboard-view-nav,
+.scenario-leaderboard-side--tab,
 .scenario-leaderboard-personal {
   max-width: var(--page-max-width);
   margin-left: auto;
@@ -30,10 +32,16 @@
 .scenario-leaderboard-select {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 800;
+}
+
+.scenario-leaderboard-select > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .scenario-leaderboard-select .ui-form-select {
@@ -42,6 +50,10 @@
   background-color: var(--bg-card);
   font-size: 13px;
   font-weight: 800;
+}
+
+.scenario-leaderboard-member-select {
+  margin-left: auto;
 }
 
 .scenario-leaderboard-link {
@@ -96,12 +108,27 @@
   color: var(--rose);
 }
 
+.scenario-leaderboard-view-nav {
+  display: flex;
+  margin-bottom: 14px;
+}
+
+.scenario-leaderboard-view-tabs.ui-segmented-control {
+  width: 100%;
+  overflow-x: auto;
+  background: var(--bg-card);
+}
+
 .scenario-leaderboard-grid {
   display: grid;
   grid-template-columns: minmax(520px, 1.45fr) minmax(320px, 0.85fr);
   align-items: start;
   gap: 14px;
   margin-bottom: 14px;
+}
+
+.scenario-leaderboard-grid--overview {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .scenario-leaderboard-panel,
@@ -133,6 +160,11 @@
   display: grid;
   align-content: start;
   gap: 14px;
+}
+
+.scenario-leaderboard-side--tab {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
 }
 
 .scenario-leaderboard-side section,
@@ -459,6 +491,7 @@
 
   .scenario-leaderboard-metrics,
   .scenario-leaderboard-grid,
+  .scenario-leaderboard-side--tab,
   .personal-grid,
   .personal-summary {
     grid-template-columns: 1fr;
@@ -484,6 +517,15 @@
   .unfinished-row,
   .personal-scenario-list article {
     grid-template-columns: 1fr;
+  }
+
+  .scenario-leaderboard-personal .scenario-leaderboard-panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scenario-leaderboard-member-select {
+    margin-left: 0;
   }
 
   .scenario-leaderboard-row .score,
