@@ -797,29 +797,6 @@ function TeamMembersTab() {
       {notice && <div className="settings-success">{notice}</div>}
       {error && <div className="settings-error">{error}</div>}
 
-      {loading ? (
-        <div className="settings-empty">
-          <div className="settings-empty-icon">
-            <Users size={36} />
-          </div>
-          <p>{t('common.loading')}</p>
-        </div>
-      ) : (
-        <div className="settings-list">
-          {members.length === 0 && !error && (
-            <div className="settings-empty">
-              <div className="settings-empty-icon">
-                <Users size={36} />
-              </div>
-              <p>{tr('当前团队暂无成员。', 'No members in the current team yet.')}</p>
-            </div>
-          )}
-          {members.map((member) => (
-            <TeamMemberRow key={member.userId} member={member} />
-          ))}
-        </div>
-      )}
-
       {canManageMembers && (
         <div className="settings-form-panel settings-member-search-panel">
           <h4>{tr('添加成员', 'Add member')}</h4>
@@ -867,6 +844,29 @@ function TeamMembersTab() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="settings-empty">
+          <div className="settings-empty-icon">
+            <Users size={36} />
+          </div>
+          <p>{t('common.loading')}</p>
+        </div>
+      ) : (
+        <div className="settings-list">
+          {members.length === 0 && !error && (
+            <div className="settings-empty">
+              <div className="settings-empty-icon">
+                <Users size={36} />
+              </div>
+              <p>{tr('当前团队暂无成员。', 'No members in the current team yet.')}</p>
+            </div>
+          )}
+          {members.map((member) => (
+            <TeamMemberRow key={member.userId} member={member} />
+          ))}
         </div>
       )}
     </>
