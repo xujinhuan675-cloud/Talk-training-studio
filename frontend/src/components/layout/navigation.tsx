@@ -92,7 +92,6 @@ export const desktopNavSections: AppNavSection[] = [
         icon: <Settings size={18} />,
         labelKey: 'nav.config',
         matchPrefix: APP_ROUTES.config,
-        roles: MANAGEMENT_SYSTEM_ROLES,
       },
     ],
   },

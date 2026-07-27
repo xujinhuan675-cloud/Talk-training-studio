@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   fetchRoomDetail,
+  getRoomStreamUrl,
   sendMessage as apiSendMessage,
   type ChatRoomDetail,
   type DispatchPhase,
@@ -10,8 +11,6 @@ import {
 } from '../services/api'
 import type { TrainingFeedbackMode } from '../services/trainingMode'
 import { useI18n } from '../i18n'
-
-const API_BASE = '/api/v1/stakeholder'
 const LOCAL_VIDEO_PREFIX = '[video-answer]'
 const EMOTION_TAG_RE = /\s*<!--emotion:\s*\{[\s\S]*?\}\s*-->\s*/gi
 const EMOTION_PARTIAL_TAG_RE = /\s*<!--emotion:[\s\S]*$/i
@@ -44,6 +43,7 @@ export interface LocalVideoAttachment {
 export interface UseChatReturn {
   selectedRoom: ChatRoomDetail | null
   setSelectedRoom: React.Dispatch<React.SetStateAction<ChatRoomDetail | null>>
+  loadError: string | null
   streamingContent: Record<string, string>
   dispatchSummary: DispatchPhase[] | null
   setDispatchSummary: React.Dispatch<React.SetStateAction<DispatchPhase[] | null>>
@@ -128,12 +128,14 @@ function hydrateLocalVideoMessages(detail: ChatRoomDetail): ChatRoomDetail {
 export function useChat(
   roomId: number | null,
   options?: {
+    trainingSessionId?: string | null
     onRoundEnd?: () => void
     audioPlayerRef?: React.RefObject<{ stop: () => void; isMuted: () => boolean; enqueue: (personaId: string, data: string, replyId?: string, sentenceIndex?: number) => void } | null>
   },
 ): UseChatReturn {
   const { tr } = useI18n()
   const [selectedRoom, setSelectedRoom] = useState<ChatRoomDetail | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [streamingContent, setStreamingContent] = useState<Record<string, string>>({})
   const [dispatchSummary, setDispatchSummary] = useState<DispatchPhase[] | null>(null)
   const [dispatchExpanded, setDispatchExpanded] = useState(false)
@@ -182,7 +184,9 @@ export function useChat(
 
     const streamVersion = eventSourceVersionRef.current + 1
     eventSourceVersionRef.current = streamVersion
-    const es = new EventSource(`${API_BASE}/rooms/${roomId}/stream`)
+    const es = new EventSource(getRoomStreamUrl(roomId, {
+      trainingSessionId: options?.trainingSessionId,
+    }))
     eventSourceRef.current = es
     const isCurrentStream = () =>
       eventSourceRef.current === es && eventSourceVersionRef.current === streamVersion
@@ -285,20 +289,24 @@ export function useChat(
       setStreamingContent({})
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId])
+  }, [roomId, options?.trainingSessionId])
 
   const loadRoomDetail = useCallback(async (id: number): Promise<ChatRoomDetail | null> => {
+    setLoadError(null)
     try {
-      const detail = await fetchRoomDetail(id)
+      const detail = await fetchRoomDetail(id, {
+        trainingSessionId: options?.trainingSessionId,
+      })
       const hydrated = hydrateLocalVideoMessages(detail)
       setSelectedRoom(hydrated)
       setTimeout(scrollToBottom, 50)
       return hydrated
-    } catch {
+    } catch (error) {
       setSelectedRoom(null)
+      setLoadError(error instanceof Error ? error.message : tr('加载对话失败', 'Failed to load conversation'))
       return null
     }
-  }, [scrollToBottom])
+  }, [options?.trainingSessionId, scrollToBottom, tr])
 
   const handleSend = useCallback(async (
     metadata?: Record<string, unknown>,
@@ -318,7 +326,9 @@ export function useChat(
     setDispatchSummary(null)
 
     try {
-      await apiSendMessage(roomId, content, metadata)
+      await apiSendMessage(roomId, content, metadata, {
+        trainingSessionId: options?.trainingSessionId,
+      })
       setFallbackTyping()
       setTimeout(scrollToBottom, 100)
       return true
@@ -329,7 +339,9 @@ export function useChat(
       // Fallback: refresh room detail
       if (roomId) {
         try {
-          const detail = await fetchRoomDetail(roomId)
+          const detail = await fetchRoomDetail(roomId, {
+            trainingSessionId: options?.trainingSessionId,
+          })
           setSelectedRoom(hydrateLocalVideoMessages(detail))
           setTimeout(scrollToBottom, 50)
         } catch (refreshError) {
@@ -341,7 +353,7 @@ export function useChat(
       setSending(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValue, roomId, sending, scrollToBottom, setFallbackTyping, tr])
+  }, [inputValue, options?.audioPlayerRef, options?.trainingSessionId, roomId, sending, scrollToBottom, setFallbackTyping, tr])
 
   const sendVideoAnswer = useCallback(async (
     attachment: LocalVideoAttachment,
@@ -356,10 +368,14 @@ export function useChat(
     setMentionResults([])
     setDispatchSummary(null)
     try {
-      await apiSendMessage(roomId, serializeVideoMessage(attachment, caption))
+      await apiSendMessage(roomId, serializeVideoMessage(attachment, caption), undefined, {
+        trainingSessionId: options?.trainingSessionId,
+      })
       setFallbackTyping()
       try {
-        const detail = await fetchRoomDetail(roomId)
+        const detail = await fetchRoomDetail(roomId, {
+          trainingSessionId: options?.trainingSessionId,
+        })
         setSelectedRoom(hydrateLocalVideoMessages(detail))
       } catch (refreshError) {
         console.error('Refresh after video send failed:', refreshError)
@@ -374,7 +390,7 @@ export function useChat(
     } finally {
       setSending(false)
     }
-  }, [inputValue, options?.audioPlayerRef, roomId, scrollToBottom, sending, setFallbackTyping, tr])
+  }, [inputValue, options?.audioPlayerRef, options?.trainingSessionId, roomId, scrollToBottom, sending, setFallbackTyping, tr])
 
   const insertMention = useCallback((persona: PersonaSummary) => {
     setInputValue((prev) =>
@@ -430,6 +446,7 @@ export function useChat(
   return {
     selectedRoom,
     setSelectedRoom,
+    loadError,
     streamingContent,
     dispatchSummary,
     setDispatchSummary,

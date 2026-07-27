@@ -6,9 +6,12 @@ import { useI18n } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import {
   buildNewApiLoginUrl,
-  canReadSameOriginNewApiStorage,
+  clearNewApiAutoSignInSuppression,
+  isNewApiAutoSignInSuppressed,
+  NEWAPI_AUTH_ENABLED,
   NEWAPI_BASE_URL,
   NEWAPI_LOGIN_MODE,
+  parseNewApiTalkWiseHandoffMessage,
 } from '../services/auth'
 import { Button } from '../components/ui/button'
 import './LoginPage.css'
@@ -26,7 +29,7 @@ function redirectTargetFromLocation(state: unknown): string {
 }
 
 const LoginPage: React.FC = () => {
-  const { currentUser, connectNewApiToken, connectStoredNewApiSession } = useAuthContext()
+  const { status, currentUser, connectNewApiCode, connectNewApiToken, connectStoredNewApiSession } = useAuthContext()
   const location = useLocation()
   const { tr } = useI18n()
   const [tokenInput, setTokenInput] = React.useState('')
@@ -35,15 +38,32 @@ const LoginPage: React.FC = () => {
   const [isAutoConnecting, setIsAutoConnecting] = React.useState(false)
   const [autoAttempted, setAutoAttempted] = React.useState(false)
   const [redirectStarted, setRedirectStarted] = React.useState(false)
+  const [autoSignInSuppressed, setAutoSignInSuppressed] = React.useState(() => isNewApiAutoSignInSuppressed())
   const redirectTarget = redirectTargetFromLocation(location.state)
   const loginUrl = React.useMemo(
     () => buildNewApiLoginUrl(typeof window === 'undefined' ? undefined : window.location.href),
     [],
   )
-  const canUseEmbeddedSession = canReadSameOriginNewApiStorage()
-  const shouldEmbedNewApi = NEWAPI_LOGIN_MODE === 'embedded' && canUseEmbeddedSession
+  const canAutoUseNewApi = NEWAPI_AUTH_ENABLED && !autoSignInSuppressed
+  const isRedirectLogin = canAutoUseNewApi && NEWAPI_LOGIN_MODE === 'redirect'
+  const shouldEmbedNewApi = canAutoUseNewApi && NEWAPI_LOGIN_MODE === 'embedded'
+  const shouldShowNewApiLink = !isRedirectLogin && !shouldEmbedNewApi
+  const shouldShowTokenFallback = !NEWAPI_AUTH_ENABLED
+  const shouldWaitForAuthSession = canAutoUseNewApi && status === 'loading'
+
+  const allowNewApiSignIn = React.useCallback(() => {
+    clearNewApiAutoSignInSuppression()
+    setAutoSignInSuppressed(false)
+    setAutoAttempted(false)
+    setError(null)
+  }, [])
 
   const tryConnectStoredSession = React.useCallback(async () => {
+    if (isNewApiAutoSignInSuppressed()) {
+      setAutoSignInSuppressed(true)
+      setAutoAttempted(true)
+      return
+    }
     setError(null)
     setIsAutoConnecting(true)
     try {
@@ -60,21 +80,106 @@ const LoginPage: React.FC = () => {
   }, [connectStoredNewApiSession, tr])
 
   React.useEffect(() => {
-    if (currentUser || autoAttempted) return
+    if (currentUser || autoSignInSuppressed || autoAttempted || shouldWaitForAuthSession) return
     void tryConnectStoredSession()
-  }, [autoAttempted, currentUser, tryConnectStoredSession])
+  }, [autoAttempted, autoSignInSuppressed, currentUser, shouldWaitForAuthSession, tryConnectStoredSession])
+
+  const handleNewApiHandoffMessage = React.useCallback(
+    (event: MessageEvent) => {
+      if (isNewApiAutoSignInSuppressed()) {
+        setAutoSignInSuppressed(true)
+        return
+      }
+      const handoff = parseNewApiTalkWiseHandoffMessage(event)
+      if (!handoff || currentUser) return
+
+      setError(null)
+      setIsAutoConnecting(true)
+      void connectNewApiCode(handoff.code, handoff.redirectUri, 'session')
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : tr('Sign-in failed', 'Sign-in failed'))
+          setAutoAttempted(true)
+        })
+        .finally(() => {
+          setIsAutoConnecting(false)
+        })
+    },
+    [connectNewApiCode, currentUser, tr],
+  )
 
   React.useEffect(() => {
-    if (currentUser || redirectStarted || !autoAttempted || NEWAPI_LOGIN_MODE !== 'redirect') return
+    if (!shouldEmbedNewApi) return undefined
+    window.addEventListener('message', handleNewApiHandoffMessage)
+    return () => {
+      window.removeEventListener('message', handleNewApiHandoffMessage)
+    }
+  }, [handleNewApiHandoffMessage, shouldEmbedNewApi])
+
+  React.useEffect(() => {
+    if (
+      currentUser ||
+      redirectStarted ||
+      !autoAttempted ||
+      !isRedirectLogin ||
+      error ||
+      isAutoConnecting ||
+      shouldWaitForAuthSession
+    ) {
+      return
+    }
     setRedirectStarted(true)
     window.location.assign(loginUrl)
-  }, [autoAttempted, currentUser, loginUrl, redirectStarted])
+  }, [
+    autoAttempted,
+    currentUser,
+    error,
+    isAutoConnecting,
+    isRedirectLogin,
+    loginUrl,
+    redirectStarted,
+    shouldWaitForAuthSession,
+  ])
+
+  const retryRedirect = React.useCallback(() => {
+    clearNewApiAutoSignInSuppression()
+    setAutoSignInSuppressed(false)
+    setError(null)
+    setAutoAttempted(true)
+    setRedirectStarted(true)
+    window.location.assign(loginUrl)
+  }, [loginUrl])
 
   if (currentUser) {
     return <Navigate to={redirectTarget} replace />
   }
 
-  if (redirectStarted) {
+  if (shouldEmbedNewApi) {
+    return (
+      <main className="login-page login-page--embedded" aria-labelledby="login-page-title">
+        <section className="login-panel login-panel--embedded">
+          <h1 id="login-page-title" className="sr-only">Sign in</h1>
+          <div className="login-embedded-shell">
+            <iframe
+              title="NewAPI sign-in"
+              src={loginUrl}
+              onLoad={() => {
+                void tryConnectStoredSession()
+              }}
+            />
+          </div>
+          {isAutoConnecting ? (
+            <div className="login-status" role="status" aria-live="polite">
+              <Loader2 size={14} aria-hidden="true" />
+              <span>{tr('Checking NewAPI sign-in', 'Checking NewAPI sign-in')}</span>
+            </div>
+          ) : null}
+          {error ? <div className="login-error" role="alert">{error}</div> : null}
+        </section>
+      </main>
+    )
+  }
+
+  if (isRedirectLogin || redirectStarted) {
     return (
       <main className="login-page" aria-labelledby="login-page-title">
         <section className="login-panel">
@@ -83,10 +188,29 @@ const LoginPage: React.FC = () => {
             <h1 id="login-page-title">{tr('正在打开 NewAPI', 'Opening NewAPI')}</h1>
             <p>{tr('请在 NewAPI 完成登录后回到 TalkWise。', 'Complete sign-in in NewAPI, then return to TalkWise.')}</p>
           </div>
-          <div className="login-status" role="status" aria-live="polite">
-            <Loader2 size={16} aria-hidden="true" />
-            <span>{tr('跳转中', 'Redirecting')}</span>
-          </div>
+          {error ? (
+            <>
+              <div className="login-error" role="alert">{error}</div>
+              <Button
+                className="login-refresh-session"
+                type="button"
+                variant="secondary"
+                onClick={retryRedirect}
+              >
+                <RefreshCw size={16} aria-hidden="true" />
+                <span>{tr('重试 NewAPI 登录', 'Retry NewAPI sign-in')}</span>
+              </Button>
+            </>
+          ) : (
+            <div className="login-status" role="status" aria-live="polite">
+              <Loader2 size={16} aria-hidden="true" />
+              <span>
+                {shouldWaitForAuthSession || isAutoConnecting
+                  ? tr('正在检查 NewAPI 登录状态', 'Checking NewAPI sign-in')
+                  : tr('跳转中', 'Redirecting')}
+              </span>
+            </div>
+          )}
         </section>
       </main>
     )
@@ -142,12 +266,12 @@ const LoginPage: React.FC = () => {
               <span>{tr('已登录，继续', 'Continue after sign-in')}</span>
             </Button>
           </div>
-        ) : (
-          <a className="login-newapi-link" href={loginUrl} rel="noreferrer">
+        ) : shouldShowNewApiLink ? (
+          <a className="login-newapi-link" href={loginUrl} rel="noreferrer" onClick={allowNewApiSignIn}>
             <ExternalLink size={16} aria-hidden="true" />
             <span>{tr('打开 NewAPI 登录页', 'Open NewAPI sign-in')}</span>
           </a>
-        )}
+        ) : null}
 
         {isAutoConnecting ? (
           <div className="login-status" role="status" aria-live="polite">
@@ -156,30 +280,34 @@ const LoginPage: React.FC = () => {
           </div>
         ) : null}
 
-        <form className="login-token-form" onSubmit={handleSubmit}>
-          <label htmlFor="newapi-token-input">NewAPI access token</label>
-          <div className="login-token-row">
-            <KeyRound size={16} aria-hidden="true" />
-            <input
-              id="newapi-token-input"
-              type="password"
-              value={tokenInput}
-              autoComplete="off"
-              placeholder="Access token"
-              onChange={(event) => setTokenInput(event.target.value)}
-            />
-          </div>
-          <Button className="login-submit" type="submit" disabled={isConnecting}>
-            {isConnecting ? <Loader2 size={16} aria-hidden="true" /> : <KeyRound size={16} aria-hidden="true" />}
-            <span>{isConnecting ? tr('连接中', 'Connecting') : tr('进入 TalkWise', 'Enter TalkWise')}</span>
-          </Button>
-          {error ? <div className="login-error" role="alert">{error}</div> : null}
-        </form>
+        {shouldShowTokenFallback ? (
+          <form className="login-token-form" onSubmit={handleSubmit}>
+            <label htmlFor="newapi-token-input">NewAPI access token</label>
+            <div className="login-token-row">
+              <KeyRound size={16} aria-hidden="true" />
+              <input
+                id="newapi-token-input"
+                type="password"
+                value={tokenInput}
+                autoComplete="off"
+                placeholder="Access token"
+                onChange={(event) => setTokenInput(event.target.value)}
+              />
+            </div>
+            <Button className="login-submit" type="submit" disabled={isConnecting}>
+              {isConnecting ? <Loader2 size={16} aria-hidden="true" /> : <KeyRound size={16} aria-hidden="true" />}
+              <span>{isConnecting ? tr('连接中', 'Connecting') : tr('进入 TalkWise', 'Enter TalkWise')}</span>
+            </Button>
+            {error ? <div className="login-error" role="alert">{error}</div> : null}
+          </form>
+        ) : null}
 
-        <div className="login-meta">
-          <span>NewAPI {NEWAPI_LOGIN_MODE}</span>
-          <span>{NEWAPI_BASE_URL}</span>
-        </div>
+        {!NEWAPI_AUTH_ENABLED ? (
+          <div className="login-meta">
+            <span>NewAPI {NEWAPI_LOGIN_MODE}</span>
+            <span>{NEWAPI_BASE_URL}</span>
+          </div>
+        ) : null}
       </section>
     </main>
   )

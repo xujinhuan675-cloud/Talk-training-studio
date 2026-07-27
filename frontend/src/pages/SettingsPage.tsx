@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppContext } from '../contexts/AppContext'
+import { useAuthContext } from '../contexts/AuthContext'
 import Avatar from '../components/Avatar'
 import PersonaEditorDialog from '../components/PersonaEditorDialog'
 import {
@@ -76,6 +77,7 @@ import {
 } from '../services/trainingStudio'
 import { useI18n, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import './SettingsPage.css'
 
 /** Reusable confirm dialog state hook */
@@ -116,18 +118,24 @@ const TABS: { key: SettingsTabKey; labelKey: TranslationKey; icon: React.ReactNo
 ]
 
 const SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios', 'organizations', 'config']
+const PERSONAL_SETTINGS_TAB_KEYS: readonly TabKey[] = ['personas', 'scenarios']
+const PERSONAL_SETTINGS_TABS = new Set<SettingsTabKey>(PERSONAL_SETTINGS_TAB_KEYS)
 
 export function SettingsShell({
   activeTab,
+  canUseManagementTabs,
   children,
 }: {
   activeTab: SettingsTabKey
+  canUseManagementTabs: boolean
   children: React.ReactNode
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
+  const visibleTabs = TABS.filter((tab) => canUseManagementTabs || PERSONAL_SETTINGS_TABS.has(tab.key))
 
   const selectTab = (tab: SettingsTabKey) => {
+    if (!canUseManagementTabs && !PERSONAL_SETTINGS_TABS.has(tab)) return
     if (tab === 'training') {
       navigate(APP_ROUTES.configScenarios)
       return
@@ -143,7 +151,7 @@ export function SettingsShell({
           className="settings-tabs-control"
           value={activeTab}
           onValueChange={selectTab}
-          options={TABS.map((tab) => ({
+          options={visibleTabs.map((tab) => ({
             value: tab.key,
             label: (
               <span className="settings-tab-label">
@@ -1205,7 +1213,7 @@ function ConfigTab() {
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [form, setForm] = useState<VoicePreferenceForm>(DEFAULT_VOICE_FORM)
   const [loading, setLoading] = useState(true)
-  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [, setCatalogLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [catalogError, setCatalogError] = useState<string | null>(null)
@@ -1713,13 +1721,6 @@ function ConfigTab() {
           <span>{tr('Pipecat provider catalog 加载失败：{message}', 'Pipecat provider catalog failed to load: {message}', { message: catalogError })}</span>
         </div>
       )}
-      {catalogLoading && !catalogError && (
-        <div className="settings-warning">
-          <RefreshCw size={14} />
-          <span>{tr('正在加载 Pipecat provider catalog，不会阻塞主配置。', 'Loading Pipecat provider catalog without blocking the main configuration.')}</span>
-        </div>
-      )}
-
       <div className="settings-voice-list" aria-label={tr('语音链路模块', 'Voice pipeline modules')}>
         {voiceModules.map((module) => (
           <button
@@ -1800,17 +1801,20 @@ function ConfigTab() {
 
 const SettingsPage: React.FC = () => {
   const [searchParams] = useSearchParams()
+  const { hasAnySystemRole } = useAuthContext()
+  const canUseManagementTabs = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
   const requestedTab = searchParams.get('tab')
-  const activeTab = SETTINGS_TAB_KEYS.includes(requestedTab as TabKey)
+  const availableTabs = canUseManagementTabs ? SETTINGS_TAB_KEYS : PERSONAL_SETTINGS_TAB_KEYS
+  const activeTab = availableTabs.includes(requestedTab as TabKey)
     ? requestedTab as TabKey
     : 'personas'
 
   return (
-    <SettingsShell activeTab={activeTab}>
+    <SettingsShell activeTab={activeTab} canUseManagementTabs={canUseManagementTabs}>
       {activeTab === 'personas' && <PersonasTab />}
       {activeTab === 'scenarios' && <ScenariosTab />}
-      {activeTab === 'organizations' && <OrganizationsTab />}
-      {activeTab === 'config' && <ConfigTab />}
+      {canUseManagementTabs && activeTab === 'organizations' && <OrganizationsTab />}
+      {canUseManagementTabs && activeTab === 'config' && <ConfigTab />}
     </SettingsShell>
   )
 }

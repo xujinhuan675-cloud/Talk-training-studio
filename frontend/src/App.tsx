@@ -148,10 +148,10 @@ function App() {
                   <Route path="review/session/:sessionId" element={<TrainingResultSessionRedirect />} />
                   <Route path="growth" element={<GrowthPage />} />
                   <Route path="growth/leaderboard" element={<ScenarioLeaderboardPage />} />
-                  <Route path="config" element={managementOnly(<SettingsPage />)} />
+                  <Route path="config" element={<SettingsPage />} />
                   <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
-                  <Route path="config/personas/new" element={managementOnly(<PersonaBuilderPage />)} />
-                  <Route path="config/personas/:id/edit" element={managementOnly(<PersonaEditorPage />)} />
+                  <Route path="config/personas/new" element={<PersonaBuilderPage />} />
+                  <Route path="config/personas/:id/edit" element={<PersonaEditorPage />} />
                   <Route path="config/persona/:id/edit" element={<PersonaEditRedirect />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>

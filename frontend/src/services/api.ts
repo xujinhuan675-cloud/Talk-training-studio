@@ -1,6 +1,11 @@
+import { getAuthRequestHeaders } from './auth'
 import { getErrorMessage } from '../utils/errors'
 
 const API_BASE = '/api/v1/stakeholder'
+
+export interface StakeholderRoomAccessOptions {
+  trainingSessionId?: string | number | null
+}
 
 export interface PersonaSummary {
   id: string
@@ -60,6 +65,67 @@ async function readApiError(resp: Response, fallback: string): Promise<Error> {
   return new Error(getErrorMessage(json, `${fallback}: ${resp.status}`))
 }
 
+function withAuthRequest(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers)
+  for (const [key, value] of Object.entries(getAuthRequestHeaders())) {
+    if (value) headers.set(key, value)
+  }
+  return {
+    ...init,
+    credentials: 'same-origin',
+    headers,
+  }
+}
+
+function appendQueryParams(path: string, params: URLSearchParams): string {
+  const query = params.toString()
+  if (!query) return path
+  return `${path}${path.includes('?') ? '&' : '?'}${query}`
+}
+
+function appendAuthQueryParams(params: URLSearchParams): void {
+  const headers = getAuthRequestHeaders()
+  const mockUser = headers['X-Mock-User']?.trim()
+  const userId = headers['X-User-Id']?.trim()
+  const role = headers['X-System-Role']?.trim()
+  const teamId = headers['X-Team-Id']?.trim()
+  if (mockUser) params.set('mock_user', mockUser)
+  if (userId) params.set('auth_user_id', userId)
+  if (role) params.set('auth_role', role)
+  if (teamId) params.set('auth_team_id', teamId)
+}
+
+function roomAccessParams(options: StakeholderRoomAccessOptions = {}): URLSearchParams {
+  const params = new URLSearchParams()
+  const trainingSessionId = options.trainingSessionId == null
+    ? ''
+    : String(options.trainingSessionId).trim()
+  if (trainingSessionId) params.set('trainingSessionId', trainingSessionId)
+  return params
+}
+
+function roomAccessUrl(path: string, options: StakeholderRoomAccessOptions = {}): string {
+  return appendQueryParams(path, roomAccessParams(options))
+}
+
+export function getRoomStreamUrl(
+  roomId: number,
+  options: StakeholderRoomAccessOptions = {},
+): string {
+  const params = roomAccessParams(options)
+  appendAuthQueryParams(params)
+  return appendQueryParams(`${API_BASE}/rooms/${roomId}/stream`, params)
+}
+
+export function getRoomVoiceWebSocketUrl(
+  roomId: number,
+  options: StakeholderRoomAccessOptions = {},
+): string {
+  const params = roomAccessParams(options)
+  appendAuthQueryParams(params)
+  return appendQueryParams(`${API_BASE}/rooms/${roomId}/voice`, params)
+}
+
 // ---------------------------------------------------------------------------
 // Dispatcher transparency types (SSE round_end payload)
 // ---------------------------------------------------------------------------
@@ -102,9 +168,15 @@ export async function fetchRooms(): Promise<ChatRoom[]> {
   return json.data
 }
 
-export async function fetchRoomDetail(roomId: number): Promise<ChatRoomDetail> {
-  const resp = await fetch(`${API_BASE}/rooms/${roomId}`)
-  if (!resp.ok) throw new Error(`Failed to fetch room: ${resp.status}`)
+export async function fetchRoomDetail(
+  roomId: number,
+  options: StakeholderRoomAccessOptions = {},
+): Promise<ChatRoomDetail> {
+  const resp = await fetch(
+    roomAccessUrl(`${API_BASE}/rooms/${roomId}`, options),
+    withAuthRequest(),
+  )
+  if (!resp.ok) throw await readApiError(resp, `Failed to fetch room: ${resp.status}`)
   const json: ApiResponse<ChatRoomDetail> = await resp.json()
   return json.data
 }
@@ -113,13 +185,14 @@ export async function sendMessage(
   roomId: number,
   content: string,
   metadata?: Record<string, unknown>,
+  options: StakeholderRoomAccessOptions = {},
 ): Promise<Message> {
-  const resp = await fetch(`${API_BASE}/rooms/${roomId}/messages`, {
+  const resp = await fetch(roomAccessUrl(`${API_BASE}/rooms/${roomId}/messages`, options), withAuthRequest({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(metadata ? { content, metadata } : { content }),
-  })
-  if (!resp.ok) throw new Error(`Failed to send message: ${resp.status}`)
+  }))
+  if (!resp.ok) throw await readApiError(resp, `Failed to send message: ${resp.status}`)
   const json: ApiResponse<Message> = await resp.json()
   return json.data
 }

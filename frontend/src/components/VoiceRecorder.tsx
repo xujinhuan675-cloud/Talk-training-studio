@@ -8,6 +8,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Loader2, Square } from 'lucide-react'
+import { getRoomVoiceWebSocketUrl } from '../services/api'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
 import './VoiceRecorder.css'
@@ -16,6 +17,7 @@ export type VoiceRecorderState = 'idle' | 'listening' | 'recording' | 'processin
 
 interface VoiceRecorderProps {
   roomId: number
+  trainingSessionId?: string | null
   disabled?: boolean
   metadata?: Record<string, unknown>
   onTranscription?: (text: string) => void
@@ -23,12 +25,12 @@ interface VoiceRecorderProps {
 }
 
 const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
-const API_PREFIX = '/api/v1/stakeholder'
 const HOLD_START_DELAY_MS = 250
 const TRANSCRIPTION_TIMEOUT_MS = 45000
 
 const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   roomId,
+  trainingSessionId,
   disabled,
   metadata,
   onTranscription,
@@ -141,7 +143,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 
   const connectWebSocket = useCallback((): Promise<WebSocket> => {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`${WS_BASE}${API_PREFIX}/rooms/${roomId}/voice`)
+      const ws = new WebSocket(`${WS_BASE}${getRoomVoiceWebSocketUrl(roomId, { trainingSessionId })}`)
       ws.onopen = () => resolve(ws)
       ws.onerror = () => reject(new Error('WebSocket connection failed'))
       ws.onclose = () => {
@@ -183,7 +185,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       }
       wsRef.current = ws
     })
-  }, [getVoiceErrorMessage, roomId, onTranscription, setRecordState])
+  }, [getVoiceErrorMessage, roomId, onTranscription, setRecordState, trainingSessionId])
 
   const stopActiveRecorder = useCallback(() => {
     if (timerRef.current) {

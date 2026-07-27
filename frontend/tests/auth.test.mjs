@@ -62,6 +62,12 @@ test('mock users expose admin, leader, and staff role capabilities', async () =>
   assert.equal(auth.hasAnySystemRole(customerService, ['staff']), true)
 })
 
+test('NewAPI login defaults to embedded mode for same-page sign-in', async () => {
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-default-login-mode')
+
+  assert.equal(auth.NEWAPI_LOGIN_MODE, 'embedded')
+})
+
 test('stored leader mock user is restored', async () => {
   const localStorage = createStorage({
     'talkwise.auth.state': JSON.stringify({ status: 'authenticated', userId: 'leader' }),
@@ -252,6 +258,47 @@ test('connectNewApiBrowserSession consumes a same-origin NewAPI user token', asy
   assert.equal(auth.canReadSameOriginNewApiStorage(), true)
   assert.equal(state.provider, 'newapi')
   assert.deepEqual(calls[0].init.headers, { Authorization: 'Bearer same-origin-token' })
+})
+
+test('NewAPI auto sign-in suppression blocks browser token until cleared', async () => {
+  const localStorage = createStorage({
+    user: JSON.stringify({ token: 'same-origin-token' }),
+  })
+  const sessionStorage = createStorage()
+  globalThis.window = {
+    localStorage,
+    sessionStorage,
+    location: { origin: 'https://newapi.flowguide.cc', href: 'https://newapi.flowguide.cc/login' },
+  }
+  let fetchCalled = false
+  globalThis.fetch = async () => {
+    fetchCalled = true
+    return {
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          provider: 'newapi',
+          user_id: 'newapi:42',
+          username: 'alice',
+          system_role: 'leader',
+        },
+      }),
+    }
+  }
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-suppress-browser-session')
+  auth.suppressNewApiAutoSignIn()
+
+  assert.equal(auth.isNewApiAutoSignInSuppressed(), true)
+  assert.equal(await auth.connectNewApiBrowserSession(), null)
+  assert.equal(fetchCalled, false)
+
+  auth.clearNewApiAutoSignInSuppression()
+  const state = await auth.connectNewApiBrowserSession()
+
+  assert.equal(state.provider, 'newapi')
+  assert.equal(fetchCalled, true)
 })
 
 test('connectNewApiBrowserSession consumes a NewAPI handoff code before token fallback', async () => {

@@ -36,6 +36,7 @@ const UserMenu: React.FC = () => {
   const currentUserValue = currentUser?.authProvider === 'mock' ? currentUser.id : ''
   const isNewApiUser = currentUser?.authProvider === 'newapi'
   const newApiLoginUrl = React.useMemo(() => buildNewApiLoginUrl(), [])
+  const showManualNewApiConnect = !NEWAPI_AUTH_ENABLED
 
   const handleNewApiSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -125,16 +126,18 @@ const UserMenu: React.FC = () => {
               <KeyRound size={14} aria-hidden="true" />
               <span>NewAPI</span>
             </span>
-            <a
-              className="user-menu-newapi-link"
-              href={newApiLoginUrl}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={tr('打开 NewAPI', 'Open NewAPI')}
-              title={newApiLoginUrl}
-            >
-              <ExternalLink size={14} aria-hidden="true" />
-            </a>
+            {showManualNewApiConnect ? (
+              <a
+                className="user-menu-newapi-link"
+                href={newApiLoginUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={tr('打开 NewAPI', 'Open NewAPI')}
+                title={newApiLoginUrl}
+              >
+                <ExternalLink size={14} aria-hidden="true" />
+              </a>
+            ) : null}
           </div>
 
           <div className="user-menu-newapi-links">
@@ -159,28 +162,32 @@ const UserMenu: React.FC = () => {
             </div>
           ) : null}
 
-          <input
-            className="user-menu-newapi-input"
-            type="password"
-            value={tokenInput}
-            autoComplete="off"
-            placeholder={tr('Access token', 'Access token')}
-            aria-label={tr('NewAPI access token', 'NewAPI access token')}
-            onChange={(event) => {
-              setTokenInput(event.target.value)
-            }}
-          />
-          <Button
-            className="user-menu-newapi-submit"
-            type="submit"
-            variant="secondary"
-            size="sm"
-            disabled={isConnecting}
-          >
-            {isConnecting ? <Loader2 size={14} aria-hidden="true" /> : <KeyRound size={14} aria-hidden="true" />}
-            <span>{isConnecting ? tr('连接中', 'Connecting') : tr('连接', 'Connect')}</span>
-          </Button>
-          {connectError ? (
+          {showManualNewApiConnect ? (
+            <>
+              <input
+                className="user-menu-newapi-input"
+                type="password"
+                value={tokenInput}
+                autoComplete="off"
+                placeholder={tr('Access token', 'Access token')}
+                aria-label={tr('NewAPI access token', 'NewAPI access token')}
+                onChange={(event) => {
+                  setTokenInput(event.target.value)
+                }}
+              />
+              <Button
+                className="user-menu-newapi-submit"
+                type="submit"
+                variant="secondary"
+                size="sm"
+                disabled={isConnecting}
+              >
+                {isConnecting ? <Loader2 size={14} aria-hidden="true" /> : <KeyRound size={14} aria-hidden="true" />}
+                <span>{isConnecting ? tr('连接中', 'Connecting') : tr('连接', 'Connect')}</span>
+              </Button>
+            </>
+          ) : null}
+          {showManualNewApiConnect && connectError ? (
             <div className="user-menu-newapi-error" role="alert">
               {connectError}
             </div>

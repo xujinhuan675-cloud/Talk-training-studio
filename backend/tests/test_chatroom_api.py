@@ -10,12 +10,15 @@ with full main.app startup.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+import api.dependencies as dependency_module
 from api.dependencies import (
     get_analysis_reader_service,
     get_analysis_service,
@@ -26,7 +29,9 @@ from api.dependencies import (
     get_stakeholder_chat_service,
 )
 from api.routes.stakeholder import router
+from api.routes.stakeholder import get_stakeholder_training_session_service
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
+from application.services.stakeholder.dto import MessageDTO
 from core.exceptions import register_exception_handlers
 from infrastructure.models.base import Base
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
@@ -81,6 +86,20 @@ class _StubPersonaLoader:
                 "profile_summary": "test",
             },
         )(),
+        "training-runtime": type(
+            "P",
+            (),
+            {
+                "id": "training-runtime",
+                "name": "Training Runtime",
+                "role": "Scenario counterpart",
+                "avatar_color": "#2563eb",
+                "organization_id": None,
+                "team_id": None,
+                "parse_status": "ok",
+                "profile_summary": "test",
+            },
+        )(),
     }
 
     def get_persona(self, pid):
@@ -110,8 +129,10 @@ def session_factory(engine):
 
 
 @pytest.fixture
-async def client(session_factory):
+async def client(session_factory, monkeypatch):
     """Create a minimal test FastAPI app with stakeholder router."""
+    monkeypatch.setattr(dependency_module.settings, "NEWAPI_AUTH_ENABLED", False)
+    monkeypatch.setattr(dependency_module.settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
     stub_loader = _StubPersonaLoader()
 
     def _uow_factory(**kwargs):
@@ -121,10 +142,20 @@ async def client(session_factory):
 
     class _FakeStakeholderChatService:
         async def send_message(self, room_id, content, *, metadata=None, access_scope):
-            raise AssertionError("send_message should not run for inaccessible rooms")
+            return (
+                MessageDTO(
+                    id=901,
+                    room_id=room_id,
+                    sender_type="user",
+                    sender_id="user",
+                    content=content,
+                    metadata=metadata or {},
+                ),
+                SimpleNamespace(id=room_id, type="battle_prep", persona_ids=["training-runtime"]),
+            )
 
         async def generate_replies(self, room_id, room) -> None:
-            raise AssertionError("generate_replies should not run for inaccessible rooms")
+            return None
 
     class _FakeRoomScopedDownstreamService:
         async def generate_report(self, room_id, *, access_scope):
@@ -157,6 +188,26 @@ async def client(session_factory):
         async def evaluate_competency(self, report_id):
             raise AssertionError("evaluate_competency should not run for inaccessible rooms")
 
+    class _FakeTrainingSessionService:
+        async def get_session(self, session_id, *, access_scope):
+            prefix = "session-for-room-"
+            if not session_id.startswith(prefix):
+                raise ValueError(f"Training session not found: {session_id}")
+            if not (
+                getattr(access_scope, "user_id", None) == "user-sales-001"
+                or (
+                    getattr(access_scope, "include_team_scope", False)
+                    and getattr(access_scope, "team_id", None) == "team-revenue"
+                )
+            ):
+                raise PermissionError("Training session is outside current user scope")
+            return SimpleNamespace(
+                session_id=session_id,
+                user_id="user-sales-001",
+                team_id="team-revenue",
+                room_id=session_id.removeprefix(prefix),
+            )
+
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router, prefix="/api/v1")
@@ -170,6 +221,7 @@ async def client(session_factory):
     app.dependency_overrides[get_coaching_service] = lambda: downstream
     app.dependency_overrides[get_battle_prep_service] = lambda: downstream
     app.dependency_overrides[get_growth_service] = lambda: downstream
+    app.dependency_overrides[get_stakeholder_training_session_service] = _FakeTrainingSessionService
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -337,6 +389,33 @@ async def test_room_detail_and_delete_hide_rooms_outside_scope(client: AsyncClie
     assert admin_detail.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_training_session_guard_allows_bound_runtime_room_detail(client: AsyncClient):
+    create_resp = await client.post(
+        "/api/v1/stakeholder/rooms",
+        json={
+            "name": "Runtime Training Detail",
+            "type": "battle_prep",
+            "persona_ids": ["training-runtime"],
+        },
+    )
+    room_id = create_resp.json()["data"]["id"]
+
+    direct_resp = await client.get(
+        f"/api/v1/stakeholder/rooms/{room_id}",
+        headers={"X-Mock-User": "sales"},
+    )
+    guarded_resp = await client.get(
+        f"/api/v1/stakeholder/rooms/{room_id}",
+        params={"trainingSessionId": f"session-for-room-{room_id}"},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert direct_resp.status_code == 404
+    assert guarded_resp.status_code == 200
+    assert guarded_resp.json()["data"]["room"]["id"] == room_id
+
+
 # ---------------------------------------------------------------------------
 # AC8: Get nonexistent room → 404
 # ---------------------------------------------------------------------------
@@ -357,6 +436,29 @@ async def test_send_message_hides_room_outside_scope_before_write(client: AsyncC
     )
 
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_training_session_guard_allows_bound_runtime_room_message(client: AsyncClient):
+    create_resp = await client.post(
+        "/api/v1/stakeholder/rooms",
+        json={
+            "name": "Runtime Training Send",
+            "type": "battle_prep",
+            "persona_ids": ["training-runtime"],
+        },
+    )
+    room_id = create_resp.json()["data"]["id"]
+
+    resp = await client.post(
+        f"/api/v1/stakeholder/rooms/{room_id}/messages",
+        params={"trainingSessionId": f"session-for-room-{room_id}"},
+        json={"content": "I need a concise answer."},
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["data"]["content"] == "I need a concise answer."
 
 
 @pytest.mark.asyncio

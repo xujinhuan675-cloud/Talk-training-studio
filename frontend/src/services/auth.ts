@@ -80,16 +80,18 @@ interface ApiResponse<T> {
 }
 
 export const AUTH_STORAGE_KEY = 'talkwise.auth.state'
+export const NEWAPI_AUTO_SIGN_IN_SUPPRESSION_KEY = 'talkwise.auth.newapi_auto_sign_in_suppressed_until'
 
 export const MANAGEMENT_SYSTEM_ROLES: readonly SystemRole[] = ['admin', 'leader']
 
 const DEFAULT_NEWAPI_BASE_URL = 'https://newapi.flowguide.cc'
+const NEWAPI_AUTO_SIGN_IN_SUPPRESSION_MS = 15 * 60 * 1000
 
 export const NEWAPI_BASE_URL = readViteEnvValue('VITE_NEWAPI_BASE_URL', DEFAULT_NEWAPI_BASE_URL)
 export const NEWAPI_AUTH_ENABLED = readViteEnvBoolean('VITE_NEWAPI_AUTH_ENABLED', false)
 export const NEWAPI_LOGIN_URL = readViteEnvValue('VITE_NEWAPI_LOGIN_URL', `${NEWAPI_BASE_URL}/login`)
 export const NEWAPI_LOGIN_MODE = normalizeNewApiLoginMode(
-  readViteEnvValue('VITE_NEWAPI_LOGIN_MODE', 'external'),
+  readViteEnvValue('VITE_NEWAPI_LOGIN_MODE', 'embedded'),
 )
 export const NEWAPI_CONSOLE_URL = readViteEnvValue('VITE_NEWAPI_CONSOLE_URL', NEWAPI_BASE_URL)
 export const NEWAPI_USAGE_URL = readViteEnvValue('VITE_NEWAPI_USAGE_URL', `${NEWAPI_BASE_URL}/usage-logs/common`)
@@ -97,10 +99,19 @@ export const NEWAPI_API_KEYS_URL = readViteEnvValue('VITE_NEWAPI_API_KEYS_URL', 
 export const NEWAPI_TALKWISE_CLIENT_ID = readViteEnvValue('VITE_NEWAPI_TALKWISE_CLIENT_ID', 'talkwise')
 export const NEWAPI_TALKWISE_REDIRECT_URI = readViteEnvValue('VITE_NEWAPI_TALKWISE_REDIRECT_URI', '')
 
+const NEWAPI_TALKWISE_HANDOFF_MESSAGE_TYPE = 'newapi:talkwise-handoff'
 const NEWAPI_USER_STORAGE_KEY = 'user'
 const NEWAPI_ACCESS_TOKEN_PARAM_NAMES = ['newapi_token', 'access_token', 'token']
 const NEWAPI_AUTH_CODE_PARAM_NAMES = ['talkwise_code', 'code']
 const NEWAPI_AUTH_STATE_PARAM_NAMES = ['state']
+
+export interface NewApiTalkWiseHandoffMessage {
+  code: string
+  redirectUri: string | null
+  redirectUrl: string | null
+  returnTo: string | null
+  state: string | null
+}
 
 const SYSTEM_ROLE_NAMES: Record<SystemRole, string> = {
   admin: 'Admin',
@@ -262,7 +273,9 @@ export async function connectNewApiAccessToken(accessToken: string): Promise<Aut
   if (!json.data) {
     throw new Error(json.message || 'Failed to connect NewAPI')
   }
-  return createNewApiAuthenticatedState(json.data)
+  const nextState = createNewApiAuthenticatedState(json.data)
+  clearNewApiAutoSignInSuppression()
+  return nextState
 }
 
 export async function connectNewApiAuthorizationCode(
@@ -294,10 +307,14 @@ export async function connectNewApiAuthorizationCode(
   if (!json.data) {
     throw new Error(json.message || 'Failed to exchange NewAPI authorization code')
   }
-  return createNewApiAuthenticatedState(json.data)
+  const nextState = createNewApiAuthenticatedState(json.data)
+  clearNewApiAutoSignInSuppression()
+  return nextState
 }
 
 export async function connectNewApiBrowserSession(): Promise<AuthState | null> {
+  if (isNewApiAutoSignInSuppressed()) return null
+
   const handoff = consumeNewApiAuthorizationCodeFromLocation()
   if (handoff) {
     return connectNewApiAuthorizationCode(handoff.code, handoff.redirectUri)
@@ -335,6 +352,53 @@ export function canReadSameOriginNewApiStorage(): boolean {
   }
 }
 
+export function parseNewApiTalkWiseHandoffMessage(
+  event: Pick<MessageEvent, 'data' | 'origin'>,
+): NewApiTalkWiseHandoffMessage | null {
+  if (!isTrustedNewApiMessageOrigin(event.origin)) return null
+  const data = event.data
+  if (!data || typeof data !== 'object') return null
+
+  const record = data as Record<string, unknown>
+  if (record.type !== NEWAPI_TALKWISE_HANDOFF_MESSAGE_TYPE) return null
+  const code = normalizeText(record.code)
+  if (!code) return null
+
+  return {
+    code,
+    redirectUri: normalizeText(record.redirectUri),
+    redirectUrl: normalizeText(record.redirectUrl),
+    returnTo: normalizeText(record.returnTo),
+    state: normalizeText(record.state),
+  }
+}
+
+function isTrustedNewApiMessageOrigin(origin: string): boolean {
+  const messageOrigin = normalizeText(origin)
+  if (!messageOrigin) return false
+  return trustedNewApiOrigins().includes(messageOrigin)
+}
+
+function trustedNewApiOrigins(): string[] {
+  return Array.from(
+    new Set(
+      [originForUrl(NEWAPI_LOGIN_URL), originForUrl(NEWAPI_BASE_URL)].filter(
+        (origin): origin is string => Boolean(origin),
+      ),
+    ),
+  )
+}
+
+function originForUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
 export async function fetchCurrentAuthSession(state: AuthState = loadInitialAuthState()): Promise<AuthState> {
   const resp = await fetch('/api/v1/auth/me', {
     method: 'GET',
@@ -362,6 +426,45 @@ export async function clearBrowserAuthSession(): Promise<void> {
     method: 'POST',
     credentials: 'same-origin',
   }).catch(() => undefined)
+}
+
+export function suppressNewApiAutoSignIn(now: number = Date.now()): void {
+  const suppressedUntil = String(now + NEWAPI_AUTO_SIGN_IN_SUPPRESSION_MS)
+  for (const storage of autoSignInSuppressionStorages()) {
+    try {
+      storage.setItem(NEWAPI_AUTO_SIGN_IN_SUPPRESSION_KEY, suppressedUntil)
+      return
+    } catch {
+      // Try the next storage backend.
+    }
+  }
+}
+
+export function clearNewApiAutoSignInSuppression(): void {
+  for (const storage of autoSignInSuppressionStorages()) {
+    try {
+      storage.removeItem(NEWAPI_AUTO_SIGN_IN_SUPPRESSION_KEY)
+    } catch {
+      // Storage access can be unavailable in restricted browser contexts.
+    }
+  }
+}
+
+export function isNewApiAutoSignInSuppressed(now: number = Date.now()): boolean {
+  for (const storage of autoSignInSuppressionStorages()) {
+    try {
+      const raw = storage.getItem(NEWAPI_AUTO_SIGN_IN_SUPPRESSION_KEY)
+      if (!raw) continue
+      const suppressedUntil = Number(raw)
+      if (Number.isFinite(suppressedUntil) && suppressedUntil > now) {
+        return true
+      }
+      storage.removeItem(NEWAPI_AUTO_SIGN_IN_SUPPRESSION_KEY)
+    } catch {
+      // Ignore storage errors and fall back to unsuppressed behavior.
+    }
+  }
+  return false
 }
 
 export function hasAnySystemRole(user: AuthUser | null | undefined, roles: readonly SystemRole[]): boolean {
@@ -683,6 +786,12 @@ function getStorage(scope: AuthStorageScope): Storage | null {
   } catch {
     return null
   }
+}
+
+function autoSignInSuppressionStorages(): Storage[] {
+  const sessionStorage = getStorage('session')
+  const localStorage = getStorage('local')
+  return [sessionStorage, localStorage].filter((storage): storage is Storage => Boolean(storage))
 }
 
 function normalizeMockUserId(value: unknown): MockUserId | null {

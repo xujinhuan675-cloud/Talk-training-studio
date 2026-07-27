@@ -15,14 +15,17 @@ const ChatContext = createContext<ChatContextType | null>(null)
 
 export function ChatProvider({
   roomId,
+  trainingSessionId,
   children,
 }: {
   roomId: number | null
+  trainingSessionId?: string | null
   children: React.ReactNode
 }) {
   const voice = useVoice()
 
   const chat = useChat(roomId, {
+    trainingSessionId,
     audioPlayerRef: voice.audioPlayerRef,
   })
 

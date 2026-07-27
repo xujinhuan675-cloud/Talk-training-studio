@@ -40,7 +40,6 @@ export function useCommandPalette(
   const navigate = useNavigate()
   const { t } = useI18n()
   const { hasAnySystemRole } = useAuthContext()
-  const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
 
   const setQuery = useCallback((nextQuery: string) => {
     setQueryState(nextQuery)
@@ -213,29 +212,27 @@ export function useCommandPalette(
     items.push(...matchingActions)
 
     // Filter personas
-    if (canUseManagementActions) {
-      const personas = Object.values(personaMap)
-      const matchingPersonas = q
-        ? personas.filter((p) => p.name.toLowerCase().includes(q) || p.role.toLowerCase().includes(q))
-        : personas
+    const personas = Object.values(personaMap)
+    const matchingPersonas = q
+      ? personas.filter((p) => p.name.toLowerCase().includes(q) || p.role.toLowerCase().includes(q))
+      : personas
 
-      for (const p of matchingPersonas.slice(0, 5)) {
-        items.push({
-          id: `persona-${p.id}`,
-          type: 'persona',
-          label: p.name,
-          description: p.role,
-          icon: 'User',
-          onSelect: () => {
-            close()
-            navigate(APP_ROUTES.config)
-          },
-        })
-      }
+    for (const p of matchingPersonas.slice(0, 5)) {
+      items.push({
+        id: `persona-${p.id}`,
+        type: 'persona',
+        label: p.name,
+        description: p.role,
+        icon: 'User',
+        onSelect: () => {
+          close()
+          navigate(APP_ROUTES.config)
+        },
+      })
     }
 
     return items
-  }, [query, rooms, personaMap, actions, close, navigate, t, hasAnySystemRole, canUseManagementActions])
+  }, [query, rooms, personaMap, actions, close, navigate, t, hasAnySystemRole])
 
   const currentSelectedIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : 0
 

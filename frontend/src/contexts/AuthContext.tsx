@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { APP_ROUTES } from '../appRoutes'
 import {
   canAccessManagementFeatures,
   canAccessMemberWorkspace,
@@ -14,6 +15,7 @@ import {
   hasAnySystemRole as authHasAnySystemRole,
   loadInitialAuthState,
   persistAuthState,
+  suppressNewApiAutoSignIn,
   type AuthState,
   type AuthStorageScope,
   type AuthUser,
@@ -44,6 +46,11 @@ export interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
+
+function isCurrentLoginRoute(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.location.pathname === APP_ROUTES.login
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>(loadInitialAuthState)
@@ -96,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signOut = useCallback(async (scope: AuthStorageScope = 'local') => {
+    suppressNewApiAutoSignIn()
     const nextState = createSignedOutState()
     setAuthState(nextState)
     persistAuthState(nextState, scope)
@@ -105,8 +113,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (authState.provider !== 'newapi' && authState.status !== 'loading') return
     let cancelled = false
-    void connectNewApiBrowserSession()
-      .then((browserState) => browserState ?? fetchCurrentAuthSession(authState))
+    const browserSession = isCurrentLoginRoute()
+      ? fetchCurrentAuthSession(authState)
+      : connectNewApiBrowserSession().then((browserState) => browserState ?? fetchCurrentAuthSession(authState))
+    void browserSession
       .then((nextState) => {
         if (cancelled) return
         setAuthState(nextState)

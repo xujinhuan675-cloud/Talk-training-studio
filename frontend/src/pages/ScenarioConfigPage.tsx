@@ -500,7 +500,7 @@ export default function ScenarioConfigPage() {
   const dimensionById = new Map(state.dimensions.map((dimension) => [dimension.id, dimension]))
 
   return (
-    <SettingsShell activeTab="training">
+    <SettingsShell activeTab="training" canUseManagementTabs={true}>
       <div className="scenario-config-page" data-workbench-skin="training">
       <header className="scenario-config-header">
         <div>

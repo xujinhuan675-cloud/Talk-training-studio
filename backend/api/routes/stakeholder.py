@@ -45,6 +45,10 @@ from application.services.stakeholder.chatroom_service import (
     ChatRoomApplicationService,
     StakeholderRoomAccessScope,
 )
+from application.services.stakeholder.room_access_policy import (
+    legacy_training_session_room_scope,
+)
+from application.services.training_studio.session_service import TrainingSessionService
 from application.services.stakeholder.dto import (
     BattlePrepGenerateDTO,
     CreateChatRoomDTO,
@@ -77,6 +81,12 @@ from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
 router = APIRouter(prefix="/stakeholder", tags=["Stakeholder Chat"])
 
+_training_session_service = TrainingSessionService(uow_factory=SQLAlchemyUnitOfWork)
+
+
+def get_stakeholder_training_session_service() -> TrainingSessionService:
+    return _training_session_service
+
 
 def _stakeholder_room_scope_for_current_user(
     current_user: CurrentUser,
@@ -91,12 +101,78 @@ def _stakeholder_room_scope_for_current_user(
     )
 
 
+def _training_session_access_scope_for_current_user(current_user: CurrentUser):
+    from domain.training_studio.session_repository import TrainingSessionAccessScope
+
+    return TrainingSessionAccessScope(
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
+        include_team_scope=current_user.is_admin or current_user.is_leader,
+    )
+
+
+def _training_session_access_error(exc: PermissionError) -> HTTPException:
+    return HTTPException(status_code=403, detail=str(exc) or "Training session is outside scope")
+
+
+def _training_session_not_found_error(exc: ValueError) -> HTTPException:
+    if "not found" in str(exc).lower():
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+def _numeric_training_room_id(value: object | None) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Session room_id must be numeric to access training room",
+        ) from exc
+
+
+async def _room_access_scope_for_request(
+    room_id: int,
+    *,
+    current_user: CurrentUser,
+    training_session_id: str | None,
+    training_session_svc: TrainingSessionService,
+    operation: str,
+) -> StakeholderRoomAccessScope:
+    session_id = (training_session_id or "").strip()
+    if not session_id:
+        return _stakeholder_room_scope_for_current_user(current_user)
+
+    try:
+        session = await training_session_svc.get_session(
+            session_id,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
+        )
+    except PermissionError as exc:
+        raise _training_session_access_error(exc) from exc
+    except ValueError as exc:
+        raise _training_session_not_found_error(exc) from exc
+
+    session_room_id = _numeric_training_room_id(getattr(session, "room_id", None))
+    if session_room_id != room_id:
+        raise HTTPException(
+            status_code=403,
+            detail="room_id does not match the accessible training session",
+        )
+    return legacy_training_session_room_scope(
+        training_session_id=getattr(session, "session_id", session_id),
+        room_id=session_room_id,
+        operation=operation,
+    )
+
+
 async def _require_stakeholder_room_access(
     room_id: int,
     *,
     chatroom_svc: ChatRoomApplicationService,
     current_user: CurrentUser,
     message_limit: int = 1,
+    access_scope: StakeholderRoomAccessScope | None = None,
 ):
     """Resolve room access before any room-scoped action.
 
@@ -107,7 +183,7 @@ async def _require_stakeholder_room_access(
     return await chatroom_svc.get_room_detail(
         room_id,
         message_limit=message_limit,
-        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+        access_scope=access_scope or _stakeholder_room_scope_for_current_user(current_user),
     )
 
 
@@ -398,13 +474,22 @@ async def delete_room(
 async def get_room_detail(
     room_id: int,
     limit: int = Query(50, ge=1, le=200),
+    training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = await _room_access_scope_for_request(
+        room_id,
+        current_user=current_user,
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        operation="read_stakeholder_room",
+    )
     detail = await svc.get_room_detail(
         room_id,
         message_limit=limit,
-        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+        access_scope=access_scope,
     )
     return success_response(data=detail.model_dump())
 
@@ -657,11 +742,19 @@ async def send_message(
     room_id: int,
     body: SendMessageDTO,
     background_tasks: BackgroundTasks,
+    training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    access_scope = _stakeholder_room_scope_for_current_user(current_user)
+    access_scope = await _room_access_scope_for_request(
+        room_id,
+        current_user=current_user,
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        operation="write_stakeholder_message",
+    )
     await _ensure_room_accepts_user_message(
         room_id,
         chatroom_svc,
@@ -692,14 +785,24 @@ async def send_message(
 @router.get("/rooms/{room_id}/stream", summary="SSE 实时推送")
 async def stream_room(
     room_id: int,
+    training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Subscribe to real-time events for a chat room via Server-Sent Events."""
+    access_scope = await _room_access_scope_for_request(
+        room_id,
+        current_user=current_user,
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        operation="stream_stakeholder_room",
+    )
     await _require_stakeholder_room_access(
         room_id,
         chatroom_svc=chatroom_svc,
         current_user=current_user,
+        access_scope=access_scope,
     )
 
     async def event_generator():
@@ -737,8 +840,10 @@ async def stream_room(
 async def voice_ws(
     websocket: WebSocket,
     room_id: int,
+    training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """WebSocket for voice message input.
@@ -757,6 +862,13 @@ async def voice_ws(
         { "type": "message_sent", "message": { ... } }
         { "type": "error", "message": "..." }
     """
+    access_scope = await _room_access_scope_for_request(
+        room_id,
+        current_user=current_user,
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        operation="voice_stakeholder_room",
+    )
     await websocket.accept()
 
     import base64
@@ -799,7 +911,6 @@ async def voice_ws(
         return
 
     audio_buffer = bytearray()
-    access_scope = _stakeholder_room_scope_for_current_user(current_user)
 
     try:
         while True:

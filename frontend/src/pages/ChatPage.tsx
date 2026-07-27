@@ -11,6 +11,7 @@ import {
   Zap,
   Flag,
   Loader2,
+  AlertCircle,
   CheckCircle2,
   ChevronDown,
   ArrowLeft,
@@ -559,6 +560,8 @@ function ChatArea() {
       ? {
           feedbackMode: trainingFeedbackMode,
           trainingFeedbackMode,
+          trainingSessionId,
+          training_session_id: trainingSessionId,
           feedbackPolicy: {
             mode: trainingFeedbackMode,
             version: 1,
@@ -566,7 +569,7 @@ function ChatArea() {
           },
         }
       : undefined
-  ), [isTrainingSession, trainingFeedbackMode])
+  ), [isTrainingSession, trainingFeedbackMode, trainingSessionId])
   const replyLanguageMetadata = React.useMemo(() => (
     isTrainingSession
       ? buildTrainingReplyLanguageMetadata(selectedReplyLanguage, 'training_room_selector')
@@ -2198,6 +2201,7 @@ function ChatArea() {
             mentionResults={chat.mentionResults}
             onInsertMention={chat.insertMention}
             roomId={chat.selectedRoom?.room.id ?? null}
+            trainingSessionId={trainingSessionId}
             messageMetadata={outgoingMessageMetadata}
             onVoiceTranscription={(text) => {
               const transcript = text.trim()
@@ -2395,10 +2399,12 @@ function NewConversationRouteState({
 export default function ChatPage() {
   const { roomId: roomIdParam } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const { tr } = useI18n()
 
   const roomId = roomIdParam ? Number(roomIdParam) : null
   const hasRoomIdParam = roomIdParam !== undefined
+  const routeTrainingSessionId = getTrainingSessionIdFromLocation(location.search, location.state)
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -2489,7 +2495,7 @@ export default function ChatPage() {
 
       {/* Center + Right columns */}
       {roomId ? (
-        <ChatProvider roomId={roomId}>
+        <ChatProvider roomId={roomId} trainingSessionId={routeTrainingSessionId}>
           <ChatAreaWithLoad
             roomId={roomId}
             onRefresh={() => setRefreshKey((k) => k + 1)}
@@ -2548,9 +2554,8 @@ function ChatAreaWithLoad({
   const { tr } = useI18n()
 
   useEffect(() => {
-    chat.loadRoomDetail(roomId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId])
+    void chat.loadRoomDetail(roomId)
+  }, [chat.loadRoomDetail, roomId])
 
   // Re-trigger room list refresh after sending a message
   // (The parent refreshKey is bumped via onRefresh, but we also
@@ -2558,6 +2563,24 @@ function ChatAreaWithLoad({
   // RoomList's own fetchRooms triggered by refreshKey.)
 
   if (!chat.selectedRoom) {
+    if (chat.loadError) {
+      return (
+        <div className="chat-page-empty">
+          <div className="chat-page-empty-icon">
+            <AlertCircle size={32} strokeWidth={1.5} />
+          </div>
+          <h2>{tr('加载失败', 'Failed to load')}</h2>
+          <p>{chat.loadError}</p>
+          <Button
+            variant="primary"
+            className="chat-page-empty-cta"
+            onClick={() => void chat.loadRoomDetail(roomId)}
+          >
+            {tr('重试', 'Retry')}
+          </Button>
+        </div>
+      )
+    }
     return (
       <div className="chat-page-empty">
         <div className="chat-page-empty-icon">
