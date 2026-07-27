@@ -137,14 +137,14 @@ def _newapi_group_for_current_user(current_user: CurrentUser) -> str:
     if not current_user.user_id.startswith("newapi:"):
         raise HTTPException(
             status_code=400,
-            detail="NewAPI team membership is only available for NewAPI sessions",
+            detail="Team membership is only available for signed-in account sessions",
         )
     group = _optional_text(current_user.newapi_group)
     team_id = _optional_text(current_user.team_id)
     if not group and team_id and team_id.startswith("newapi:"):
         group = _optional_text(team_id[len("newapi:") :])
     if not group:
-        raise HTTPException(status_code=400, detail="NewAPI team group is not available")
+        raise HTTPException(status_code=400, detail="Team group is not available")
     return group
 
 
@@ -189,10 +189,54 @@ def _team_member_payload(member: NewAPITeamMember) -> AuthTeamMemberDTO:
     )
 
 
+def _newapi_numeric_user_id(current_user: CurrentUser) -> int:
+    raw_user_id = _optional_text(current_user.user_id) or ""
+    if raw_user_id.startswith("newapi:"):
+        raw_user_id = raw_user_id[len("newapi:") :]
+    try:
+        return int(raw_user_id)
+    except ValueError:
+        return 0
+
+
+def _current_user_team_payload(current_user: CurrentUser, group: str) -> AuthTeamDTO:
+    team_id = _optional_text(current_user.team_id) or f"newapi:{group}"
+    team_name = _optional_text(current_user.team_name) or group
+    return AuthTeamDTO(id=team_id, name=team_name, group=group)
+
+
+def _current_user_team_member_payload(
+    current_user: CurrentUser,
+    team: AuthTeamDTO,
+) -> AuthTeamMemberDTO:
+    member_id = _newapi_numeric_user_id(current_user)
+    username = (
+        _optional_text(current_user.username)
+        or _optional_text(current_user.display_name)
+        or current_user.user_id
+    )
+    return AuthTeamMemberDTO(
+        id=member_id,
+        user_id=member_id,
+        username=username,
+        display_name=current_user.display_name,
+        email=None,
+        system_role=current_user.system_role,
+        group=team.group,
+        team_id=team.id,
+        team_name=team.name,
+        quota_remaining=current_user.quota_remaining,
+        quota_used=current_user.quota_used,
+        quota_total=current_user.quota_total,
+        request_count=current_user.request_count,
+        in_team=True,
+    )
+
+
 def _newapi_team_http_exception(exc: NewAPIAuthError) -> HTTPException:
     if isinstance(exc, NewAPIAuthUnavailableError):
-        return HTTPException(status_code=503, detail="NewAPI team service unavailable")
-    return HTTPException(status_code=502, detail="NewAPI team request was rejected")
+        return HTTPException(status_code=503, detail="Team member service unavailable")
+    return HTTPException(status_code=502, detail="Team member request was rejected")
 
 
 def _set_talkwise_session_cookie(response: Response, current_user: CurrentUser) -> None:
@@ -204,7 +248,7 @@ def _set_talkwise_session_cookie(response: Response, current_user: CurrentUser) 
 
 @router.post(
     "/newapi/session",
-    summary="Verify a NewAPI dashboard access token",
+    summary="Verify a dashboard access token",
     response_model=ApiResponse[AuthUserDTO],
 )
 async def create_newapi_session(
@@ -213,19 +257,19 @@ async def create_newapi_session(
 ):
     access_token = extract_bearer_token(authorization)
     if not access_token:
-        raise HTTPException(status_code=401, detail="NewAPI access token required")
+        raise HTTPException(status_code=401, detail="Access token required")
 
     current_user = await get_current_user_from_newapi_token(access_token)
     _set_talkwise_session_cookie(response, current_user)
     return success_response(
         data=_auth_user_payload(current_user),
-        message="NewAPI session verified",
+        message="Session verified",
     )
 
 
 @router.post(
     "/newapi/login",
-    summary="Sign in with NewAPI username and password",
+    summary="Sign in with account username and password",
     response_model=ApiResponse[AuthUserDTO],
 )
 async def create_newapi_login_session(
@@ -237,20 +281,20 @@ async def create_newapi_login_session(
     if not username or not password:
         raise HTTPException(
             status_code=422,
-            detail="NewAPI username and password are required",
+            detail="Username and password are required",
         )
 
     current_user = await get_current_user_from_newapi_credentials(username, password)
     _set_talkwise_session_cookie(response, current_user)
     return success_response(
         data=_auth_user_payload(current_user),
-        message="NewAPI session verified",
+        message="Session verified",
     )
 
 
 @router.post(
     "/newapi/exchange",
-    summary="Exchange a NewAPI handoff code for a TalkWise browser session",
+    summary="Exchange a handoff code for a TalkWise browser session",
     response_model=ApiResponse[AuthUserDTO],
 )
 async def exchange_newapi_session(
@@ -267,27 +311,27 @@ async def exchange_newapi_session(
         _set_talkwise_session_cookie(response, current_user)
         return success_response(
             data=_auth_user_payload(current_user),
-            message="NewAPI authorization code exchanged",
+            message="Authorization code exchanged",
         )
 
     access_token = _optional_text(payload.access_token) or extract_bearer_token(authorization)
     if not access_token:
         raise HTTPException(
             status_code=401,
-            detail="NewAPI authorization code or access token required",
+            detail="Authorization code or access token required",
         )
 
     current_user = await get_current_user_from_newapi_token(access_token)
     _set_talkwise_session_cookie(response, current_user)
     return success_response(
         data=_auth_user_payload(current_user),
-        message="NewAPI session verified",
+        message="Session verified",
     )
 
 
 @router.get(
     "/newapi/team/members",
-    summary="List the current NewAPI group members",
+    summary="List the current account group members",
     response_model=ApiResponse[AuthTeamMembersDTO],
 )
 async def list_newapi_team_members(current_user: CurrentUser = Depends(get_current_user)):
@@ -300,6 +344,13 @@ async def list_newapi_team_members(current_user: CurrentUser = Depends(get_curre
             client_secret=settings.NEWAPI_TALKWISE_CLIENT_SECRET,
             timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
         )
+    except NewAPIAuthUnavailableError:
+        team = _current_user_team_payload(current_user, group)
+        member = _current_user_team_member_payload(current_user, team)
+        return success_response(
+            data=AuthTeamMembersDTO(team=team, members=[member], total=1),
+            message="Team members loaded from current session",
+        )
     except NewAPIAuthError as exc:
         raise _newapi_team_http_exception(exc) from exc
 
@@ -309,13 +360,13 @@ async def list_newapi_team_members(current_user: CurrentUser = Depends(get_curre
             members=[_team_member_payload(member) for member in result.members],
             total=result.total,
         ),
-        message="NewAPI team members loaded",
+        message="Team members loaded",
     )
 
 
 @router.get(
     "/newapi/team/users/search",
-    summary="Search NewAPI users for assignment to the current group",
+    summary="Search users for assignment to the current group",
     response_model=ApiResponse[AuthTeamUserSearchDTO],
 )
 async def search_newapi_team_users(
@@ -344,13 +395,13 @@ async def search_newapi_team_users(
             users=[_team_member_payload(user) for user in result.users],
             total=result.total,
         ),
-        message="NewAPI users loaded",
+        message="Users loaded",
     )
 
 
 @router.post(
     "/newapi/team/members",
-    summary="Assign a NewAPI user to the current group",
+    summary="Assign a user to the current group",
     response_model=ApiResponse[AuthTeamMemberDTO],
 )
 async def assign_newapi_team_member(
@@ -373,7 +424,7 @@ async def assign_newapi_team_member(
 
     return success_response(
         data=_team_member_payload(member),
-        message="NewAPI team member assigned",
+        message="Team member assigned",
     )
 
 

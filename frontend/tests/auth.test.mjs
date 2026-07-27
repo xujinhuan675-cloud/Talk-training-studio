@@ -176,6 +176,49 @@ test('connectNewApiAccessToken exchanges bearer token for a cookie session witho
   assert.equal(sessionStorage.getItem('talkwise.auth.state').includes('newapi-token'), false)
 })
 
+test('connectNewApiCredentials posts credentials for a cookie session without persisting secrets', async () => {
+  const localStorage = createStorage()
+  const sessionStorage = createStorage()
+  globalThis.window = { localStorage, sessionStorage }
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      json: async () => ({
+        code: 0,
+        message: 'ok',
+        data: {
+          provider: 'newapi',
+          user_id: 'newapi:42',
+          username: 'alice',
+          display_name: 'Alice Zhang',
+          system_role: 'leader',
+          business_role: 'sales',
+          team_id: 'newapi:paid',
+          team_name: 'paid',
+        },
+      }),
+    }
+  }
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-connect-newapi-credentials')
+  const state = await auth.connectNewApiCredentials('  alice@example.com  ', 'secret-password')
+  auth.persistAuthState(state, 'session')
+
+  assert.equal(calls[0].url, '/api/v1/auth/newapi/login')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    username: 'alice@example.com',
+    password: 'secret-password',
+  })
+  assert.equal(state.provider, 'newapi')
+  assert.equal(state.user.username, 'alice')
+  assert.equal(sessionStorage.getItem('talkwise.auth.state').includes('secret-password'), false)
+})
+
 test('connectNewApiAuthorizationCode exchanges a handoff code for a cookie session', async () => {
   const localStorage = createStorage()
   const sessionStorage = createStorage()
@@ -536,6 +579,48 @@ test('fetchCurrentTeamMembers uses the NewAPI cookie session and normalizes memb
   assert.equal(payload.members[0].userId, 42)
   assert.equal(payload.members[0].displayName, 'Alice Zhang')
   assert.equal(payload.members[0].quotaTotal, 1000)
+})
+
+test('fetchCurrentTeamMembers sanitizes legacy integration error text', async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({
+      detail: 'NewAPI team service unavailable',
+    }),
+  })
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-team-members-error')
+
+  await assert.rejects(
+    () => auth.fetchCurrentTeamMembers(),
+    (error) => {
+      assert.equal(error.message, 'Team member service unavailable')
+      assert.doesNotMatch(error.message, /NewAPI/)
+      return true
+    },
+  )
+})
+
+test('credential login sanitizes legacy integration credential errors', async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({
+      detail: 'Invalid NewAPI username or password',
+    }),
+  })
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-credential-error')
+
+  await assert.rejects(
+    () => auth.connectNewApiCredentials('alice@example.com', 'wrong-password'),
+    (error) => {
+      assert.equal(error.message, 'Invalid username or password')
+      assert.doesNotMatch(error.message, /NewAPI/)
+      return true
+    },
+  )
 })
 
 test('searchNewApiTeamUsers trims keywords and uses the cookie session', async () => {

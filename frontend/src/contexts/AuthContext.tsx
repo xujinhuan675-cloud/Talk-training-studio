@@ -36,6 +36,10 @@ export interface AuthContextValue {
   canManageTeam: boolean
   canViewTeamLeaderboard: boolean
   canUseMemberWorkspace: boolean
+  isSignInPromptOpen: boolean
+  requestSignIn: () => void
+  closeSignInPrompt: () => void
+  requireAuthenticated: () => boolean
   connectNewApiCredentials: (username: string, password: string, scope?: AuthStorageScope) => Promise<AuthUser>
   connectNewApiCode: (code: string, redirectUri?: string | null, scope?: AuthStorageScope) => Promise<AuthUser>
   connectNewApiToken: (accessToken: string, scope?: AuthStorageScope) => Promise<AuthUser>
@@ -56,6 +60,7 @@ function isCurrentLoginRoute(): boolean {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>(loadInitialAuthState)
+  const [isSignInPromptOpen, setIsSignInPromptOpen] = useState(false)
   const users = useMemo(() => getMockUsers(), [])
 
   const refreshSession = useCallback(async () => {
@@ -70,15 +75,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const switchUser = useCallback((userId: MockUserId, scope: AuthStorageScope = 'local') => {
     const nextState = createAuthenticatedState(userId)
     setAuthState(nextState)
+    setIsSignInPromptOpen(false)
     persistAuthState(nextState, scope)
   }, [])
 
   const connectNewApiToken = useCallback(async (accessToken: string, scope: AuthStorageScope = 'session') => {
     const nextState = await connectNewApiAccessToken(accessToken)
     setAuthState(nextState)
+    setIsSignInPromptOpen(false)
     persistAuthState(nextState, scope)
     if (!nextState.user) {
-      throw new Error('NewAPI session did not return a user')
+      throw new Error('Sign-in session did not return a user')
     }
     return nextState.user
   }, [])
@@ -87,9 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (username: string, password: string, scope: AuthStorageScope = 'session') => {
       const nextState = await connectNewApiCredentialsService(username, password)
       setAuthState(nextState)
+      setIsSignInPromptOpen(false)
       persistAuthState(nextState, scope)
       if (!nextState.user) {
-        throw new Error('NewAPI session did not return a user')
+        throw new Error('Sign-in session did not return a user')
       }
       return nextState.user
     },
@@ -100,9 +108,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (code: string, redirectUri?: string | null, scope: AuthStorageScope = 'session') => {
       const nextState = await connectNewApiAuthorizationCode(code, redirectUri)
       setAuthState(nextState)
+      setIsSignInPromptOpen(false)
       persistAuthState(nextState, scope)
       if (!nextState.user) {
-        throw new Error('NewAPI session did not return a user')
+        throw new Error('Sign-in session did not return a user')
       }
       return nextState.user
     },
@@ -113,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const nextState = await connectNewApiBrowserSession()
     if (!nextState) return null
     setAuthState(nextState)
+    setIsSignInPromptOpen(false)
     persistAuthState(nextState, 'session')
     return nextState
   }, [])
@@ -125,6 +135,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await clearBrowserAuthSession()
   }, [])
 
+  const requestSignIn = useCallback(() => {
+    setIsSignInPromptOpen(true)
+  }, [])
+
+  const closeSignInPrompt = useCallback(() => {
+    setIsSignInPromptOpen(false)
+  }, [])
+
+  const requireAuthenticated = useCallback(() => {
+    if (authState.user) return true
+    requestSignIn()
+    return false
+  }, [authState.user, requestSignIn])
+
   useEffect(() => {
     if (authState.provider !== 'newapi' && authState.status !== 'loading') return
     let cancelled = false
@@ -136,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return
         setAuthState(nextState)
         if (nextState.status === 'authenticated' && nextState.provider === 'newapi') {
+          setIsSignInPromptOpen(false)
           persistAuthState(nextState, 'session')
         }
       })
@@ -173,6 +198,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canManageTeam: canAccessManagementFeatures(authState.user),
       canViewTeamLeaderboard: canAccessTeamLeaderboard(authState.user),
       canUseMemberWorkspace: canAccessMemberWorkspace(authState.user),
+      isSignInPromptOpen,
+      requestSignIn,
+      closeSignInPrompt,
+      requireAuthenticated,
       connectNewApiCredentials,
       connectNewApiCode,
       connectNewApiToken,
@@ -190,8 +219,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       connectNewApiCredentials,
       connectNewApiToken,
       connectStoredNewApiSession,
+      closeSignInPrompt,
       hasAnySystemRole,
       hasSystemRole,
+      isSignInPromptOpen,
+      requestSignIn,
+      requireAuthenticated,
       refreshSession,
       signOut,
       switchUser,

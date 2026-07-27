@@ -126,7 +126,7 @@ function matchesScenario(
 export default function ScenarioTrainingPage() {
   const navigate = useNavigate()
   const { locale, t, tr } = useI18n()
-  const { currentUser, hasAnySystemRole } = useAuthContext()
+  const { currentUser, hasAnySystemRole, requireAuthenticated } = useAuthContext()
   const [mode, setMode] = useState<ScenarioLaunchMode>('text')
   const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
   const [query, setQuery] = useState('')
@@ -201,6 +201,7 @@ export default function ScenarioTrainingPage() {
   )
 
   const startScenario = async (scenario: ScenarioTrainingCard) => {
+    if (!requireAuthenticated()) return
     setStartingScenarioId(scenario.id)
     setError(null)
     try {

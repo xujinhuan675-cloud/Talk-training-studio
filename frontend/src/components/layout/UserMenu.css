@@ -81,6 +81,24 @@
   color: var(--text-muted);
 }
 
+.user-menu-login {
+  min-width: 72px;
+  max-width: none;
+  padding: 3px 12px;
+}
+
+.user-menu-login svg {
+  flex-shrink: 0;
+}
+
+.user-menu-login span {
+  color: currentColor;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .user-menu-popover {
   width: 280px;
   padding: 8px;
@@ -319,6 +337,12 @@
     width: 34px;
     padding: 3px;
     justify-content: center;
+  }
+
+  .user-menu-login {
+    width: auto;
+    min-width: 64px;
+    padding: 3px 10px;
   }
 
   .user-menu-summary,

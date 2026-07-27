@@ -39,6 +39,7 @@ import {
 import { Button } from '../components/ui/button'
 import { Field, Select, Textarea } from '../components/ui/form'
 import { SegmentedControl } from '../components/ui/segmented-control'
+import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import './TrainingStudioPage.css'
@@ -236,6 +237,7 @@ function splitTechStack(value: string, fallback: string): string[] {
 export default function TrainingStudioPage({ initialProfile = 'practice' }: TrainingStudioPageProps) {
   const navigate = useNavigate()
   const { locale, t } = useI18n()
+  const { requireAuthenticated } = useAuthContext()
   const [config, setConfig] = useState<TrainingStudioConfig>(() => getDefaultTrainingStudioConfig(t))
   const previousDefaultsRef = useRef(getDefaultTrainingStudioConfig(t))
   const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : 'voice')
@@ -277,6 +279,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   }, [config, effectiveFeedbackMode, goal, mode, t])
 
   const startQuickSession = async () => {
+    if (!requireAuthenticated()) return
     setStarting('quick')
     setError(null)
     try {

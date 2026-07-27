@@ -1,11 +1,12 @@
 import { Suspense, lazy, useEffect, type ReactNode } from 'react'
 import { Routes, Route, Navigate, Outlet, useLocation, useParams } from 'react-router-dom'
+import AuthPromptDialog from './components/auth/AuthPromptDialog'
 import Layout from './components/layout/Layout'
 import { AppProvider } from './contexts/AppContext'
 import { AuthProvider, useAuthContext } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { I18nProvider, useI18n } from './i18n'
-import { MANAGEMENT_SYSTEM_ROLES, NEWAPI_AUTH_ENABLED, type SystemRole } from './services/auth'
+import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from './services/auth'
 import { APP_ROUTES } from './appRoutes'
 import {
   createRedirectTarget,
@@ -59,13 +60,9 @@ function RequireSystemRole({
   children: ReactNode
 }) {
   const location = useLocation()
-  const { canUseMemberWorkspace, hasAnySystemRole } = useAuthContext()
+  const { currentUser, hasAnySystemRole } = useAuthContext()
 
-  if (!canUseMemberWorkspace) {
-    return <Navigate to="/" replace state={{ from: location }} />
-  }
-
-  if (!hasAnySystemRole(roles)) {
+  if (currentUser && !hasAnySystemRole(roles)) {
     return <Navigate to={APP_ROUTES.practiceScenarios} replace state={{ from: location }} />
   }
 
@@ -74,21 +71,6 @@ function RequireSystemRole({
 
 function managementOnly(element: ReactNode) {
   return <RequireSystemRole roles={MANAGEMENT_SYSTEM_ROLES}>{element}</RequireSystemRole>
-}
-
-function RequireAuthentication({ children }: { children: ReactNode }) {
-  const location = useLocation()
-  const { currentUser, status } = useAuthContext()
-
-  if (status === 'loading') {
-    return <RouteLoadingFallback />
-  }
-
-  if (NEWAPI_AUTH_ENABLED && !currentUser) {
-    return <Navigate to={APP_ROUTES.login} replace state={{ from: location }} />
-  }
-
-  return <>{children}</>
 }
 
 function RedirectTo({ to }: { to: string }) {
@@ -124,39 +106,40 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <DocumentTitleSync />
+          <AuthPromptDialog />
           <Suspense fallback={<RouteLoadingFallback />}>
             <Routes>
               <Route path="login" element={<LoginPage />} />
-              <Route element={<RequireAuthentication><AppProvider><Layout /></AppProvider></RequireAuthentication>}>
-                  <Route index element={<HomePage />} />
-                  <Route path="practice" element={<Outlet />}>
-                    <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
-                    <Route path="scenarios" element={<ScenarioTrainingPage />} />
-                    <Route path="custom" element={managementOnly(<TrainingStudioPage />)} />
-                    <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
-                    <Route path="defense-prep" element={<DefensePrepPage />} />
-                    <Route path="battle-prep" element={<BattlePrepPage />} />
-                  </Route>
-                  <Route path="chat/:roomId" element={<ConversationRoomRedirect />} />
-                  <Route path="conversations" element={<ChatPage />} />
-                  <Route path="conversations/:roomId" element={<ChatPage />} />
-                  <Route path="review" element={<Outlet />}>
-                    <Route index element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
-                    <Route path="sessions" element={<TrainingHistoryPage />} />
-                    <Route path="sessions/:sessionId" element={<TrainingResultPage />} />
-                  </Route>
-                  <Route path="review/session/:sessionId" element={<TrainingResultSessionRedirect />} />
-                  <Route path="growth" element={<GrowthPage />} />
-                  <Route path="growth/leaderboard" element={<ScenarioLeaderboardPage />} />
-                  <Route path="config" element={<SettingsPage />} />
-                  <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
-                  <Route path="config/personas/new" element={<PersonaBuilderPage />} />
-                  <Route path="config/personas/:id/edit" element={<PersonaEditorPage />} />
-                  <Route path="config/persona/:id/edit" element={<PersonaEditRedirect />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
+              <Route element={<AppProvider><Layout /></AppProvider>}>
+                <Route index element={<HomePage />} />
+                <Route path="practice" element={<Outlet />}>
+                  <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
+                  <Route path="scenarios" element={<ScenarioTrainingPage />} />
+                  <Route path="custom" element={managementOnly(<TrainingStudioPage />)} />
+                  <Route path="live-coach" element={managementOnly(<TrainingStudioPage initialProfile="live_coach" />)} />
+                  <Route path="defense-prep" element={<DefensePrepPage />} />
+                  <Route path="battle-prep" element={<BattlePrepPage />} />
                 </Route>
-              </Routes>
-            </Suspense>
+                <Route path="chat/:roomId" element={<ConversationRoomRedirect />} />
+                <Route path="conversations" element={<ChatPage />} />
+                <Route path="conversations/:roomId" element={<ChatPage />} />
+                <Route path="review" element={<Outlet />}>
+                  <Route index element={<RedirectTo to={APP_ROUTES.reviewSessions} />} />
+                  <Route path="sessions" element={<TrainingHistoryPage />} />
+                  <Route path="sessions/:sessionId" element={<TrainingResultPage />} />
+                </Route>
+                <Route path="review/session/:sessionId" element={<TrainingResultSessionRedirect />} />
+                <Route path="growth" element={<GrowthPage />} />
+                <Route path="growth/leaderboard" element={<ScenarioLeaderboardPage />} />
+                <Route path="config" element={<SettingsPage />} />
+                <Route path="config/scenarios" element={managementOnly(<ScenarioConfigPage />)} />
+                <Route path="config/personas/new" element={<PersonaBuilderPage />} />
+                <Route path="config/personas/:id/edit" element={<PersonaEditorPage />} />
+                <Route path="config/persona/:id/edit" element={<PersonaEditRedirect />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+          </Suspense>
         </AuthProvider>
       </ThemeProvider>
     </I18nProvider>

@@ -180,10 +180,10 @@ async def get_current_user_from_newapi_token(access_token: str) -> CurrentUser:
     except NewAPIAuthUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="NewAPI authentication service unavailable",
+            detail="Authentication service unavailable",
         ) from exc
     except NewAPIAuthError as exc:
-        raise HTTPException(status_code=401, detail="Invalid NewAPI access token") from exc
+        raise HTTPException(status_code=401, detail="Invalid access token") from exc
     return _current_user_from_newapi_identity(identity)
 
 
@@ -199,12 +199,12 @@ async def get_current_user_from_newapi_credentials(username: str, password: str)
     except NewAPIAuthUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="NewAPI authentication service unavailable",
+            detail="Authentication service unavailable",
         ) from exc
     except NewAPIAuthError as exc:
         raise HTTPException(
             status_code=401,
-            detail="Invalid NewAPI username or password",
+            detail="Invalid username or password",
         ) from exc
     return _current_user_from_newapi_identity(identity)
 
@@ -227,10 +227,10 @@ async def get_current_user_from_newapi_code(
     except NewAPIAuthUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="NewAPI authentication service unavailable",
+            detail="Authentication service unavailable",
         ) from exc
     except NewAPIAuthError as exc:
-        raise HTTPException(status_code=401, detail="Invalid NewAPI authorization code") from exc
+        raise HTTPException(status_code=401, detail="Invalid authorization code") from exc
     return _current_user_from_newapi_identity(identity)
 
 
@@ -275,7 +275,7 @@ async def get_current_user(
                 raise
 
     if settings.NEWAPI_AUTH_ENABLED and not settings.NEWAPI_AUTH_ALLOW_MOCK_FALLBACK:
-        raise HTTPException(status_code=401, detail="NewAPI access token required")
+        raise HTTPException(status_code=401, detail="Access token required")
 
     mock_key = (
         _coerce_optional_text(x_mock_user)

@@ -24,7 +24,7 @@ import {
 import './UserMenu.css'
 
 const UserMenu: React.FC = () => {
-  const { currentUser, users, connectNewApiToken, switchUser, signOut } = useAuthContext()
+  const { currentUser, users, connectNewApiToken, requestSignIn, switchUser, signOut } = useAuthContext()
   const { tr } = useI18n()
   const [tokenInput, setTokenInput] = React.useState('')
   const [connectError, setConnectError] = React.useState<string | null>(null)
@@ -42,7 +42,7 @@ const UserMenu: React.FC = () => {
     event.preventDefault()
     const token = tokenInput.trim()
     if (!token) {
-      setConnectError(tr('请输入 NewAPI token', 'Enter a NewAPI token'))
+      setConnectError(tr('请输入访问令牌', 'Enter an access token'))
       return
     }
     setConnectError(null)
@@ -56,6 +56,23 @@ const UserMenu: React.FC = () => {
     } finally {
       setIsConnecting(false)
     }
+  }
+
+  if (!currentUser) {
+    return (
+      <Button
+        className="user-menu-trigger user-menu-login"
+        variant="secondary"
+        size="sm"
+        type="button"
+        aria-label={tr('登录', 'Sign in')}
+        title={tr('登录', 'Sign in')}
+        onClick={requestSignIn}
+      >
+        <UserRound size={15} aria-hidden="true" />
+        <span>{tr('登录', 'Sign in')}</span>
+      </Button>
+    )
   }
 
   return (
@@ -124,7 +141,7 @@ const UserMenu: React.FC = () => {
           <div className="user-menu-newapi-header">
             <span className="user-menu-newapi-title">
               <KeyRound size={14} aria-hidden="true" />
-              <span>NewAPI</span>
+              <span>{tr('账号', 'Account')}</span>
             </span>
             {showManualNewApiConnect ? (
               <a
@@ -132,7 +149,7 @@ const UserMenu: React.FC = () => {
                 href={newApiLoginUrl}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={tr('打开 NewAPI', 'Open NewAPI')}
+                aria-label={tr('打开账号控制台', 'Open account console')}
                 title={newApiLoginUrl}
               >
                 <ExternalLink size={14} aria-hidden="true" />
@@ -169,8 +186,8 @@ const UserMenu: React.FC = () => {
                 type="password"
                 value={tokenInput}
                 autoComplete="off"
-                placeholder={tr('Access token', 'Access token')}
-                aria-label={tr('NewAPI access token', 'NewAPI access token')}
+                placeholder={tr('访问令牌', 'Access token')}
+                aria-label={tr('访问令牌', 'Access token')}
                 onChange={(event) => {
                   setTokenInput(event.target.value)
                 }}
@@ -202,8 +219,8 @@ const UserMenu: React.FC = () => {
             signOut()
           }}
         >
-          {currentUser ? <LogOut size={15} aria-hidden="true" /> : <UserRound size={15} aria-hidden="true" />}
-          <span>{currentUser ? tr('退出登录', 'Sign out') : tr('保持未登录', 'Stay signed out')}</span>
+          <LogOut size={15} aria-hidden="true" />
+          <span>{tr('退出登录', 'Sign out')}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

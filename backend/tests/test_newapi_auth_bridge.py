@@ -9,6 +9,7 @@ from api.routes import auth as auth_routes
 from infrastructure.auth_session import create_session_cookie_value, session_cookie_options
 from infrastructure.external.newapi_auth import (
     NewAPIAuthError,
+    NewAPIAuthUnavailableError,
     NewAPIIdentity,
     NewAPITeam,
     NewAPITeamMember,
@@ -155,6 +156,55 @@ async def test_newapi_authorization_code_exchange_maps_control_plane_claims(
 
 
 @pytest.mark.asyncio
+async def test_newapi_credentials_login_maps_to_talkwise_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_authenticate_credentials(
+        username: str,
+        password: str,
+        *,
+        base_url: str,
+        login_path: str,
+        timeout_seconds: float,
+    ):
+        assert username == "alice@example.com"
+        assert password == "secret-password"
+        assert base_url == "https://newapi.example"
+        assert login_path == "/api/user/login"
+        assert timeout_seconds == 2.5
+        return NewAPIIdentity(
+            id=42,
+            username="alice",
+            display_name="Alice Zhang",
+            role=10,
+            status=1,
+            group="paid",
+            quota=1200,
+            used_quota=300,
+            request_count=12,
+        )
+
+    monkeypatch.setattr(deps.settings, "NEWAPI_BASE_URL", "https://newapi.example")
+    monkeypatch.setattr(deps.settings, "NEWAPI_LOGIN_PATH", "/api/user/login")
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_TIMEOUT_SECONDS", 2.5)
+    monkeypatch.setattr(deps, "authenticate_newapi_credentials", fake_authenticate_credentials)
+
+    current_user = await deps.get_current_user_from_newapi_credentials(
+        "alice@example.com",
+        "secret-password",
+    )
+
+    assert current_user.user_id == "newapi:42"
+    assert current_user.username == "alice"
+    assert current_user.display_name == "Alice Zhang"
+    assert current_user.system_role == "admin"
+    assert current_user.team_id == "newapi:paid"
+    assert current_user.quota_remaining == 1200
+    assert current_user.quota_used == 300
+    assert current_user.quota_total == 1500
+
+
+@pytest.mark.asyncio
 async def test_newapi_exchange_route_sets_talkwise_session_cookie(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -198,6 +248,51 @@ async def test_newapi_exchange_route_sets_talkwise_session_cookie(
 
 
 @pytest.mark.asyncio
+async def test_newapi_login_route_sets_talkwise_session_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_user_from_credentials(username: str, password: str):
+        assert username == "alice@example.com"
+        assert password == "secret-password"
+        return deps.CurrentUser(
+            user_id="newapi:42",
+            username="alice",
+            display_name="Alice Zhang",
+            system_role="leader",
+            business_role="sales",
+            team_id="newapi:paid",
+            team_name="paid",
+            quota_remaining=1200,
+            quota_used=300,
+            quota_total=1500,
+        )
+
+    monkeypatch.setattr(
+        auth_routes,
+        "get_current_user_from_newapi_credentials",
+        fake_get_user_from_credentials,
+    )
+    response = Response()
+
+    result = await auth_routes.create_newapi_login_session(
+        auth_routes.NewAPILoginRequest(
+            username="  alice@example.com  ",
+            password="secret-password",
+        ),
+        response,
+    )
+
+    assert result.data is not None
+    assert result.data.user_id == "newapi:42"
+    assert result.data.username == "alice"
+    assert result.data.team_name == "paid"
+    assert result.data.quota_total == 1500
+    set_cookie = response.headers["set-cookie"]
+    assert deps.settings.TALKWISE_SESSION_COOKIE_NAME in set_cookie
+    assert "HttpOnly" in set_cookie
+
+
+@pytest.mark.asyncio
 async def test_newapi_exchange_route_requires_code_or_token() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await auth_routes.exchange_newapi_session(
@@ -206,7 +301,7 @@ async def test_newapi_exchange_route_requires_code_or_token() -> None:
         )
 
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "NewAPI authorization code or access token required"
+    assert exc_info.value.detail == "Authorization code or access token required"
 
 
 @pytest.mark.asyncio
@@ -285,7 +380,49 @@ async def test_newapi_team_members_route_requires_newapi_group() -> None:
         )
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "NewAPI team group is not available"
+    assert exc_info.value.detail == "Team group is not available"
+
+
+@pytest.mark.asyncio
+async def test_newapi_team_members_route_falls_back_to_current_user_when_service_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch_team_members(**_kwargs):
+        raise NewAPIAuthUnavailableError("service down")
+
+    monkeypatch.setattr(auth_routes, "fetch_newapi_team_members", fake_fetch_team_members)
+
+    result = await auth_routes.list_newapi_team_members(
+        current_user=deps.CurrentUser(
+            user_id="newapi:42",
+            username="alice",
+            display_name="Alice Zhang",
+            system_role="leader",
+            team_id="team-paid",
+            team_name="Paid Team",
+            newapi_group="paid",
+            quota_remaining=120,
+            quota_used=30,
+            quota_total=150,
+            request_count=8,
+        )
+    )
+
+    assert result.data is not None
+    assert result.data.team.id == "team-paid"
+    assert result.data.team.name == "Paid Team"
+    assert result.data.team.group == "paid"
+    assert result.data.total == 1
+    assert result.data.members[0].user_id == 42
+    assert result.data.members[0].username == "alice"
+    assert result.data.members[0].display_name == "Alice Zhang"
+    assert result.data.members[0].system_role == "leader"
+    assert result.data.members[0].team_id == "team-paid"
+    assert result.data.members[0].team_name == "Paid Team"
+    assert result.data.members[0].quota_remaining == 120
+    assert result.data.members[0].quota_total == 150
+    assert result.data.members[0].request_count == 8
+    assert result.data.members[0].in_team is True
 
 
 @pytest.mark.asyncio
@@ -434,7 +571,7 @@ async def test_newapi_auth_enabled_requires_bearer_token(monkeypatch: pytest.Mon
         await _resolve_user(x_mock_user="admin")
 
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "NewAPI access token required"
+    assert exc_info.value.detail == "Access token required"
 
 
 @pytest.mark.asyncio
@@ -460,7 +597,7 @@ async def test_invalid_newapi_bearer_token_is_rejected(monkeypatch: pytest.Monke
         await _resolve_user(authorization="Bearer bad-token")
 
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "Invalid NewAPI access token"
+    assert exc_info.value.detail == "Invalid access token"
 
 
 @pytest.mark.asyncio
@@ -511,7 +648,7 @@ async def test_tampered_talkwise_session_cookie_is_rejected_when_newapi_auth_is_
         await _resolve_user(talkwise_session=f"{cookie_value}tampered")
 
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "NewAPI access token required"
+    assert exc_info.value.detail == "Access token required"
 
 
 def test_session_cookie_options_are_httponly() -> None:

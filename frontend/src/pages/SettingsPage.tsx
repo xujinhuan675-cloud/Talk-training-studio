@@ -766,7 +766,7 @@ function TeamMembersTab() {
           <div className="settings-empty-icon">
             <Users size={36} />
           </div>
-          <p>{tr('请使用 NewAPI 登录后查看真实团队成员。', 'Sign in with NewAPI to view real team members.')}</p>
+          <p>{tr('请登录后查看团队成员。', 'Sign in to view team members.')}</p>
         </div>
       </>
     )
@@ -784,7 +784,7 @@ function TeamMembersTab() {
 
       <div className="settings-members-summary">
         <div className="settings-members-summary-main">
-          <span className="settings-members-summary-label">{tr('NewAPI 团队', 'NewAPI team')}</span>
+          <span className="settings-members-summary-label">{tr('当前团队', 'Current team')}</span>
           <strong>{teamName}</strong>
           {groupName && <span className="settings-members-summary-group">{tr('组 {group}', 'Group {group}', { group: groupName })}</span>}
         </div>
@@ -831,7 +831,7 @@ function TeamMembersTab() {
                 setSearchKeyword(event.target.value)
                 setSearchError(null)
               }}
-              placeholder={tr('搜索 NewAPI 用户名或邮箱', 'Search NewAPI username or email')}
+              placeholder={tr('搜索用户名或邮箱', 'Search username or email')}
             />
             <Button variant="primary" type="submit" disabled={searching || !searchKeyword.trim()}>
               <Search size={14} />
@@ -863,7 +863,7 @@ function TeamMembersTab() {
             ))}
             {hasSearched && !searching && searchResults.length === 0 && !searchError && (
               <div className="settings-empty settings-member-search-empty">
-                <p>{tr('没有找到可添加的 NewAPI 用户。', 'No matching NewAPI users found.')}</p>
+                <p>{tr('没有找到可添加的用户。', 'No matching users found.')}</p>
               </div>
             )}
           </div>

@@ -326,7 +326,7 @@ export function getAuthRequestHeaders(state: AuthState = loadInitialAuthState())
 export async function connectNewApiAccessToken(accessToken: string): Promise<AuthState> {
   const token = accessToken.trim()
   if (!token) {
-    throw new Error('NewAPI access token is required')
+    throw new Error('Access token is required')
   }
 
   const resp = await fetch('/api/v1/auth/newapi/session', {
@@ -337,12 +337,12 @@ export async function connectNewApiAccessToken(accessToken: string): Promise<Aut
     },
   })
   if (!resp.ok) {
-    throw await readAuthError(resp, `Failed to connect NewAPI: ${resp.status}`)
+    throw await readAuthError(resp, `Failed to connect account: ${resp.status}`)
   }
 
   const json = (await resp.json()) as ApiResponse<NewApiSessionUser>
   if (!json.data) {
-    throw new Error(json.message || 'Failed to connect NewAPI')
+    throw new Error(publicAuthErrorMessage(json.message || 'Failed to connect account'))
   }
   const nextState = createNewApiAuthenticatedState(json.data)
   clearNewApiAutoSignInSuppression()
@@ -352,7 +352,7 @@ export async function connectNewApiAccessToken(accessToken: string): Promise<Aut
 export async function connectNewApiCredentials(username: string, password: string): Promise<AuthState> {
   const loginUsername = username.trim()
   if (!loginUsername || !password) {
-    throw new Error('NewAPI username and password are required')
+    throw new Error('Username and password are required')
   }
 
   const resp = await fetch('/api/v1/auth/newapi/login', {
@@ -364,12 +364,12 @@ export async function connectNewApiCredentials(username: string, password: strin
     body: JSON.stringify({ username: loginUsername, password }),
   })
   if (!resp.ok) {
-    throw await readAuthError(resp, `Failed to sign in with NewAPI: ${resp.status}`)
+    throw await readAuthError(resp, `Failed to sign in: ${resp.status}`)
   }
 
   const json = (await resp.json()) as ApiResponse<NewApiSessionUser>
   if (!json.data) {
-    throw new Error(json.message || 'Failed to sign in with NewAPI')
+    throw new Error(publicAuthErrorMessage(json.message || 'Failed to sign in'))
   }
   const nextState = createNewApiAuthenticatedState(json.data)
   clearNewApiAutoSignInSuppression()
@@ -382,7 +382,7 @@ export async function connectNewApiAuthorizationCode(
 ): Promise<AuthState> {
   const authorizationCode = code.trim()
   if (!authorizationCode) {
-    throw new Error('NewAPI authorization code is required')
+    throw new Error('Authorization code is required')
   }
 
   const body = {
@@ -398,12 +398,12 @@ export async function connectNewApiAuthorizationCode(
     body: JSON.stringify(body),
   })
   if (!resp.ok) {
-    throw await readAuthError(resp, `Failed to exchange NewAPI authorization code: ${resp.status}`)
+    throw await readAuthError(resp, `Failed to exchange authorization code: ${resp.status}`)
   }
 
   const json = (await resp.json()) as ApiResponse<NewApiSessionUser>
   if (!json.data) {
-    throw new Error(json.message || 'Failed to exchange NewAPI authorization code')
+    throw new Error(publicAuthErrorMessage(json.message || 'Failed to exchange authorization code'))
   }
   const nextState = createNewApiAuthenticatedState(json.data)
   clearNewApiAutoSignInSuppression()
@@ -525,12 +525,12 @@ export async function fetchCurrentTeamMembers(): Promise<AuthTeamMembersPayload>
     credentials: 'same-origin',
   })
   if (!resp.ok) {
-    throw await readAuthError(resp, `Failed to load NewAPI team members: ${resp.status}`)
+    throw await readAuthError(resp, `Failed to load team members: ${resp.status}`)
   }
 
   const json = (await resp.json()) as ApiResponse<AuthTeamMembersDTO>
   if (!json.data) {
-    throw new Error(json.message || 'Failed to load NewAPI team members')
+    throw new Error(publicAuthErrorMessage(json.message || 'Failed to load team members'))
   }
   const team = normalizeTeamDTO(json.data.team)
   const members = (json.data.members ?? []).map((member) => normalizeTeamMemberDTO(member, team))
@@ -559,12 +559,12 @@ export async function searchNewApiTeamUsers(
     credentials: 'same-origin',
   })
   if (!resp.ok) {
-    throw await readAuthError(resp, `Failed to search NewAPI users: ${resp.status}`)
+    throw await readAuthError(resp, `Failed to search users: ${resp.status}`)
   }
 
   const json = (await resp.json()) as ApiResponse<AuthTeamUserSearchDTO>
   if (!json.data) {
-    throw new Error(json.message || 'Failed to search NewAPI users')
+    throw new Error(publicAuthErrorMessage(json.message || 'Failed to search users'))
   }
   const team = normalizeTeamDTO(json.data.team)
   const users = (json.data.users ?? []).map((user) => normalizeTeamMemberDTO(user, team))
@@ -577,7 +577,7 @@ export async function searchNewApiTeamUsers(
 
 export async function assignNewApiTeamMember(userId: number): Promise<AuthTeamMember> {
   if (!Number.isFinite(userId) || userId <= 0) {
-    throw new Error('NewAPI user id is required')
+    throw new Error('User id is required')
   }
 
   const resp = await fetch('/api/v1/auth/newapi/team/members', {
@@ -589,12 +589,12 @@ export async function assignNewApiTeamMember(userId: number): Promise<AuthTeamMe
     body: JSON.stringify({ user_id: userId }),
   })
   if (!resp.ok) {
-    throw await readAuthError(resp, `Failed to assign NewAPI team member: ${resp.status}`)
+    throw await readAuthError(resp, `Failed to assign team member: ${resp.status}`)
   }
 
   const json = (await resp.json()) as ApiResponse<AuthTeamMemberDTO>
   if (!json.data) {
-    throw new Error(json.message || 'Failed to assign NewAPI team member')
+    throw new Error(publicAuthErrorMessage(json.message || 'Failed to assign team member'))
   }
   return normalizeTeamMemberDTO(json.data)
 }
@@ -764,11 +764,11 @@ function normalizeTeamMemberDTO(
 ): AuthTeamMember {
   const userId = normalizeNullableNumber(member.user_id ?? member.id)
   if (userId === null) {
-    throw new Error('NewAPI team member response missing user id')
+    throw new Error('Team member response missing user id')
   }
   const username = normalizeText(member.username)
   if (!username) {
-    throw new Error('NewAPI team member response missing username')
+    throw new Error('Team member response missing username')
   }
   const group = normalizeText(member.group) || fallbackTeam?.group || null
   return {
@@ -1051,7 +1051,27 @@ async function readAuthError(resp: Response, fallback: string): Promise<Error> {
     (typeof json?.message === 'string' && json.message) ||
     (typeof json?.detail === 'string' && json.detail) ||
     fallback
-  return new Error(message)
+  return new Error(publicAuthErrorMessage(message))
+}
+
+function publicAuthErrorMessage(message: string): string {
+  return message
+    .replace(/\bInvalid NewAPI username or password\b/g, 'Invalid username or password')
+    .replace(/\bNewAPI authentication service unavailable\b/g, 'Authentication service unavailable')
+    .replace(/\bInvalid NewAPI access token\b/g, 'Invalid access token')
+    .replace(/\bInvalid NewAPI authorization code\b/g, 'Invalid authorization code')
+    .replace(/\bNewAPI authorization code or access token required\b/g, 'Authorization code or access token required')
+    .replace(/\bNewAPI access token required\b/g, 'Access token required')
+    .replace(/\bNewAPI team service unavailable\b/g, 'Team member service unavailable')
+    .replace(/\bNewAPI team request was rejected\b/g, 'Team member request was rejected')
+    .replace(/\bNewAPI team member\b/g, 'team member')
+    .replace(/\bNewAPI team members\b/g, 'team members')
+    .replace(/\bNewAPI users\b/g, 'users')
+    .replace(/\bNewAPI user\b/g, 'user')
+    .replace(/\bNewAPI authorization code\b/g, 'authorization code')
+    .replace(/\bNewAPI access token\b/g, 'access token')
+    .replace(/\bNewAPI session\b/g, 'sign-in session')
+    .replace(/\bNewAPI\b/g, 'account service')
 }
 
 function readViteEnvValue(name: string, fallback: string): string {

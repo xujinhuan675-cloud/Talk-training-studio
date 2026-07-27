@@ -296,6 +296,22 @@ test('training session requests surface FastAPI detail string errors', async () 
   )
 })
 
+test('completeTrainingSession explains fetch network errors without surfacing browser text', async () => {
+  globalThis.fetch = async () => {
+    throw new TypeError('Failed to fetch')
+  }
+
+  await assert.rejects(
+    () => trainingSession.completeTrainingSession('session-1'),
+    (error) => {
+      assert.match(error.message, /Failed to complete training session: backend service unreachable/)
+      assert.match(error.message, /Restart the local backend or check VITE_API_URL/)
+      assert.doesNotMatch(error.message, /Failed to fetch/)
+      return true
+    },
+  )
+})
+
 test('training session requests explain backend proxy failures', async () => {
   globalThis.fetch = async () => ({
     ok: false,

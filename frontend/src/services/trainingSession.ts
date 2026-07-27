@@ -344,8 +344,31 @@ async function readError(resp: Response, fallback: string): Promise<Error> {
   return new Error(getErrorMessage(json, fallback))
 }
 
+function isFetchNetworkError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false
+  const message = error.message.trim().toLowerCase()
+  return !message
+    || message.includes('failed to fetch')
+    || message.includes('networkerror')
+    || message.includes('load failed')
+}
+
+function requestNetworkError(fallback: string): Error {
+  return new Error(
+    `${fallback}: backend service unreachable. Restart the local backend or check VITE_API_URL.`,
+  )
+}
+
 async function requestJson<T>(url: string, init?: RequestInit, errorMessage = 'Training session request failed'): Promise<T> {
-  const resp = await fetch(url, withAuthHeaders(init))
+  let resp: Response
+  try {
+    resp = await fetch(url, withAuthHeaders(init))
+  } catch (error) {
+    if (isFetchNetworkError(error)) {
+      throw requestNetworkError(errorMessage)
+    }
+    throw error
+  }
   if (!resp.ok) {
     throw await readError(resp, `${errorMessage}: ${resp.status}`)
   }

@@ -245,7 +245,7 @@ function recommendationReason(scenario: ScenarioTrainingCard, tr: TranslateInlin
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate()
-  const { currentUser } = useAuthContext()
+  const { currentUser, requireAuthenticated } = useAuthContext()
   const { tr, t } = useI18n()
   const [sessions, setSessions] = useState<TrainingSessionDTO[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
@@ -344,6 +344,7 @@ const HomePage: React.FC = () => {
 
   const startRecommendedScenario = async (scenario: ScenarioTrainingCard) => {
     if (startingScenarioId !== null) return
+    if (!requireAuthenticated()) return
     setStartingScenarioId(scenario.id)
     setScenarioLaunchError(null)
     try {
