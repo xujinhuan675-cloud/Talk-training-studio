@@ -13,8 +13,8 @@ import {
   Trophy,
 } from 'lucide-react'
 import { fetchScenarioTrainingCatalog, fetchScenarioTrainingProgress } from '../services/scenarioTraining'
-import { type TrainingFeedbackMode } from '../services/trainingMode'
-import { launchScenarioTraining, type ScenarioLaunchMode } from '../services/scenarioTrainingLaunch'
+import { type TrainingFeedbackMode, type TrainingMode } from '../services/trainingMode'
+import { launchScenarioTraining } from '../services/scenarioTrainingLaunch'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type Translate, type TranslateInline } from '../i18n'
 import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
@@ -50,10 +50,10 @@ type CategoryFilter = ScenarioCategoryFilter
 
 const difficultyOptions: DifficultyFilter[] = ['all', ...scenarioDifficultyOptions]
 const categoryOptions: CategoryFilter[] = ['all', ...scenarioCategoryOptions]
-const modeOptions: ScenarioLaunchMode[] = ['text', 'voice', 'video', 'realtime']
+const modeOptions: TrainingMode[] = ['text', 'voice', 'video']
 const feedbackModeOptions: TrainingFeedbackMode[] = ['simulation', 'assisted', 'drill']
 
-function getModeLabel(value: ScenarioLaunchMode, t: Translate): string {
+function getModeLabel(value: TrainingMode, t: Translate): string {
   switch (value) {
     case 'text':
       return t('training.mode.text.label')
@@ -61,8 +61,6 @@ function getModeLabel(value: ScenarioLaunchMode, t: Translate): string {
       return t('training.mode.voice.label')
     case 'video':
       return t('training.mode.video.label')
-    case 'realtime':
-      return t('training.mode.realtime.label')
   }
 }
 
@@ -127,7 +125,7 @@ export default function ScenarioTrainingPage() {
   const navigate = useNavigate()
   const { locale, t, tr } = useI18n()
   const { currentUser, hasAnySystemRole, requireAuthenticated } = useAuthContext()
-  const [mode, setMode] = useState<ScenarioLaunchMode>('text')
+  const [mode, setMode] = useState<TrainingMode>('text')
   const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
   const [query, setQuery] = useState('')
   const [difficulty, setDifficulty] = useState<DifficultyFilter>('all')
