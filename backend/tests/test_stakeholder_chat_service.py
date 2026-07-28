@@ -344,6 +344,15 @@ class _CapturingLLM:
         yield LLMChunk(content="", finish_reason="end_turn")
 
 
+class _CapturingTTS:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def synthesize_stream(self, text, config):
+        self.requests.append((text, config))
+        yield b"mp3-audio"
+
+
 @pytest.mark.asyncio
 async def test_selected_llm_model_metadata_is_passed_to_stream(session_factory):
     from application.services.stakeholder.stakeholder_chat_service import (
@@ -413,6 +422,45 @@ async def test_reply_language_metadata_is_appended_to_system_prompt(session_fact
     assert llm.last_messages[0].role == "system"
     assert "AI reply language" in llm.last_messages[0].content
     assert "English (en-US)" in llm.last_messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_reply_language_metadata_is_passed_to_tts_config(session_factory):
+    from application.services.stakeholder.stakeholder_chat_service import (
+        StakeholderChatService,
+    )
+
+    persona = _make_persona()
+    persona.voice_style = "Speak calmly."
+    tts = _CapturingTTS()
+    room_id = await _create_room(session_factory)
+    svc = StakeholderChatService(
+        uow_factory=_uow_factory(session_factory),
+        persona_loader=FakePersonaLoader(personas={"jianfeng": persona}),
+        llm=_CapturingLLM(response="Acknowledged."),
+        tts=tts,
+    )
+
+    _, room = await svc.send_message(
+        room_id,
+        "Use the selected training language for voice.",
+        access_scope=unrestricted_stakeholder_room_scope(),
+        metadata={
+            "replyLanguage": "zh-CN",
+            "language": {
+                "replyLanguage": "zh-CN",
+                "source": "training_room_selector",
+            },
+        },
+    )
+    await svc.generate_replies(room_id, room)
+
+    assert tts.requests
+    config = tts.requests[0][1]
+    assert config.language == "zh-CN"
+    assert "Speak calmly." in config.style_instruction
+    assert "Mandarin Chinese" in config.style_instruction
+    assert "Do not translate" in config.style_instruction
 
 
 @pytest.mark.asyncio

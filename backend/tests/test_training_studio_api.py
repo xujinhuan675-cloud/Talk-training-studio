@@ -583,6 +583,41 @@ def test_voice_config_reports_openrouter_tts_reusing_openrouter_llm_key() -> Non
         settings.voice = original_voice
 
 
+def test_voice_config_reports_tts_runtime_not_initialized(monkeypatch: pytest.MonkeyPatch) -> None:
+    import infrastructure.external.voice as voice_module
+
+    monkeypatch.setattr(voice_module, "get_tts_client", lambda: None)
+    original_llm = settings.llm
+    original_voice = settings.voice
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-openrouter-reused",
+        base_url="https://openrouter.ai/api/v1",
+        default_model="openai/gpt-4o-mini",
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="openrouter",
+        tts_api_key=None,
+        tts_base_url="https://openrouter.ai/api/v1",
+        tts_model="mistralai/voxtral-mini-tts-2603",
+        stt_provider="whisper",
+        stt_api_key=None,
+        stt_base_url="https://openrouter.ai/api/v1",
+        stt_model="openai/whisper-1",
+    )
+
+    try:
+        dto = training_studio_routes._voice_config_response()
+
+        assert dto.tts_api_key_configured is True
+        assert dto.tts_runtime_available is False
+        assert dto.tts_runtime_status == "not_initialized"
+        assert "TTS client" in dto.tts_runtime_message
+    finally:
+        settings.llm = original_llm
+        settings.voice = original_voice
+
+
 def test_voice_config_does_not_reuse_llm_key_for_inventory_stt_provider() -> None:
     original_llm = settings.llm
     original_voice = settings.voice
@@ -1557,6 +1592,46 @@ async def test_training_session_complete_and_report(client: AsyncClient, app: Fa
         room_id=42,
         operation="session_report",
     )
+
+
+@pytest.mark.asyncio
+async def test_training_session_complete_does_not_fail_when_report_generation_fails(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    class FailingAnalysisService(FakeAnalysisService):
+        async def generate_report(self, room_id: int, *, access_scope) -> FakeReport:
+            self.generated_for.append(room_id)
+            self.generated_scopes.append(access_scope)
+            raise RuntimeError("provider returned 500")
+
+    failing_analysis = FailingAnalysisService()
+    app.dependency_overrides[get_analysis_service] = lambda: failing_analysis
+    app.state.analysis_service = failing_analysis
+
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={},
+    )
+
+    assert complete_resp.status_code == 200
+    completed = complete_resp.json()["data"]
+    assert completed["status"] == "completed"
+    assert completed["report_id"] is None
+    assert failing_analysis.generated_for == [42]
+    assert app.state.growth_service.evaluated == []
+    completion_report = completed["task_config"]["metadata"]["completionReport"]
+    assert completion_report["status"] == "failed"
+    assert completion_report["phase"] == "generate_report"
+    assert completion_report["completedWithoutReport"] is True
+    assert completion_report["errorType"] == "RuntimeError"
 
 
 @pytest.mark.asyncio

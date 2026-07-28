@@ -23,6 +23,7 @@ class TTSConfig:
     volume: float = 1.0
     pitch: float = 0.0
     style_instruction: Optional[str] = None
+    language: Optional[str] = None
 
 
 @runtime_checkable

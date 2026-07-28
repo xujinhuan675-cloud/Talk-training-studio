@@ -9,7 +9,24 @@
 type QueueItem = {
   personaId: string
   data: ArrayBuffer
+  replyId?: string
+  sentenceIndex?: number
 }
+
+export type AudioPlaybackErrorReason =
+  | 'audio_context_unavailable'
+  | 'audio_context_resume_failed'
+  | 'audio_decode_failed'
+
+export type AudioPlaybackErrorHandler = (
+  error: unknown,
+  detail: {
+    reason: AudioPlaybackErrorReason
+    personaId?: string | null
+    replyId?: string
+    sentenceIndex?: number
+  },
+) => void
 
 export class AudioPlayQueue {
   private queue: QueueItem[] = []
@@ -18,18 +35,41 @@ export class AudioPlayQueue {
   private audioContext: AudioContext | null = null
   private currentSource: AudioBufferSourceNode | null = null
   private onPlayingChange?: (playing: boolean, personaId: string | null) => void
+  private onError?: AudioPlaybackErrorHandler
   /** Track seen (reply_id:sentence_index) keys to prevent duplicate playback. */
   private seenChunks = new Set<string>()
 
-  constructor(opts?: { onPlayingChange?: (playing: boolean, personaId: string | null) => void }) {
+  constructor(opts?: {
+    onPlayingChange?: (playing: boolean, personaId: string | null) => void
+    onError?: AudioPlaybackErrorHandler
+  }) {
     this.onPlayingChange = opts?.onPlayingChange
+    this.onError = opts?.onError
   }
 
   private getContext(): AudioContext {
     if (!this.audioContext || this.audioContext.state === 'closed') {
-      this.audioContext = new AudioContext()
+      const AudioContextCtor = window.AudioContext
+        || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!AudioContextCtor) {
+        throw new Error('Web Audio API is not available in this browser')
+      }
+      this.audioContext = new AudioContextCtor()
     }
     return this.audioContext
+  }
+
+  async unlock(): Promise<void> {
+    if (this.muted) return
+    try {
+      const ctx = this.getContext()
+      if (ctx.state === 'suspended') {
+        await ctx.resume()
+      }
+    } catch (error) {
+      this.onError?.(error, { reason: 'audio_context_resume_failed', personaId: null })
+      throw error
+    }
   }
 
   setMuted(muted: boolean): void {
@@ -43,13 +83,13 @@ export class AudioPlayQueue {
     return this.muted
   }
 
-  enqueue(personaId: string, base64Data: string, replyId?: string, sentenceIndex?: number): void {
-    if (this.muted || !base64Data) return
+  enqueue(personaId: string, base64Data: string, replyId?: string, sentenceIndex?: number): boolean {
+    if (this.muted || !base64Data) return false
 
     // Deduplicate: skip if we've already enqueued this exact chunk
     if (replyId) {
       const key = `${replyId}:${sentenceIndex ?? 0}`
-      if (this.seenChunks.has(key)) return
+      if (this.seenChunks.has(key)) return false
       this.seenChunks.add(key)
     }
 
@@ -59,12 +99,19 @@ export class AudioPlayQueue {
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i)
       }
-      this.queue.push({ personaId, data: bytes.buffer })
+      this.queue.push({ personaId, data: bytes.buffer, replyId, sentenceIndex })
       if (!this.playing) {
         this.playNext()
       }
+      return true
     } catch {
-      // Silently ignore decode errors
+      this.onError?.(new Error('Invalid base64 audio payload'), {
+        reason: 'audio_decode_failed',
+        personaId,
+        replyId,
+        sentenceIndex,
+      })
+      return false
     }
   }
 
@@ -97,7 +144,19 @@ export class AudioPlayQueue {
     try {
       const ctx = this.getContext()
       if (ctx.state === 'suspended') {
-        await ctx.resume()
+        try {
+          await ctx.resume()
+        } catch (error) {
+          this.onError?.(error, {
+            reason: 'audio_context_resume_failed',
+            personaId: item.personaId,
+            replyId: item.replyId,
+            sentenceIndex: item.sentenceIndex,
+          })
+          this.currentSource = null
+          this.playNext()
+          return
+        }
       }
       const audioBuffer = await ctx.decodeAudioData(item.data.slice(0))
       const source = ctx.createBufferSource()
@@ -112,8 +171,13 @@ export class AudioPlayQueue {
         }
         source.start(0)
       })
-    } catch {
-      // Skip unplayable chunks
+    } catch (error) {
+      this.onError?.(error, {
+        reason: this.audioContext ? 'audio_decode_failed' : 'audio_context_unavailable',
+        personaId: item.personaId,
+        replyId: item.replyId,
+        sentenceIndex: item.sentenceIndex,
+      })
       this.currentSource = null
     }
 

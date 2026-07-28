@@ -141,7 +141,7 @@ from application.services.training_studio.training_core import (
 from application.services.file_asset_service import FileAssetApplicationService
 from core.config import LLMSettings, VoiceSettings, settings
 from core.response import success_response
-from domain.common.exceptions import DomainValidationException, FileAssetNotFoundException
+from domain.common.exceptions import BusinessException, DomainValidationException, FileAssetNotFoundException
 from domain.conversation.repository import OwnedMetadataScope
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
@@ -432,6 +432,9 @@ class VoicePreferenceConfigDTO(BaseModel):
     tts_model: str
     tts_api_key_configured: bool
     tts_api_key_preview: str | None = None
+    tts_runtime_available: bool
+    tts_runtime_status: str
+    tts_runtime_message: str | None = None
     stt_provider: str
     stt_base_url: str | None = None
     stt_model: str
@@ -634,6 +637,9 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
     llm_key = settings.llm.api_key
     explicit_tts_key = settings.voice.tts_api_key
     tts_key = _effective_voice_tts_key()
+    tts_runtime_available, tts_runtime_status, tts_runtime_message = _voice_tts_runtime_state(
+        tts_key
+    )
     stt_key = settings.voice.stt_api_key
     stt_can_reuse_shared_key = _voice_stt_provider_can_use_shared_key(settings.voice.stt_provider)
     selected_realtime_provider = _normalized_realtime_llm_provider(
@@ -691,6 +697,9 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
         tts_model=settings.voice.tts_model,
         tts_api_key_configured=bool(tts_key),
         tts_api_key_preview=_secret_preview(tts_key),
+        tts_runtime_available=tts_runtime_available,
+        tts_runtime_status=tts_runtime_status,
+        tts_runtime_message=tts_runtime_message,
         stt_provider=settings.voice.stt_provider,
         stt_base_url=settings.voice.stt_base_url,
         stt_model=settings.voice.stt_model,
@@ -717,6 +726,43 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
         realtime_transcription_model=settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
         updated_at=datetime.now(UTC).isoformat(),
     )
+
+
+def _voice_tts_runtime_state(tts_key: str | None) -> tuple[bool, str, str | None]:
+    from infrastructure.external.voice import get_tts_client
+
+    if get_tts_client() is not None:
+        return True, "ready", "TTS runtime client is initialized"
+    if tts_key:
+        return (
+            False,
+            "not_initialized",
+            (
+                "TTS credentials are configured, but the current backend process "
+                "has no initialized TTS client. Save the voice settings or restart "
+                "the backend, then check backend logs if this remains unavailable."
+            ),
+        )
+    return (
+        False,
+        "missing_key",
+        "TTS credentials are missing; configure a supported TTS provider before using voice playback.",
+    )
+
+
+def _completion_report_failure_metadata(exc: Exception) -> dict[str, object]:
+    raw_message = getattr(exc, "message", None) or str(exc)
+    message = redact_realtime_secret_text(str(raw_message or "").strip())
+    if len(message) > 500:
+        message = f"{message[:500].rstrip()}..."
+    return {
+        "status": "failed",
+        "phase": "generate_report",
+        "errorType": type(exc).__name__,
+        "message": message or "Report generation failed",
+        "completedWithoutReport": True,
+        "recordedAt": datetime.now(UTC).isoformat(),
+    }
 
 
 def _effective_voice_tts_key() -> str | None:
@@ -3044,6 +3090,7 @@ async def complete_training_session(
         svc=svc,
         current_user=current_user,
     )
+    completion_metadata: dict[str, object] = dict(body.metadata or {})
 
     report_id = str(body.report_id).strip() if body.report_id is not None else ""
     if body.generate_report and not report_id:
@@ -3067,10 +3114,25 @@ async def complete_training_session(
                     operation="generate_report",
                 ),
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        report_id = str(report.id)
-        background_tasks.add_task(growth_svc.evaluate_competency, report.id)
+        except (BusinessException, ValueError) as exc:
+            logger.warning(
+                "training_session_completion_report_failed",
+                extra={
+                    "session_id": session_id,
+                    "room_id": session.room_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
+        except Exception as exc:
+            logger.exception(
+                "training_session_completion_report_failed",
+                extra={"session_id": session_id, "room_id": session.room_id},
+            )
+            completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
+        else:
+            report_id = str(report.id)
+            background_tasks.add_task(growth_svc.evaluate_competency, report.id)
     elif report_id:
         report_id = await _require_report_id_for_training_session(
             report_id,
@@ -3085,7 +3147,7 @@ async def complete_training_session(
             session_id,
             report_id=report_id or None,
             score_id=score_id,
-            metadata=body.metadata,
+            metadata=completion_metadata,
             access_scope=_training_session_access_scope_for_current_user(current_user),
         )
     except PermissionError as exc:

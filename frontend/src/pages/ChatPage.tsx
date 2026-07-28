@@ -110,6 +110,7 @@ import {
   buildTrainingReplyLanguageMetadata,
   normalizeTrainingReplyLanguage,
 } from '../data/trainingReplyLanguages'
+import { fetchVoiceConfig } from '../services/voiceConfig'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
@@ -1264,10 +1265,24 @@ function ChatArea() {
       }
       return
     }
-    if (preparedVoiceRoomRef.current === selectedRoomId) return
+    if (preparedVoiceRoomRef.current === selectedRoomId) {
+      return
+    }
     voice.prepareVoiceSession()
     preparedVoiceRoomRef.current = selectedRoomId
-  }, [isVoiceBattlePrep, selectedRoomId, voice])
+    fetchVoiceConfig()
+      .then((voiceConfig) => {
+        if (preparedVoiceRoomRef.current !== selectedRoomId || voiceConfig.tts_runtime_available !== false) return
+        voice.failVoiceSession(
+          voiceConfig.tts_runtime_message
+          || tr(
+            'TTS 未在当前后端运行时生效，AI 文字回复可以生成，但不会播放语音。',
+            'TTS is not active in the current backend runtime. AI text replies can be generated, but voice playback will not start.',
+          ),
+        )
+      })
+      .catch(() => undefined)
+  }, [isVoiceBattlePrep, selectedRoomId, tr, voice])
 
   useEffect(() => {
     if (!isVideoBattlePrep) {

@@ -2031,7 +2031,11 @@ function ConfigTab() {
       title: tr('TTS 语音合成', 'TTS speech synthesis'),
       subtitle: tr('回合制语音的文字转语音模块', 'Text-to-speech module for turn-based voice'),
       model: form.ttsModel,
-      tone: toneForProvider(form.ttsProvider, 'tts', Boolean(config?.tts_api_key_configured)),
+      tone: toneForProvider(
+        form.ttsProvider,
+        'tts',
+        config?.tts_runtime_available ?? Boolean(config?.tts_api_key_configured),
+      ),
     },
     {
       key: 'realtime',
@@ -2120,6 +2124,23 @@ function ConfigTab() {
     )
   }
 
+  const renderTtsRuntimeNote = () => {
+    if (!config) return null
+    const message = config.tts_runtime_message?.trim()
+    if (config.tts_runtime_available) {
+      return (
+        <p className="settings-voice-note">
+          {tr('TTS runtime is initialized; turn-based voice can play AI replies.', 'TTS runtime is initialized; turn-based voice can play AI replies.')}
+        </p>
+      )
+    }
+    return (
+      <p className="settings-voice-note settings-voice-note-warning">
+        {message || tr('TTS settings are not active in the current backend runtime. Save settings or restart the backend, then try again.', 'TTS settings are not active in the current backend runtime. Save settings or restart the backend, then try again.')}
+      </p>
+    )
+  }
+
   const renderModuleConfig = () => {
     if (!activeModuleMeta) return null
     if (activeModule === 'llm') {
@@ -2177,6 +2198,7 @@ function ConfigTab() {
           </Field>
           {renderCatalogSummary(ttsChannel, 'Pipecat TTS')}
           {renderProviderPresetNote('tts', form.ttsProvider)}
+          {renderTtsRuntimeNote()}
         </>
       )
     }

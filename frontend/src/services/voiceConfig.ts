@@ -18,6 +18,9 @@ export interface VoicePreferenceConfig {
   tts_model: string
   tts_api_key_configured: boolean
   tts_api_key_preview: string | null
+  tts_runtime_available?: boolean
+  tts_runtime_status?: string
+  tts_runtime_message?: string | null
   stt_provider: string
   stt_base_url: string | null
   stt_model: string

@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 # MiniMax TTS HTTP streaming endpoint
 _DEFAULT_BASE_URL = "https://api.minimax.chat"
 _T2A_PATH = "/v1/t2a_v2"
+_LANGUAGE_BOOSTS = {
+    "zh": "Chinese",
+    "en": "English",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+}
 
 
 def _extract_group_id_from_jwt(api_key: str) -> str | None:
@@ -70,6 +79,14 @@ def _normalize_stream_audio(audio_hex: str, previous_hex: str) -> tuple[bytes | 
     except ValueError:
         logger.warning("minimax_tts_hex_decode_error")
         return None, previous_hex
+
+
+def _language_boost(language: str | None) -> str | None:
+    text = (language or "").strip().lower()
+    if not text:
+        return None
+    primary = text.split("-", 1)[0]
+    return _LANGUAGE_BOOSTS.get(primary)
 
 
 class MinimaxTTSProvider:
@@ -123,6 +140,8 @@ class MinimaxTTSProvider:
                 "channel": 1,
             },
         }
+        if language_boost := _language_boost(config.language):
+            payload["language_boost"] = language_boost
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",

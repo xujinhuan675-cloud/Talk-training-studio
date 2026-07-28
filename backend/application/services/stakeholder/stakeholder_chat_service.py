@@ -75,6 +75,16 @@ _REPLY_LANGUAGE_LABELS = {
     "fr": "French",
     "de": "German",
 }
+_TTS_LANGUAGE_INSTRUCTIONS = {
+    "zh-CN": "Use natural Mandarin Chinese pronunciation for Simplified Chinese text.",
+    "zh-TW": "Use natural Mandarin Chinese pronunciation for Traditional Chinese text.",
+    "en-US": "Use natural English pronunciation.",
+    "ja": "Use natural Japanese pronunciation.",
+    "ko": "Use natural Korean pronunciation.",
+    "es": "Use natural Spanish pronunciation.",
+    "fr": "Use natural French pronunciation.",
+    "de": "Use natural German pronunciation.",
+}
 
 
 def _extract_emotion(content: str) -> tuple[str, int | None, str | None]:
@@ -176,6 +186,26 @@ def _append_reply_language_instruction(system_prompt: str, reply_language: str |
         f"- Reply to the learner in {label} ({language}) unless the learner explicitly asks to switch languages.\n"
         "- Preserve names, product terms, and quoted user text in their original language when appropriate."
     )
+
+
+def _tts_style_instruction(
+    voice_style: str | None,
+    reply_language: str | None,
+) -> str | None:
+    parts: list[str] = []
+    clean_style = _clean_llm_selection_text(voice_style)
+    if clean_style:
+        parts.append(clean_style)
+    language = _clean_llm_selection_text(reply_language)
+    if language:
+        parts.append(
+            _TTS_LANGUAGE_INSTRUCTIONS.get(
+                language,
+                f"Use natural pronunciation for {language}.",
+            )
+        )
+        parts.append("Do not translate the text during speech synthesis.")
+    return " ".join(parts) or None
 
 
 class StakeholderChatService:
@@ -462,6 +492,7 @@ class StakeholderChatService:
                                             sentence,
                                             audio_index,
                                             tts_reply_id,
+                                            selected_reply_language,
                                         )
                                     )
                                     tts_tasks.append(task)
@@ -479,6 +510,7 @@ class StakeholderChatService:
                                     remaining,
                                     audio_index,
                                     tts_reply_id,
+                                    selected_reply_language,
                                 )
                             )
                             tts_tasks.append(task)
@@ -568,6 +600,7 @@ class StakeholderChatService:
         text: str,
         index: int,
         reply_id: str = "",
+        reply_language: str | None = None,
     ) -> None:
         """Synthesize a sentence via TTS and push audio chunks via SSE.
 
@@ -588,6 +621,11 @@ class StakeholderChatService:
             config = TTSConfig(
                 voice_id=persona.voice_id or "",
                 speed=persona.voice_speed,
+                style_instruction=_tts_style_instruction(
+                    persona.voice_style,
+                    reply_language,
+                ),
+                language=reply_language,
             )
             # Accumulate all streaming chunks into a complete mp3 per sentence.
             # Individual chunks are mp3 fragments that browsers can't decode alone.

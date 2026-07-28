@@ -158,6 +158,17 @@ test('Settings AI service cards omit provider catalog rows but keep dialog catal
   assert.match(source, /renderCatalogSummary\(llmChannel, 'Pipecat LLM'\)/)
 })
 
+test('Settings TTS card uses backend runtime availability, not only configured keys', () => {
+  const source = readSource('src/pages/SettingsPage.tsx')
+  const configStart = source.indexOf('function ConfigTab()')
+  const config = source.slice(configStart)
+
+  assert.notEqual(configStart, -1)
+  assert.match(config, /config\?\.tts_runtime_available \?\? Boolean\(config\?\.tts_api_key_configured\)/)
+  assert.match(config, /renderTtsRuntimeNote/)
+  assert.match(config, /tts_runtime_message/)
+})
+
 test('Settings AI service reset and dialog close controls stay out of primary action rows', () => {
   const source = readSource('src/pages/SettingsPage.tsx')
   const css = readSource('src/pages/SettingsPage.css')

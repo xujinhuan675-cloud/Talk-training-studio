@@ -130,7 +130,9 @@ export function useChat(
   options?: {
     trainingSessionId?: string | null
     onRoundEnd?: () => void
-    audioPlayerRef?: React.RefObject<{ stop: () => void; isMuted: () => boolean; enqueue: (personaId: string, data: string, replyId?: string, sentenceIndex?: number) => void } | null>
+    audioPlayerRef?: React.RefObject<{ stop: () => void; isMuted: () => boolean; enqueue: (personaId: string, data: string, replyId?: string, sentenceIndex?: number) => boolean } | null>
+    onAudioOutputReceived?: () => void
+    onAudioOutputMissing?: (personaId: string) => void
   },
 ): UseChatReturn {
   const { tr } = useI18n()
@@ -150,6 +152,7 @@ export function useChat(
   const eventSourceRef = useRef<EventSource | null>(null)
   const eventSourceVersionRef = useRef(0)
   const pendingTypingPersonaRef = useRef<string | null>(null)
+  const audioChunkPersonaIdsRef = useRef<Set<string>>(new Set())
 
   const scrollToBottom = useCallback(() => {
     if (messageListRef.current) {
@@ -196,6 +199,11 @@ export function useChat(
       const msg: Message = hydrateLocalVideoMessage(JSON.parse(e.data))
       // Clear streaming content for this persona -- the final message replaces it
       if (msg.sender_type === 'persona') {
+        const player = options?.audioPlayerRef?.current
+        if (player && !player.isMuted() && !audioChunkPersonaIdsRef.current.has(msg.sender_id)) {
+          options?.onAudioOutputMissing?.(msg.sender_id)
+        }
+        audioChunkPersonaIdsRef.current.delete(msg.sender_id)
         clearPendingTyping(msg.sender_id)
         setTypingPersona((prev) => (prev === msg.sender_id ? null : prev))
         setStreamingContent((prev) => {
@@ -249,9 +257,13 @@ export function useChat(
       if (player && !player.isMuted()) {
         const data = JSON.parse(e.data)
         if (data.data) {
-          player.enqueue(
+          const enqueued = player.enqueue(
             data.persona_id, data.data, data.reply_id, data.sentence_index,
           )
+          if (enqueued) {
+            audioChunkPersonaIdsRef.current.add(data.persona_id)
+            options?.onAudioOutputReceived?.()
+          }
         }
       }
     })
@@ -285,6 +297,7 @@ export function useChat(
         eventSourceRef.current = null
       }
       pendingTypingPersonaRef.current = null
+      audioChunkPersonaIdsRef.current.clear()
       setTypingPersona(null)
       setStreamingContent({})
     }
@@ -317,6 +330,7 @@ export function useChat(
 
     // Stop any playing audio when user sends a new message
     options?.audioPlayerRef?.current?.stop()
+    audioChunkPersonaIdsRef.current.clear()
 
     setSending(true)
     setSendError(null)
@@ -361,6 +375,7 @@ export function useChat(
   ): Promise<boolean> => {
     if (!roomId || sending) return false
     options?.audioPlayerRef?.current?.stop()
+    audioChunkPersonaIdsRef.current.clear()
     setSending(true)
     setSendError(null)
     setInputValue('')

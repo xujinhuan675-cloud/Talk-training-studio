@@ -20,6 +20,23 @@ from application.ports.tts import TTSConfig
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://api.elevenlabs.io"
+_LANGUAGE_CODES = {
+    "zh": "zh",
+    "en": "en",
+    "ja": "ja",
+    "ko": "ko",
+    "es": "es",
+    "fr": "fr",
+    "de": "de",
+}
+
+
+def _language_code(language: str | None) -> str | None:
+    text = (language or "").strip().lower()
+    if not text:
+        return None
+    primary = text.split("-", 1)[0]
+    return _LANGUAGE_CODES.get(primary)
 
 
 class ElevenLabsTTSProvider:
@@ -58,6 +75,8 @@ class ElevenLabsTTSProvider:
             "model_id": self._model,
             "output_format": self._output_format,
         }
+        if language_code := _language_code(config.language):
+            payload["language_code"] = language_code
 
         # Voice settings
         voice_settings: dict = {

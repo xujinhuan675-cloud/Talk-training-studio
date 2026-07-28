@@ -27,6 +27,8 @@ export function ChatProvider({
   const chat = useChat(roomId, {
     trainingSessionId,
     audioPlayerRef: voice.audioPlayerRef,
+    onAudioOutputReceived: voice.markAudioOutputReceived,
+    onAudioOutputMissing: voice.markAudioOutputMissing,
   })
 
   const coaching = useCoaching(roomId)
