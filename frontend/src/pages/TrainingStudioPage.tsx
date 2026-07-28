@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  ChevronDown,
   CheckCircle2,
   ClipboardCheck,
   Keyboard,
@@ -9,6 +10,7 @@ import {
   Mic2,
   Radio,
   RefreshCw,
+  SlidersHorizontal,
   Video,
   Wand2,
 } from 'lucide-react'
@@ -236,12 +238,13 @@ function splitTechStack(value: string, fallback: string): string[] {
 
 export default function TrainingStudioPage({ initialProfile = 'practice' }: TrainingStudioPageProps) {
   const navigate = useNavigate()
-  const { locale, t } = useI18n()
+  const { locale, t, tr } = useI18n()
   const { requireAuthenticated } = useAuthContext()
   const [config, setConfig] = useState<TrainingStudioConfig>(() => getDefaultTrainingStudioConfig(t))
   const previousDefaultsRef = useRef(getDefaultTrainingStudioConfig(t))
   const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : 'voice')
   const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
+  const [trainingConfigOpen, setTrainingConfigOpen] = useState(false)
   const [liveCoachSourceLanguage, setLiveCoachSourceLanguage] = useState('zh-CN')
   const [liveCoachTargetLanguage, setLiveCoachTargetLanguage] = useState('en-US')
   const [goal, setGoal] = useState('')
@@ -277,6 +280,22 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       t,
     )
   }, [config, effectiveFeedbackMode, goal, mode, t])
+
+  const trainingConfigSummary = useMemo(() => {
+    const scenario = getTrainingScenarioLabel(config.scenario, t)
+    const difficulty = getTrainingDifficultyLabel(config.difficulty, t)
+    const framework = getExpressionFrameworkLabel(config.framework, t)
+    return tr(
+      '{scenario} · {difficulty} · {framework} · {count} 题',
+      '{scenario} · {difficulty} · {framework} · {count} questions',
+      {
+        count: config.questionCount,
+        difficulty,
+        framework,
+        scenario,
+      },
+    )
+  }, [config.difficulty, config.framework, config.questionCount, config.scenario, t, tr])
 
   const startQuickSession = async () => {
     if (!requireAuthenticated()) return
@@ -624,7 +643,36 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               </section>
             )}
 
-            <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
+            <section
+              className="training-studio-config-panel"
+              aria-label={tr('训练参数', 'Training parameters')}
+            >
+              <Button
+                type="button"
+                className="training-studio-config-toggle"
+                variant="secondary"
+                onClick={() => setTrainingConfigOpen((open) => !open)}
+                aria-expanded={trainingConfigOpen}
+                aria-controls="training-studio-config-options"
+                disabled={starting !== null}
+              >
+                <span className="training-studio-config-title">
+                  <SlidersHorizontal size={16} />
+                  {tr('训练参数', 'Training parameters')}
+                </span>
+                <span className="training-studio-config-summary">{trainingConfigSummary}</span>
+                <ChevronDown
+                  size={16}
+                  className={`training-studio-config-chevron${trainingConfigOpen ? ' open' : ''}`}
+                />
+              </Button>
+
+              {trainingConfigOpen && (
+                <div id="training-studio-config-options" className="training-studio-config-content">
+                  <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
+                </div>
+              )}
+            </section>
           </div>
         </div>
 

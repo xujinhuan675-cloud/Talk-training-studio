@@ -430,6 +430,69 @@
   white-space: nowrap;
 }
 
+.training-studio-config-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.training-studio-config-toggle.ui-button {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  gap: 12px;
+  border: 1px solid var(--training-workbench-border);
+  border-radius: var(--training-workbench-radius);
+  padding: 10px 14px;
+  background: var(--training-workbench-surface);
+  color: var(--text-primary);
+  box-shadow: var(--training-workbench-shadow);
+  text-align: left;
+}
+
+.training-studio-config-toggle.ui-button:hover:not(:disabled) {
+  border-color: var(--training-workbench-border-accent);
+  background: var(--training-workbench-surface-raised);
+  color: var(--text-primary);
+}
+
+.training-studio-config-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.training-studio-config-title svg {
+  color: var(--training-workbench-primary);
+}
+
+.training-studio-config-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-studio-config-chevron {
+  color: var(--text-secondary);
+  transition: transform var(--transition-fast);
+}
+
+.training-studio-config-chevron.open {
+  transform: rotate(180deg);
+}
+
+.training-studio-config-content {
+  display: grid;
+}
+
 .training-studio-action {
   width: 100%;
 }
@@ -513,5 +576,14 @@
 
   .training-studio-live-coach-badge {
     justify-content: flex-start;
+  }
+
+  .training-studio-config-toggle.ui-button {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .training-studio-config-summary {
+    grid-column: 1 / -1;
+    white-space: normal;
   }
 }

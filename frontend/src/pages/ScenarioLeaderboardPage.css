@@ -110,11 +110,14 @@
 
 .scenario-leaderboard-view-nav {
   display: flex;
+  align-items: center;
+  overflow-x: auto;
   margin-bottom: 14px;
 }
 
 .scenario-leaderboard-view-tabs.ui-segmented-control {
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   overflow-x: auto;
   background: var(--bg-card);
 }

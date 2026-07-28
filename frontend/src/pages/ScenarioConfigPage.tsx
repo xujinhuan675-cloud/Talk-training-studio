@@ -239,24 +239,14 @@ export default function ScenarioConfigPage() {
     () => [
       {
         value: 'scenarios',
-        label: (
-          <>
-            <span className="scenario-config-tab-label">{tr('场景草稿', 'Scenario drafts')}</span>
-            <span className="scenario-config-tab-count">{state.scenarios.length}</span>
-          </>
-        ),
+        label: <span className="scenario-config-tab-label">{tr('场景草稿', 'Scenario drafts')}</span>,
       },
       {
         value: 'dimensions',
-        label: (
-          <>
-            <span className="scenario-config-tab-label">{tr('维度库', 'Dimension library')}</span>
-            <span className="scenario-config-tab-count">{state.dimensions.length}</span>
-          </>
-        ),
+        label: <span className="scenario-config-tab-label">{tr('维度库', 'Dimension library')}</span>,
       },
     ],
-    [state.dimensions.length, state.scenarios.length, tr],
+    [tr],
   )
   const selectedWeightValidation = validateScenarioWeightTotal(draft.dimensionWeights)
   const selectedWeightTotal = calculateScenarioWeightTotal(draft.dimensionWeights)
@@ -532,6 +522,7 @@ export default function ScenarioConfigPage() {
           className="scenario-config-tabs"
           onValueChange={setActiveTab}
           options={tabOptions}
+          size="sm"
           value={activeTab}
         />
       </div>
@@ -655,62 +646,73 @@ export default function ScenarioConfigPage() {
               </div>
             </div>
 
-            <label className="scenario-config-field">
-              <span>{tr('场景描述', 'Scenario description')}</span>
-              <Textarea
-                value={draft.description}
-                onChange={(event) => patchDraft({ description: event.target.value })}
-                rows={3}
-              />
-            </label>
+            <details className="scenario-config-section scenario-config-content-section">
+              <summary className="scenario-config-section-summary">
+                <span>
+                  <strong>{tr('场景内容', 'Scenario content')}</strong>
+                  <small>{tr('目标、背景、角色和训练要点', 'Goals, context, persona, and training points')}</small>
+                </span>
+              </summary>
 
-            <label className="scenario-config-field">
-              <span>{tr('客户画像', 'Customer profile')}</span>
-              <Textarea
-                value={draft.customerProfile}
-                onChange={(event) => patchDraft({ customerProfile: event.target.value })}
-                rows={3}
-              />
-            </label>
+              <div className="scenario-config-section-body">
+                <label className="scenario-config-field">
+                  <span>{tr('场景描述', 'Scenario description')}</span>
+                  <Textarea
+                    value={draft.description}
+                    onChange={(event) => patchDraft({ description: event.target.value })}
+                    rows={3}
+                  />
+                </label>
 
-            <label className="scenario-config-field">
-              <span>{tr('对手开场白', 'Counterpart opening line')}</span>
-              <Textarea
-                value={draft.openingLine}
-                onChange={(event) => patchDraft({ openingLine: event.target.value })}
-                rows={2}
-              />
-            </label>
+                <label className="scenario-config-field">
+                  <span>{tr('客户画像', 'Customer profile')}</span>
+                  <Textarea
+                    value={draft.customerProfile}
+                    onChange={(event) => patchDraft({ customerProfile: event.target.value })}
+                    rows={3}
+                  />
+                </label>
 
-            <div className="scenario-config-form-grid">
-              <label>
-                <span>{tr('角色名称', 'Persona name')}</span>
-                <Input value={draft.persona.name} onChange={(event) => updatePersona('name', event.target.value)} />
-              </label>
-              <label>
-                <span>{tr('角色身份', 'Persona role')}</span>
-                <Input value={draft.persona.role} onChange={(event) => updatePersona('role', event.target.value)} />
-              </label>
-            </div>
+                <label className="scenario-config-field">
+                  <span>{tr('对手开场白', 'Counterpart opening line')}</span>
+                  <Textarea
+                    value={draft.openingLine}
+                    onChange={(event) => patchDraft({ openingLine: event.target.value })}
+                    rows={2}
+                  />
+                </label>
 
-            <label className="scenario-config-field">
-              <span>{tr('角色风格', 'Persona style')}</span>
-              <Textarea
-                value={draft.persona.style}
-                onChange={(event) => updatePersona('style', event.target.value)}
-                rows={2}
-              />
-            </label>
+                <div className="scenario-config-form-grid">
+                  <label>
+                    <span>{tr('角色名称', 'Persona name')}</span>
+                    <Input value={draft.persona.name} onChange={(event) => updatePersona('name', event.target.value)} />
+                  </label>
+                  <label>
+                    <span>{tr('角色身份', 'Persona role')}</span>
+                    <Input value={draft.persona.role} onChange={(event) => updatePersona('role', event.target.value)} />
+                  </label>
+                </div>
 
-            <label className="scenario-config-field">
-              <span>{tr('训练要点', 'Training points')}</span>
-              <Textarea
-                value={draft.trainingPoints.join('\n')}
-                onChange={(event) => patchDraft({ trainingPoints: splitLines(event.target.value) })}
-                rows={4}
-                placeholder={tr('每行一个训练要点', 'One training point per line')}
-              />
-            </label>
+                <label className="scenario-config-field">
+                  <span>{tr('角色风格', 'Persona style')}</span>
+                  <Textarea
+                    value={draft.persona.style}
+                    onChange={(event) => updatePersona('style', event.target.value)}
+                    rows={2}
+                  />
+                </label>
+
+                <label className="scenario-config-field">
+                  <span>{tr('训练要点', 'Training points')}</span>
+                  <Textarea
+                    value={draft.trainingPoints.join('\n')}
+                    onChange={(event) => patchDraft({ trainingPoints: splitLines(event.target.value) })}
+                    rows={4}
+                    placeholder={tr('每行一个训练要点', 'One training point per line')}
+                  />
+                </label>
+              </div>
+            </details>
 
             <section className="scenario-config-weight-editor" aria-label={tr('场景评分维度权重', 'Scenario dimension weights')}>
               <div className="scenario-config-weight-head">
@@ -736,41 +738,52 @@ export default function ScenarioConfigPage() {
                 <span style={{ width: `${Math.min(100, selectedWeightTotal)}%` }} />
               </div>
 
-              <div className="scenario-config-weight-table">
-                {state.dimensions.map((dimension) => {
-                  const selected = isDimensionSelected(dimension.id)
-                  const weight = draft.dimensionWeights.find((item) => item.dimensionId === dimension.id)?.weight ?? 0
-                  const displayName = getDimensionDisplayName(dimension, tr)
-                  const displayDescription = getDimensionDisplayDescription(dimension, tr)
-                  const disabled = !dimension.enabled && !selected
-                  return (
-                    <div key={dimension.id} className={!dimension.enabled ? 'disabled' : ''}>
-                      <label
-                        className={`scenario-config-weight-option${selected ? ' selected' : ''}${disabled ? ' disabled' : ''}`}
-                      >
-                        <Checkbox
-                          checked={selected}
-                          disabled={disabled}
-                          onChange={() => toggleScenarioDimension(dimension.id)}
-                        />
-                        <span>{displayName}</span>
-                      </label>
-                      <p>{displayDescription || tr('暂无评分标准。', 'No scoring criteria yet.')}</p>
-                      <label>
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={weight}
-                          disabled={!selected}
-                          onChange={(event) => updateScenarioWeight(dimension.id, event.target.value)}
-                        />
-                        <span>%</span>
-                      </label>
-                    </div>
-                  )
-                })}
-              </div>
+              <details className="scenario-config-section scenario-config-weight-details">
+                <summary className="scenario-config-section-summary">
+                  <span>
+                    <strong>{tr('权重明细', 'Weight details')}</strong>
+                    <small>
+                      {tr('{count} 个维度', '{count} dimensions', { count: draft.dimensionWeights.length })}
+                    </small>
+                  </span>
+                </summary>
+
+                <div className="scenario-config-section-body scenario-config-weight-table">
+                  {state.dimensions.map((dimension) => {
+                    const selected = isDimensionSelected(dimension.id)
+                    const weight = draft.dimensionWeights.find((item) => item.dimensionId === dimension.id)?.weight ?? 0
+                    const displayName = getDimensionDisplayName(dimension, tr)
+                    const displayDescription = getDimensionDisplayDescription(dimension, tr)
+                    const disabled = !dimension.enabled && !selected
+                    return (
+                      <div key={dimension.id} className={!dimension.enabled ? 'disabled' : ''}>
+                        <label
+                          className={`scenario-config-weight-option${selected ? ' selected' : ''}${disabled ? ' disabled' : ''}`}
+                        >
+                          <Checkbox
+                            checked={selected}
+                            disabled={disabled}
+                            onChange={() => toggleScenarioDimension(dimension.id)}
+                          />
+                          <span>{displayName}</span>
+                        </label>
+                        <p>{displayDescription || tr('暂无评分标准。', 'No scoring criteria yet.')}</p>
+                        <label>
+                          <Input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={weight}
+                            disabled={!selected}
+                            onChange={(event) => updateScenarioWeight(dimension.id, event.target.value)}
+                          />
+                          <span>%</span>
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+              </details>
             </section>
           </section>
         </main>
@@ -851,14 +864,29 @@ export default function ScenarioConfigPage() {
               </label>
             </div>
 
-            <label className="scenario-config-field">
-              <span>{tr('评分标准', 'Scoring criteria')}</span>
-              <Textarea
-                value={dimensionDraft.description}
-                onChange={(event) => setDimensionDraft((current) => ({ ...current, description: event.target.value }))}
-                rows={6}
-              />
-            </label>
+            <details className="scenario-config-section scenario-config-dimension-criteria">
+              <summary className="scenario-config-section-summary">
+                <span>
+                  <strong>{tr('标准定义', 'Criteria definition')}</strong>
+                  <small>
+                    {dimensionDraft.description.trim()
+                      ? tr('已填写评分标准', 'Scoring criteria added')
+                      : tr('待补充评分标准', 'Scoring criteria pending')}
+                  </small>
+                </span>
+              </summary>
+
+              <div className="scenario-config-section-body">
+                <label className="scenario-config-field">
+                  <span>{tr('评分标准', 'Scoring criteria')}</span>
+                  <Textarea
+                    value={dimensionDraft.description}
+                    onChange={(event) => setDimensionDraft((current) => ({ ...current, description: event.target.value }))}
+                    rows={6}
+                  />
+                </label>
+              </div>
+            </details>
 
             <div className="scenario-config-dimension-footer">
               <Button variant="secondary" onClick={() => toggleDimensionEnabled(dimensionDraft)} disabled={isRemoteSaving}>

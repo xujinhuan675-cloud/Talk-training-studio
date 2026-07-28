@@ -19,17 +19,42 @@ test('Settings members tab keeps the add-member search above the member list', (
   assert.ok(searchPanel < memberList)
 })
 
-test('Settings personas tab keeps the tab label from repeating as a section title', () => {
+test('Settings tabs keep tab labels from repeating as section titles', () => {
   const source = readSource('src/pages/SettingsPage.tsx')
-  const tabStart = source.indexOf('function PersonasTab()')
-  const tabEnd = source.indexOf('// Scenarios Tab', tabStart)
-  const personasTab = source.slice(tabStart, tabEnd)
+  const tabRanges = [
+    ['personas', 'function PersonasTab()', '// Scenarios Tab'],
+    ['scenarios', 'function ScenariosTab()', '// Team Members Tab'],
+    ['members', 'function TeamMembersTab()', '// Organizations Tab'],
+    ['organizations', 'function OrganizationsTab()', '// Preferences Tab'],
+    ['config', 'function ConfigTab()', '// SettingsPage'],
+  ]
 
-  assert.notEqual(tabStart, -1)
-  assert.notEqual(tabEnd, -1)
-  assert.match(personasTab, /settings-section-header actions-only/)
-  assert.match(personasTab, /settings-header-actions/)
-  assert.doesNotMatch(personasTab, /settings-section-title/)
+  for (const [name, startMarker, endMarker] of tabRanges) {
+    const tabStart = source.indexOf(startMarker)
+    const tabEnd = source.indexOf(endMarker, tabStart)
+    const tab = source.slice(tabStart, tabEnd)
+
+    assert.notEqual(tabStart, -1, `${name} tab start not found`)
+    assert.notEqual(tabEnd, -1, `${name} tab end not found`)
+    assert.match(tab, /settings-section-header actions-only/, `${name} tab should align actions to the right`)
+    assert.match(tab, /settings-header-actions/, `${name} tab should use the shared action wrapper`)
+    assert.doesNotMatch(tab, /settings-section-title/, `${name} tab should not repeat its tab label`)
+  }
+})
+
+test('Settings organization subtabs use content-sized secondary tab layout', () => {
+  const css = readSource('src/pages/SettingsPage.css')
+  const orgTabsBlock = css.match(/\.settings-org-tabs\.ui-segmented-control\s*\{([\s\S]*?)\n\}/)?.[1]
+  const orgTabButtonBlock = css.match(/\.settings-org-tabs \.ui-segmented-control-button\s*\{([\s\S]*?)\n\}/)?.[1]
+
+  assert.ok(orgTabsBlock)
+  assert.ok(orgTabButtonBlock)
+  assert.match(orgTabsBlock, /align-self:\s*flex-start/)
+  assert.match(orgTabsBlock, /max-width:\s*100%/)
+  assert.match(orgTabsBlock, /overflow-x:\s*auto/)
+  assert.doesNotMatch(orgTabsBlock, /(^|\n)\s*width:\s*100%/)
+  assert.match(orgTabButtonBlock, /flex:\s*0 0 auto/)
+  assert.doesNotMatch(orgTabButtonBlock, /flex:\s*1/)
 })
 
 test('Settings personas tab deduplicates repeated display identities', () => {
@@ -138,7 +163,7 @@ test('Settings AI service reset and dialog close controls stay out of primary ac
   const css = readSource('src/pages/SettingsPage.css')
   const configStart = source.indexOf('function ConfigTab()')
   const config = source.slice(configStart)
-  const headerStart = config.indexOf('<div className="settings-section-header">')
+  const headerStart = config.indexOf('<div className="settings-section-header actions-only">')
   const listStart = config.indexOf('<div className="settings-voice-list"')
   const header = config.slice(headerStart, listStart)
   const bottomActions = config.match(/<div className="settings-form-actions settings-voice-actions">([\s\S]*?)<\/div>/)
@@ -146,6 +171,7 @@ test('Settings AI service reset and dialog close controls stay out of primary ac
   const dialogActions = dialog?.[1].match(/<div className="dialog-actions settings-voice-dialog-actions">([\s\S]*?)<\/div>/)
 
   assert.notEqual(configStart, -1)
+  assert.doesNotMatch(header, /settings-section-title/)
   assert.match(header, /settings-reset-button/)
   assert.match(header, /<RotateCcw size=\{14\} \/>/)
   assert.match(header, /'Reset'/)

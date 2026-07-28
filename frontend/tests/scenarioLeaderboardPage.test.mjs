@@ -7,6 +7,18 @@ function readSource(relativePath) {
   return fs.readFileSync(path.resolve(relativePath), 'utf8')
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function findRuleBlock(css, selector) {
+  const rulePattern = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(selector)}\\s*\\{([\\s\\S]*?)\\n\\s*\\}`)
+  const match = css.match(rulePattern)
+
+  assert.ok(match)
+  return match[1]
+}
+
 test('ScenarioLeaderboardPage uses the current NewAPI team members for Team Board', () => {
   const source = readSource('src/pages/ScenarioLeaderboardPage.tsx')
 
@@ -39,6 +51,8 @@ test('ScenarioLeaderboardPage labels NewAPI Team Board by the loaded current tea
 test('ScenarioLeaderboardPage splits dense management content into secondary tabs', () => {
   const source = readSource('src/pages/ScenarioLeaderboardPage.tsx')
   const css = readSource('src/pages/ScenarioLeaderboardPage.css')
+  const viewNavBlock = findRuleBlock(css, '.scenario-leaderboard-view-nav')
+  const viewTabsBlock = findRuleBlock(css, '.scenario-leaderboard-view-tabs.ui-segmented-control')
 
   assert.match(source, /type LeaderboardViewTab = 'overview' \| 'unfinished' \| 'insights' \| 'personal'/)
   assert.match(source, /activeBoardTab, setActiveBoardTab/)
@@ -50,6 +64,10 @@ test('ScenarioLeaderboardPage splits dense management content into secondary tab
   assert.match(source, /activeBoardTab === 'personal'/)
   assert.match(source, /\(!isManagementView \|\| activeBoardTab === 'personal'\)/)
   assert.match(css, /\.scenario-leaderboard-view-nav/)
+  assert.match(viewNavBlock, /overflow-x:\s*auto/)
+  assert.match(viewTabsBlock, /width:\s*fit-content/)
+  assert.match(viewTabsBlock, /max-width:\s*100%/)
+  assert.doesNotMatch(viewTabsBlock, /(^|\n)\s*width:\s*100%/)
   assert.match(css, /\.scenario-leaderboard-grid--overview/)
   assert.match(css, /\.scenario-leaderboard-side--tab/)
 })

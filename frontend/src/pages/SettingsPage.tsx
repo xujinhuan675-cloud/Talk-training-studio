@@ -713,12 +713,13 @@ function ScenariosTab() {
 
   return (
     <>
-      <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('对话场景', 'Room scenarios')}</h3>
-        <Button className="settings-create-btn" variant="primary" onClick={startCreate}>
-          <Plus size={14} />
-          {tr('新建对话场景', 'New room scenario')}
-        </Button>
+      <div className="settings-section-header actions-only">
+        <div className="settings-header-actions">
+          <Button className="settings-create-btn" variant="primary" onClick={startCreate}>
+            <Plus size={14} />
+            {tr('新建对话场景', 'New room scenario')}
+          </Button>
+        </div>
       </div>
 
       <div className="settings-form-panel settings-list-filter-panel">
@@ -1083,9 +1084,6 @@ function TeamMembersTab() {
   if (!isNewApiSession) {
     return (
       <>
-        <div className="settings-section-header">
-          <h3 className="settings-section-title">{tr('成员', 'Members')}</h3>
-        </div>
         <div className="settings-empty">
           <div className="settings-empty-icon">
             <Users size={36} />
@@ -1098,12 +1096,13 @@ function TeamMembersTab() {
 
   return (
     <>
-      <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('成员', 'Members')}</h3>
-        <Button className="settings-header-button" variant="secondary" onClick={loadMembers} disabled={loading}>
-          <RefreshCw size={14} />
-          {t('common.refresh')}
-        </Button>
+      <div className="settings-section-header actions-only">
+        <div className="settings-header-actions">
+          <Button className="settings-header-button" variant="secondary" onClick={loadMembers} disabled={loading}>
+            <RefreshCw size={14} />
+            {t('common.refresh')}
+          </Button>
+        </div>
       </div>
 
       <div className="settings-members-summary">
@@ -1434,12 +1433,13 @@ function OrganizationsTab() {
 
   return (
     <>
-      <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('组织', 'Organizations')}</h3>
-        <Button className="settings-create-btn" variant="primary" onClick={handleNewOrg}>
-          <Plus size={14} />
-          {tr('新建组织', 'New Organization')}
-        </Button>
+      <div className="settings-section-header actions-only">
+        <div className="settings-header-actions">
+          <Button className="settings-create-btn" variant="primary" onClick={handleNewOrg}>
+            <Plus size={14} />
+            {tr('新建组织', 'New Organization')}
+          </Button>
+        </div>
       </div>
 
       <div className="settings-org-layout">
@@ -2266,8 +2266,7 @@ function ConfigTab() {
 
   return (
     <>
-      <div className="settings-section-header">
-        <h3 className="settings-section-title">{tr('AI 服务', 'AI Services')}</h3>
+      <div className="settings-section-header actions-only">
         <div className="settings-header-actions">
           <Button
             className="settings-header-button"

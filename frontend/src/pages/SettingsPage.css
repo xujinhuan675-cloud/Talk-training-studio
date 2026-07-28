@@ -63,13 +63,6 @@
   justify-content: flex-end;
 }
 
-.settings-section-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-}
-
 /* List items */
 .settings-list {
   display: flex;
@@ -925,13 +918,15 @@
 }
 
 .settings-org-tabs.ui-segmented-control {
-  width: 100%;
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
   justify-content: flex-start;
   background: var(--bg-card);
 }
 
 .settings-org-tabs .ui-segmented-control-button {
-  flex: 1 1 0;
+  flex: 0 0 auto;
 }
 
 .settings-org-content {
