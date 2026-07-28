@@ -16,6 +16,7 @@ in its own UoW transaction. Incremental text is pushed to the frontend via
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import json
 import re
@@ -23,6 +24,10 @@ import uuid
 from typing import Callable
 
 from application.ports.llm import LLMMessage
+from application.ports.turn_based_voice import (
+    TurnBasedVoicePipelinePort,
+    TurnBasedVoiceSynthesisConfig,
+)
 from application.services.stakeholder.dto import MessageDTO
 from application.services.stakeholder.prompt_builder import (
     build_compressed_group_llm_messages,
@@ -219,7 +224,7 @@ class StakeholderChatService:
         dispatcher=None,
         max_group_rounds: int = 20,
         compression_service=None,
-        tts=None,
+        voice_pipeline: TurnBasedVoicePipelinePort | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._persona_loader = persona_loader
@@ -227,7 +232,7 @@ class StakeholderChatService:
         self._dispatcher = dispatcher
         self._max_group_rounds = max_group_rounds
         self._compression = compression_service
-        self._tts = tts  # Optional TTSPort for voice synthesis
+        self._voice_pipeline = voice_pipeline
 
     async def send_message(
         self,
@@ -456,7 +461,7 @@ class StakeholderChatService:
                     stream_buffer = ""
 
                     # Set up TTS pipeline if voice is enabled for this persona
-                    tts_enabled = self._tts is not None
+                    tts_enabled = self._voice_pipeline is not None
                     sentence_buf = None
                     tts_tasks: list[asyncio.Task] = []
                     audio_index = 0
@@ -607,48 +612,49 @@ class StakeholderChatService:
         Runs as a concurrent task alongside LLM generation so that
         TTS for sentence N happens while LLM generates sentence N+1.
         """
-        import base64
-
-        from application.ports.tts import TTSConfig
-
         # Strip emotion tags — they arrive as trailing <!--emotion:{...}-->
         # and must not be spoken aloud.
         text = _EMOTION_RE.sub("", text).strip()
-        if not text:
+        if not text or self._voice_pipeline is None:
             return
 
         try:
-            config = TTSConfig(
+            config = TurnBasedVoiceSynthesisConfig(
+                persona_id=persona_id,
                 voice_id=persona.voice_id or "",
-                speed=persona.voice_speed,
+                voice_speed=persona.voice_speed,
                 style_instruction=_tts_style_instruction(
                     persona.voice_style,
                     reply_language,
                 ),
                 language=reply_language,
+                audio_sequence=index,
+                metadata={
+                    "replyId": reply_id,
+                    "sentenceIndex": index,
+                    "personaId": persona_id,
+                },
             )
-            # Accumulate all streaming chunks into a complete mp3 per sentence.
-            # Individual chunks are mp3 fragments that browsers can't decode alone.
-            audio_parts: list[bytes] = []
-            async for audio_bytes in self._tts.synthesize_stream(text, config):
-                audio_parts.append(audio_bytes)
-
-            if audio_parts:
-                complete_audio = b"".join(audio_parts)
+            async for audio_output in self._voice_pipeline.synthesize_stream(text, config):
                 await room_event_bus.publish(
                     room_id,
                     "audio_chunk",
                     {
                         "persona_id": persona_id,
-                        "data": base64.b64encode(complete_audio).decode("ascii"),
+                        "data": base64.b64encode(audio_output.data).decode("ascii"),
                         "sentence_index": index,
                         "reply_id": reply_id,
                         "sentence_final": True,
+                        "runtime": audio_output.runtime,
+                        "provider": audio_output.provider,
+                        "mime_type": audio_output.mime_type,
+                        "sequence": audio_output.sequence,
+                        "context_id": audio_output.context_id,
                     },
                 )
         except Exception:
             logger.exception(
-                "TTS synthesis failed for room %d, persona %s, sentence %d",
+                "Turn-based voice pipeline failed for room %d, persona %s, sentence %d",
                 room_id,
                 persona_id,
                 index,

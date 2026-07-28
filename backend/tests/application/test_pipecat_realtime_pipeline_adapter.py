@@ -1011,6 +1011,38 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
     ]
 
 
+def test_pipeline_start_metadata_strips_secret_config_values():
+    handle = pipecat_adapter.build_pipecat_pipeline_handle(
+        runtime=fake_runtime(websocket=False),
+        context=TrainingVoiceContext(
+            binding=RealtimeSessionBinding(training_session_id="training-secret", room_id=9),
+            metadata={
+                "scenario": "coaching",
+                "Authorization": "Bearer sk-context-secret",
+            },
+        ),
+        config=RealtimePipelineConfig(
+            provider="pipecat",
+            metadata={
+                "openaiApiKey": "sk-config-secret",
+                "safeConfig": "kept",
+                "notes": "Bearer sk-note-secret",
+                "nested": {"token": "nested-secret", "public": "ok"},
+            },
+        ),
+    )
+
+    start_metadata = handle.worker.kwargs["params"].kwargs["start_metadata"]
+    metadata = start_metadata["metadata"]
+    assert metadata["scenario"] == "coaching"
+    assert metadata["safeConfig"] == "kept"
+    assert metadata["notes"] == "Bearer ***"
+    assert metadata["nested"] == {"public": "ok"}
+    assert "Authorization" not in metadata
+    assert "openaiApiKey" not in metadata
+    assert "sk-config-secret" not in json.dumps(start_metadata)
+
+
 @pytest.mark.asyncio
 async def test_adapter_uses_configured_input_sample_rate_when_chunk_omits_it():
     adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(runtime=fake_runtime(websocket=False))
@@ -1848,6 +1880,51 @@ async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_eve
     }
     assert "unsafe" not in payload["metadata"]
     assert processor.pushed[0][0].audio == audio
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_ignores_empty_or_non_bytes_tts_audio():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+    )
+
+    await processor.process_frame(
+        FakeTTSAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+    await processor.process_frame(
+        FakeTTSAudioRawFrame(audio="not-bytes", sample_rate=16000, num_channels=1),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    assert queue.empty()
+    assert len(processor.pushed) == 2
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_defaults_invalid_audio_shape_values():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+    )
+
+    await processor.process_frame(
+        FakeTTSAudioRawFrame(audio=b"pcm", sample_rate="bad", num_channels="bad"),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+    assert event["sampleRate"] == 16000
+    assert event["channels"] == 1
+    assert event["payload"]["sampleRate"] == 16000
+    assert event["payload"]["channels"] == 1
 
 
 @pytest.mark.asyncio

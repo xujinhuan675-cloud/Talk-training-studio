@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from application.ports.llm import LLMChunk, LLMMessage, LLMResponse
+from application.ports.realtime import REALTIME_RUNTIME_PIPECAT, RealtimeOutputAudio
 from application.services.stakeholder.room_access_policy import (
     StakeholderRoomAccessScope,
     unrestricted_stakeholder_room_scope,
@@ -344,13 +345,20 @@ class _CapturingLLM:
         yield LLMChunk(content="", finish_reason="end_turn")
 
 
-class _CapturingTTS:
+class _CapturingVoicePipeline:
     def __init__(self) -> None:
         self.requests = []
 
     async def synthesize_stream(self, text, config):
         self.requests.append((text, config))
-        yield b"mp3-audio"
+        yield RealtimeOutputAudio(
+            data=b"mp3-audio",
+            provider="pipecat",
+            runtime=REALTIME_RUNTIME_PIPECAT,
+            mime_type="audio/mpeg",
+            sequence=config.audio_sequence,
+            context_id="reply-1:0",
+        )
 
 
 @pytest.mark.asyncio
@@ -425,20 +433,20 @@ async def test_reply_language_metadata_is_appended_to_system_prompt(session_fact
 
 
 @pytest.mark.asyncio
-async def test_reply_language_metadata_is_passed_to_tts_config(session_factory):
+async def test_reply_language_metadata_is_passed_to_voice_pipeline_config(session_factory):
     from application.services.stakeholder.stakeholder_chat_service import (
         StakeholderChatService,
     )
 
     persona = _make_persona()
     persona.voice_style = "Speak calmly."
-    tts = _CapturingTTS()
+    voice_pipeline = _CapturingVoicePipeline()
     room_id = await _create_room(session_factory)
     svc = StakeholderChatService(
         uow_factory=_uow_factory(session_factory),
         persona_loader=FakePersonaLoader(personas={"jianfeng": persona}),
         llm=_CapturingLLM(response="Acknowledged."),
-        tts=tts,
+        voice_pipeline=voice_pipeline,
     )
 
     _, room = await svc.send_message(
@@ -455,12 +463,73 @@ async def test_reply_language_metadata_is_passed_to_tts_config(session_factory):
     )
     await svc.generate_replies(room_id, room)
 
-    assert tts.requests
-    config = tts.requests[0][1]
+    assert voice_pipeline.requests
+    config = voice_pipeline.requests[0][1]
     assert config.language == "zh-CN"
     assert "Speak calmly." in config.style_instruction
     assert "Mandarin Chinese" in config.style_instruction
     assert "Do not translate" in config.style_instruction
+
+
+@pytest.mark.asyncio
+async def test_voice_pipeline_audio_chunk_sse_keeps_turn_based_envelope(session_factory):
+    from application.services.stakeholder.sse import room_event_bus
+    from application.services.stakeholder.stakeholder_chat_service import (
+        StakeholderChatService,
+    )
+
+    voice_pipeline = _CapturingVoicePipeline()
+    room_id = await _create_room(session_factory)
+    queue = room_event_bus.subscribe(room_id)
+    svc = StakeholderChatService(
+        uow_factory=_uow_factory(session_factory),
+        persona_loader=FakePersonaLoader(),
+        llm=_CapturingLLM(response="Acknowledged."),
+        voice_pipeline=voice_pipeline,
+    )
+
+    try:
+        _, room = await svc.send_message(
+            room_id,
+            "Keep the audio_chunk wire contract.",
+            access_scope=unrestricted_stakeholder_room_scope(),
+        )
+        await svc.generate_replies(room_id, room)
+
+        events = []
+        while not queue.empty():
+            events.append(await queue.get())
+    finally:
+        room_event_bus.unsubscribe(room_id, queue)
+
+    audio_index, audio_payload = next(
+        (index, payload)
+        for index, (event, payload) in enumerate(events)
+        if event == "audio_chunk"
+    )
+    persona_message_index = next(
+        index
+        for index, (event, payload) in enumerate(events)
+        if event == "message" and payload["sender_type"] == "persona"
+    )
+
+    assert audio_index < persona_message_index
+    assert audio_payload == {
+        "persona_id": "jianfeng",
+        "data": "bXAzLWF1ZGlv",
+        "sentence_index": 0,
+        "reply_id": audio_payload["reply_id"],
+        "sentence_final": True,
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "provider": "pipecat",
+        "mime_type": "audio/mpeg",
+        "sequence": 0,
+        "context_id": "reply-1:0",
+    }
+    assert audio_payload["reply_id"]
+    assert "mimeType" not in audio_payload
+    assert "contextId" not in audio_payload
+    assert "audio" not in audio_payload
 
 
 @pytest.mark.asyncio

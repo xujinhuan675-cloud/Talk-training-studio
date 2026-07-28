@@ -23,6 +23,7 @@ from infrastructure.external.pipecat.realtime_pipeline import (
     pipecat_source_snapshot,
     validate_pipecat_voice_config,
 )
+from infrastructure.external.pipecat.turn_based_cascade import PipecatTurnBasedCascadePipeline
 
 __all__ = [
     "PipecatCapability",
@@ -30,6 +31,7 @@ __all__ = [
     "PipecatRealtimePipelineError",
     "PipecatRealtimePipelineAdapter",
     "PipecatRuntime",
+    "PipecatTurnBasedCascadePipeline",
     "build_pipecat_llm_processors",
     "build_pipecat_pipeline_handle",
     "build_pipecat_voice_processors",

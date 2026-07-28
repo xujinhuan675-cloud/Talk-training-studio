@@ -525,6 +525,23 @@ async def get_stakeholder_chat_service(
     )
     # TTS is optional — None if not configured
     tts = get_tts_client()
+    tts_provider = settings.voice.tts_provider
+    normalized_tts_provider = str(tts_provider or "").strip().lower().replace("-", "_").replace(" ", "_")
+    native_tts_provider = (
+        normalized_tts_provider in {"openai", "openai_tts"}
+        and _turn_based_openai_tts_key_available()
+    )
+    voice_pipeline = None
+    if tts is not None or native_tts_provider:
+        from infrastructure.external.pipecat import PipecatTurnBasedCascadePipeline
+
+        voice_pipeline = PipecatTurnBasedCascadePipeline(
+            tts,
+            tts_provider=tts_provider,
+            tts_model=settings.voice.tts_model,
+            tts_api_key=settings.voice.tts_api_key,
+            tts_base_url=settings.voice.tts_base_url,
+        )
     return StakeholderChatService(
         uow_factory=SQLAlchemyUnitOfWork,
         persona_loader=loader,
@@ -532,7 +549,30 @@ async def get_stakeholder_chat_service(
         dispatcher=dispatcher,
         max_group_rounds=settings.stakeholder.max_group_rounds,
         compression_service=compression,
-        tts=tts,
+        voice_pipeline=voice_pipeline,
+    )
+
+
+def _turn_based_openai_tts_key_available() -> bool:
+    llm_provider = (
+        str(getattr(settings.llm, "provider", "") or "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    llm_base_url = str(getattr(settings.llm, "base_url", "") or "").strip().lower()
+    llm_key = None
+    if (
+        llm_provider not in {"openrouter", "open_router", "openrouter_ai", "openrouter_compatible"}
+        and "openrouter.ai" not in llm_base_url
+    ):
+        llm_key = settings.llm.api_key
+    return bool(
+        settings.voice.tts_api_key
+        or settings.REALTIME_OPENAI_API_KEY
+        or settings.OPENAI_API_KEY
+        or llm_key
     )
 
 

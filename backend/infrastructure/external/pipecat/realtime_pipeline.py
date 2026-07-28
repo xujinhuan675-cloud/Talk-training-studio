@@ -3092,7 +3092,7 @@ def _tts_audio_event_from_pipecat_frame(
     audio_sequence: int | None,
 ) -> Mapping[str, Any] | None:
     audio = _bytes_from_audio_frame(frame)
-    if audio is None:
+    if not audio:
         return None
 
     sequence = _frame_audio_sequence(frame, fallback=audio_sequence)
@@ -3137,7 +3137,7 @@ def _frame_sample_rate(frame: Any, config: RealtimePipelineConfig) -> int:
     value = getattr(frame, "sample_rate", None)
     if value is None:
         value = _audio_out_sample_rate(config) or _audio_in_sample_rate(config)
-    return int(value or 16000)
+    return _positive_int(value, default=16000)
 
 
 def _frame_channels(frame: Any, config: RealtimePipelineConfig) -> int:
@@ -3146,7 +3146,15 @@ def _frame_channels(frame: Any, config: RealtimePipelineConfig) -> int:
         value = getattr(frame, "channels", None)
     if value is None:
         value = config.metadata.get("outputChannels") or config.metadata.get("channels")
-    return int(value or 1)
+    return _positive_int(value, default=1)
+
+
+def _positive_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _output_audio_mime_type(config: RealtimePipelineConfig, frame: Any) -> str:
@@ -3372,7 +3380,9 @@ def _start_metadata(
     context: TrainingVoiceContext,
     config: RealtimePipelineConfig,
 ) -> dict[str, Any]:
-    metadata = {**dict(context.metadata), **dict(config.metadata)}
+    raw_metadata = {**dict(context.metadata), **dict(config.metadata)}
+    safe_metadata = _json_safe_metadata(raw_metadata)
+    metadata = dict(safe_metadata) if isinstance(safe_metadata, Mapping) else {}
     start_metadata: dict[str, Any] = {
         "source": "talkwise",
         "provider": config.provider,
