@@ -47,6 +47,13 @@ import EmotionCurve from '../components/EmotionCurve'
 import CheatSheetComponent from '../components/CheatSheet'
 import { Button } from '../components/ui/button'
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '../components/ui/dialog'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -66,12 +73,16 @@ import { createDefaultConversation } from '../services/defaultConversation'
 import {
   completeTrainingSession,
   buildTrainingCompletionBranchMetadata,
+  getTrainingCompletionReportState,
+  getTrainingSession,
   getTrainingSessionReport,
   persistTrainingGuidanceEvents,
   requestTrainingGuidance,
   startTrainingGuidanceStream,
+  type TrainingCompletionReportState,
   type GuideEventDTO,
   type TrainingSessionReportDTO,
+  type TrainingSessionDTO,
   type TrainingGuidanceResponse,
   type TranscriptTurnDTO,
 } from '../services/trainingSession'
@@ -87,6 +98,7 @@ import {
 import {
   getInteractionModeFromLocation,
   getLiveCoachLanguagePairFromLocation,
+  getRealtimeProfileFromLocation,
   getTrainingFeedbackModeFromLocation,
   getTrainingProfileFromLocation,
   getTrainingModeFromLocation,
@@ -120,7 +132,7 @@ import {
   getScenarioCategoryLabel,
   getScenarioDifficultyLabel,
 } from '../utils/scenarioLabels'
-import type { RealtimeVoiceProfile } from '../services/realtimeSession'
+import type { RealtimeTranscriptRole } from '../services/realtimeSession'
 import '../App.css'
 import '../styles/panelControls.css'
 import './ChatPage.css'
@@ -158,41 +170,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function getStateStringValue(state: unknown, key: string): string | null {
   const value = asRecord(state)?.[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function normalizeRouteRealtimeVoiceProfile(value: string | null): RealtimeVoiceProfile | null {
-  const normalized = value?.trim().toLowerCase().replace(/[-\s]/g, '_')
-  if (!normalized) return null
-  if (normalized === 'cascade' || normalized === 'near_realtime' || normalized === 'stt_llm_tts') {
-    return 'cascade'
-  }
-  if (
-    normalized === 'true_realtime'
-    || normalized === 'speech_to_speech'
-    || normalized === 'speech2speech'
-    || normalized === 'speechtospeech'
-    || normalized === 'realtime_llm'
-    || normalized === 'openai_realtime'
-    || normalized === 'openai_speech_to_speech'
-  ) {
-    return normalized === 'true_realtime' ? 'true_realtime' : 'speech_to_speech'
-  }
-  return null
-}
-
-function getRealtimeVoiceProfileFromLocation(search: string, state: unknown): RealtimeVoiceProfile | null {
-  const stateValue = getStateStringValue(state, 'realtimeProfile')
-    ?? getStateStringValue(state, 'realtime_profile')
-    ?? getStateStringValue(state, 'voiceProfile')
-    ?? getStateStringValue(state, 'voice_profile')
-  const params = new URLSearchParams(search)
-  return normalizeRouteRealtimeVoiceProfile(
-    stateValue
-      ?? params.get('realtimeProfile')
-      ?? params.get('realtime_profile')
-      ?? params.get('voiceProfile')
-      ?? params.get('voice_profile'),
-  )
 }
 
 function getStateStringArrayValue(state: unknown, key: string): string[] {
@@ -309,6 +286,8 @@ function extractTrainingReportScore(report: TrainingSessionReportDTO): number | 
 const GUIDANCE_TURN_WINDOW = 8
 const GUIDANCE_AUTO_DELAY_MS = 900
 const GUIDANCE_AUTO_MIN_INTERVAL_MS = 1200
+const TRAINING_REPORT_POLL_INTERVAL_MS = 1200
+const TRAINING_REPORT_POLL_TIMEOUT_MS = 90000
 const ROOM_AUTO_OPENING_MESSAGE = '我来接'
 
 const GUIDE_EVENT_TEXTS: Record<string, [string, string]> = {
@@ -438,6 +417,90 @@ type RefreshGuidanceOptions = {
 
 type MobileSheetKey = 'cheatsheet' | 'coaching' | 'analysis' | 'emotion'
 
+const OPTIMISTIC_REALTIME_TRANSCRIPT_SOURCE = 'realtime_voice_final'
+
+function senderTypeForRealtimeRole(role: RealtimeTranscriptRole): ChatMessage['sender_type'] {
+  return role === 'assistant' ? 'persona' : 'user'
+}
+
+function isOptimisticRealtimeTranscriptMessage(message: ChatMessage): boolean {
+  const metadata = asRecord(message.metadata)
+  const realtime = asRecord(metadata?.realtime)
+  return metadata?.source === OPTIMISTIC_REALTIME_TRANSCRIPT_SOURCE && realtime?.optimistic === true
+}
+
+function isSameVisibleTranscriptMessage(message: ChatMessage, candidate: ChatMessage): boolean {
+  return message.room_id === candidate.room_id
+    && message.sender_type === candidate.sender_type
+    && message.content.trim() === candidate.content.trim()
+}
+
+type TrainingCompletionStage =
+  | 'idle'
+  | 'saving_guidance'
+  | 'ending_session'
+  | 'generating_report'
+  | 'opening_report'
+  | 'returning'
+
+type TrainingCompletionChoice = 'with_report' | 'without_report'
+
+function getTrainingCompletionButtonLabel(
+  stage: TrainingCompletionStage,
+  completed: boolean,
+  tr: TranslateInline,
+): string {
+  if (stage === 'saving_guidance') return tr('保存中', 'Saving')
+  if (stage === 'ending_session') return tr('结束中', 'Ending')
+  if (stage === 'generating_report') return tr('生成报告中', 'Generating report')
+  if (stage === 'opening_report') return tr('打开报告中', 'Opening report')
+  if (stage === 'returning') return tr('返回中', 'Returning')
+  return completed ? tr('已结束', 'Ended') : tr('结束练习', 'End practice')
+}
+
+function getTrainingCompletionButtonTitle(
+  stage: TrainingCompletionStage,
+  completed: boolean,
+  tr: TranslateInline,
+): string {
+  if (stage === 'saving_guidance') return tr('正在保存训练记录和实时指导事件', 'Saving practice records and coach events')
+  if (stage === 'ending_session') return tr('正在结束训练', 'Ending the practice session')
+  if (stage === 'generating_report') {
+    return tr('正在生成对话分析报告，完成后会自动打开报告', 'Generating the conversation analysis report. It will open automatically.')
+  }
+  if (stage === 'opening_report') return tr('对话分析报告已生成，正在打开报告', 'The conversation analysis report is ready and opening.')
+  if (stage === 'returning') return tr('训练已结束，正在返回训练入口', 'Practice ended. Returning to the training entry.')
+  return completed ? tr('训练已结束', 'Practice ended') : tr('打开结束选择', 'Choose how to end practice')
+}
+
+function getTrainingReportStatusCopy(
+  state: TrainingCompletionReportState,
+  tr: TranslateInline,
+): { title: string; message: string } {
+  if (state.status === 'ready') {
+    return {
+      title: tr('对话分析报告已生成', 'Conversation analysis report is ready'),
+      message: tr('正在打开报告', 'Opening the report'),
+    }
+  }
+  if (state.status === 'failed') {
+    return {
+      title: tr('对话分析报告生成失败', 'Conversation analysis report failed'),
+      message: state.message || tr('训练已结束，但报告没有生成成功，可以稍后重新分析。', 'Practice ended, but the report was not generated. You can analyze again later.'),
+    }
+  }
+  return {
+    title: tr('对话分析报告生成中', 'Generating conversation analysis report'),
+    message: tr('训练已结束，报告会在生成完成后自动打开。', 'Practice ended. The report will open automatically when it is ready.'),
+  }
+}
+
+function waitForTrainingReportPoll(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
 /* ------------------------------------------------------------------ */
 /*  Inner chat area — must be inside ChatProvider                      */
 /* ------------------------------------------------------------------ */
@@ -459,12 +522,14 @@ function ChatArea() {
   const persistedGuidanceSignatureRef = React.useRef<string | null>(null)
   const guidanceStreamAbortRef = React.useRef<AbortController | null>(null)
   const guidanceStreamVersionRef = React.useRef(0)
+  const trainingReportPollSeqRef = React.useRef(0)
+  const optimisticRealtimeMessageIdRef = React.useRef(-1)
   const initialRouteMessageKeyRef = React.useRef<string | null>(null)
   const trainingMode = getTrainingModeFromLocation(location.search, location.state)
   const interactionMode = getInteractionModeFromLocation(location.search, location.state)
   const trainingSessionId = getTrainingSessionIdFromLocation(location.search, location.state)
   const trainingProfile = getTrainingProfileFromLocation(location.search, location.state)
-  const realtimeVoiceProfile = getRealtimeVoiceProfileFromLocation(location.search, location.state)
+  const realtimeVoiceProfile = getRealtimeProfileFromLocation(location.search, location.state)
   const trainingFeedbackMode = getTrainingFeedbackModeFromLocation(location.search, location.state)
   const liveCoachLanguagePair = getLiveCoachLanguagePairFromLocation(location.search, location.state)
   const routeReplyLanguage = normalizeTrainingReplyLanguage(
@@ -499,6 +564,9 @@ function ChatArea() {
   const [battlePrepRoundCount, setBattlePrepRoundCount] = useState(0)
   const [battlePrepEnding, setBattlePrepEnding] = useState(false)
   const [trainingSessionCompleting, setTrainingSessionCompleting] = useState(false)
+  const [trainingCompletionStage, setTrainingCompletionStage] = useState<TrainingCompletionStage>('idle')
+  const [trainingCompletionDialogOpen, setTrainingCompletionDialogOpen] = useState(false)
+  const [trainingCompletionReportState, setTrainingCompletionReportState] = useState<TrainingCompletionReportState | null>(null)
   const [trainingSessionCompleted, setTrainingSessionCompleted] = useState(false)
   const [guidanceOpen, setGuidanceOpen] = useState(false)
   const [guidanceLoading, setGuidanceLoading] = useState(false)
@@ -866,6 +934,11 @@ function ChatArea() {
 
   // Compute battle prep round count from existing messages
   const selectedRoomMessages = chat.selectedRoom?.messages
+  const trainingCompletionHasMessages = React.useMemo(() => (
+    (selectedRoomMessages || []).some((message: { content?: string }) => (
+      typeof message.content === 'string' && message.content.trim().length > 0
+    ))
+  ), [selectedRoomMessages])
   useEffect(() => {
     if (selectedRoomType === 'battle_prep' && selectedRoomMessages && selectedRoomMessages.length > 0) {
       const userMsgCount = selectedRoomMessages.filter((m: { sender_type: string }) => m.sender_type === 'user').length
@@ -1336,9 +1409,95 @@ function ChatArea() {
     }
   }, [])
 
-  const handleRealtimeTranscriptPersisted = React.useCallback((text: string, role: 'user' | 'assistant' = 'user') => {
+  const appendRealtimeTranscriptMessage = React.useCallback((message: ChatMessage) => {
+    chat.setSelectedRoom((prev) => {
+      if (!prev || prev.room.id !== message.room_id) return prev
+      if (prev.messages.some((item) => item.id === message.id)) return prev
+      const optimisticIndex = prev.messages.findIndex((item) => (
+        isOptimisticRealtimeTranscriptMessage(item) && isSameVisibleTranscriptMessage(message, item)
+      ))
+      if (optimisticIndex >= 0) {
+        const nextMessages = [...prev.messages]
+        nextMessages[optimisticIndex] = message
+        return { ...prev, messages: nextMessages }
+      }
+      return { ...prev, messages: [...prev.messages, message] }
+    })
+    setTimeout(chat.scrollToBottom, 50)
+  }, [chat.scrollToBottom, chat.setSelectedRoom])
+
+  const appendOptimisticRealtimeTranscriptMessage = React.useCallback((
+    text: string,
+    role: RealtimeTranscriptRole,
+  ) => {
+    const transcript = text.trim()
+    if (!transcript || !selectedRoomId) return
+    const senderType = senderTypeForRealtimeRole(role)
+    chat.setSelectedRoom((prev) => {
+      if (!prev || prev.room.id !== selectedRoomId) return prev
+      const alreadyPending = prev.messages.some((item) => (
+        isOptimisticRealtimeTranscriptMessage(item)
+        && item.room_id === selectedRoomId
+        && item.sender_type === senderType
+        && item.content.trim() === transcript
+      ))
+      if (alreadyPending) return prev
+      const messageId = optimisticRealtimeMessageIdRef.current
+      optimisticRealtimeMessageIdRef.current -= 1
+      const optimisticMessage: ChatMessage = {
+        id: messageId,
+        room_id: selectedRoomId,
+        sender_type: senderType,
+        sender_id: senderType === 'persona' ? 'assistant' : 'user',
+        content: transcript,
+        timestamp: new Date().toISOString(),
+        emotion_score: null,
+        emotion_label: null,
+        metadata: {
+          ...(realtimeTranscriptMetadata || {}),
+          source: OPTIMISTIC_REALTIME_TRANSCRIPT_SOURCE,
+          trainingMode: 'voice',
+          interactionMode: 'realtime',
+          trainingProfile,
+          trainingFeedbackMode,
+          realtime: {
+            role,
+            optimistic: true,
+          },
+        },
+      }
+      return { ...prev, messages: [...prev.messages, optimisticMessage] }
+    })
+    setTimeout(chat.scrollToBottom, 50)
+  }, [
+    chat.scrollToBottom,
+    chat.setSelectedRoom,
+    realtimeTranscriptMetadata,
+    selectedRoomId,
+    trainingFeedbackMode,
+    trainingProfile,
+  ])
+
+  const handleRealtimeTranscriptFinal = React.useCallback((
+    text: string,
+    role: RealtimeTranscriptRole,
+  ) => {
+    if (role !== 'user') return
+    appendOptimisticRealtimeTranscriptMessage(text, role)
+  }, [appendOptimisticRealtimeTranscriptMessage])
+
+  const handleRealtimeTranscriptPersisted = React.useCallback((
+    text: string,
+    role: RealtimeTranscriptRole = 'user',
+    message?: ChatMessage,
+  ) => {
     const transcript = text.trim()
     if (!transcript) return
+    if (message) {
+      appendRealtimeTranscriptMessage(message)
+    } else if (role === 'user') {
+      appendOptimisticRealtimeTranscriptMessage(transcript, role)
+    }
     setLastVoiceTranscript(transcript)
     scheduleGuidanceRefresh({
       extraTurn: {
@@ -1360,6 +1519,8 @@ function ChatArea() {
     })
     setTimeout(chat.scrollToBottom, 100)
   }, [
+    appendRealtimeTranscriptMessage,
+    appendOptimisticRealtimeTranscriptMessage,
     chat.scrollToBottom,
     isDrillFeedbackMode,
     isLiveCoachSession,
@@ -1369,17 +1530,130 @@ function ChatArea() {
     trainingProfile,
   ])
 
-  const handleCompleteTrainingSession = React.useCallback(async () => {
-    if (!trainingSessionId || trainingSessionCompleting) return
-    const hasMessages = (selectedRoomMessages || []).some((message: { content?: string }) => (
-      typeof message.content === 'string' && message.content.trim().length > 0
-    ))
+  const updateScenarioTrainingCompletionProgress = React.useCallback((
+    session: TrainingSessionDTO,
+    scenarioScore?: number,
+  ) => {
+    if (!scenarioTrainingId) return
+    saveScenarioTrainingProgress(
+      markScenarioTrainingCompleted(getScenarioTrainingProgress(progressScope), scenarioTrainingId, {
+        trainingSessionId: session.session_id || trainingSessionId || undefined,
+        reportId: session.report_id,
+        scoreId: session.score_id,
+        score: scenarioScore,
+        scoreStatus: scenarioScore === undefined ? 'pending' : 'ready',
+        scope: progressScope,
+        completedAt: session.completed_at ?? undefined,
+      }),
+      progressScope,
+    )
+  }, [progressScope, scenarioTrainingId, trainingSessionId])
+
+  const openTrainingCompletionReport = React.useCallback(async (
+    session: TrainingSessionDTO,
+    reportState: TrainingCompletionReportState,
+  ) => {
+    if (!trainingSessionId) return
+    const reportId = Number(reportState.reportId ?? session.report_id)
+    if (!Number.isFinite(reportId) || reportId <= 0) return
+
+    const scenarioScore = await getTrainingSessionReport(trainingSessionId)
+      .then(extractTrainingReportScore)
+      .catch(() => undefined)
+    updateScenarioTrainingCompletionProgress(session, scenarioScore)
+    await analysis.openReport(reportId)
+    setTrainingCompletionReportState(null)
+  }, [
+    analysis,
+    trainingSessionId,
+    updateScenarioTrainingCompletionProgress,
+  ])
+
+  const pollTrainingCompletionReport = React.useCallback(async () => {
+    if (!trainingSessionId) return
+    const pollSeq = trainingReportPollSeqRef.current + 1
+    trainingReportPollSeqRef.current = pollSeq
+    const deadline = Date.now() + TRAINING_REPORT_POLL_TIMEOUT_MS
+
+    while (Date.now() < deadline) {
+      await waitForTrainingReportPoll(TRAINING_REPORT_POLL_INTERVAL_MS)
+      if (trainingReportPollSeqRef.current !== pollSeq) return
+
+      let latestSession: TrainingSessionDTO
+      try {
+        latestSession = await getTrainingSession(trainingSessionId)
+      } catch {
+        continue
+      }
+      if (trainingReportPollSeqRef.current !== pollSeq) return
+
+      const reportState = getTrainingCompletionReportState(latestSession)
+      if (!reportState || reportState.status === 'pending') {
+        if (reportState) setTrainingCompletionReportState(reportState)
+        continue
+      }
+
+      setTrainingCompletionReportState(reportState)
+      if (reportState.status === 'failed') return
+
+      await openTrainingCompletionReport(latestSession, reportState)
+      if (trainingReportPollSeqRef.current === pollSeq) {
+        setTrainingCompletionReportState(null)
+      }
+      return
+    }
+
+    if (trainingReportPollSeqRef.current === pollSeq) {
+      setTrainingCompletionReportState({
+        status: 'failed',
+        phase: 'generate_report',
+        message: tr('报告生成时间较长，请稍后点击分析查看最新报告。', 'Report generation is taking longer than expected. Try Analyze again shortly.'),
+        errorType: 'Timeout',
+      })
+    }
+  }, [
+    openTrainingCompletionReport,
+    trainingSessionId,
+    tr,
+  ])
+
+  useEffect(() => {
+    setTrainingCompletionReportState(null)
+    setTrainingCompletionDialogOpen(false)
+    return () => {
+      trainingReportPollSeqRef.current += 1
+    }
+  }, [trainingSessionId])
+
+  const handleTrainingCompletionDialogOpenChange = React.useCallback((open: boolean) => {
+    if (trainingSessionCompleting) return
+    setTrainingCompletionDialogOpen(open)
+  }, [trainingSessionCompleting])
+
+  const handleRequestCompleteTrainingSession = React.useCallback(() => {
+    if (!trainingSessionId || trainingSessionCompleting || trainingSessionCompleted || analysis.analyzingRoom) return
+    setTrainingCompletionDialogOpen(true)
+  }, [
+    analysis.analyzingRoom,
+    trainingSessionCompleting,
+    trainingSessionCompleted,
+    trainingSessionId,
+  ])
+
+  const handleCompleteTrainingSession = React.useCallback(async (choice: TrainingCompletionChoice) => {
+    if (!trainingSessionId || trainingSessionCompleting || trainingSessionCompleted) return
+    const shouldGenerateReport = choice === 'with_report' && trainingCompletionHasMessages
+    if (choice === 'with_report' && !shouldGenerateReport) return
+
+    setTrainingCompletionDialogOpen(false)
     setTrainingSessionCompleting(true)
+    setTrainingCompletionStage('ending_session')
     try {
       if (trainingGuidanceEnabled && guidanceEvents.length > 0) {
         const signature = guidanceEventsSignature(guidanceEvents)
         if (persistedGuidanceSignatureRef.current !== signature) {
           try {
+            setTrainingCompletionStage('saving_guidance')
             await persistTrainingGuidanceEvents(trainingSessionId, {
               events: guidanceEvents,
               reason: 'session_complete',
@@ -1408,61 +1682,60 @@ function ChatArea() {
       }
       const completionBranchMetadata = buildTrainingCompletionBranchMetadata(messageTreeSelection)
       const completionMetadata = mergeMetadata(completionBranchMetadata, trainingFeedbackMetadata)
+      setTrainingCompletionStage('ending_session')
       const session = await completeTrainingSession(trainingSessionId, {
-        generate_report: hasMessages,
+        generate_report: shouldGenerateReport,
+        report_generation: shouldGenerateReport ? 'background' : 'sync',
         ...(completionMetadata ? { metadata: completionMetadata } : {}),
       })
       setTrainingSessionCompleted(true)
-      const reportId = Number(session.report_id)
-      const scenarioScore = Number.isFinite(reportId) && reportId > 0
-        ? await getTrainingSessionReport(trainingSessionId)
-          .then(extractTrainingReportScore)
-          .catch(() => undefined)
-        : undefined
-      if (hasMessages && scenarioTrainingId) {
-        saveScenarioTrainingProgress(
-          markScenarioTrainingCompleted(getScenarioTrainingProgress(progressScope), scenarioTrainingId, {
-            trainingSessionId: session.session_id || trainingSessionId,
-            reportId: session.report_id,
-            scoreId: session.score_id,
-            score: scenarioScore,
-            scoreStatus: scenarioScore === undefined ? 'pending' : 'ready',
-            scope: progressScope,
-            completedAt: session.completed_at ?? undefined,
-          }),
-          progressScope,
-        )
-      }
-      if (Number.isFinite(reportId) && reportId > 0) {
-        await analysis.openReport(reportId)
-      } else if (hasMessages) {
-        await analysis.handleAnalyze()
+      if (shouldGenerateReport) {
+        const reportState = getTrainingCompletionReportState(session) ?? {
+          status: 'pending',
+          phase: 'generate_report',
+          generation: 'background',
+        } satisfies TrainingCompletionReportState
+        setTrainingCompletionReportState(reportState)
+        updateScenarioTrainingCompletionProgress(session)
+        if (reportState.status === 'ready') {
+          void openTrainingCompletionReport(session, reportState).catch((error: unknown) => {
+            setTrainingCompletionReportState({
+              status: 'failed',
+              phase: 'open_report',
+              message: getErrorMessage(error, tr('报告打开失败', 'Failed to open report')),
+              errorType: error instanceof Error ? error.name : 'OpenReportError',
+            })
+          })
+        } else if (reportState.status === 'pending') {
+          void pollTrainingCompletionReport()
+        }
       } else {
-        navigate(resolvedTrainingBackPath)
+        trainingReportPollSeqRef.current += 1
+        setTrainingCompletionReportState(null)
+        updateScenarioTrainingCompletionProgress(session)
       }
     } catch (e: unknown) {
       alert(getErrorMessage(e, tr('训练完成失败', 'Failed to complete training session')))
     } finally {
       setTrainingSessionCompleting(false)
+      setTrainingCompletionStage('idle')
     }
   }, [
-    analysis,
     guidanceEvents,
     interactionMode,
-    isLiveCoachSession,
     liveCoachGuidanceMetadata,
     messageTreeSelection,
-    navigate,
-    progressScope,
-    resolvedTrainingBackPath,
-    scenarioTrainingId,
-    selectedRoomMessages,
+    openTrainingCompletionReport,
+    pollTrainingCompletionReport,
+    trainingCompletionHasMessages,
     trainingMode,
     trainingFeedbackMetadata,
     trainingFeedbackMode,
     trainingGuidanceEnabled,
+    updateScenarioTrainingCompletionProgress,
     trainingProfile,
     trainingSessionCompleting,
+    trainingSessionCompleted,
     trainingSessionId,
     tr,
   ])
@@ -1602,6 +1875,34 @@ function ChatArea() {
     { value: 'analysis', label: tr('评分', 'Score') },
     { value: 'emotion', label: tr('情绪', 'Emotion') },
   ] as const
+  const activeTrainingCompletionStage = trainingSessionCompleting ? trainingCompletionStage : 'idle'
+  const trainingCompletionButtonLabel = getTrainingCompletionButtonLabel(
+    activeTrainingCompletionStage,
+    trainingSessionCompleted,
+    tr,
+  )
+  const trainingCompletionButtonTitle = getTrainingCompletionButtonTitle(
+    activeTrainingCompletionStage,
+    trainingSessionCompleted,
+    tr,
+  )
+  const trainingReportStatusCopy = trainingCompletionReportState
+    ? getTrainingReportStatusCopy(trainingCompletionReportState, tr)
+    : null
+  const realtimeVoiceControl = isRealtimeBattlePrep ? (
+    <RealtimeVoiceRecorder
+      key={`${trainingSessionId || 'no-session'}:${selectedRoomId || 'no-room'}:${realtimeVoiceProfile || 'cascade'}`}
+      roomId={selectedRoomId}
+      trainingSessionId={trainingSessionId}
+      disabled={chat.sending}
+      personaId={primaryPersona?.id || null}
+      counterpartName={counterpartName}
+      realtimeProfile={realtimeVoiceProfile}
+      transcriptMetadata={realtimeTranscriptMetadata}
+      onFinalTranscript={handleRealtimeTranscriptFinal}
+      onPersistedTranscript={handleRealtimeTranscriptPersisted}
+    />
+  ) : null
 
   const handleMobileSheetChange = (sheet: MobileSheetKey) => {
     setMobileSheet((current) => (current === sheet ? null : sheet))
@@ -1663,11 +1964,13 @@ function ChatArea() {
             <Button
               variant={trainingSessionCompleted ? 'secondary' : 'primary'}
               className={`chat-page-training-complete${trainingSessionCompleted ? ' completed' : ''}`}
-              onClick={handleCompleteTrainingSession}
-              disabled={trainingSessionCompleting || analysis.analyzingRoom}
+              onClick={handleRequestCompleteTrainingSession}
+              disabled={trainingSessionCompleting || trainingSessionCompleted || analysis.analyzingRoom}
+              title={trainingCompletionButtonTitle}
+              aria-label={trainingCompletionButtonTitle}
             >
               {trainingSessionCompleting ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
-              {trainingSessionCompleted ? tr('已结束', 'Ended') : tr('结束练习', 'End practice')}
+              <span aria-live="polite">{trainingCompletionButtonLabel}</span>
             </Button>
           )}
           <Button
@@ -1829,6 +2132,66 @@ function ChatArea() {
           </Button>
         </div>
       </div>
+
+      <Dialog
+        open={trainingCompletionDialogOpen}
+        onOpenChange={handleTrainingCompletionDialogOpenChange}
+      >
+        <DialogContent className="training-completion-dialog">
+          <div className="training-completion-dialog-title-row">
+            <div className="training-completion-dialog-title-copy">
+              <DialogTitle className="training-completion-dialog-title">
+                {tr('结束练习', 'End practice')}
+              </DialogTitle>
+              <DialogDescription className="training-completion-dialog-description">
+                {trainingCompletionHasMessages
+                  ? tr('选择生成报告，或仅结束本次训练。', 'Generate a report, or just end this practice.')
+                  : tr('当前没有有效对话，只能仅结束本次训练。', 'There are no valid messages, so only ending the practice is available.')}
+              </DialogDescription>
+            </div>
+            <DialogClose asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="training-completion-dialog-close"
+                disabled={trainingSessionCompleting}
+                aria-label={tr('关闭', 'Close')}
+                title={tr('关闭', 'Close')}
+              >
+                <X size={16} />
+              </Button>
+            </DialogClose>
+          </div>
+
+          {!trainingCompletionHasMessages && (
+            <div className="training-completion-dialog-note" role="status">
+              <AlertCircle size={16} />
+              <span>{tr('没有可用于分析的对话内容。', 'No conversation content is available for analysis.')}</span>
+            </div>
+          )}
+
+          <div className="training-completion-dialog-actions">
+            <Button
+              variant="secondary"
+              className="training-completion-dialog-action"
+              onClick={() => void handleCompleteTrainingSession('without_report')}
+              disabled={trainingSessionCompleting}
+            >
+              {trainingSessionCompleting ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
+              {tr('仅结束训练', 'End Only')}
+            </Button>
+            <Button
+              variant="primary"
+              className="training-completion-dialog-action"
+              onClick={() => void handleCompleteTrainingSession('with_report')}
+              disabled={trainingSessionCompleting || !trainingCompletionHasMessages}
+            >
+              {trainingSessionCompleting ? <Loader2 size={15} className="spin" /> : <FileText size={15} />}
+              {tr('结束并生成报告', 'End and Report')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {isTrainingSession && (
         <section className="chat-page-training-banner" data-testid="training-context-banner">
@@ -2019,6 +2382,37 @@ function ChatArea() {
         </section>
       )}
 
+      {trainingCompletionReportState && trainingReportStatusCopy && (
+        <section
+          className={`chat-page-report-status-bar ${trainingCompletionReportState.status}`}
+          aria-live="polite"
+        >
+          {trainingCompletionReportState.status === 'pending'
+            ? <Loader2 size={15} className="spin" />
+            : trainingCompletionReportState.status === 'failed'
+              ? <AlertCircle size={15} />
+              : <FileText size={15} />}
+          <div className="report-status-copy">
+            <strong>{trainingReportStatusCopy.title}</strong>
+            <span>{trainingReportStatusCopy.message}</span>
+          </div>
+          {trainingCompletionReportState.status === 'failed' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="report-status-action"
+              onClick={() => {
+                setTrainingCompletionReportState(null)
+                void analysis.handleAnalyze()
+              }}
+              disabled={analysis.analyzingRoom}
+            >
+              {analysis.analyzingRoom ? tr('生成中', 'Generating') : tr('重新分析', 'Analyze Again')}
+            </Button>
+          )}
+        </section>
+      )}
+
       {/* Battle prep bar */}
       {isBattlePrep && (
         <div className="chat-page-battle-bar">
@@ -2076,17 +2470,6 @@ function ChatArea() {
             <strong>{realtimeBarTitle}</strong>
             <span>{realtimeBarCopy}</span>
           </div>
-          <RealtimeVoiceRecorder
-            key={`${trainingSessionId || 'no-session'}:${selectedRoomId || 'no-room'}:${realtimeVoiceProfile || 'cascade'}`}
-            roomId={selectedRoomId}
-            trainingSessionId={trainingSessionId}
-            disabled={chat.sending}
-            personaId={primaryPersona?.id || null}
-            counterpartName={counterpartName}
-            realtimeProfile={realtimeVoiceProfile}
-            transcriptMetadata={realtimeTranscriptMetadata}
-            onPersistedTranscript={handleRealtimeTranscriptPersisted}
-          />
         </div>
       )}
 
@@ -2218,6 +2601,8 @@ function ChatArea() {
             roomId={chat.selectedRoom?.room.id ?? null}
             trainingSessionId={trainingSessionId}
             messageMetadata={outgoingMessageMetadata}
+            showVoiceButton={!isRealtimeBattlePrep}
+            realtimeVoiceControl={realtimeVoiceControl}
             onVoiceTranscription={(text) => {
               const transcript = text.trim()
               if (!transcript) return

@@ -47,6 +47,21 @@ def test_training_session_start_record_and_complete():
     assert session.message_count == 3
 
 
+def test_training_session_can_attach_report_after_completion():
+    session = TrainingSession(
+        session_id="session-1",
+        task_config=make_task_config(),
+        mode="text",
+    )
+
+    session.start("room-1")
+    session.complete()
+    session.attach_completion_report(" report-1 ", score_id=" score-1 ")
+
+    assert session.report_id == "report-1"
+    assert session.score_id == "score-1"
+
+
 def test_training_session_rejects_invalid_transitions():
     session = TrainingSession(
         session_id="session-1",
@@ -56,6 +71,9 @@ def test_training_session_rejects_invalid_transitions():
 
     with pytest.raises(ValueError, match="Cannot complete"):
         session.complete()
+
+    with pytest.raises(ValueError, match="Cannot attach report"):
+        session.attach_completion_report("report-1")
 
     with pytest.raises(ValueError, match="Cannot record"):
         session.record_turn()

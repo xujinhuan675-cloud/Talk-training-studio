@@ -47,6 +47,20 @@ test('buildTrainingModeChatPath carries realtime as interaction mode', () => {
   assert.equal(url.searchParams.get('interactionMode'), 'realtime')
 })
 
+test('buildTrainingModeChatPath carries explicit realtime profile for realtime calls', () => {
+  const path = trainingMode.buildTrainingModeChatPath(42, 'voice', 'training-session-1', 'realtime', {
+    realtimeProfile: 'speech_to_speech',
+  })
+  const url = new URL(path, 'http://localhost')
+
+  assert.equal(trainingMode.REALTIME_PROFILE_QUERY_PARAM, 'realtimeProfile')
+  assert.equal(url.pathname, '/conversations/42')
+  assert.equal(url.searchParams.get('trainingMode'), 'voice')
+  assert.equal(url.searchParams.get('interactionMode'), 'realtime')
+  assert.equal(url.searchParams.get('trainingSessionId'), 'training-session-1')
+  assert.equal(url.searchParams.get('realtimeProfile'), 'speech_to_speech')
+})
+
 test('buildTrainingModeChatPath maps legacy realtime mode to voice plus realtime interaction', () => {
   const path = trainingMode.buildTrainingModeChatPath(42, 'realtime')
   const url = new URL(path, 'http://localhost')
@@ -158,6 +172,24 @@ test('legacy realtime route state and query map to voice plus realtime interacti
   assert.equal(trainingMode.getInteractionModeFromLocation('?trainingMode=realtime', null), 'realtime')
   assert.equal(trainingMode.getTrainingModeFromLocation('', { trainingMode: 'realtime' }), 'voice')
   assert.equal(trainingMode.getInteractionModeFromLocation('', { trainingMode: 'realtime' }), 'realtime')
+})
+
+test('getRealtimeProfileFromLocation reads query first and supports route state aliases', () => {
+  assert.equal(
+    trainingMode.getRealtimeProfileFromLocation('?realtimeProfile=speech_to_speech', {
+      realtimeProfile: 'cascade',
+    }),
+    'speech_to_speech',
+  )
+  assert.equal(
+    trainingMode.getRealtimeProfileFromLocation('', { realtimeProfile: 'openai_realtime' }),
+    'speech_to_speech',
+  )
+  assert.equal(
+    trainingMode.getRealtimeProfileFromLocation('', { voice_profile: 'near_realtime' }),
+    'cascade',
+  )
+  assert.equal(trainingMode.getRealtimeProfileFromLocation('?realtimeProfile=invalid', null), null)
 })
 
 test('getTrainingSessionIdFromLocation reads query first and falls back to route state', () => {

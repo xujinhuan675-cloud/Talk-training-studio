@@ -26,6 +26,30 @@ naming_convention = {
 
 def upgrade() -> None:
     """Change room_id FK from CASCADE to SET NULL and make nullable."""
+    if op.get_context().dialect.name == "postgresql":
+        # PostgreSQL names unnamed FKs as <table>_<column>_fkey. Avoid the
+        # longer SQLite naming-convention value, which exceeds PG's limit.
+        op.alter_column(
+            'stakeholder_competency_evaluations',
+            'room_id',
+            existing_type=sa.INTEGER(),
+            nullable=True,
+        )
+        op.drop_constraint(
+            'stakeholder_competency_evaluations_room_id_fkey',
+            'stakeholder_competency_evaluations',
+            type_='foreignkey',
+        )
+        op.create_foreign_key(
+            'fk_competency_eval_room_id',
+            'stakeholder_competency_evaluations',
+            'stakeholder_chat_rooms',
+            ['room_id'],
+            ['id'],
+            ondelete='SET NULL',
+        )
+        return
+
     with op.batch_alter_table(
         'stakeholder_competency_evaluations',
         naming_convention=naming_convention,

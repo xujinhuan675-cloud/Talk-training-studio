@@ -87,6 +87,20 @@ class TrainingSession:
         self.completed_at = datetime.now(UTC)
         self.status = TrainingSessionStatus.COMPLETED
 
+    def attach_completion_report(
+        self,
+        report_id: str,
+        score_id: str | None = None,
+    ) -> None:
+        if self.status != TrainingSessionStatus.COMPLETED:
+            raise ValueError(f"Cannot attach report while {self.status.value}")
+        normalized_report_id = report_id.strip()
+        if not normalized_report_id:
+            raise ValueError("report_id cannot be empty")
+        self.report_id = normalized_report_id
+        if score_id is not None:
+            self.score_id = score_id.strip() if score_id and score_id.strip() else None
+
     def fail(self, reason: str) -> None:
         if self.status not in {TrainingSessionStatus.CREATED, TrainingSessionStatus.ACTIVE}:
             raise ValueError(f"Cannot fail session while {self.status.value}")

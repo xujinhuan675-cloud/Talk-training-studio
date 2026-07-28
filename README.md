@@ -183,6 +183,8 @@ git clone <repo-url> && cd TalkWise
 .\scripts\check-dev.ps1
 ```
 
+本地调试完成并准备发布到服务器时，按 [服务器部署操作手册](docs/development/server-deployment-runbook.md) 执行本地验证、打包上传、服务切换、健康检查和回滚。
+
 本地开发不要手动分别启动 `uvicorn` 和 `npm run dev` 作为默认路径；统一使用 `start-dev.cmd`，避免前端 Vite 代理仍指向旧端口导致“后端加载不上”。默认端口来自根目录 `.env` 的 `BACKEND_PORT` / `FRONTEND_PORT`，缺省为 `8012` / `5177`；端口被占用时脚本会报出占用进程，确实需要临时换端口时再使用 `.\start-dev.cmd -AutoPort`。
 
 多智能体或多人并行开发时，先按 [Multi-Agent Core Development Loop](docs/development/multi-agent-core-loop.md) 拆分切片；涉及跨前后端/外部服务/持久化的纵切功能时，按 [Agentic Vertical Slice Development Loop](docs/development/agentic-vertical-slice-loop.md) 执行 code graph、子智能体、最小验收和风险收口，再用 `.\scripts\core-loop.ps1 -Slice voice` 这类快速检查先跑通核心路径。

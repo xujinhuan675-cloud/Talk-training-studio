@@ -3,10 +3,12 @@ export type NormalizedTrainingMode = TrainingMode
 export type InteractionMode = 'turn_based' | 'realtime'
 export type TrainingProfile = 'practice' | 'live_coach'
 export type TrainingFeedbackMode = 'simulation' | 'assisted' | 'drill'
+export type RealtimeVoiceProfile = 'cascade' | 'speech_to_speech' | 'true_realtime'
 export type LegacyTrainingMode = TrainingMode | 'realtime'
 
 export const TRAINING_MODE_QUERY_PARAM = 'trainingMode'
 export const INTERACTION_MODE_QUERY_PARAM = 'interactionMode'
+export const REALTIME_PROFILE_QUERY_PARAM = 'realtimeProfile'
 export const TRAINING_PROFILE_QUERY_PARAM = 'trainingProfile'
 export const TRAINING_FEEDBACK_MODE_QUERY_PARAM = 'trainingFeedbackMode'
 export const REPLY_LANGUAGE_QUERY_PARAM = 'replyLanguage'
@@ -16,6 +18,7 @@ const CONVERSATION_ROUTE_PREFIX = '/conversations'
 
 const TRAINING_MODES = new Set<NormalizedTrainingMode>(['text', 'voice', 'video'])
 const INTERACTION_MODES = new Set<InteractionMode>(['turn_based', 'realtime'])
+const REALTIME_VOICE_PROFILES = new Set<RealtimeVoiceProfile>(['cascade', 'speech_to_speech', 'true_realtime'])
 const TRAINING_PROFILES = new Set<TrainingProfile>(['practice', 'live_coach'])
 const TRAINING_FEEDBACK_MODES = new Set<TrainingFeedbackMode>(['simulation', 'assisted', 'drill'])
 const DEFAULT_TRAINING_FEEDBACK_MODE: TrainingFeedbackMode = 'simulation'
@@ -24,6 +27,10 @@ export interface TrainingModeLocationState {
   source?: string
   trainingMode?: LegacyTrainingMode
   interactionMode?: InteractionMode
+  realtimeProfile?: RealtimeVoiceProfile
+  realtime_profile?: RealtimeVoiceProfile
+  voiceProfile?: RealtimeVoiceProfile
+  voice_profile?: RealtimeVoiceProfile
   trainingSessionId?: string
   trainingProfile?: TrainingProfile
   trainingFeedbackMode?: TrainingFeedbackMode
@@ -33,6 +40,7 @@ export interface TrainingModeLocationState {
 }
 
 export interface TrainingModeChatPathOptions {
+  realtimeProfile?: RealtimeVoiceProfile | null
   trainingProfile?: TrainingProfile | null
   trainingFeedbackMode?: TrainingFeedbackMode | null
   replyLanguage?: string | null
@@ -49,6 +57,18 @@ function normalizeTrainingMode(value: unknown): NormalizedTrainingMode | null {
 
 function isInteractionMode(value: unknown): value is InteractionMode {
   return typeof value === 'string' && INTERACTION_MODES.has(value as InteractionMode)
+}
+
+function normalizeRealtimeVoiceProfile(value: unknown): RealtimeVoiceProfile | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLowerCase().replace(/[-\s]/g, '_')
+  if (!normalized) return null
+  if (normalized === 'speech2speech' || normalized === 'speechtospeech') return 'speech_to_speech'
+  if (normalized === 'openai_realtime' || normalized === 'openai_speech_to_speech') return 'speech_to_speech'
+  if (normalized === 'near_realtime' || normalized === 'stt_llm_tts') return 'cascade'
+  return REALTIME_VOICE_PROFILES.has(normalized as RealtimeVoiceProfile)
+    ? normalized as RealtimeVoiceProfile
+    : null
 }
 
 function normalizeTrainingProfile(value: unknown): TrainingProfile | null {
@@ -89,6 +109,10 @@ export function buildTrainingModeChatPath(
   })
   if (trainingSessionId) {
     params.set('trainingSessionId', trainingSessionId)
+  }
+  const realtimeProfile = normalizeRealtimeVoiceProfile(options.realtimeProfile)
+  if (resolvedInteractionMode === 'realtime' && realtimeProfile) {
+    params.set(REALTIME_PROFILE_QUERY_PARAM, realtimeProfile)
   }
   const trainingProfile = normalizeTrainingProfile(options.trainingProfile)
   if (trainingProfile && trainingProfile !== 'practice') {
@@ -145,6 +169,18 @@ export function getInteractionModeFromLocation(search: string, state: unknown): 
   }
 
   return getStateValue(state, 'trainingMode') === 'realtime' ? 'realtime' : 'turn_based'
+}
+
+export function getRealtimeProfileFromLocation(search: string, state: unknown): RealtimeVoiceProfile | null {
+  const searchParams = new URLSearchParams(search)
+  return normalizeRealtimeVoiceProfile(searchParams.get(REALTIME_PROFILE_QUERY_PARAM))
+    ?? normalizeRealtimeVoiceProfile(searchParams.get('realtime_profile'))
+    ?? normalizeRealtimeVoiceProfile(searchParams.get('voiceProfile'))
+    ?? normalizeRealtimeVoiceProfile(searchParams.get('voice_profile'))
+    ?? normalizeRealtimeVoiceProfile(getStateValue(state, 'realtimeProfile'))
+    ?? normalizeRealtimeVoiceProfile(getStateValue(state, 'realtime_profile'))
+    ?? normalizeRealtimeVoiceProfile(getStateValue(state, 'voiceProfile'))
+    ?? normalizeRealtimeVoiceProfile(getStateValue(state, 'voice_profile'))
 }
 
 export function getTrainingSessionIdFromLocation(search: string, state: unknown): string | null {

@@ -199,6 +199,21 @@ test('completeTrainingSession posts to the complete endpoint with JSON body', as
   assert.deepEqual(JSON.parse(calls[0].init.body), body)
 })
 
+test('completeTrainingSession can request background report generation', async () => {
+  const calls = installFetchStub()
+
+  await trainingSession.completeTrainingSession('session-1', {
+    generate_report: true,
+    report_generation: 'background',
+  })
+
+  assert.equal(calls[0].url, '/api/v1/training-studio/sessions/session-1/complete')
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    generate_report: true,
+    report_generation: 'background',
+  })
+})
+
 test('completeTrainingSession posts an empty JSON body by default', async () => {
   const calls = installFetchStub()
 
@@ -915,6 +930,114 @@ test('getTrainingSession preserves failed status failure reason from backend', a
 
   assert.equal(result.status, 'failed')
   assert.equal(result.failure_reason, 'report generation timed out')
+})
+
+test('getTrainingCompletionReportState reads pending, ready, and failed metadata', () => {
+  const baseSession = {
+    session_id: 'session-1',
+    mode: 'voice',
+    status: 'completed',
+    task_config: {
+      role: 'Sales Associate',
+      level: 'Senior',
+      tech_stack: ['discovery'],
+      question_type_ratios: { behavioral: 30, craft: 50, pressure: 20 },
+      question_count: 5,
+      framework: 'prep',
+      difficulty: 'medium',
+      category: 'sales',
+    },
+    message_count: 4,
+  }
+
+  assert.deepEqual(
+    trainingSession.getTrainingCompletionReportState({
+      ...baseSession,
+      task_config: {
+        ...baseSession.task_config,
+        metadata: {
+          completionReport: {
+            status: 'pending',
+            phase: 'generate_report',
+            generation: 'background',
+            requestedAt: '2026-07-28T12:00:00Z',
+          },
+        },
+      },
+    }),
+    {
+      status: 'pending',
+      phase: 'generate_report',
+      generation: 'background',
+      reportId: undefined,
+      message: undefined,
+      errorType: undefined,
+      completedWithoutReport: undefined,
+      requestedAt: '2026-07-28T12:00:00Z',
+      recordedAt: undefined,
+    },
+  )
+
+  assert.deepEqual(
+    trainingSession.getTrainingCompletionReportState({
+      ...baseSession,
+      report_id: '501',
+      task_config: {
+        ...baseSession.task_config,
+        metadata: {
+          completion_report: {
+            status: 'ready',
+            report_id: '501',
+            recorded_at: '2026-07-28T12:01:00Z',
+          },
+        },
+      },
+    }),
+    {
+      status: 'ready',
+      phase: undefined,
+      generation: undefined,
+      reportId: '501',
+      message: undefined,
+      errorType: undefined,
+      completedWithoutReport: undefined,
+      requestedAt: undefined,
+      recordedAt: '2026-07-28T12:01:00Z',
+    },
+  )
+
+  assert.deepEqual(
+    trainingSession.getTrainingCompletionReportState({
+      ...baseSession,
+      metadata: {
+        completionReport: {
+          status: 'failed',
+          message: 'Provider failed',
+          errorType: 'RuntimeError',
+          completedWithoutReport: true,
+        },
+      },
+    }),
+    {
+      status: 'failed',
+      phase: undefined,
+      generation: undefined,
+      reportId: undefined,
+      message: 'Provider failed',
+      errorType: 'RuntimeError',
+      completedWithoutReport: true,
+      requestedAt: undefined,
+      recordedAt: undefined,
+    },
+  )
+
+  assert.equal(
+    trainingSession.getTrainingCompletionReportState({
+      ...baseSession,
+      report_id: '777',
+    }).status,
+    'ready',
+  )
 })
 
 test('listTrainingSessions uses the sessions collection endpoint', async () => {

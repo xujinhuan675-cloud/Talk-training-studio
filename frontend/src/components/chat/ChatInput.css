@@ -21,6 +21,47 @@
   line-height: 1.4;
 }
 
+.message-input-realtime-slot {
+  display: flex;
+  margin: 0 24px -2px;
+}
+
+.message-input-realtime-slot .realtime-voice-recorder {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  justify-content: space-between;
+}
+
+.message-input-realtime-slot .realtime-voice-status {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.message-input-realtime-slot .realtime-voice-status span,
+.message-input-realtime-slot .realtime-voice-status small {
+  max-width: 100%;
+}
+
+.message-input-realtime-slot .realtime-voice-status small {
+  min-height: 14px;
+}
+
+.message-input-realtime-slot .realtime-voice-action {
+  flex: 0 0 78px;
+  width: 78px;
+  min-width: 78px;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
 .message-input-bar .message-input-textarea {
   flex: 1;
   min-width: 0;
@@ -141,6 +182,27 @@
 
   .message-input-error {
     margin: 0 12px;
+  }
+
+  .message-input-realtime-slot {
+    margin: 0 12px -2px;
+  }
+
+  .message-input-realtime-slot .realtime-voice-recorder {
+    padding: 7px 8px;
+    gap: 8px;
+  }
+
+  .message-input-realtime-slot .realtime-voice-status {
+    display: flex;
+    min-height: 32px;
+  }
+
+  .message-input-realtime-slot .realtime-voice-action {
+    flex-basis: 72px;
+    width: 72px;
+    min-width: 72px;
+    min-height: 32px;
   }
 
   .message-input-bar .message-input-textarea,

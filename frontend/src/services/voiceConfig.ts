@@ -80,10 +80,33 @@ function unwrapApiResponse<T>(value: ApiResponse<T> | T): T {
   return value as T
 }
 
+function errorMessageFromPayload(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    const messages = value
+      .map((item) => errorMessageFromPayload(item))
+      .filter((message): message is string => Boolean(message))
+    return messages.length > 0 ? messages.join('; ') : null
+  }
+  if (hasObjectShape(value)) {
+    for (const key of ['message', 'detail', 'details', 'error', 'reason']) {
+      const message = errorMessageFromPayload(value[key])
+      if (message) return message
+    }
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
 async function readError(resp: Response, fallback: string): Promise<Error> {
   const json = await resp.json().catch(() => null)
-  const detail = typeof json?.detail === 'string' ? json.detail : json?.detail?.message
-  return new Error(json?.error?.details || detail || json?.message || `${fallback}: ${resp.status}`)
+  const message = errorMessageFromPayload(json) ?? `${fallback}: ${resp.status}`
+  return new Error(message)
 }
 
 async function requestVoiceConfig<T>(init?: RequestInit, fallback = 'Voice config request failed'): Promise<T> {

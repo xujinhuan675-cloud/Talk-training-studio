@@ -51,6 +51,23 @@ export interface RealtimeAudioOutputEvent {
   createdAt?: string
 }
 
+export interface RealtimePersistedTranscriptMessage {
+  id: number
+  room_id: number
+  content: string
+  sender_type: string
+  sender_id: string
+  timestamp?: string | null
+  emotion_score?: number | null
+  emotion_label?: string | null
+  metadata?: Record<string, unknown>
+  attachments?: unknown[]
+  video_url?: string
+  videoUrl?: string
+  mediaUrl?: string
+  media_url?: string
+}
+
 export interface RealtimeErrorPayload {
   message: string
   code?: string
@@ -120,14 +137,7 @@ export type RealtimeServerEvent =
       payload: {
         trainingSessionId: string
         roomId: number
-        message: {
-          id: number
-          room_id: number
-          content: string
-          sender_type: string
-          sender_id: string
-          metadata?: Record<string, unknown>
-        }
+        message: RealtimePersistedTranscriptMessage
       }
       createdAt?: string
     }
@@ -566,6 +576,19 @@ function normalizeRealtimeVoiceProfile(profile?: string | null): RealtimeVoicePr
   return 'cascade'
 }
 
+export const DEFAULT_TRAINING_REALTIME_PROVIDER = 'pipecat'
+
+const OPENAI_PIPECAT_REALTIME_ALIASES = new Set(['openai', 'openai.realtime', 'openai_realtime'])
+
+export function resolveTrainingRealtimeWebSocketProvider(provider?: string | null): string {
+  const normalized = provider?.trim()
+  if (!normalized) return DEFAULT_TRAINING_REALTIME_PROVIDER
+  if (OPENAI_PIPECAT_REALTIME_ALIASES.has(normalized.toLowerCase())) {
+    return DEFAULT_TRAINING_REALTIME_PROVIDER
+  }
+  return normalized
+}
+
 export function getRealtimeVoiceAudioContract(profile?: string | null): RealtimeVoiceAudioContract {
   const realtimeProfile = normalizeRealtimeVoiceProfile(profile)
   const canonicalProfile = realtimeProfile === 'cascade' ? 'cascade' : 'speech_to_speech'
@@ -601,6 +624,7 @@ export function getRealtimeVoiceAudioContract(profile?: string | null): Realtime
 export function getTrainingRealtimeWebSocketUrl({
   sessionId,
   roomId,
+  provider,
   audioFormat,
   profile,
 }: {
@@ -618,7 +642,7 @@ export function getTrainingRealtimeWebSocketUrl({
   if (roomId !== undefined && roomId !== null && String(roomId).trim()) {
     params.set('room_id', String(roomId).trim())
   }
-  params.set('provider', 'pipecat')
+  params.set('provider', resolveTrainingRealtimeWebSocketProvider(provider))
   if (audioFormat !== undefined && audioFormat !== null && String(audioFormat).trim()) {
     params.set('audio_format', String(audioFormat).trim())
   }

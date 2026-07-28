@@ -212,6 +212,25 @@ class TrainingSessionService:
         session.complete(report_id=report_id, score_id=score_id)
         return await self._save(session)
 
+    async def record_completion_report(
+        self,
+        session_id: str,
+        report_id: str | None = None,
+        score_id: str | None = None,
+        *,
+        metadata: Mapping[str, object] | None = None,
+        access_scope: TrainingSessionAccessScope,
+    ) -> TrainingSession:
+        session = await self._require_session(session_id, access_scope=access_scope)
+        if session.status != TrainingSessionStatus.COMPLETED:
+            raise ValueError(f"Cannot record completion report while {session.status.value}")
+        _merge_task_config_metadata(session, metadata)
+        if report_id is not None:
+            session.attach_completion_report(report_id, score_id=score_id)
+        elif score_id is not None:
+            session.score_id = score_id.strip() if score_id and score_id.strip() else None
+        return await self._save(session)
+
     async def fail_session(
         self,
         session_id: str,

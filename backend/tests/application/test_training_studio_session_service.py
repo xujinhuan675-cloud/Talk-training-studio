@@ -105,6 +105,32 @@ async def test_session_service_tracks_scenario_progress():
     assert progress[0].report_id == "report-1"
 
 
+async def test_session_service_records_report_after_completion():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+
+    session = await service.create_session(make_payload())
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.complete_session(
+        session.session_id,
+        metadata={"completionReport": {"status": "pending"}},
+        access_scope=_scope(),
+    )
+
+    updated = await service.record_completion_report(
+        session.session_id,
+        report_id="501",
+        metadata={"completionReport": {"status": "ready", "reportId": "501"}},
+        access_scope=_scope(),
+    )
+
+    assert updated.status == TrainingSessionStatus.COMPLETED
+    assert updated.report_id == "501"
+    assert updated.task_config.metadata["completionReport"] == {
+        "status": "ready",
+        "reportId": "501",
+    }
+
+
 async def test_session_service_scenario_progress_handles_mixed_timezone_datetimes():
     session_ids = iter(["scenario-a-old", "scenario-a-new", "scenario-b"])
     service = TrainingSessionService(id_factory=lambda: next(session_ids))

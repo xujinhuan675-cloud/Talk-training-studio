@@ -21,6 +21,7 @@ import { normalizeTrainingReplyLanguage } from '../data/trainingReplyLanguages'
 import {
   buildTrainingModeChatPath,
   type InteractionMode,
+  type RealtimeVoiceProfile,
   type TrainingFeedbackMode,
   type TrainingMode,
   type TrainingProfile,
@@ -309,6 +310,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       const level = getTrainingLevelLabel(config.level, t)
       const trainingMode = getLaunchTrainingMode(mode)
       const interactionMode = getLaunchInteractionMode(mode)
+      const realtimeProfile: RealtimeVoiceProfile | null = mode === 'realtime' ? 'speech_to_speech' : null
       const modeLabel = getModeLabel(mode, t)
       const feedbackModeLabel = getFeedbackModeLabel(effectiveFeedbackMode, t)
       const feedbackOption = getFeedbackModeOption(effectiveFeedbackMode)
@@ -384,6 +386,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               source: isLiveCoachMode ? 'live_coach_mvp' : 'training_studio',
               trainingMode,
               interactionMode,
+              ...(realtimeProfile ? { realtimeProfile } : {}),
               trainingProfile,
               feedbackMode: effectiveFeedbackMode,
               trainingFeedbackMode: effectiveFeedbackMode,
@@ -439,6 +442,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           nextInteractionMode,
           {
             trainingProfile,
+            realtimeProfile,
             trainingFeedbackMode: effectiveFeedbackMode,
             replyLanguage,
             sourceLanguage: isLiveCoachMode ? liveCoachSourceLanguage : null,
@@ -450,6 +454,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           trainingMode,
           interactionMode,
           trainingSessionId: startedSession.session_id,
+          ...(realtimeProfile ? { realtimeProfile } : {}),
           trainingProfile,
           trainingFeedbackMode: effectiveFeedbackMode,
           feedbackMode: effectiveFeedbackMode,

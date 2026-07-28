@@ -18,6 +18,7 @@ import {
   KeyRound,
   ChevronRight,
   CheckCircle2,
+  Clock3,
   AlertTriangle,
   Cable,
   Search,
@@ -89,6 +90,7 @@ import {
   type AuthTeam,
   type AuthTeamMember,
 } from '../services/auth'
+import { getErrorMessage as getReadableErrorMessage } from '../utils/errors'
 import './SettingsPage.css'
 
 /** Reusable confirm dialog state hook */
@@ -114,7 +116,7 @@ function useConfirmDialog() {
 }
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return getReadableErrorMessage(error)
 }
 
 function personaDisplayKey(persona: PersonaSummary): string {
@@ -1985,6 +1987,7 @@ function ConfigTab() {
   }
 
   const toneLabel = (tone: VoiceModuleTone) => {
+    if (tone === 'neutral') return tr('待接入', 'Adapter pending')
     if (tone === 'ready') return tr('可用', 'Ready')
     if (tone === 'warning') return tr('需配置', 'Needs config')
     if (tone === 'blocked') return tr('未接入', 'Not wired')
@@ -1997,8 +2000,23 @@ function ConfigTab() {
     configured: boolean,
   ): VoiceModuleTone => {
     const preset = providerPresetByValue(channel, provider)
+    if (preset?.status === 'inventory') return 'neutral'
     if (preset && preset.status !== 'runtime') return 'blocked'
     return configured ? 'ready' : 'warning'
+  }
+
+  const realtimeModuleTone = (): VoiceModuleTone => {
+    const preset = providerPresetByValue('realtime', form.realtimeProvider)
+    if (preset?.status === 'inventory') return 'neutral'
+    if (form.realtimeProvider === 'openai') {
+      if (realtimeCapabilities?.pipecat.readyForCall) return 'ready'
+      return config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'
+    }
+    return toneForProvider(
+      form.realtimeProvider,
+      'realtime',
+      Boolean(config?.realtime_effective_api_key_configured),
+    )
   }
 
   const voiceModules: Array<{
@@ -2041,11 +2059,9 @@ function ConfigTab() {
       key: 'realtime',
       icon: <Radio size={18} />,
       title: tr('Realtime 实时语音', 'Realtime voice'),
-      subtitle: tr('Pipecat 实时语音会话：连续音频、打断、实时输出', 'Pipecat session for continuous audio, interruption, and realtime output'),
+      subtitle: tr('连续音频、打断、实时输出的运行链路；非 runtime provider 保持待接入状态', 'Runtime path for continuous audio, interruption, and realtime output; non-runtime providers stay adapter pending'),
       model: form.realtimeModel,
-      tone: form.realtimeProvider === 'openai'
-        ? (realtimeCapabilities?.pipecat.readyForCall ? 'ready' : (config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'))
-        : 'blocked',
+      tone: realtimeModuleTone(),
     },
     {
       key: 'transport',
@@ -2103,6 +2119,14 @@ function ConfigTab() {
   ) => {
     const preset = providerPresetByValue(channel, provider)
     if (!preset) return null
+    if (channel === 'realtime' && preset.status === 'inventory' && config?.realtime_effective_api_key_configured) {
+      return (
+        <p className="settings-voice-note settings-voice-note-warning">
+          {tr('密钥已配置，Realtime runtime 待接入。', 'Key configured; Realtime runtime adapter pending.')}
+          {preset.note ? ` ${preset.note}` : ''}
+        </p>
+      )
+    }
     if (preset.status === 'runtime') {
       return (
         <p className="settings-voice-note">
@@ -2265,7 +2289,7 @@ function ConfigTab() {
             <Input value={form.realtimeTranscriptionModel} onChange={(e) => updateForm({ realtimeTranscriptionModel: e.target.value })} />
           </Field>
           <p className="settings-voice-note">
-            {tr('Realtime 不是单纯 TTS；它是 Pipecat 管道里的连续音频、VAD、turn 和音频输出组合。', 'Realtime is not plain TTS; it is continuous audio, VAD, turn handling, and output audio inside the Pipecat pipeline.')}
+            {tr('Realtime 不是单纯 TTS；它需要后端 /realtime runtime 接入连续音频、VAD、turn 和音频输出。', 'Realtime is not plain TTS; it requires a backend /realtime runtime for continuous audio, VAD, turn handling, and output audio.')}
           </p>
           {renderCatalogSummary(realtimeChannel, 'Pipecat realtime')}
           {renderProviderPresetNote('realtime', form.realtimeProvider)}
@@ -2338,7 +2362,11 @@ function ConfigTab() {
               <span className="settings-voice-module-title-row">
                 <strong>{module.title}</strong>
                 <span className={`settings-voice-badge ${module.tone}`}>
-                  {module.tone === 'ready' ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
+                  {module.tone === 'ready'
+                    ? <CheckCircle2 size={13} />
+                    : module.tone === 'neutral'
+                      ? <Clock3 size={13} />
+                      : <AlertTriangle size={13} />}
                   {toneLabel(module.tone)}
                 </span>
               </span>

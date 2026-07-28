@@ -1,4 +1,4 @@
-import type { InteractionMode, TrainingFeedbackMode, TrainingMode } from './trainingMode'
+import type { InteractionMode, RealtimeVoiceProfile, TrainingFeedbackMode, TrainingMode } from './trainingMode'
 import { buildTrainingModeChatPath } from './trainingMode'
 import { launchTrainingSessionFlow } from './trainingLaunch'
 import {
@@ -51,6 +51,7 @@ export async function launchScenarioTraining({
 }: LaunchScenarioTrainingParams) {
   const trainingMode = getScenarioTrainingMode(mode)
   const interactionMode = getScenarioInteractionMode(mode)
+  const realtimeProfile: RealtimeVoiceProfile | null = mode === 'realtime' ? 'speech_to_speech' : null
   const normalizedReplyLanguage = normalizeTrainingReplyLanguage(replyLanguage)
   const scenarioParam = `scenarioTrainingId=${encodeURIComponent(scenario.id)}`
   const taskConfig = buildScenarioTrainingTaskConfig(scenario, {
@@ -76,6 +77,7 @@ export async function launchScenarioTraining({
           ...taskConfig.metadata,
           trainingMode,
           interactionMode,
+          ...(realtimeProfile ? { realtimeProfile } : {}),
           feedbackMode,
           trainingFeedbackMode: feedbackMode,
           trainingProfile: 'practice',
@@ -85,6 +87,7 @@ export async function launchScenarioTraining({
             ...scenarioTrainingRecord,
             trainingMode,
             interactionMode,
+            ...(realtimeProfile ? { realtimeProfile } : {}),
             feedbackMode,
             replyLanguage: normalizedReplyLanguage,
             reply_language: normalizedReplyLanguage,
@@ -108,6 +111,7 @@ export async function launchScenarioTraining({
           scenarioTitle: scenario.title,
           trainingMode,
           interactionMode,
+          ...(realtimeProfile ? { realtimeProfile } : {}),
           feedbackMode,
           trainingFeedbackMode: feedbackMode,
           replyLanguage: normalizedReplyLanguage,
@@ -128,6 +132,7 @@ export async function launchScenarioTraining({
         {
           trainingFeedbackMode: feedbackMode,
           replyLanguage: normalizedReplyLanguage,
+          realtimeProfile,
         },
       )
       return `${chatPath}${chatPath.includes('?') ? '&' : '?'}${scenarioParam}`
@@ -139,6 +144,7 @@ export async function launchScenarioTraining({
       }),
       trainingMode,
       interactionMode,
+      ...(realtimeProfile ? { realtimeProfile } : {}),
       trainingFeedbackMode: feedbackMode,
       replyLanguage: normalizedReplyLanguage,
       trainingSessionId: startedSession.session_id,

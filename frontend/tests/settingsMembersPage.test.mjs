@@ -169,6 +169,27 @@ test('Settings TTS card uses backend runtime availability, not only configured k
   assert.match(config, /tts_runtime_message/)
 })
 
+test('Settings AI service shows readable errors and neutral inventory realtime state', () => {
+  const source = readSource('src/pages/SettingsPage.tsx')
+  const css = readSource('src/pages/SettingsPage.css')
+  const voiceConfig = readSource('src/services/voiceConfig.ts')
+  const configStart = source.indexOf('function ConfigTab()')
+  const config = source.slice(configStart)
+
+  assert.notEqual(configStart, -1)
+  assert.match(source, /getErrorMessage as getReadableErrorMessage/)
+  assert.match(source, /return getReadableErrorMessage\(error\)/)
+  assert.doesNotMatch(source, /return error instanceof Error \? error\.message : String\(error\)/)
+  assert.match(voiceConfig, /function errorMessageFromPayload/)
+  assert.match(voiceConfig, /const message = errorMessageFromPayload\(json\)/)
+  assert.doesNotMatch(voiceConfig, /json\?\.error\?\.details \|\| detail/)
+  assert.match(config, /if \(preset\?\.status === 'inventory'\) return 'neutral'/)
+  assert.match(config, /const realtimeModuleTone = \(\): VoiceModuleTone =>/)
+  assert.match(config, /tone: realtimeModuleTone\(\)/)
+  assert.match(source, /module\.tone === 'neutral'[\s\S]*<Clock3 size=\{13\} \/>/)
+  assert.match(css, /\.settings-voice-badge\.neutral\s*\{[\s\S]*border-color:\s*var\(--border\)/)
+})
+
 test('Settings AI service reset and dialog close controls stay out of primary action rows', () => {
   const source = readSource('src/pages/SettingsPage.tsx')
   const css = readSource('src/pages/SettingsPage.css')

@@ -344,6 +344,7 @@ _LLM_PROVIDERS = {
     "perplexity",
     "qwen",
     "together",
+    "volcengine",
     "xai",
 }
 _VOICE_TTS_PROVIDERS = {
@@ -370,6 +371,7 @@ _VOICE_TTS_PROVIDERS = {
     "soniox",
     "speechmatics",
     "together",
+    "volcengine",
     "xai",
 }
 _VOICE_STT_PROVIDERS = {
@@ -386,6 +388,7 @@ _VOICE_STT_PROVIDERS = {
     "openai",
     "soniox",
     "speechmatics",
+    "volcengine",
     "whisper",
     "xai",
 }
@@ -400,6 +403,7 @@ _REALTIME_PROVIDERS = {
     "openai.realtime",
     "openai_realtime",
     "ultravox.realtime",
+    "volcengine.doubao_realtime",
     "xai.realtime",
 }
 _OPENROUTER_LLM_PROVIDER = "openrouter"
@@ -659,6 +663,9 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
 
     explicit_stt_key = _explicit_config_value("VOICE__STT_API_KEY", env_values)
     if explicit_stt_key:
+        stt_key = explicit_stt_key
+        stt_key_source = "stt"
+    elif stt_key and not stt_can_reuse_shared_key:
         stt_key_source = "stt"
     elif stt_can_reuse_shared_key and explicit_tts_key:
         stt_key = explicit_tts_key
@@ -761,6 +768,31 @@ def _completion_report_failure_metadata(exc: Exception) -> dict[str, object]:
         "errorType": type(exc).__name__,
         "message": message or "Report generation failed",
         "completedWithoutReport": True,
+        "recordedAt": datetime.now(UTC).isoformat(),
+    }
+
+
+def _completion_report_pending_metadata() -> dict[str, object]:
+    return {
+        "status": "pending",
+        "phase": "generate_report",
+        "generation": "background",
+        "completedWithoutReport": False,
+        "requestedAt": datetime.now(UTC).isoformat(),
+    }
+
+
+def _completion_report_ready_metadata(
+    report_id: int | str,
+    *,
+    generation: str = "background",
+) -> dict[str, object]:
+    return {
+        "status": "ready",
+        "phase": "generate_report",
+        "generation": generation,
+        "reportId": str(report_id),
+        "completedWithoutReport": False,
         "recordedAt": datetime.now(UTC).isoformat(),
     }
 
@@ -1042,6 +1074,7 @@ class CompleteTrainingSessionDTO(BaseModel):
     report_id: int | str | None = None
     score_id: int | str | None = None
     generate_report: bool = True
+    report_generation: str = Field(default="sync", pattern=r"^(sync|background)$")
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
@@ -1352,6 +1385,93 @@ async def _require_report_id_for_training_session(
     if report is None or str(report.room_id) != str(room_lookup_id):
         raise HTTPException(status_code=404, detail="Training session report not found")
     return str(report_lookup_id)
+
+
+async def _generate_training_completion_report_background(
+    *,
+    session_id: str,
+    room_id: int,
+    session_access_scope: TrainingSessionAccessScope,
+    room_access_scope: StakeholderRoomAccessScope,
+    svc: TrainingSessionService,
+    analysis_svc: AnalysisService,
+    growth_svc,
+) -> None:
+    try:
+        report = await analysis_svc.generate_report(
+            room_id,
+            access_scope=room_access_scope,
+        )
+    except (BusinessException, ValueError) as exc:
+        logger.warning(
+            "training_session_background_report_failed",
+            extra={
+                "session_id": session_id,
+                "room_id": room_id,
+                "error_type": type(exc).__name__,
+            },
+        )
+        await _record_training_completion_report_failure(
+            session_id=session_id,
+            exc=exc,
+            svc=svc,
+            access_scope=session_access_scope,
+        )
+        return
+    except Exception as exc:
+        logger.exception(
+            "training_session_background_report_failed",
+            extra={"session_id": session_id, "room_id": room_id},
+        )
+        await _record_training_completion_report_failure(
+            session_id=session_id,
+            exc=exc,
+            svc=svc,
+            access_scope=session_access_scope,
+        )
+        return
+
+    try:
+        await svc.record_completion_report(
+            session_id,
+            report_id=str(report.id),
+            metadata={"completionReport": _completion_report_ready_metadata(report.id)},
+            access_scope=session_access_scope,
+        )
+    except Exception:
+        logger.exception(
+            "training_session_background_report_record_failed",
+            extra={"session_id": session_id, "room_id": room_id, "report_id": report.id},
+        )
+        return
+
+    try:
+        await growth_svc.evaluate_competency(report.id)
+    except Exception:
+        logger.exception(
+            "training_session_background_competency_eval_failed",
+            extra={"session_id": session_id, "room_id": room_id, "report_id": report.id},
+        )
+
+
+async def _record_training_completion_report_failure(
+    *,
+    session_id: str,
+    exc: Exception,
+    svc: TrainingSessionService,
+    access_scope: TrainingSessionAccessScope,
+) -> None:
+    try:
+        await svc.record_completion_report(
+            session_id,
+            metadata={"completionReport": _completion_report_failure_metadata(exc)},
+            access_scope=access_scope,
+        )
+    except Exception:
+        logger.exception(
+            "training_session_completion_report_failure_record_failed",
+            extra={"session_id": session_id},
+        )
 
 
 def _stakeholder_room_id_for_training_session(session) -> int:
@@ -3090,9 +3210,13 @@ async def complete_training_session(
         svc=svc,
         current_user=current_user,
     )
+    session_access_scope = _training_session_access_scope_for_current_user(current_user)
     completion_metadata: dict[str, object] = dict(body.metadata or {})
 
     report_id = str(body.report_id).strip() if body.report_id is not None else ""
+    report_generation = body.report_generation.strip().lower()
+    background_report_room_id: int | None = None
+    background_report_access_scope: StakeholderRoomAccessScope | None = None
     if body.generate_report and not report_id:
         if not session.room_id:
             raise HTTPException(
@@ -3104,41 +3228,55 @@ async def complete_training_session(
             raise HTTPException(
                 status_code=400, detail="Session room_id must be numeric to generate a report"
             ) from exc
-        try:
-            report = await analysis_svc.generate_report(
-                room_id,
-                access_scope=_legacy_room_scope_for_accessible_training_session(
-                    session,
-                    current_user,
-                    room_id=room_id,
-                    operation="generate_report",
-                ),
-            )
-        except (BusinessException, ValueError) as exc:
-            logger.warning(
-                "training_session_completion_report_failed",
-                extra={
-                    "session_id": session_id,
-                    "room_id": session.room_id,
-                    "error_type": type(exc).__name__,
-                },
-            )
-            completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
-        except Exception as exc:
-            logger.exception(
-                "training_session_completion_report_failed",
-                extra={"session_id": session_id, "room_id": session.room_id},
-            )
-            completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
+        report_access_scope = _legacy_room_scope_for_accessible_training_session(
+            session,
+            current_user,
+            room_id=room_id,
+            operation="generate_report",
+        )
+        if report_generation == "background":
+            completion_metadata["completionReport"] = _completion_report_pending_metadata()
+            background_report_room_id = room_id
+            background_report_access_scope = report_access_scope
         else:
-            report_id = str(report.id)
-            background_tasks.add_task(growth_svc.evaluate_competency, report.id)
+            try:
+                report = await analysis_svc.generate_report(
+                    room_id,
+                    access_scope=report_access_scope,
+                )
+            except (BusinessException, ValueError) as exc:
+                logger.warning(
+                    "training_session_completion_report_failed",
+                    extra={
+                        "session_id": session_id,
+                        "room_id": session.room_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
+            except Exception as exc:
+                logger.exception(
+                    "training_session_completion_report_failed",
+                    extra={"session_id": session_id, "room_id": session.room_id},
+                )
+                completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
+            else:
+                report_id = str(report.id)
+                completion_metadata["completionReport"] = _completion_report_ready_metadata(
+                    report.id,
+                    generation="sync",
+                )
+                background_tasks.add_task(growth_svc.evaluate_competency, report.id)
     elif report_id:
         report_id = await _require_report_id_for_training_session(
             report_id,
             session=session,
             reader_svc=reader_svc,
             current_user=current_user,
+        )
+        completion_metadata["completionReport"] = _completion_report_ready_metadata(
+            report_id,
+            generation="explicit",
         )
 
     score_id = str(body.score_id).strip() if body.score_id is not None else None
@@ -3148,12 +3286,23 @@ async def complete_training_session(
             report_id=report_id or None,
             score_id=score_id,
             metadata=completion_metadata,
-            access_scope=_training_session_access_scope_for_current_user(current_user),
+            access_scope=session_access_scope,
         )
     except PermissionError as exc:
         raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
+    if background_report_room_id is not None and background_report_access_scope is not None:
+        background_tasks.add_task(
+            _generate_training_completion_report_background,
+            session_id=session_id,
+            room_id=background_report_room_id,
+            session_access_scope=session_access_scope,
+            room_access_scope=background_report_access_scope,
+            svc=svc,
+            analysis_svc=analysis_svc,
+            growth_svc=growth_svc,
+        )
     return success_response(data=_session_to_dict(completed))
 
 
@@ -3715,8 +3864,6 @@ async def save_voice_config(
     new_stt_key = _clean_config_text(body.stt_api_key)
     if body.stt_use_tts_api_key and _voice_stt_provider_can_use_shared_key(stt_provider):
         stt_api_key = tts_api_key or llm_api_key
-    elif body.stt_use_tts_api_key:
-        stt_api_key = None
     elif body.clear_stt_api_key:
         stt_api_key = None
     elif new_stt_key:
@@ -3783,8 +3930,11 @@ async def save_voice_config(
         env_updates["LLM__API_KEY"] = llm_api_key
     if body.clear_tts_api_key or new_tts_key:
         env_updates["VOICE__TTS_API_KEY"] = tts_api_key
-    if body.stt_use_tts_api_key or body.clear_stt_api_key or new_stt_key:
-        env_updates["VOICE__STT_API_KEY"] = "" if body.stt_use_tts_api_key else stt_api_key
+    stt_uses_shared_key = body.stt_use_tts_api_key and _voice_stt_provider_can_use_shared_key(
+        stt_provider
+    )
+    if stt_uses_shared_key or body.clear_stt_api_key or new_stt_key:
+        env_updates["VOICE__STT_API_KEY"] = "" if stt_uses_shared_key else stt_api_key
     if body.clear_realtime_api_key or new_realtime_key:
         if realtime_provider in {"openai", "openai.realtime"}:
             env_updates["REALTIME_OPENAI_API_KEY"] = realtime_openai_api_key

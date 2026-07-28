@@ -23,6 +23,8 @@ export interface ChatInputProps {
   messageMetadata?: Record<string, unknown>
   onVoiceTranscription?: (text: string) => void
   onVoiceRecorderStateChange?: (state: VoiceRecorderState, error: string | null) => void
+  showVoiceButton?: boolean
+  realtimeVoiceControl?: React.ReactNode
   onVideoClick?: () => void
   videoActive?: boolean
   showVideoButton?: boolean
@@ -47,6 +49,8 @@ export default function ChatInput({
   messageMetadata,
   onVoiceTranscription,
   onVoiceRecorderStateChange,
+  showVoiceButton = true,
+  realtimeVoiceControl,
   onVideoClick,
   videoActive,
   showVideoButton = true,
@@ -78,6 +82,11 @@ export default function ChatInput({
           {sendError}
         </div>
       )}
+      {realtimeVoiceControl && (
+        <div className="message-input-realtime-slot">
+          {realtimeVoiceControl}
+        </div>
+      )}
       <div className="message-input-bar">
         {mentionQuery !== null && mentionResults.length > 0 && (
           <div className="mention-dropdown">
@@ -107,7 +116,7 @@ export default function ChatInput({
           disabled={sending}
           rows={1}
         />
-        {roomId && (
+        {roomId && showVoiceButton && (
           <VoiceRecorder
             roomId={roomId}
             trainingSessionId={trainingSessionId}

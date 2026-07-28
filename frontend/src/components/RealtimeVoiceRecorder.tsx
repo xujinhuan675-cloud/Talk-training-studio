@@ -4,15 +4,19 @@ import {
   createRealtimeSession,
   getRealtimeVoiceAudioContract,
   getTrainingRealtimeWebSocketUrl,
+  resolveTrainingRealtimeWebSocketProvider,
   RealtimeAudioOutputQueue,
   type RealtimeServerEvent,
   type RealtimeSession,
   type RealtimeAudioOutputEvent,
+  type RealtimePersistedTranscriptMessage,
   type RealtimeSessionStatus,
   type RealtimeTranscriptRole,
   type RealtimeVoiceProfile,
 } from '../services/realtimeSession'
 import { logRealtimeClientEvent, type ClientRealtimeEventInput } from '../services/clientEventLogger'
+import type { Message as ChatMessage } from '../services/api'
+import { fetchVoiceConfig } from '../services/voiceConfig'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
 
@@ -23,8 +27,10 @@ export interface RealtimeVoiceRecorderProps {
   personaId?: string | null
   counterpartName?: string
   realtimeProfile?: RealtimeVoiceProfile | null
+  realtimeProvider?: string | null
   transcriptMetadata?: Record<string, unknown>
-  onPersistedTranscript?: (text: string, role: RealtimeTranscriptRole) => void
+  onFinalTranscript?: (text: string, role: RealtimeTranscriptRole) => void
+  onPersistedTranscript?: (text: string, role: RealtimeTranscriptRole, message?: ChatMessage) => void
 }
 
 function statusLabel(
@@ -33,6 +39,7 @@ function statusLabel(
   tr: (zhText: string, enText: string) => string,
 ): string {
   if (error) return error
+  if (status === 'processing') return tr('正在整理你的回答', 'Processing your turn')
   if (status === 'connecting' || status === 'preparing') return tr('正在连接实时语音教练', 'Connecting realtime voice agent')
   if (status === 'speaking') return tr('AI 正在说话', 'AI is speaking')
   if (status === 'listening' || status === 'connected') return tr('实时语音教练已连接', 'Realtime voice agent connected')
@@ -102,9 +109,124 @@ function encodePcm16Mono(input: Float32Array, inputSampleRate: number, outputSam
   return buffer
 }
 
-function realtimeRoleFromSender(senderType: unknown): RealtimeTranscriptRole {
-  const normalized = typeof senderType === 'string' ? senderType.trim().toLowerCase() : ''
-  return normalized === 'persona' || normalized === 'assistant' ? 'assistant' : 'user'
+function realtimeRoleFromValue(value: unknown, fallback: RealtimeTranscriptRole = 'user'): RealtimeTranscriptRole {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (normalized === 'persona' || normalized === 'assistant' || normalized === 'counterpart' || normalized === 'ai') {
+    return 'assistant'
+  }
+  if (normalized === 'user' || normalized === 'learner' || normalized === 'participant') return 'user'
+  return fallback
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function textValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function eventPayload(event: RealtimeServerEvent): Record<string, unknown> {
+  const payload = (event as { payload?: unknown }).payload
+  return isRecord(payload) ? payload : {}
+}
+
+function transcriptTextFromEvent(event: RealtimeServerEvent): string {
+  const payload = eventPayload(event)
+  return textValue((event as { text?: unknown }).text)
+    || textValue(payload.text)
+    || textValue(payload.transcript)
+}
+
+function transcriptRoleFromEvent(
+  event: RealtimeServerEvent,
+  fallback: RealtimeTranscriptRole = 'user',
+): RealtimeTranscriptRole {
+  const payload = eventPayload(event)
+  const directRole = realtimeRoleFromValue((event as { role?: unknown }).role, fallback)
+  if (directRole !== fallback || textValue((event as { role?: unknown }).role)) return directRole
+  const payloadRole = realtimeRoleFromValue(payload.role, fallback)
+  if (payloadRole !== fallback || textValue(payload.role)) return payloadRole
+  const eventType = textValue(payload.eventType || (event as { eventType?: unknown }).eventType)
+  return eventType.startsWith('response.') ? 'assistant' : fallback
+}
+
+function realtimeEventKey(
+  event: RealtimeServerEvent,
+  role: RealtimeTranscriptRole,
+  content: string,
+  prefix: string,
+): string {
+  const payload = eventPayload(event)
+  const stableId = textValue(payload.eventId)
+    || textValue(payload.event_id)
+    || textValue(payload.itemId)
+    || textValue(payload.item_id)
+    || textValue(payload.responseId)
+    || textValue(payload.response_id)
+    || textValue((event as { createdAt?: unknown }).createdAt)
+  return stableId ? `${prefix}:${stableId}` : `${prefix}:${role}:${content}`
+}
+
+function normalizedSenderType(value: unknown, role: RealtimeTranscriptRole): ChatMessage['sender_type'] {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (normalized === 'persona' || normalized === 'assistant') return 'persona'
+  if (normalized === 'system') return 'system'
+  return role === 'assistant' ? 'persona' : 'user'
+}
+
+function realtimeMessageToChatMessage(
+  message: RealtimePersistedTranscriptMessage,
+  role: RealtimeTranscriptRole,
+  createdAt?: string,
+): ChatMessage | null {
+  const id = Number(message.id)
+  const roomId = Number(message.room_id)
+  const content = typeof message.content === 'string' ? message.content.trim() : ''
+  if (!Number.isFinite(id) || !Number.isFinite(roomId) || !content) return null
+
+  const senderType = normalizedSenderType(message.sender_type, role)
+  const senderId = typeof message.sender_id === 'string' && message.sender_id.trim()
+    ? message.sender_id.trim()
+    : senderType === 'persona'
+      ? 'assistant'
+      : senderType
+  const chatMessage: ChatMessage = {
+    id,
+    room_id: roomId,
+    sender_type: senderType,
+    sender_id: senderId,
+    content,
+    timestamp: typeof message.timestamp === 'string' || message.timestamp === null
+      ? message.timestamp
+      : createdAt || null,
+    emotion_score: typeof message.emotion_score === 'number' && Number.isFinite(message.emotion_score)
+      ? message.emotion_score
+      : null,
+    emotion_label: typeof message.emotion_label === 'string' ? message.emotion_label : null,
+  }
+  if (isRecord(message.metadata)) chatMessage.metadata = message.metadata
+  if (Array.isArray(message.attachments)) chatMessage.attachments = message.attachments
+  if (typeof message.video_url === 'string') chatMessage.video_url = message.video_url
+  if (typeof message.videoUrl === 'string') chatMessage.videoUrl = message.videoUrl
+  if (typeof message.mediaUrl === 'string') chatMessage.mediaUrl = message.mediaUrl
+  if (typeof message.media_url === 'string') chatMessage.media_url = message.media_url
+  return chatMessage
+}
+
+function persistedTranscriptMessageFromEvent(event: RealtimeServerEvent): RealtimePersistedTranscriptMessage | null {
+  const payload = eventPayload(event)
+  const value = payload.message ?? (event as { message?: unknown }).message
+  return isRecord(value) ? value as unknown as RealtimePersistedTranscriptMessage : null
+}
+
+function realtimeRoleFromPersistedMessage(
+  message: RealtimePersistedTranscriptMessage,
+  fallback: RealtimeTranscriptRole,
+): RealtimeTranscriptRole {
+  const metadata = isRecord(message.metadata) ? message.metadata : null
+  const realtime = isRecord(metadata?.realtime) ? metadata.realtime : null
+  return realtimeRoleFromValue(message.sender_type || realtime?.role, fallback)
 }
 
 function errorName(error: unknown): string | undefined {
@@ -120,6 +242,18 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+function cleanRealtimeProvider(value?: string | null): string | null {
+  const normalized = value?.trim()
+  return normalized || null
+}
+
+type RecorderClientRealtimeEventInput =
+  Omit<ClientRealtimeEventInput, 'trainingSessionId' | 'roomId' | 'provider' | 'realtimeProfile'>
+  & {
+    provider?: string | null
+    configuredRealtimeProvider?: string | null
+  }
+
 export default function RealtimeVoiceRecorder({
   roomId,
   trainingSessionId,
@@ -127,7 +261,9 @@ export default function RealtimeVoiceRecorder({
   personaId,
   counterpartName,
   realtimeProfile,
+  realtimeProvider,
   transcriptMetadata,
+  onFinalTranscript,
   onPersistedTranscript,
 }: RealtimeVoiceRecorderProps) {
   const { tr } = useI18n()
@@ -145,21 +281,59 @@ export default function RealtimeVoiceRecorder({
   const transcriptKeysRef = useRef<Set<string>>(new Set())
   const inputSendErrorLoggedRef = useRef(false)
   const startFailureLoggedRef = useRef(false)
+  const savedRealtimeProviderRef = useRef<string | null>(null)
+  const activeRealtimeProviderRef = useRef<string | null>(null)
   const [status, setStatus] = useState<RealtimeSessionStatus>('idle')
   const [preview, setPreview] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  const logClientEvent = useCallback((
-    event: Omit<ClientRealtimeEventInput, 'trainingSessionId' | 'roomId' | 'provider' | 'realtimeProfile'>,
-  ) => {
+  const fallbackRealtimeProvider = resolveTrainingRealtimeWebSocketProvider(realtimeProvider)
+
+  const loadConfiguredRealtimeProvider = useCallback(async (): Promise<string | null> => {
+    const providerFromProps = cleanRealtimeProvider(realtimeProvider)
+    if (providerFromProps) return providerFromProps
+    if (savedRealtimeProviderRef.current) return savedRealtimeProviderRef.current
+    try {
+      const voiceConfig = await fetchVoiceConfig()
+      const savedProvider = cleanRealtimeProvider(voiceConfig.realtime_provider)
+      savedRealtimeProviderRef.current = savedProvider
+      return savedProvider
+    } catch {
+      return null
+    }
+  }, [realtimeProvider])
+
+  const logClientEvent = useCallback((event: RecorderClientRealtimeEventInput) => {
+    const {
+      provider,
+      configuredRealtimeProvider,
+      payload,
+      ...eventFields
+    } = event
+    const runtimeProvider = provider
+      || activeRealtimeProviderRef.current
+      || fallbackRealtimeProvider
+    const configuredProvider = configuredRealtimeProvider
+      || cleanRealtimeProvider(realtimeProvider)
+      || savedRealtimeProviderRef.current
+    const providerPayload = configuredProvider && configuredProvider !== runtimeProvider
+      ? {
+          configuredRealtimeProvider: configuredProvider,
+          runtimeProvider,
+        }
+      : {}
     void logRealtimeClientEvent({
       trainingSessionId,
       roomId,
-      provider: 'pipecat',
+      provider: runtimeProvider,
       realtimeProfile: realtimeProfile || undefined,
-      ...event,
+      ...eventFields,
+      payload: {
+        ...(payload || {}),
+        ...providerPayload,
+      },
     })
-  }, [realtimeProfile, roomId, trainingSessionId])
+  }, [fallbackRealtimeProvider, realtimeProfile, realtimeProvider, roomId, trainingSessionId])
 
   const stopOutputAudio = useCallback(() => {
     outputAudioQueueRef.current?.clear()
@@ -183,6 +357,7 @@ export default function RealtimeVoiceRecorder({
 
   const closeRealtime = useCallback((nextStatus: RealtimeSessionStatus = 'closed') => {
     const realtimeSession = realtimeSessionRef.current
+    const closingRealtimeProvider = activeRealtimeProviderRef.current || fallbackRealtimeProvider
     const committedAudio = Boolean(realtimeSession?.isConnected)
     const hadRealtimeState = Boolean(
       realtimeSession
@@ -222,6 +397,7 @@ export default function RealtimeVoiceRecorder({
     if (hadRealtimeState) {
       logClientEvent({
         eventType: 'realtime.closed',
+        provider: closingRealtimeProvider,
         severity: nextStatus === 'error' ? 'error' : 'info',
         payload: {
           nextStatus,
@@ -229,7 +405,8 @@ export default function RealtimeVoiceRecorder({
         },
       })
     }
-  }, [logClientEvent, stopOutputAudio])
+    activeRealtimeProviderRef.current = null
+  }, [fallbackRealtimeProvider, logClientEvent, stopOutputAudio])
 
   useEffect(() => {
     return () => closeRealtime('closed')
@@ -374,7 +551,7 @@ export default function RealtimeVoiceRecorder({
     if (event.type === 'error') {
       const message = typeof event.message === 'string' && event.message.trim()
         ? event.message
-        : tr('Pipecat 实时通道错误', 'Pipecat realtime error')
+        : tr('实时语音通道错误', 'Realtime voice error')
       logClientEvent({
         eventType: 'realtime.server_error',
         severity: 'error',
@@ -425,35 +602,52 @@ export default function RealtimeVoiceRecorder({
       return
     }
 
-    if (event.type === 'transcript.delta' && event.text.trim()) {
-      setPreview(event.text.trim())
+    if (event.type === 'transcript.delta' && transcriptTextFromEvent(event)) {
+      setPreview(tr('正在转写语音', 'Transcribing voice'))
       return
     }
-    if (event.type === 'transcript.done' && event.text.trim()) {
-      setPreview(event.text.trim())
+    if (event.type === 'transcript.done') {
+      const content = transcriptTextFromEvent(event)
+      if (!content) return
+      const role = transcriptRoleFromEvent(event)
+      const key = realtimeEventKey(event, role, content, 'final')
+      if (!transcriptKeysRef.current.has(key)) {
+        transcriptKeysRef.current.add(key)
+        setPreview(role === 'assistant'
+          ? tr('AI 语音文本已生成', 'AI transcript ready')
+          : tr('你的语音文本已生成', 'Your transcript is ready'))
+        onFinalTranscript?.(content, role)
+      }
       return
     }
     if (event.type === 'transcript.persisted') {
-      const message = event.payload.message
-      const content = typeof message.content === 'string' ? message.content.trim() : ''
-      const role = realtimeRoleFromSender(message.sender_type)
-      const key = `${role}:${content}`
+      const message = persistedTranscriptMessageFromEvent(event)
+      const content = message ? textValue(message.content) : transcriptTextFromEvent(event)
+      const role = message
+        ? realtimeRoleFromPersistedMessage(message, transcriptRoleFromEvent(event))
+        : transcriptRoleFromEvent(event)
+      const chatMessage = message
+        ? realtimeMessageToChatMessage({ ...message, content }, role, event.createdAt)
+        : null
+      const key = chatMessage ? `message:${chatMessage.id}` : realtimeEventKey(event, role, content, 'persisted')
       if (content && !transcriptKeysRef.current.has(key)) {
         transcriptKeysRef.current.add(key)
-        setPreview(content)
-        onPersistedTranscript?.(content, role)
+        setPreview(role === 'assistant'
+          ? tr('AI 回复已保存', 'AI reply saved')
+          : tr('你的语音文本已显示在对话中', 'Your transcript is shown in the chat'))
+        onPersistedTranscript?.(content, role, chatMessage || undefined)
         logClientEvent({
           eventType: 'transcript.persisted',
           payload: {
-            messageId: message.id,
-            senderType: message.sender_type,
+            messageId: chatMessage?.id ?? message?.id,
+            senderType: chatMessage?.sender_type ?? message?.sender_type,
             role,
-            persistedRoomId: message.room_id,
+            persistedRoomId: chatMessage?.room_id ?? message?.room_id,
           },
         })
       }
     }
-  }, [logClientEvent, onPersistedTranscript, tr])
+  }, [logClientEvent, onFinalTranscript, onPersistedTranscript, tr])
 
   const startRealtime = useCallback(async () => {
     if (!roomId || !trainingSessionId || disabled) return
@@ -462,12 +656,19 @@ export default function RealtimeVoiceRecorder({
     setError(null)
     setPreview(counterpartName ? tr('正在连接 {name}', 'Connecting to {name}', { name: counterpartName }) : '')
     setStatus('connecting')
+    const configuredRealtimeProvider = await loadConfiguredRealtimeProvider()
+    const realtimeRuntimeProvider = resolveTrainingRealtimeWebSocketProvider(configuredRealtimeProvider)
+    activeRealtimeProviderRef.current = realtimeRuntimeProvider
     const audioContract = getRealtimeVoiceAudioContract(realtimeProfile)
     startFailureLoggedRef.current = false
     inputSendErrorLoggedRef.current = false
     logClientEvent({
       eventType: 'realtime.start_requested',
+      provider: realtimeRuntimeProvider,
+      configuredRealtimeProvider,
       payload: {
+        realtimeProvider: realtimeRuntimeProvider,
+        configuredRealtimeProvider: configuredRealtimeProvider || undefined,
         realtimeProfile: audioContract.realtimeProfile,
         latencyProfile: audioContract.latencyProfile,
         inputSampleRate: audioContract.inputSampleRate,
@@ -495,6 +696,7 @@ export default function RealtimeVoiceRecorder({
         url: getTrainingRealtimeWebSocketUrl({
           sessionId: trainingSessionId,
           roomId,
+          provider: realtimeRuntimeProvider,
           audioFormat: 'pcm16',
           profile: realtimeProfile,
         }),
@@ -503,9 +705,13 @@ export default function RealtimeVoiceRecorder({
           if (nextStatus === 'connected') {
             logClientEvent({
               eventType: 'realtime.ws_connected',
+              provider: realtimeRuntimeProvider,
+              configuredRealtimeProvider,
               payload: {
                 status: nextStatus,
                 roomId,
+                realtimeProvider: realtimeRuntimeProvider,
+                configuredRealtimeProvider: configuredRealtimeProvider || undefined,
               },
             })
             try {
@@ -515,6 +721,8 @@ export default function RealtimeVoiceRecorder({
                 metadata: {
                   ...(transcriptMetadata || {}),
                   personaId: personaId || undefined,
+                  realtimeProvider: configuredRealtimeProvider || realtimeRuntimeProvider,
+                  runtimeProvider: realtimeRuntimeProvider,
                   realtimeProfile: audioContract.realtimeProfile,
                   inputSampleRate: audioContract.inputSampleRate,
                   audioContract,
@@ -528,12 +736,15 @@ export default function RealtimeVoiceRecorder({
             } catch (sendError) {
               logClientEvent({
                 eventType: 'realtime.configure_failed',
+                provider: realtimeRuntimeProvider,
+                configuredRealtimeProvider,
                 severity: 'error',
                 message: errorMessage(sendError, 'Realtime voice initialization failed'),
                 payload: {
                   phase: 'session.configure',
                   roomId,
                   sessionId: trainingSessionId,
+                  realtimeProvider: realtimeRuntimeProvider,
                 },
               })
               setError(sendError instanceof Error ? sendError.message : tr('实时语音初始化失败', 'Realtime voice initialization failed'))
@@ -548,13 +759,16 @@ export default function RealtimeVoiceRecorder({
         onError: (socketError) => {
           logClientEvent({
             eventType: 'realtime.ws_error',
+            provider: realtimeRuntimeProvider,
+            configuredRealtimeProvider,
             severity: 'error',
-            message: socketError.message || 'Pipecat realtime channel error',
+            message: socketError.message || 'Realtime voice channel error',
             payload: {
               name: socketError.name,
+              realtimeProvider: realtimeRuntimeProvider,
             },
           })
-          setError(socketError.message || tr('Pipecat 实时通道错误', 'Pipecat realtime channel error'))
+          setError(socketError.message || tr('实时语音通道错误', 'Realtime voice channel error'))
           setStatus('error')
         },
       })
@@ -571,11 +785,14 @@ export default function RealtimeVoiceRecorder({
       localStreamRef.current = localStream
       logClientEvent({
         eventType: 'mic.capture_started',
+        provider: realtimeRuntimeProvider,
+        configuredRealtimeProvider,
         payload: {
           trackCount: localStream.getAudioTracks().length,
           inputSampleRate: audioContract.inputSampleRate,
           outputSampleRate: audioContract.outputSampleRate,
           realtimeProfile: audioContract.realtimeProfile,
+          realtimeProvider: realtimeRuntimeProvider,
         },
       })
 
@@ -607,12 +824,15 @@ export default function RealtimeVoiceRecorder({
             inputSendErrorLoggedRef.current = true
             logClientEvent({
               eventType: 'audio.input_send_failed',
+              provider: realtimeRuntimeProvider,
+              configuredRealtimeProvider,
               severity: 'error',
               message: errorMessage(sendError, 'Failed to send realtime audio'),
               payload: {
                 sampleRate: audioContext.sampleRate,
                 outputSampleRate: audioContract.inputSampleRate,
                 audioBytes: audio.byteLength,
+                realtimeProvider: realtimeRuntimeProvider,
               },
             })
           }
@@ -633,12 +853,15 @@ export default function RealtimeVoiceRecorder({
         startFailureLoggedRef.current = true
         logClientEvent({
           eventType: failureEventType,
+          provider: realtimeRuntimeProvider,
+          configuredRealtimeProvider,
           severity: 'error',
           message: failureMessage,
           payload: {
             errorName: errorName(err),
             roomId,
             trainingSessionId,
+            realtimeProvider: realtimeRuntimeProvider,
             realtimeProfile: audioContract.realtimeProfile,
           },
         })
@@ -646,15 +869,21 @@ export default function RealtimeVoiceRecorder({
       closeRealtime('error')
       setError(err instanceof Error ? err.message : tr('启动实时语音教练失败', 'Failed to start realtime voice agent'))
     }
-  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, logClientEvent, personaId, realtimeProfile, roomId, trainingSessionId, transcriptMetadata, tr])
+  }, [closeRealtime, counterpartName, disabled, handleRealtimeEvent, loadConfiguredRealtimeProvider, logClientEvent, personaId, realtimeProfile, roomId, trainingSessionId, transcriptMetadata, tr])
 
-  const active = status === 'connecting' || status === 'connected' || status === 'listening' || status === 'speaking'
+  const active = status === 'connecting'
+    || status === 'connected'
+    || status === 'preparing'
+    || status === 'listening'
+    || status === 'processing'
+    || status === 'speaking'
   const label = statusLabel(status, error, tr)
+  const actionDisabled = status === 'connecting' || (!active && (disabled || !roomId || !trainingSessionId))
   const actionTitle = active ? tr('停止实时语音教练', 'Stop realtime voice agent') : tr('启动实时语音教练', 'Start realtime voice agent')
 
   return (
     <div className="realtime-voice-recorder">
-      <div className="realtime-voice-status">
+      <div className="realtime-voice-status" aria-live="polite">
         <span>{label}</span>
         {preview && <small>{preview}</small>}
       </div>
@@ -663,7 +892,7 @@ export default function RealtimeVoiceRecorder({
         size="sm"
         className={`realtime-voice-action${active ? ' active' : ''}`}
         onClick={active ? () => closeRealtime('closed') : startRealtime}
-        disabled={disabled || !roomId || !trainingSessionId || status === 'connecting'}
+        disabled={actionDisabled}
         title={actionTitle}
         aria-label={actionTitle}
       >

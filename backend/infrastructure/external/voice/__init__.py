@@ -26,6 +26,18 @@ _OPENROUTER_PROVIDER_ALIASES = {
     "openrouter_ai",
     "openrouter_compatible",
 }
+_VOLCENGINE_PROVIDER_ALIASES = {
+    "volcengine",
+    "volc_engine",
+    "doubao",
+    "byteplus",
+    "bytedance",
+    "volcengine_doubao",
+}
+_MINIMAX_TTS_DEFAULT_MODEL = "speech-2.8-hd"
+_OPENAI_STT_DEFAULT_MODEL = "whisper-1"
+_VOLCENGINE_TTS_DEFAULT_MODEL = "seed-tts-2.0"
+_VOLCENGINE_STT_DEFAULT_MODEL = "volc.bigasr.sauc.duration"
 
 
 def _normalized_provider(value: object | None) -> str:
@@ -71,6 +83,18 @@ def _effective_tts_base_url() -> str | None:
     ):
         return settings.llm.base_url
     return None
+
+
+def _effective_volcengine_tts_model(value: str | None) -> str:
+    if value and value != _MINIMAX_TTS_DEFAULT_MODEL:
+        return value
+    return _VOLCENGINE_TTS_DEFAULT_MODEL
+
+
+def _effective_volcengine_stt_model(value: str | None) -> str:
+    if value and value != _OPENAI_STT_DEFAULT_MODEL:
+        return value
+    return _VOLCENGINE_STT_DEFAULT_MODEL
 
 
 # ---- TTS ----
@@ -121,6 +145,14 @@ async def init_tts_client() -> None:
             _tts_client = OpenRouterTTSProvider(
                 api_key=tts_api_key,
                 model=voice_cfg.tts_model,
+                **({"base_url": tts_base_url} if tts_base_url else {}),
+            )
+        elif tts_provider in _VOLCENGINE_PROVIDER_ALIASES:
+            from .volcengine_voice import VolcengineTTSProvider
+
+            _tts_client = VolcengineTTSProvider(
+                api_key=tts_api_key,
+                model=_effective_volcengine_tts_model(voice_cfg.tts_model),
                 **({"base_url": tts_base_url} if tts_base_url else {}),
             )
         else:
@@ -184,13 +216,22 @@ async def init_stt_client() -> None:
         return
 
     try:
-        if voice_cfg.stt_provider in ("minimax", "openai", "whisper"):
+        stt_provider = _normalized_provider(voice_cfg.stt_provider)
+        if stt_provider in ("minimax", "openai", "whisper"):
             from .minimax_stt import MinimaxSTTProvider
 
             _stt_client = MinimaxSTTProvider(
                 api_key=voice_cfg.stt_api_key,
                 base_url=voice_cfg.stt_base_url or "https://api.openai.com/v1",
                 model=voice_cfg.stt_model,
+            )
+        elif stt_provider in _VOLCENGINE_PROVIDER_ALIASES:
+            from .volcengine_voice import VolcengineSTTProvider
+
+            _stt_client = VolcengineSTTProvider(
+                api_key=voice_cfg.stt_api_key,
+                model=_effective_volcengine_stt_model(voice_cfg.stt_model),
+                **({"base_url": voice_cfg.stt_base_url} if voice_cfg.stt_base_url else {}),
             )
         else:
             logger.warning(

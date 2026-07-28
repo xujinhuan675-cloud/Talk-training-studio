@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import Mapping
 from itertools import count
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel, Field
 
@@ -24,6 +26,8 @@ from api.dependencies import (
 import api.routes.training_studio as training_studio_routes
 from api.routes.training_studio import (
     get_live_guidance_service,
+    get_training_realtime_pipeline_factory,
+    get_training_realtime_uow_factory,
     get_training_runtime_uow_factory,
     get_training_scenario_config_service,
     get_storybank_service,
@@ -167,6 +171,15 @@ class FakeTrainingRuntimeMessageRepository:
         )
         self._state.messages.append(saved)
         return saved
+
+    async def list_by_room_id(
+        self, room_id: int, *, skip: int = 0, limit: int = 50
+    ) -> list[SimpleNamespace]:
+        messages = [message for message in self._state.messages if message.room_id == room_id]
+        return messages[skip : skip + limit]
+
+    async def count_by_room_id(self, room_id: int) -> int:
+        return sum(1 for message in self._state.messages if message.room_id == room_id)
 
 
 class FakeTrainingRuntimeUnitOfWork:
@@ -454,9 +467,23 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         reloads.append(True)
 
     try:
-        monkeypatch.setattr(training_studio_routes, "_settings_env_file_path", lambda: env_file)
-        monkeypatch.setattr(training_studio_routes, "_reload_voice_clients", fake_reload_voice_clients)
-        monkeypatch.setattr(training_studio_routes, "_reload_llm_client", fake_reload_llm_client)
+        monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
+        monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
+        monkeypatch.setattr(
+            training_studio_routes,
+            "_settings_env_file_path",
+            lambda: env_file,
+        )
+        monkeypatch.setattr(
+            training_studio_routes,
+            "_reload_voice_clients",
+            fake_reload_voice_clients,
+        )
+        monkeypatch.setattr(
+            training_studio_routes,
+            "_reload_llm_client",
+            fake_reload_llm_client,
+        )
         settings.llm.api_key = "sk-llm-old"
         settings.llm.base_url = "https://old-llm.example.com/v1"
         settings.llm.default_model = "old-model"
@@ -540,6 +567,155 @@ async def test_voice_config_save_writes_env_and_reloads_clients(
         assert settings.REALTIME_PROVIDER == "openai"
         assert settings.REALTIME_BASE_URL == "https://api.openai.com/v1/realtime/calls"
         assert settings.REALTIME_OPENAI_API_KEY == "sk-realtime-5678"
+    finally:
+        settings.llm = original_llm
+        settings.voice = original_voice
+        for key, value in original_realtime.items():
+            setattr(settings, key, value)
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+@pytest.mark.asyncio
+async def test_voice_config_save_accepts_volcengine_presets(
+    client: AsyncClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("SECRET_KEY=test-secret\n", encoding="utf-8")
+    voice_env_keys = [
+        "LLM__PROVIDER",
+        "LLM__BASE_URL",
+        "LLM__DEFAULT_MODEL",
+        "LLM__WIRE_API",
+        "LLM__API_KEY",
+        "VOICE__TTS_PROVIDER",
+        "VOICE__TTS_BASE_URL",
+        "VOICE__TTS_MODEL",
+        "VOICE__TTS_API_KEY",
+        "VOICE__STT_PROVIDER",
+        "VOICE__STT_BASE_URL",
+        "VOICE__STT_MODEL",
+        "VOICE__STT_API_KEY",
+        "REALTIME_PROVIDER",
+        "REALTIME_API_KEY",
+        "REALTIME_BASE_URL",
+        "REALTIME_OPENAI_API_KEY",
+        "REALTIME_OPENAI_MODEL",
+        "REALTIME_OPENAI_VOICE",
+        "REALTIME_OPENAI_TRANSCRIPTION_MODEL",
+    ]
+    old_env = {key: os.environ.get(key) for key in voice_env_keys}
+    original_llm = settings.llm.model_copy(deep=True)
+    original_voice = settings.voice.model_copy(deep=True)
+    original_realtime = {
+        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
+        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
+        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
+        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
+        "REALTIME_OPENAI_MODEL": settings.REALTIME_OPENAI_MODEL,
+        "REALTIME_OPENAI_VOICE": settings.REALTIME_OPENAI_VOICE,
+        "REALTIME_OPENAI_TRANSCRIPTION_MODEL": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+    }
+
+    async def fake_reload_voice_clients() -> None:
+        return None
+
+    async def fake_reload_llm_client() -> None:
+        return None
+
+    try:
+        monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
+        monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
+        monkeypatch.setattr(
+            training_studio_routes,
+            "_settings_env_file_path",
+            lambda: env_file,
+        )
+        monkeypatch.setattr(
+            training_studio_routes,
+            "_reload_voice_clients",
+            fake_reload_voice_clients,
+        )
+        monkeypatch.setattr(
+            training_studio_routes,
+            "_reload_llm_client",
+            fake_reload_llm_client,
+        )
+        settings.llm = LLMSettings(
+            provider="openai",
+            api_key="sk-old-llm",
+            base_url="https://api.openai.com/v1",
+            default_model="gpt-4o-mini",
+        )
+        settings.voice = VoiceSettings(
+            tts_provider="minimax",
+            tts_api_key=None,
+            tts_base_url=None,
+            tts_model="speech-2.8-hd",
+            stt_provider="whisper",
+            stt_api_key=None,
+            stt_base_url=None,
+            stt_model="whisper-1",
+        )
+        settings.REALTIME_OPENAI_API_KEY = None
+        settings.REALTIME_API_KEY = None
+        settings.REALTIME_PROVIDER = "openai"
+        settings.REALTIME_BASE_URL = "https://api.openai.com/v1/realtime/calls"
+        settings.REALTIME_OPENAI_MODEL = "gpt-realtime-2.1"
+        settings.REALTIME_OPENAI_VOICE = "marin"
+        settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
+
+        resp = await client.put(
+            "/api/v1/training-studio/voice-config",
+            headers={"X-Mock-User": "admin"},
+            json={
+                "llm_provider": "volcengine",
+                "llm_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                "llm_default_model": "doubao-seed-1-6-250615",
+                "llm_wire_api": "chat_completions",
+                "llm_api_key": "sk-volc-ark",
+                "tts_provider": "volcengine",
+                "tts_base_url": "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+                "tts_model": "seed-tts-2.0",
+                "tts_api_key": "sk-volc-speech-tts",
+                "stt_provider": "volcengine",
+                "stt_base_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+                "stt_model": "volc.bigasr.sauc.duration",
+                "stt_api_key": "sk-volc-speech-stt",
+                "realtime_provider": "volcengine.doubao_realtime",
+                "realtime_base_url": (
+                    "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
+                ),
+                "realtime_api_key": "sk-volc-realtime",
+                "realtime_model": "seed-duplex",
+                "realtime_voice": "your-volcengine-voice",
+                "realtime_transcription_model": "volcengine-realtime-transcript",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["llm_provider"] == "volcengine"
+        assert data["tts_provider"] == "volcengine"
+        assert data["stt_provider"] == "volcengine"
+        assert data["stt_api_key_source"] == "stt"
+        assert data["realtime_provider"] == "volcengine.doubao_realtime"
+        assert data["realtime_api_key_source"] == "realtime"
+        assert settings.voice.stt_api_key == "sk-volc-speech-stt"
+        assert settings.REALTIME_API_KEY == "sk-volc-realtime"
+        assert settings.REALTIME_OPENAI_API_KEY is None
+
+        env_text = env_file.read_text(encoding="utf-8")
+        assert "LLM__PROVIDER=volcengine" in env_text
+        assert "VOICE__TTS_PROVIDER=volcengine" in env_text
+        assert "VOICE__STT_PROVIDER=volcengine" in env_text
+        assert "REALTIME_PROVIDER=volcengine.doubao_realtime" in env_text
+        assert "REALTIME_API_KEY=sk-volc-realtime" in env_text
     finally:
         settings.llm = original_llm
         settings.voice = original_voice
@@ -650,6 +826,43 @@ def test_voice_config_does_not_reuse_llm_key_for_inventory_stt_provider() -> Non
         settings.voice = original_voice
 
 
+def test_voice_config_reports_volcengine_dedicated_stt_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_llm = settings.llm
+    original_voice = settings.voice
+    monkeypatch.delenv("VOICE__STT_API_KEY", raising=False)
+    monkeypatch.setattr(training_studio_routes, "_read_env_file_values", lambda path=None: {})
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-llm-shared",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="volcengine",
+        tts_api_key="sk-volc-tts",
+        tts_base_url="https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+        tts_model="seed-tts-2.0",
+        stt_provider="volcengine",
+        stt_api_key="sk-volc-stt",
+        stt_base_url="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+        stt_model="volc.bigasr.sauc.duration",
+    )
+
+    try:
+        dto = training_studio_routes._voice_config_response()
+
+        assert dto.stt_provider == "volcengine"
+        assert dto.stt_api_key_configured is True
+        assert dto.stt_api_key_preview == "***-stt"
+        assert dto.stt_api_key_source == "stt"
+        assert dto.stt_use_tts_api_key is False
+    finally:
+        settings.llm = original_llm
+        settings.voice = original_voice
+
+
 def test_voice_config_reports_generic_realtime_provider_key() -> None:
     original_llm = settings.llm
     original_realtime = {
@@ -737,6 +950,138 @@ def test_openai_realtime_key_accepts_generic_key_for_openai_provider() -> None:
             setattr(settings, key, value)
 
 
+def test_realtime_capabilities_include_volcengine_doubao_runtime_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "REALTIME_PROVIDER", "volcengine.doubao_realtime")
+    monkeypatch.setattr(settings, "REALTIME_API_KEY", "sk-volcengine-realtime")
+    monkeypatch.setattr(settings, "REALTIME_BASE_URL", "wss://example.test/doubao/realtime")
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_MODEL", "seed-duplex-test")
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "voice-test")
+
+    data = training_studio_routes._realtime_capabilities_response()
+    volcengine = find_provider_capability(data, "volcengine.doubao_realtime")
+
+    assert volcengine is not None
+    assert volcengine["provider"] == "volcengine.doubao_realtime"
+    assert volcengine["runtime"] == "volcengine.doubao_realtime"
+    assert volcengine.get("readyForCall") is True
+    assert "sk-volcengine-realtime" not in json.dumps(data, default=str)
+    assert find_provider_capability(data, "pipecat") is not None
+
+
+def test_realtime_pipeline_factory_keeps_pipecat_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_adapter = object()
+    fake_module = SimpleNamespace(create_pipecat_realtime_pipeline=lambda: fake_adapter)
+    monkeypatch.setattr(
+        training_studio_routes,
+        "_load_pipecat_realtime_adapter",
+        lambda: fake_module,
+    )
+
+    factory = training_studio_routes.get_training_realtime_pipeline_factory()
+
+    assert factory("pipecat") is fake_adapter
+    assert factory("pipecat_pipeline") is fake_adapter
+
+
+def test_realtime_pipeline_factory_routes_volcengine_doubao_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "REALTIME_PROVIDER", "volcengine.doubao_realtime")
+    monkeypatch.setattr(settings, "REALTIME_API_KEY", "sk-volcengine-realtime")
+    monkeypatch.setattr(settings, "REALTIME_BASE_URL", "wss://example.test/doubao/realtime")
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_MODEL", "seed-duplex-test")
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "voice-test")
+
+    factory = training_studio_routes.get_training_realtime_pipeline_factory()
+
+    assert factory("volcengine.doubao_realtime") is not None
+
+
+def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRealtimePipelineAdapter:
+        def __init__(self) -> None:
+            self.started_context = None
+            self.started_config = None
+            self.closed = False
+
+        async def start(self, context, config) -> None:
+            self.started_context = context
+            self.started_config = config
+
+        async def append_audio(self, chunk) -> None:
+            return None
+
+        async def commit_audio(self) -> None:
+            return None
+
+        async def events(self):
+            if False:
+                yield {}
+
+        async def close(self) -> None:
+            self.closed = True
+
+    async def create_bound_session() -> str:
+        session = await app.state.training_session_service.create_session(
+            session_payload(
+                "realtime",
+                user_id="user-admin-001",
+                team_id="team-ops",
+            )
+        )
+        await app.state.training_session_service.start_session(
+            session.session_id,
+            room_id="42",
+            access_scope=training_session_scope(),
+        )
+        return session.session_id
+
+    adapter = FakeRealtimePipelineAdapter()
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
+    session_id = asyncio.run(create_bound_session())
+    app.state.training_runtime_state.rooms[42] = SimpleNamespace(id=42, name="Realtime Room")
+    app.dependency_overrides[get_training_realtime_uow_factory] = (
+        app.dependency_overrides[get_training_runtime_uow_factory]
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda provider: adapter
+        if provider == "volcengine.doubao_realtime"
+        else None
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        f"/api/v1/training-studio/realtime?session_id={session_id}&room_id=42"
+        "&provider=volcengine.doubao_realtime",
+        headers={"X-Mock-User": "admin"},
+    ) as ws:
+        started = ws.receive_json()
+        assert started["type"] == "session.started", started
+        listening = ws.receive_json()
+        ws.send_json({"type": "session.close", "reason": "done"})
+        closed = ws.receive_json()
+
+    assert started["payload"]["provider"] == "volcengine.doubao_realtime"
+    assert started["payload"]["realtimeRuntime"] == "volcengine.doubao_realtime"
+    assert listening["status"] == "listening"
+    assert closed["type"] == "session.closed"
+    assert adapter.started_context is not None
+    assert adapter.started_context.metadata["provider"] == "volcengine.doubao_realtime"
+    assert adapter.started_context.metadata["realtimeRuntime"] == "volcengine.doubao_realtime"
+    assert adapter.started_config is not None
+    assert adapter.started_config.provider == "volcengine.doubao_realtime"
+    assert adapter.started_config.runtime == "volcengine.doubao_realtime"
+    assert adapter.closed is True
+
+
 @pytest.mark.asyncio
 async def test_task_config_normalizes_ratios_and_rubric_weights(client: AsyncClient) -> None:
     resp = await client.post(
@@ -811,6 +1156,22 @@ def parse_sse_events(text: str) -> list[tuple[str, dict]]:
         if data_lines:
             events.append((event_name, json.loads("\n".join(data_lines))))
     return events
+
+
+def find_provider_capability(payload: object, provider: str) -> Mapping[str, object] | None:
+    if isinstance(payload, Mapping):
+        if payload.get("provider") == provider or payload.get("id") == provider:
+            return payload
+        for value in payload.values():
+            found = find_provider_capability(value, provider)
+            if found is not None:
+                return found
+    if isinstance(payload, (list, tuple)):
+        for item in payload:
+            found = find_provider_capability(item, provider)
+            if found is not None:
+                return found
+    return None
 
 
 def admin_team_headers(team_id: str) -> dict[str, str]:
@@ -1592,6 +1953,52 @@ async def test_training_session_complete_and_report(client: AsyncClient, app: Fa
         room_id=42,
         operation="session_report",
     )
+
+
+@pytest.mark.asyncio
+async def test_training_session_complete_can_generate_report_in_background(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload())
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+
+    complete_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/complete",
+        json={"report_generation": "background"},
+    )
+
+    assert complete_resp.status_code == 200
+    completed = complete_resp.json()["data"]
+    assert completed["status"] == "completed"
+    assert completed["report_id"] is None
+    assert completed["task_config"]["metadata"]["completionReport"]["status"] == "pending"
+    assert completed["task_config"]["metadata"]["completionReport"]["generation"] == "background"
+
+    session_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}")
+    assert session_resp.status_code == 200
+    session = session_resp.json()["data"]
+    assert session["report_id"] == "501"
+    completion_report = session["task_config"]["metadata"]["completionReport"]
+    assert completion_report["status"] == "ready"
+    assert completion_report["reportId"] == "501"
+    assert app.state.analysis_service.generated_for == [42]
+    assert app.state.growth_service.evaluated == [501]
+    assert_training_session_legacy_room_scope(
+        app.state.analysis_service.generated_scopes[0],
+        session_id=session_id,
+        room_id=42,
+        operation="generate_report",
+    )
+
+    app.state.analysis_reader_service.reports[501] = FakeReport(id=501, room_id=42)
+    report_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}/report")
+    assert report_resp.status_code == 200
+    assert report_resp.json()["data"]["id"] == 501
 
 
 @pytest.mark.asyncio

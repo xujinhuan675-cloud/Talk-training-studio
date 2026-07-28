@@ -83,7 +83,22 @@ export interface CompleteTrainingSessionRequest {
   report_id?: number | string | null
   score_id?: number | string | null
   generate_report?: boolean
+  report_generation?: 'sync' | 'background'
   metadata?: Record<string, unknown>
+}
+
+export type TrainingCompletionReportStatus = 'pending' | 'ready' | 'failed'
+
+export interface TrainingCompletionReportState {
+  status: TrainingCompletionReportStatus
+  phase?: string
+  generation?: 'sync' | 'background' | 'explicit' | string
+  reportId?: string
+  message?: string
+  errorType?: string
+  completedWithoutReport?: boolean
+  requestedAt?: string
+  recordedAt?: string
 }
 
 export interface TrainingSessionReportDTO {
@@ -458,6 +473,51 @@ function firstArray(record: Record<string, unknown>, keys: string[]): unknown[] 
     if (Array.isArray(value)) return value
   }
   return []
+}
+
+function normalizedCompletionReportStatus(value: unknown): TrainingCompletionReportStatus | null {
+  const status = cleanText(value)?.toLowerCase()
+  if (status === 'pending' || status === 'ready' || status === 'failed') return status
+  return null
+}
+
+function completionReportMetadata(session: TrainingSessionDTO): Record<string, unknown> | null {
+  const taskMetadata = asRecord(session.task_config?.metadata)
+  const rootMetadata = asRecord(session.metadata)
+  return asRecord(taskMetadata?.completionReport)
+    ?? asRecord(taskMetadata?.completion_report)
+    ?? asRecord(rootMetadata?.completionReport)
+    ?? asRecord(rootMetadata?.completion_report)
+}
+
+export function getTrainingCompletionReportState(
+  session: TrainingSessionDTO,
+): TrainingCompletionReportState | null {
+  const metadata = completionReportMetadata(session)
+  const reportId = cleanText(metadata?.reportId)
+    ?? cleanText(metadata?.report_id)
+    ?? cleanText(session.report_id)
+  const status = normalizedCompletionReportStatus(metadata?.status)
+    ?? (reportId ? 'ready' : null)
+  if (!status) return null
+  const completedWithoutReport = metadata?.completedWithoutReport
+  const completedWithoutReportAlias = metadata?.completed_without_report
+
+  return {
+    status,
+    phase: cleanText(metadata?.phase),
+    generation: cleanText(metadata?.generation),
+    reportId,
+    message: cleanText(metadata?.message),
+    errorType: cleanText(metadata?.errorType) ?? cleanText(metadata?.error_type),
+    completedWithoutReport: typeof completedWithoutReport === 'boolean'
+      ? completedWithoutReport
+      : typeof completedWithoutReportAlias === 'boolean'
+        ? completedWithoutReportAlias
+        : undefined,
+    requestedAt: cleanText(metadata?.requestedAt) ?? cleanText(metadata?.requested_at),
+    recordedAt: cleanText(metadata?.recordedAt) ?? cleanText(metadata?.recorded_at),
+  }
 }
 
 function collectBranchMetadataCandidates(

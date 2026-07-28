@@ -802,6 +802,142 @@
   cursor: not-allowed;
 }
 
+.chat-page-report-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 8px 20px;
+  border-bottom: 1px solid rgba(37, 99, 235, 0.22);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.chat-page-report-status-bar.failed {
+  border-bottom-color: rgba(220, 38, 38, 0.22);
+  background: var(--danger-bg);
+  color: #dc2626;
+}
+
+.chat-page-report-status-bar.ready {
+  border-bottom-color: rgba(22, 163, 74, 0.22);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.chat-page-report-status-bar svg {
+  flex: 0 0 auto;
+}
+
+.report-status-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.report-status-copy strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.report-status-copy span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  opacity: 0.88;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-status-action.ui-button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.training-completion-dialog.ui-dialog-content {
+  width: min(460px, calc(100vw - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card, #fff);
+  box-shadow: var(--shadow-xl, 0 24px 60px rgba(15, 23, 42, 0.18));
+}
+
+.training-completion-dialog {
+  padding: 18px 18px 16px;
+}
+
+.training-completion-dialog-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.training-completion-dialog-title-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.training-completion-dialog-title {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.training-completion-dialog-description {
+  margin-top: 6px;
+  color: var(--text-secondary, #5f6b7a);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.training-completion-dialog-close.ui-button {
+  flex: 0 0 auto;
+  margin-top: -2px;
+}
+
+.training-completion-dialog-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.training-completion-dialog-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.training-completion-dialog-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.training-completion-dialog-action.ui-button {
+  justify-content: center;
+  min-height: 40px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.training-completion-dialog-action svg {
+  flex: 0 0 auto;
+}
+
 .chat-page-live-coach-strip {
   display: flex;
   align-items: center;
@@ -1813,6 +1949,14 @@
     margin-right: 3px;
     min-height: 30px;
     padding: 0 9px;
+  }
+
+  .training-completion-dialog {
+    padding: 16px;
+  }
+
+  .training-completion-dialog-actions {
+    grid-template-columns: 1fr;
   }
 
   .chat-page-training-scene {

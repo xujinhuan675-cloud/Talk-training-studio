@@ -72,6 +72,14 @@ export const LLM_PROVIDER_PRESETS: VoiceProviderPreset[] = [
     wireApi: 'chat_completions',
   },
   {
+    value: 'volcengine',
+    label: 'Volcengine Ark (Doubao)',
+    status: 'runtime',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-seed-1-6-250615',
+    wireApi: 'chat_completions',
+  },
+  {
     value: 'together',
     label: 'Together AI',
     status: 'runtime',
@@ -169,6 +177,14 @@ export const TTS_PROVIDER_PRESETS: VoiceProviderPreset[] = [
     status: 'runtime',
     baseUrl: 'https://api.elevenlabs.io',
     model: 'eleven_multilingual_v2',
+  },
+  {
+    value: 'volcengine',
+    label: 'Volcengine Doubao TTS',
+    status: 'runtime',
+    baseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+    model: 'seed-tts-2.0',
+    note: 'Uses Volcengine Speech native TTS with X-Api-Key and X-Api-Resource-Id headers.',
   },
   {
     value: 'openai',
@@ -300,6 +316,15 @@ export const STT_PROVIDER_PRESETS: VoiceProviderPreset[] = [
     note: 'Current adapter uses the OpenAI Whisper-compatible transcription API.',
   },
   {
+    value: 'volcengine',
+    label: 'Volcengine Doubao ASR',
+    status: 'runtime',
+    baseUrl: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel',
+    model: 'volc.bigasr.sauc.duration',
+    reuseTtsKey: false,
+    note: 'Supports pcm, wav, ogg, or mp3 input; browser WebM must be converted before this adapter can transcribe it.',
+  },
+  {
     value: 'deepgram',
     label: 'Deepgram',
     status: 'inventory',
@@ -396,6 +421,15 @@ export const REALTIME_PROVIDER_PRESETS: VoiceProviderPreset[] = [
     model: 'gpt-realtime-2.1',
     realtimeVoice: 'marin',
     realtimeTranscriptionModel: 'gpt-realtime-whisper',
+  },
+  {
+    value: 'volcengine.doubao_realtime',
+    label: 'Volcengine Doubao Realtime',
+    status: 'inventory',
+    baseUrl: 'wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue',
+    model: '1.2.6.0',
+    realtimeVoice: 'your-volcengine-voice',
+    note: 'Key/config can be saved, but the Volcengine realtime runtime adapter is still pending.',
   },
   {
     value: 'aws.nova_sonic',
