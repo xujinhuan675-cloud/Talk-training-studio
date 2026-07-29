@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -501,6 +502,20 @@ async def test_runner_rejects_audio_commands_after_close():
             "REALTIME_PROVIDER_ERROR",
             "provider_error",
         ),
+        (
+            {
+                "type": "error",
+                "payload": {
+                    "message": "Volcengine request parameter is invalid",
+                    "code": "InvalidParameter",
+                    "status": 400,
+                    "metadata": {"requestId": "req-volc-1"},
+                },
+            },
+            "Volcengine request parameter is invalid",
+            "REALTIME_PROVIDER_BAD_REQUEST",
+            "bad_request",
+        ),
     ],
 )
 @pytest.mark.asyncio
@@ -531,8 +546,52 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
     assert exc_info.value.metadata["errorCategory"] == expected_category
     assert exc_info.value.metadata["fatal"] is True
     assert exc_info.value.metadata["retryable"] is (expected_category == "provider_unavailable")
+    if expected_category == "bad_request":
+        assert exc_info.value.metadata["sourceCode"] == "InvalidParameter"
+        assert exc_info.value.metadata["metadata"]["requestId"] == "req-volc-1"
+        assert exc_info.value.metadata["metadata"]["statusCode"] == 400
     await runner.close()
     assert event_sink.events == []
+
+
+@pytest.mark.asyncio
+async def test_runner_logs_provider_event_pump_failure_with_structured_details(caplog):
+    caplog.set_level(
+        logging.WARNING,
+        logger="application.services.training_studio.realtime_pipeline_runner",
+    )
+    runner, adapter, _sink = await _started_runner()
+
+    await adapter.emit(
+        {
+            "type": "error",
+            "payload": {
+                "message": "Volcengine request parameter is invalid",
+                "code": "InvalidParameter",
+                "status": 400,
+                "metadata": {"requestId": "req-invalid-1"},
+            },
+        }
+    )
+
+    async def _wait_for_error() -> None:
+        while runner.events_error is None:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_wait_for_error(), timeout=1)
+
+    record = next(
+        item for item in caplog.records if item.message == "Realtime pipeline event pump failed"
+    )
+    error = record.realtime_error
+    assert error["message"] == "Volcengine request parameter is invalid"
+    assert error["code"] == "REALTIME_PROVIDER_BAD_REQUEST"
+    assert error["errorCategory"] == "bad_request"
+    assert error["metadata"]["requestId"] == "req-invalid-1"
+    assert error["metadata"]["statusCode"] == 400
+    assert error["trainingSessionId"] == "training-1"
+    assert error["roomId"] == 42
+    await runner.close()
 
 
 @pytest.mark.asyncio

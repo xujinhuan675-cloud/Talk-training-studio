@@ -234,6 +234,41 @@ function wireValue(
   return undefined
 }
 
+function nestedWireValue(
+  event: Record<string, unknown>,
+  payload: Record<string, unknown> | null,
+  keys: string[],
+  options: { allowRecord?: boolean } = {},
+): unknown {
+  const records: Record<string, unknown>[] = []
+  const seen = new WeakSet<object>()
+
+  function visit(value: unknown, depth: number): void {
+    if (!isRecord(value) || seen.has(value) || depth < 0) return
+    seen.add(value)
+    records.push(value)
+    for (const key of ['payload', 'error', 'data', 'body', 'details', 'detail']) {
+      const nested = value[key]
+      if (isRecord(nested)) {
+        visit(nested, depth - 1)
+      } else if (Array.isArray(nested)) {
+        nested.forEach((item) => visit(item, depth - 1))
+      }
+    }
+  }
+
+  visit(event, 4)
+  if (payload) visit(payload, 4)
+
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key]
+      if (value !== undefined && (options.allowRecord || !isRecord(value))) return value
+    }
+  }
+  return undefined
+}
+
 function audioBufferFromView(value: ArrayBufferView): ArrayBuffer {
   return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer
 }
@@ -270,9 +305,9 @@ function optionalBoolean(value: unknown): boolean | undefined {
 
 function normalizeRealtimeErrorEvent(event: Record<string, unknown>): RealtimeErrorEvent {
   const payload = isRecord(event.payload) ? event.payload : null
-  const message = optionalText(wireValue(event, payload, ['message', 'detail', 'error']))
+  const message = optionalText(nestedWireValue(event, payload, ['message', 'detail', 'error', 'reason', 'msg']))
     || 'Realtime session error'
-  const code = optionalText(wireValue(event, payload, ['code', 'errorCode', 'error_code']))
+  const code = optionalText(nestedWireValue(event, payload, ['code', 'errorCode', 'error_code']))
   const outputPayload: RealtimeErrorPayload = { message }
   if (code) outputPayload.code = code
 
@@ -288,17 +323,17 @@ function normalizeRealtimeErrorEvent(event: Record<string, unknown>): RealtimeEr
     'trainingSessionId',
     'realtimeSessionId',
   ] as const) {
-    const value = optionalText(wireValue(event, payload, [key]))
+    const value = optionalText(nestedWireValue(event, payload, [key]))
     if (value) outputPayload[key] = value
   }
 
-  const roomId = optionalNumber(wireValue(event, payload, ['roomId', 'room_id']))
+  const roomId = optionalNumber(nestedWireValue(event, payload, ['roomId', 'room_id']))
   if (roomId !== undefined) outputPayload.roomId = roomId
-  const retryable = optionalBoolean(wireValue(event, payload, ['retryable']))
+  const retryable = optionalBoolean(nestedWireValue(event, payload, ['retryable']))
   if (retryable !== undefined) outputPayload.retryable = retryable
-  const fatal = optionalBoolean(wireValue(event, payload, ['fatal']))
+  const fatal = optionalBoolean(nestedWireValue(event, payload, ['fatal']))
   if (fatal !== undefined) outputPayload.fatal = fatal
-  const metadata = wireValue(event, payload, ['metadata'])
+  const metadata = nestedWireValue(event, payload, ['metadata'], { allowRecord: true })
   if (isRecord(metadata)) outputPayload.metadata = metadata
 
   const output: RealtimeErrorEvent = {
@@ -559,6 +594,7 @@ export class RealtimeSession {
   }
 
   private setStatus(status: RealtimeSessionStatus): void {
+    if (this.status === status) return
     this.status = status
     this.options.onStatusChange?.(status)
   }

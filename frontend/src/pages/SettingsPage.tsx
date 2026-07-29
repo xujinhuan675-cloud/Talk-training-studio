@@ -2012,6 +2012,12 @@ function ConfigTab() {
       if (realtimeCapabilities?.pipecat.readyForCall) return 'ready'
       return config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'
     }
+    if (form.realtimeProvider === 'volcengine.doubao_realtime') {
+      const volcengineRealtime = realtimeCapabilities?.volcengineDoubaoRealtime
+        ?? realtimeCapabilities?.providers?.['volcengine.doubao_realtime']
+      if (volcengineRealtime?.readyForCall) return 'ready'
+      return config?.realtime_effective_api_key_configured ? 'warning' : 'blocked'
+    }
     return toneForProvider(
       form.realtimeProvider,
       'realtime',

@@ -262,7 +262,7 @@ async def test_volcengine_stt_sends_headers_and_turn_based_audio_frames() -> Non
 
     audio_frame = _decode_client_frame(fake_websocket.sent[1])
     assert audio_frame.message_type == _MSG_CLIENT_AUDIO_ONLY_REQUEST
-    assert audio_frame.sequence == -1
+    assert audio_frame.sequence == -2
     assert audio_frame.payload == b"wav-audio"
 
 
@@ -450,5 +450,42 @@ async def test_volcengine_lifecycle_uses_provider_defaults(
         }
     finally:
         await voice_lifecycle.shutdown_tts_client()
+        await voice_lifecycle.shutdown_stt_client()
+        settings.voice = original_voice
+
+
+@pytest.mark.asyncio
+async def test_volcengine_lifecycle_reuses_tts_key_for_stt_when_dedicated_key_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_voice = settings.voice
+    voice_lifecycle._tts_client = None
+    voice_lifecycle._stt_client = None
+    _FakeVolcengineSTTProvider.instances = []
+    monkeypatch.setattr(
+        "infrastructure.external.voice.volcengine_voice.VolcengineSTTProvider",
+        _FakeVolcengineSTTProvider,
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="volcengine",
+        tts_api_key="volc-shared-speech-key",
+        tts_base_url=None,
+        tts_model="seed-tts-2.0",
+        stt_provider="volcengine",
+        stt_api_key=None,
+        stt_base_url=None,
+        stt_model="volc.bigasr.sauc.duration",
+    )
+
+    try:
+        await voice_lifecycle.init_stt_client()
+
+        stt_provider = voice_lifecycle.get_stt_client()
+        assert isinstance(stt_provider, _FakeVolcengineSTTProvider)
+        assert stt_provider.kwargs == {
+            "api_key": "volc-shared-speech-key",
+            "model": "volc.bigasr.sauc.duration",
+        }
+    finally:
         await voice_lifecycle.shutdown_stt_client()
         settings.voice = original_voice

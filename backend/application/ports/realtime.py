@@ -12,6 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 REALTIME_EVENT_SCHEMA_VERSION = 1
 REALTIME_RUNTIME_PIPECAT = "pipecat"
 REALTIME_RUNTIME_TALKWISE_LOCAL = "talkwise_local"
+REALTIME_RUNTIME_VOLCENGINE_DOUBAO = "volcengine.doubao_realtime"
 OPENAI_REALTIME_API_KEY_ENV_KEYS = ("REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY")
 _SENSITIVE_REALTIME_METADATA_KEYS = {
     "api_key",
@@ -56,8 +57,22 @@ def realtime_runtime_for_provider(provider: object | None) -> str:
     """Return the public realtime runtime family for a provider alias."""
 
     normalized = _normalized_realtime_name(provider)
-    if normalized in {"pipecat", "pipecat_pipeline", "openai", "openai_realtime", "openai_webrtc"}:
+    if normalized in {
+        "pipecat",
+        "pipecat_pipeline",
+        "openai",
+        "openai.realtime",
+        "openai_realtime",
+        "openai_webrtc",
+    }:
         return REALTIME_RUNTIME_PIPECAT
+    if normalized in {
+        "volcengine.doubao_realtime",
+        "volcengine_doubao_realtime",
+        "doubao_realtime",
+        "doubao.realtime",
+    }:
+        return REALTIME_RUNTIME_VOLCENGINE_DOUBAO
     if normalized in {"", "local", "talkwise", "talkwise_local"}:
         return REALTIME_RUNTIME_TALKWISE_LOCAL
     return normalized

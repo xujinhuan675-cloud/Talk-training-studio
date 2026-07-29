@@ -163,7 +163,8 @@ class VolcengineSTTProvider:
             await websocket.send(encode_volcengine_asr_json_request(request_payload))
             for index, chunk in enumerate(_iter_audio_chunks(audio, self._chunk_size), start=1):
                 final = index * self._chunk_size >= len(audio)
-                sequence = -index if final else index
+                sequence_number = index + 1
+                sequence = -sequence_number if final else sequence_number
                 await websocket.send(encode_volcengine_asr_audio_request(chunk, sequence=sequence))
 
                 response = await websocket.recv()

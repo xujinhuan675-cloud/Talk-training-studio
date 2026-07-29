@@ -21,6 +21,7 @@ import logging
 import json
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Callable
 
 from application.ports.llm import LLMMessage
@@ -46,6 +47,23 @@ from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import ChatRoom, Message
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SendMessageResult:
+    message: MessageDTO
+    room: ChatRoom
+    created: bool
+
+
+def _metadata_text(metadata: dict[str, object] | None, *keys: str) -> str | None:
+    if not metadata:
+        return None
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _extract_mentions(content: str, persona_loader) -> list[str]:
@@ -244,9 +262,33 @@ class StakeholderChatService:
     ) -> tuple[MessageDTO, ChatRoom]:
         """Save user message (committed immediately). Returns (dto, room) for background reply generation."""
 
+        result = await self.send_message_with_status(
+            room_id,
+            content,
+            metadata=metadata,
+            access_scope=access_scope,
+        )
+        return result.message, result.room
+
+    async def send_message_with_status(
+        self,
+        room_id: int,
+        content: str,
+        *,
+        metadata: dict[str, object] | None = None,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> SendMessageResult:
+        """Save a user message and report whether a new row was created."""
+
         scope = require_stakeholder_room_access_scope(
             access_scope,
             operation="write_stakeholder_message",
+        )
+        request_metadata = metadata or {}
+        client_request_id = _metadata_text(
+            request_metadata,
+            "clientRequestId",
+            "client_request_id",
         )
         async with self._uow_factory() as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
@@ -258,13 +300,27 @@ class StakeholderChatService:
                 action=StakeholderRoomAction.WRITE,
             ).room
 
+            if client_request_id:
+                existing_user_msg = (
+                    await uow.stakeholder_message_repository.get_user_message_by_client_request_id(
+                        room_id,
+                        client_request_id,
+                    )
+                )
+                if existing_user_msg is not None:
+                    return SendMessageResult(
+                        message=MessageDTO.model_validate(existing_user_msg),
+                        room=room,
+                        created=False,
+                    )
+
             user_msg = Message(
                 id=None,
                 room_id=room_id,
                 sender_type="user",
                 sender_id="user",
                 content=content,
-                metadata=metadata or {},
+                metadata=request_metadata,
             )
             saved_user_msg = await uow.stakeholder_message_repository.create(user_msg)
             await uow.chat_room_repository.update_last_message_at(room_id, saved_user_msg.timestamp)
@@ -273,7 +329,7 @@ class StakeholderChatService:
             # Publish user message event via SSE
             await room_event_bus.publish(room_id, "message", user_dto.model_dump(mode="json"))
 
-        return user_dto, room
+        return SendMessageResult(message=user_dto, room=room, created=True)
 
     async def _load_org_context(self, persona_id: str) -> str | None:
         """Load organization context for a persona, if it belongs to one."""

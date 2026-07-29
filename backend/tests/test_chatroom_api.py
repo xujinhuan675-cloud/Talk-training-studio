@@ -154,6 +154,15 @@ async def client(session_factory, monkeypatch):
                 SimpleNamespace(id=room_id, type="battle_prep", persona_ids=["training-runtime"]),
             )
 
+        async def send_message_with_status(self, room_id, content, *, metadata=None, access_scope):
+            msg, room = await self.send_message(
+                room_id,
+                content,
+                metadata=metadata,
+                access_scope=access_scope,
+            )
+            return SimpleNamespace(message=msg, room=room, created=True)
+
         async def generate_replies(self, room_id, room) -> None:
             return None
 

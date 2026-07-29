@@ -48,6 +48,13 @@ class MessageRepository(ABC):
     async def create(self, message: Message) -> Message: ...
 
     @abstractmethod
+    async def get_user_message_by_client_request_id(
+        self,
+        room_id: int,
+        client_request_id: str,
+    ) -> Optional[Message]: ...
+
+    @abstractmethod
     async def list_by_room_id(
         self, room_id: int, *, skip: int = 0, limit: int = 50
     ) -> list[Message]: ...

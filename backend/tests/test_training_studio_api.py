@@ -863,6 +863,43 @@ def test_voice_config_reports_volcengine_dedicated_stt_key(
         settings.voice = original_voice
 
 
+def test_voice_config_reports_volcengine_stt_reusing_tts_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_llm = settings.llm
+    original_voice = settings.voice
+    monkeypatch.delenv("VOICE__STT_API_KEY", raising=False)
+    monkeypatch.setattr(training_studio_routes, "_read_env_file_values", lambda path=None: {})
+    settings.llm = LLMSettings(
+        provider="openai",
+        api_key="sk-llm-shared",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+    )
+    settings.voice = VoiceSettings(
+        tts_provider="volcengine",
+        tts_api_key="sk-volc-speech",
+        tts_base_url="https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+        tts_model="seed-tts-2.0",
+        stt_provider="volcengine",
+        stt_api_key=None,
+        stt_base_url="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+        stt_model="volc.bigasr.sauc.duration",
+    )
+
+    try:
+        dto = training_studio_routes._voice_config_response()
+
+        assert dto.stt_provider == "volcengine"
+        assert dto.stt_api_key_configured is True
+        assert dto.stt_api_key_preview == "***eech"
+        assert dto.stt_api_key_source == "tts"
+        assert dto.stt_use_tts_api_key is True
+    finally:
+        settings.llm = original_llm
+        settings.voice = original_voice
+
+
 def test_voice_config_reports_generic_realtime_provider_key() -> None:
     original_llm = settings.llm
     original_realtime = {
@@ -897,7 +934,9 @@ def test_voice_config_reports_generic_realtime_provider_key() -> None:
             setattr(settings, key, value)
 
 
-def test_voice_config_does_not_reuse_llm_key_for_non_openai_realtime_provider() -> None:
+def test_voice_config_does_not_reuse_llm_key_for_non_openai_realtime_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original_llm = settings.llm
     original_realtime = {
         "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
@@ -905,6 +944,8 @@ def test_voice_config_does_not_reuse_llm_key_for_non_openai_realtime_provider() 
         "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
         "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
     }
+    monkeypatch.delenv("REALTIME_API_KEY", raising=False)
+    monkeypatch.setattr(training_studio_routes, "_read_env_file_values", lambda path=None: {})
     settings.llm = LLMSettings(
         provider="openai",
         api_key="sk-llm-fallback",
@@ -1001,6 +1042,32 @@ def test_realtime_pipeline_factory_routes_volcengine_doubao_runtime(
     assert factory("volcengine.doubao_realtime") is not None
 
 
+def test_realtime_pipeline_factory_uses_volcengine_default_for_placeholder_voice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    fake_adapter = object()
+    fake_module = SimpleNamespace(
+        create_volcengine_doubao_realtime_adapter=lambda **kwargs: (
+            captured.update(kwargs) or fake_adapter
+        )
+    )
+    monkeypatch.setattr(
+        training_studio_routes,
+        "_load_volcengine_doubao_realtime_adapter",
+        lambda: fake_module,
+    )
+    monkeypatch.setattr(settings, "REALTIME_API_KEY", "sk-volcengine-realtime")
+    monkeypatch.setattr(settings, "REALTIME_BASE_URL", "wss://example.test/doubao/realtime")
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_MODEL", "seed-duplex-test")
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "your-volcengine-voice")
+
+    factory = training_studio_routes.get_training_realtime_pipeline_factory()
+
+    assert factory("volcengine.doubao_realtime") is fake_adapter
+    assert captured["voice"] == "zh_female_vv_uranus_bigtts"
+
+
 def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
@@ -1046,6 +1113,7 @@ def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection
     adapter = FakeRealtimePipelineAdapter()
     monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
     monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
+    monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "your-volcengine-voice")
     session_id = asyncio.run(create_bound_session())
     app.state.training_runtime_state.rooms[42] = SimpleNamespace(id=42, name="Realtime Room")
     app.dependency_overrides[get_training_realtime_uow_factory] = (
@@ -1079,6 +1147,10 @@ def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection
     assert adapter.started_config is not None
     assert adapter.started_config.provider == "volcengine.doubao_realtime"
     assert adapter.started_config.runtime == "volcengine.doubao_realtime"
+    assert adapter.started_config.voice == "zh_female_vv_uranus_bigtts"
+    assert adapter.started_config.metadata["realtimeLlm"]["voice"] == (
+        "zh_female_vv_uranus_bigtts"
+    )
     assert adapter.closed is True
 
 

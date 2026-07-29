@@ -381,9 +381,18 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 
   const actionTitle = state === 'idle'
     ? tr('点击录音 / 长按说话', 'Click to record / hold to speak')
-    : state === 'recording'
-      ? tr('点击停止', 'Click to stop')
-      : tr('识别中...', 'Recognizing...')
+    : state === 'listening'
+      ? tr('正在监听语音', 'Listening for speech')
+      : state === 'recording'
+        ? tr('点击停止', 'Click to stop')
+        : tr('识别中...', 'Recognizing...')
+  const actionLabel = state === 'idle'
+    ? tr('语音回答', 'Voice reply')
+    : state === 'listening'
+      ? tr('监听中', 'Listening')
+      : state === 'recording'
+        ? tr('停止', 'Stop')
+        : tr('识别中', 'Recognizing')
 
   return (
     <div className="voice-recorder">
@@ -412,6 +421,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         {state === 'listening' && <Mic size={18} />}
         {state === 'recording' && <Square size={14} />}
         {state === 'processing' && <Loader2 size={18} className="spin" />}
+        <span className="voice-btn-label">{actionLabel}</span>
       </Button>
     </div>
   )

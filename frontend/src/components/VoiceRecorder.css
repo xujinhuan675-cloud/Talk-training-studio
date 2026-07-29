@@ -5,24 +5,31 @@
 }
 
 .voice-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-width: 84px;
   min-height: 36px;
-  padding: 0;
-  width: 36px;
+  padding: 0 10px;
+  width: auto;
   height: 36px;
-  border: none;
-  border-radius: 50%;
+  border: 1px solid var(--green);
+  border-radius: 999px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: var(--surface-2, #e8ece5);
-  color: var(--text-secondary, #5a6b5d);
+  background: #fff;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .voice-btn:hover:not(:disabled) {
-  background: var(--green);
-  color: white;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .voice-btn:disabled {
@@ -32,13 +39,19 @@
 
 .voice-btn.recording {
   background: #e53e3e;
+  border-color: #e53e3e;
   color: white;
   animation: pulse-recording 1.5s ease-in-out infinite;
 }
 
 .voice-btn.processing {
-  background: var(--green);
-  color: white;
+  background: var(--green-soft);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.voice-btn-label {
+  display: inline-block;
 }
 
 .voice-duration {

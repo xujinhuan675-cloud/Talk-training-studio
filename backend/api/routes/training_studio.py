@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import importlib.util
 import json
 import logging
 import mimetypes
@@ -60,6 +61,7 @@ from application.ports.llm import (
 from application.ports.realtime import (
     OPENAI_REALTIME_API_KEY_ENV_KEYS,
     REALTIME_RUNTIME_PIPECAT,
+    REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
     PersistedRealtimeTranscript,
     RealtimeAudioChunk,
     RealtimePipelineAdapter,
@@ -173,6 +175,35 @@ _PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "llm": "openai",
     "vad": "silero",
     "turnDetection": "pipecat",
+}
+_PIPECAT_REALTIME_PROVIDER_ALIASES = {
+    "pipecat",
+    "pipecat_pipeline",
+    "openai",
+    "openai.realtime",
+    "openai_realtime",
+    "openai_webrtc",
+}
+_VOLCENGINE_DOUBAO_REALTIME_PROVIDER = "volcengine.doubao_realtime"
+_VOLCENGINE_DOUBAO_REALTIME_PROVIDER_ALIASES = {
+    _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+    "volcengine_doubao_realtime",
+    "doubao_realtime",
+    "doubao.realtime",
+}
+_VOLCENGINE_DOUBAO_REALTIME_PLACEHOLDER_VOICES = {
+    "marin",
+    "your-voice",
+    "your-doubao-voice",
+    "your-volcengine-voice",
+    "your-volcengine-realtime-voice",
+}
+_DEFAULT_VOLCENGINE_DOUBAO_REALTIME_VOICE = "zh_female_vv_uranus_bigtts"
+_VOLCENGINE_DOUBAO_REALTIME_REQUIRED_FEATURES = {
+    "stt": "volcengine.doubao_realtime",
+    "tts": "volcengine.doubao_realtime",
+    "llm": "volcengine.doubao_realtime",
+    "turnDetection": "volcengine.doubao_realtime",
 }
 _PIPECAT_REALTIME_PROFILE_CASCADE = "cascade"
 _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH = "speech_to_speech"
@@ -665,7 +696,11 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
     if explicit_stt_key:
         stt_key = explicit_stt_key
         stt_key_source = "stt"
-    elif stt_key and not stt_can_reuse_shared_key:
+    elif stt_can_reuse_shared_key and explicit_tts_key and stt_key == explicit_tts_key:
+        stt_key_source = "tts"
+    elif stt_can_reuse_shared_key and settings.llm.api_key and stt_key == settings.llm.api_key:
+        stt_key_source = "llm"
+    elif stt_key:
         stt_key_source = "stt"
     elif stt_can_reuse_shared_key and explicit_tts_key:
         stt_key = explicit_tts_key
@@ -815,7 +850,17 @@ def _effective_voice_tts_key() -> str | None:
 
 def _voice_stt_provider_can_use_shared_key(provider: str | None) -> bool:
     normalized = (provider or "").strip().lower().replace("-", "_").replace(" ", "_")
-    return normalized in {"minimax", "openai", "whisper"}
+    return normalized in {
+        "minimax",
+        "openai",
+        "whisper",
+        "volcengine",
+        "volc_engine",
+        "doubao",
+        "byteplus",
+        "bytedance",
+        "volcengine_doubao",
+    }
 
 
 def _settings_llm_provider_metadata() -> LLMProviderMetadata:
@@ -1012,27 +1057,52 @@ RealtimePipelineFactory = Callable[[str], RealtimePipelineAdapter | None]
 
 def get_training_realtime_pipeline_factory() -> RealtimePipelineFactory:
     def _factory(provider: str) -> RealtimePipelineAdapter | None:
-        if not _uses_pipecat_realtime(provider):
-            return None
-        try:
-            pipecat_adapter = _load_pipecat_realtime_adapter()
-            return pipecat_adapter.create_pipecat_realtime_pipeline()
-        except Exception as exc:
-            logger.warning(
-                "Pipecat realtime pipeline factory failed",
-                extra={
-                    "realtime_error": {
-                        "provider": provider,
-                        "runtime": "realtime_voice",
-                        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
-                        "phase": "pipeline_factory",
-                        "code": "PIPECAT_PIPELINE_FACTORY_FAILED",
-                        "message": str(exc),
-                    }
-                },
-                exc_info=True,
-            )
-            return None
+        if _uses_pipecat_realtime(provider):
+            try:
+                pipecat_adapter = _load_pipecat_realtime_adapter()
+                return pipecat_adapter.create_pipecat_realtime_pipeline()
+            except Exception as exc:
+                logger.warning(
+                    "Pipecat realtime pipeline factory failed",
+                    extra={
+                        "realtime_error": {
+                            "provider": provider,
+                            "runtime": "realtime_voice",
+                            "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+                            "phase": "pipeline_factory",
+                            "code": "PIPECAT_PIPELINE_FACTORY_FAILED",
+                            "message": str(exc),
+                        }
+                    },
+                    exc_info=True,
+                )
+                return None
+        if _uses_volcengine_doubao_realtime(provider):
+            try:
+                volcengine_adapter = _load_volcengine_doubao_realtime_adapter()
+                return volcengine_adapter.create_volcengine_doubao_realtime_adapter(
+                    api_key=settings.REALTIME_API_KEY,
+                    base_url=settings.REALTIME_BASE_URL,
+                    model=settings.REALTIME_OPENAI_MODEL,
+                    voice=_realtime_voice_for_provider(provider),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Volcengine Doubao realtime pipeline factory failed",
+                    extra={
+                        "realtime_error": {
+                            "provider": provider,
+                            "runtime": "realtime_voice",
+                            "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+                            "phase": "pipeline_factory",
+                            "code": "VOLCENGINE_REALTIME_PIPELINE_FACTORY_FAILED",
+                            "message": str(exc),
+                        }
+                    },
+                    exc_info=True,
+                )
+                return None
+        return None
 
     return _factory
 
@@ -1526,6 +1596,13 @@ def _exception_realtime_error_payload(
             and "Pipecat realtime pipeline is not available" in message
         ):
             code = "PIPECAT_PIPELINE_UNAVAILABLE"
+            phase = "pipeline_factory"
+        elif (
+            _uses_volcengine_doubao_realtime(provider)
+            and exc.status_code == 503
+            and "Volcengine Doubao realtime pipeline is not available" in message
+        ):
+            code = "VOLCENGINE_REALTIME_PIPELINE_UNAVAILABLE"
             phase = "pipeline_factory"
         elif exc.status_code == 400 and "Pipecat only" in message:
             code = "UNSUPPORTED_REALTIME_PROVIDER"
@@ -2067,10 +2144,151 @@ def _pipecat_speech_to_speech_pipeline_metadata(
     }
 
 
+def _volcengine_doubao_realtime_audio_contract(
+    *,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    resolved_input_sample_rate = input_sample_rate or 16000
+    return {
+        "input": {
+            "encoding": "pcm16",
+            "sampleRate": resolved_input_sample_rate,
+            "channels": 1,
+            "mimeType": "audio/pcm",
+        },
+        "output": {
+            "encoding": "pcm16",
+            "sampleRate": 24000,
+            "channels": 1,
+            "mimeType": "audio/pcm",
+        },
+        "transport": "websocket.json_base64_audio",
+    }
+
+
+def _volcengine_doubao_realtime_profile_contract(
+    *,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    return {
+        "latencyProfile": "true_realtime",
+        "costProfile": "provider_metered",
+        "inputAudio": _volcengine_doubao_realtime_audio_contract(
+            input_sample_rate=input_sample_rate,
+        )["input"],
+        "outputAudio": _volcengine_doubao_realtime_audio_contract()["output"],
+        "services": dict(_VOLCENGINE_DOUBAO_REALTIME_REQUIRED_FEATURES),
+        "turnDetection": {
+            "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+            "source": "volcengine_doubao_realtime",
+        },
+        "talkwiseIntegration": {
+            "transcriptsPersisted": True,
+            "liveGuidanceTriggered": True,
+            "providerNativeRealtime": True,
+        },
+        "browserE2E": {
+            "verified": False,
+            "requiredSignals": [
+                "session.started",
+                "session.configured",
+                "audio.output",
+                "transcript.done",
+                "transcript.persisted",
+            ],
+        },
+        "readinessFeatures": dict(_VOLCENGINE_DOUBAO_REALTIME_REQUIRED_FEATURES),
+    }
+
+
+def _volcengine_doubao_realtime_pipeline_metadata(
+    binding: tuple[str, int],
+    *,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    resolved_input_sample_rate = input_sample_rate or 16000
+    profile_contract = _volcengine_doubao_realtime_profile_contract(
+        input_sample_rate=resolved_input_sample_rate,
+    )
+    model = settings.REALTIME_OPENAI_MODEL or "1.2.6.0"
+    voice = _realtime_voice_for_provider(_VOLCENGINE_DOUBAO_REALTIME_PROVIDER)
+    realtime_llm: dict[str, object] = {
+        "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+        "model": model,
+        "turnDetection": profile_contract["turnDetection"],
+        "outputModalities": ["audio", "text"],
+    }
+    if voice:
+        realtime_llm["voice"] = voice
+    if settings.REALTIME_BASE_URL:
+        realtime_llm["baseUrl"] = settings.REALTIME_BASE_URL
+
+    return {
+        "transport": "websocket",
+        "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+        "profile": "native_duplex",
+        "realtimeProfile": "native_duplex",
+        "inputSampleRate": resolved_input_sample_rate,
+        "outputSampleRate": 24000,
+        "inputAudioFormat": "pcm16",
+        "outputAudioFormat": "pcm16",
+        "audioContract": _volcengine_doubao_realtime_audio_contract(
+            input_sample_rate=resolved_input_sample_rate,
+        ),
+        "profileContract": profile_contract,
+        "latencyProfile": profile_contract["latencyProfile"],
+        "costProfile": profile_contract["costProfile"],
+        "browserE2E": profile_contract["browserE2E"],
+        "readinessFeatures": profile_contract["readinessFeatures"],
+        "realtimeLlm": realtime_llm,
+        "context": {
+            "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+            "realtimeServiceMode": True,
+            "providerNativeRealtime": True,
+        },
+        "stt": {"provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER},
+        "tts": {"provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER},
+        "turnDetection": profile_contract["turnDetection"],
+        "talkwise": {
+            "trainingSessionId": binding[0],
+            "roomId": binding[1],
+            "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+            "runtime": "realtime_voice",
+            "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+            "transport": "websocket",
+        },
+    }
+
+
+def _realtime_pipeline_metadata(
+    provider: str,
+    binding: tuple[str, int],
+    *,
+    profile: str = _PIPECAT_REALTIME_PROFILE_CASCADE,
+    input_sample_rate: int | None = None,
+) -> dict[str, object]:
+    if _uses_volcengine_doubao_realtime(provider):
+        return _volcengine_doubao_realtime_pipeline_metadata(
+            binding,
+            input_sample_rate=input_sample_rate,
+        )
+    return _pipecat_realtime_pipeline_metadata(
+        binding,
+        profile=profile,
+        input_sample_rate=input_sample_rate,
+    )
+
+
 def _load_pipecat_realtime_adapter() -> Any:
     from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
 
     return pipecat_adapter
+
+
+def _load_volcengine_doubao_realtime_adapter() -> Any:
+    from infrastructure.external.voice import volcengine_realtime
+
+    return volcengine_realtime
 
 
 def _pipecat_unavailable_capability_response(
@@ -2170,9 +2388,164 @@ def _pipecat_realtime_capability_response() -> dict[str, object]:
     return data
 
 
+def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
+    try:
+        websocket_available = importlib.util.find_spec("websockets") is not None
+    except Exception:
+        websocket_available = False
+    api_key_configured = bool(settings.REALTIME_API_KEY)
+    missing_modules = [] if websocket_available else ["websockets"]
+    blocking_reasons: list[RealtimeReadinessIssue] = []
+    if not websocket_available:
+        blocking_reasons.append(
+            RealtimeReadinessIssue(
+                code="VOLCENGINE_REALTIME_DEPENDENCY_MISSING",
+                message="Volcengine Doubao realtime requires the 'websockets' package",
+                phase="runtime_import",
+                provider=_VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+                modules=("websockets",),
+            )
+        )
+    if not api_key_configured:
+        blocking_reasons.append(
+            RealtimeReadinessIssue(
+                code="MISSING_VOLCENGINE_REALTIME_API_KEY",
+                message="Volcengine Doubao realtime API key is required",
+                phase="configuration",
+                provider=_VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+                missing_env=("REALTIME_API_KEY",),
+            )
+        )
+
+    readiness = build_realtime_readiness(
+        required={
+            "transport": "websocket",
+            "features": dict(_VOLCENGINE_DOUBAO_REALTIME_REQUIRED_FEATURES),
+            "env": ["REALTIME_API_KEY"],
+            "model": settings.REALTIME_OPENAI_MODEL or "1.2.6.0",
+            "voice": _realtime_voice_for_provider(_VOLCENGINE_DOUBAO_REALTIME_PROVIDER),
+            "baseUrl": (
+                settings.REALTIME_BASE_URL
+                or "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
+            ),
+        },
+        blocking_reasons=blocking_reasons,
+        runtime=REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+    ).to_dict()
+    profile_contract = _volcengine_doubao_realtime_profile_contract()
+    smoke = _provider_neutral_realtime_smoke_contract(
+        {
+            "contractEvents": [
+                "session.ready",
+                "session.configured",
+                "session.closed",
+                "audio.output",
+                "transcript.delta",
+                "transcript.done",
+                "transcript.persisted",
+                "user_turn.started",
+                "user_turn.stopped",
+                "assistant_speaking.started",
+                "assistant_speaking.stopped",
+                "interrupted",
+                "silence_timeout",
+                "error",
+            ],
+            "eventOrder": {
+                "finalTranscript": [
+                    "transcript.done",
+                    "transcript.persisted",
+                    "training.live_guidance.triggered",
+                ],
+                "assistantAudioThenTranscript": [
+                    "audio.output",
+                    "transcript.done",
+                    "transcript.persisted",
+                ],
+                "turnLifecycle": [
+                    "user_turn.started",
+                    "user_turn.stopped",
+                    "assistant_speaking.started",
+                    "assistant_speaking.stopped",
+                ],
+            },
+            "readinessAssertions": {
+                "readyForCallImpliesLocalRuntimeReady": True,
+                "browserE2EVerified": False,
+                "requiresExplicitMediaPermission": True,
+                "providerNativeRuntime": True,
+            },
+        }
+    )
+    smoke["eventOrder"] = {
+        "finalTranscript": [
+            "transcript.done",
+            "transcript.persisted",
+            "training.live_guidance.triggered",
+        ],
+        "assistantAudioThenTranscript": [
+            "audio.output",
+            "transcript.done",
+            "transcript.persisted",
+        ],
+        "turnLifecycle": [
+            "user_turn.started",
+            "user_turn.stopped",
+            "assistant_speaking.started",
+            "assistant_speaking.stopped",
+        ],
+    }
+    smoke["readinessAssertions"] = {
+        "readyForCallImpliesLocalRuntimeReady": True,
+        "browserE2EVerified": False,
+        "requiresExplicitMediaPermission": True,
+        "providerNativeRuntime": True,
+    }
+    payload = {
+        "runtime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+        "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+        "available": bool(readiness["ready"]),
+        "coreAvailable": websocket_available,
+        "websocketAvailable": websocket_available,
+        "vadAvailable": True,
+        "sttAvailable": True,
+        "ttsAvailable": True,
+        "llmAvailable": True,
+        "openaiRealtimeLlmAvailable": False,
+        "turnDetectionAvailable": True,
+        "profiles": {
+            "default": "native_duplex",
+            "supported": ["native_duplex"],
+            "native_duplex": {
+                "contract": profile_contract,
+                "latencyProfile": "true_realtime",
+                "costProfile": "provider_metered",
+                "audioContract": _volcengine_doubao_realtime_audio_contract(),
+                "browserE2E": profile_contract["browserE2E"],
+            },
+        },
+        "missingModules": missing_modules,
+        "optionalMissingModules": [],
+        "error": None if readiness["ready"] else readiness["blockingReasons"][0]["message"],
+        "readyForCall": readiness["ready"],
+        "readiness": readiness,
+        "errors": readiness["blockingReasons"],
+        "smoke": smoke,
+    }
+    return payload
+
+
 def _realtime_capabilities_response() -> dict[str, object]:
+    pipecat = _pipecat_realtime_capability_response()
+    volcengine = _volcengine_doubao_realtime_capability_response()
     return {
-        "pipecat": _pipecat_realtime_capability_response(),
+        "pipecat": pipecat,
+        "volcengineDoubaoRealtime": volcengine,
+        "providers": {
+            "pipecat": pipecat,
+            "openai": pipecat,
+            _VOLCENGINE_DOUBAO_REALTIME_PROVIDER: volcengine,
+        },
     }
 
 
@@ -2336,8 +2709,14 @@ def _query_realtime_provider(websocket: WebSocket) -> str:
     provider = _coerce_optional_text(websocket.query_params.get("provider"))
     if provider is None:
         return "pipecat"
-    normalized = provider.lower().replace("-", "_")
-    return "pipecat" if normalized in {"pipecat", "pipecat_pipeline"} else normalized
+    normalized = _normalized_realtime_llm_provider(provider)
+    if normalized in {"pipecat", "pipecat_pipeline"}:
+        return "pipecat"
+    if normalized in {"openai", "openai.realtime", "openai_realtime", "openai_webrtc"}:
+        return "pipecat"
+    if normalized in _VOLCENGINE_DOUBAO_REALTIME_PROVIDER_ALIASES:
+        return _VOLCENGINE_DOUBAO_REALTIME_PROVIDER
+    return normalized
 
 
 def _query_realtime_profile(websocket: WebSocket) -> str:
@@ -2389,6 +2768,7 @@ def _query_realtime_input_sample_rate(websocket: WebSocket, *, profile: str) -> 
 
 def _realtime_audio_chunk_metadata(
     *,
+    provider: str,
     profile: str,
     input_sample_rate: int,
     payload: Mapping[str, object] | None = None,
@@ -2407,15 +2787,95 @@ def _realtime_audio_chunk_metadata(
         "sampleRate": sample_rate,
         "inputSampleRate": sample_rate,
         "channels": channels,
-        "audioContract": _pipecat_realtime_audio_contract(
-            profile,
-            input_sample_rate=sample_rate,
+        "audioContract": (
+            _volcengine_doubao_realtime_audio_contract(input_sample_rate=sample_rate)
+            if _uses_volcengine_doubao_realtime(provider)
+            else _pipecat_realtime_audio_contract(
+                profile,
+                input_sample_rate=sample_rate,
+            )
         ),
     }
 
 
 def _uses_pipecat_realtime(provider: str) -> bool:
-    return provider.lower().replace("-", "_") in {"pipecat", "pipecat_pipeline"}
+    return _normalized_realtime_llm_provider(provider) in _PIPECAT_REALTIME_PROVIDER_ALIASES
+
+
+def _uses_volcengine_doubao_realtime(provider: str) -> bool:
+    return (
+        _normalized_realtime_llm_provider(provider)
+        in _VOLCENGINE_DOUBAO_REALTIME_PROVIDER_ALIASES
+    )
+
+
+def _uses_supported_realtime_provider(provider: str) -> bool:
+    return _uses_pipecat_realtime(provider) or _uses_volcengine_doubao_realtime(provider)
+
+
+def _realtime_pipeline_unavailable_detail(provider: str) -> str:
+    if _uses_volcengine_doubao_realtime(provider):
+        return "Volcengine Doubao realtime pipeline is not available"
+    return "Pipecat realtime pipeline is not available"
+
+
+def _realtime_voice_for_provider(provider: str) -> str | None:
+    voice = _coerce_optional_text(settings.REALTIME_OPENAI_VOICE)
+    if _uses_volcengine_doubao_realtime(provider):
+        if voice is None:
+            return _DEFAULT_VOLCENGINE_DOUBAO_REALTIME_VOICE
+        normalized = voice.lower().replace("_", "-").replace(" ", "-")
+        if normalized in _VOLCENGINE_DOUBAO_REALTIME_PLACEHOLDER_VOICES:
+            return _DEFAULT_VOLCENGINE_DOUBAO_REALTIME_VOICE
+    if voice is None:
+        return None
+    return voice
+
+
+def _echoes_realtime_transcript_done(provider: str) -> bool:
+    return _uses_pipecat_realtime(provider) or _uses_volcengine_doubao_realtime(provider)
+
+
+def _realtime_start_metadata(
+    provider: str,
+    binding: tuple[str, int] | None,
+    *,
+    profile: str,
+    input_sample_rate: int,
+) -> dict[str, object]:
+    if _uses_volcengine_doubao_realtime(provider):
+        metadata: dict[str, object] = {
+            "transport": "websocket",
+            "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+            "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+            "realtimeProfile": "native_duplex",
+            "inputSampleRate": input_sample_rate,
+            "audioContract": _volcengine_doubao_realtime_audio_contract(
+                input_sample_rate=input_sample_rate,
+            ),
+            "profileContract": _volcengine_doubao_realtime_profile_contract(
+                input_sample_rate=input_sample_rate,
+            ),
+        }
+    else:
+        metadata = {
+            "transport": "websocket",
+            "provider": provider,
+            "realtimeRuntime": realtime_runtime_for_provider(provider),
+            "realtimeProfile": profile,
+            "inputSampleRate": input_sample_rate,
+            "audioContract": _pipecat_realtime_audio_contract(
+                profile,
+                input_sample_rate=input_sample_rate,
+            ),
+            "profileContract": _pipecat_realtime_profile_contract(
+                profile,
+                input_sample_rate=input_sample_rate,
+            ),
+        }
+    if binding is not None:
+        metadata.update({"trainingSessionId": binding[0], "roomId": binding[1]})
+    return metadata
 
 
 def _configure_binding(payload: dict[str, object]) -> tuple[str | None, int | None]:
@@ -2600,7 +3060,7 @@ class _WebSocketTrainingTranscriptSink:
         )
 
     async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
-        if _uses_pipecat_realtime(transcript.provider):
+        if _echoes_realtime_transcript_done(transcript.provider):
             await _send_wire_event(
                 self._websocket,
                 "transcript.done",
@@ -3405,14 +3865,15 @@ async def record_training_client_event(
         current_user=current_user,
     )
     payload = _safe_client_event_payload(body.payload)
+    client_event_provider = _coerce_optional_text(body.provider) or "pipecat"
     client_event = {
         "eventType": event_type,
         "eventCategory": _coerce_optional_text(body.event_category) or "realtime_voice",
         "severity": severity,
         "trainingSessionId": training_session_id,
         "roomId": room_id,
-        "provider": _coerce_optional_text(body.provider) or "pipecat",
-        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+        "provider": client_event_provider,
+        "realtimeRuntime": realtime_runtime_for_provider(client_event_provider),
         "realtimeProfile": _coerce_optional_text(body.realtime_profile),
         "errorCategory": _coerce_optional_text(body.error_category),
         "message": _truncate_client_event_text(body.message) if body.message else None,
@@ -3862,12 +4323,12 @@ async def save_voice_config(
 
     stt_api_key = current_voice.stt_api_key
     new_stt_key = _clean_config_text(body.stt_api_key)
-    if body.stt_use_tts_api_key and _voice_stt_provider_can_use_shared_key(stt_provider):
-        stt_api_key = tts_api_key or llm_api_key
+    if new_stt_key:
+        stt_api_key = new_stt_key
     elif body.clear_stt_api_key:
         stt_api_key = None
-    elif new_stt_key:
-        stt_api_key = new_stt_key
+    elif body.stt_use_tts_api_key and _voice_stt_provider_can_use_shared_key(stt_provider):
+        stt_api_key = tts_api_key or llm_api_key
 
     realtime_provider = _normalized_provider(
         body.realtime_provider,
@@ -3930,8 +4391,11 @@ async def save_voice_config(
         env_updates["LLM__API_KEY"] = llm_api_key
     if body.clear_tts_api_key or new_tts_key:
         env_updates["VOICE__TTS_API_KEY"] = tts_api_key
-    stt_uses_shared_key = body.stt_use_tts_api_key and _voice_stt_provider_can_use_shared_key(
-        stt_provider
+    stt_uses_shared_key = (
+        body.stt_use_tts_api_key
+        and _voice_stt_provider_can_use_shared_key(stt_provider)
+        and not new_stt_key
+        and not body.clear_stt_api_key
     )
     if stt_uses_shared_key or body.clear_stt_api_key or new_stt_key:
         env_updates["VOICE__STT_API_KEY"] = "" if stt_uses_shared_key else stt_api_key
@@ -4189,6 +4653,26 @@ async def realtime_training_session(
     provider = _query_realtime_provider(websocket)
     realtime_profile = _query_realtime_profile(websocket)
     input_sample_rate = _query_realtime_input_sample_rate(websocket, profile=realtime_profile)
+    logger.info(
+        "Training realtime websocket accepted",
+        extra={
+            "realtime_session": dict(
+                sanitize_realtime_public_value(
+                    {
+                        "provider": provider,
+                        "runtime": realtime_runtime_for_provider(provider),
+                        "realtimeProfile": realtime_profile,
+                        "queryTrainingSessionId": query_session_id,
+                        "queryRoomId": query_room_id,
+                        "inputSampleRate": input_sample_rate,
+                        "userId": current_user.user_id,
+                        "teamId": current_user.team_id,
+                    }
+                )
+                or {}
+            )
+        },
+    )
     session = RealtimeSession(session_id=query_session_id)
     binding: tuple[str, int] | None = None
     pipeline_runner: RealtimePipelineSessionRunner | None = None
@@ -4201,7 +4685,7 @@ async def realtime_training_session(
         if adapter is None:
             raise HTTPException(
                 status_code=503,
-                detail="Pipecat realtime pipeline is not available",
+                detail=_realtime_pipeline_unavailable_detail(provider),
             )
         sink = _WebSocketTrainingTranscriptSink(
             websocket=websocket,
@@ -4249,6 +4733,46 @@ async def realtime_training_session(
             uow_factory=uow_factory,
             current_user=current_user,
         )
+        pipeline_metadata = _realtime_pipeline_metadata(
+            provider,
+            active_binding,
+            profile=realtime_profile,
+            input_sample_rate=input_sample_rate,
+        )
+        logger.info(
+            "Training realtime pipeline starting",
+            extra={
+                "realtime_session": dict(
+                    sanitize_realtime_public_value(
+                        {
+                            "provider": provider,
+                            "runtime": realtime_runtime_for_provider(provider),
+                            "realtimeProfile": pipeline_metadata.get("realtimeProfile")
+                            or realtime_profile,
+                            "trainingSessionId": active_binding[0],
+                            "roomId": active_binding[1],
+                            "inputSampleRate": pipeline_metadata.get("inputSampleRate"),
+                            "outputSampleRate": pipeline_metadata.get("outputSampleRate"),
+                            "inputAudioFormat": pipeline_metadata.get("inputAudioFormat"),
+                            "outputAudioFormat": pipeline_metadata.get("outputAudioFormat"),
+                            "model": settings.REALTIME_OPENAI_MODEL,
+                            "voice": _realtime_voice_for_provider(provider),
+                            "voiceIgnored": bool(
+                                _coerce_optional_text(settings.REALTIME_OPENAI_VOICE)
+                                and _realtime_voice_for_provider(provider) is None
+                            ),
+                            "baseUrl": settings.REALTIME_BASE_URL,
+                            "apiKeyConfigured": (
+                                bool(settings.REALTIME_API_KEY)
+                                if _uses_volcengine_doubao_realtime(provider)
+                                else bool(_openai_realtime_api_key())
+                            ),
+                        }
+                    )
+                    or {}
+                )
+            },
+        )
         await runner.start(
             binding=RealtimeSessionBinding(
                 training_session_id=active_binding[0],
@@ -4259,26 +4783,22 @@ async def realtime_training_session(
             task_goal=voice_context["task_goal"],
             rubric=voice_context["rubric"],
             recent_turns=voice_context["recent_turns"],
-            runtime=REALTIME_RUNTIME_PIPECAT,
+            runtime=realtime_runtime_for_provider(provider),
             model=settings.REALTIME_OPENAI_MODEL,
-            voice=settings.REALTIME_OPENAI_VOICE,
+            voice=_realtime_voice_for_provider(provider),
             input_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
             output_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
             instructions=_default_realtime_agent_instructions(),
             context_metadata=voice_context["metadata"],
-            config_metadata=_pipecat_realtime_pipeline_metadata(
-                active_binding,
-                profile=realtime_profile,
-                input_sample_rate=input_sample_rate,
-            ),
+            config_metadata=pipeline_metadata,
         )
         pipeline_runner = runner
 
     try:
-        if not _uses_pipecat_realtime(provider):
+        if not _uses_supported_realtime_provider(provider):
             raise HTTPException(
                 status_code=400,
-                detail="Realtime voice uses Pipecat only; connect with provider=pipecat",
+                detail="Realtime voice provider is not wired to a backend runtime",
             )
         binding = await _resolve_realtime_binding(
             query_session_id,
@@ -4289,23 +4809,12 @@ async def realtime_training_session(
         )
         if binding is not None:
             await _ensure_pipeline_runner(binding)
-        start_metadata: dict[str, object] = {
-            "transport": "websocket",
-            "provider": provider,
-            "realtimeRuntime": realtime_runtime_for_provider(provider),
-            "realtimeProfile": realtime_profile,
-            "inputSampleRate": input_sample_rate,
-            "audioContract": _pipecat_realtime_audio_contract(
-                realtime_profile,
-                input_sample_rate=input_sample_rate,
-            ),
-            "profileContract": _pipecat_realtime_profile_contract(
-                realtime_profile,
-                input_sample_rate=input_sample_rate,
-            ),
-        }
-        if binding is not None:
-            start_metadata.update({"trainingSessionId": binding[0], "roomId": binding[1]})
+        start_metadata = _realtime_start_metadata(
+            provider,
+            binding,
+            profile=realtime_profile,
+            input_sample_rate=input_sample_rate,
+        )
         await _send_event(websocket, session.start(start_metadata))
         await _send_event(websocket, session.listen())
         while True:
@@ -4326,6 +4835,7 @@ async def realtime_training_session(
                         mime_type="audio/pcm",
                         sequence=session.input_sequence,
                         metadata=_realtime_audio_chunk_metadata(
+                            provider=provider,
                             profile=realtime_profile,
                             input_sample_rate=input_sample_rate,
                         ),
@@ -4399,6 +4909,7 @@ async def realtime_training_session(
                         mime_type=mime_type,
                         sequence=session.input_sequence,
                         metadata=_realtime_audio_chunk_metadata(
+                            provider=provider,
                             profile=realtime_profile,
                             input_sample_rate=input_sample_rate,
                             payload=payload,
@@ -4419,6 +4930,9 @@ async def realtime_training_session(
                 pipeline_runner.raise_if_failed()
                 await _send_event(websocket, session.listen())
             elif event_type == "response.cancel":
+                if pipeline_runner is not None:
+                    await pipeline_runner.cancel_response(_coerce_optional_text(payload.get("reason")))
+                    pipeline_runner.raise_if_failed()
                 await _send_event(websocket, session.listen())
             elif event_type == "session.close":
                 await _send_event(websocket, session.close(payload.get("reason")))
@@ -4428,7 +4942,7 @@ async def realtime_training_session(
                 await _send_event(
                     websocket,
                     session.fail(
-                        "Transcript events must come from the Pipecat realtime pipeline",
+                        "Transcript events must come from the realtime pipeline",
                         "UNSUPPORTED_EVENT",
                     ),
                 )

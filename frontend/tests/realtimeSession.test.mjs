@@ -278,6 +278,32 @@ test('decodeRealtimeServerEvent normalizes nested realtime error payloads', () =
   })
 })
 
+test('decodeRealtimeServerEvent reads deeply nested realtime provider errors', () => {
+  const event = realtimeSession.decodeRealtimeServerEvent(JSON.stringify({
+    type: 'error',
+    payload: {
+      error: {
+        message: 'Volcengine request parameter is invalid',
+        code: 'InvalidParameter',
+        metadata: { requestId: 'req-volc-1' },
+      },
+      provider: 'volcengine.doubao_realtime',
+      phase: 'provider_event',
+      errorCategory: 'bad_request',
+      fatal: true,
+    },
+  }))
+
+  assert.equal(event.type, 'error')
+  assert.equal(event.message, 'Volcengine request parameter is invalid')
+  assert.equal(event.code, 'InvalidParameter')
+  assert.equal(event.provider, 'volcengine.doubao_realtime')
+  assert.equal(event.phase, 'provider_event')
+  assert.equal(event.errorCategory, 'bad_request')
+  assert.equal(event.fatal, true)
+  assert.deepEqual(event.payload.metadata, { requestId: 'req-volc-1' })
+})
+
 test('RealtimeSession decodes nested base64 audio.output events from the websocket', () => {
   let socket
   const events = []

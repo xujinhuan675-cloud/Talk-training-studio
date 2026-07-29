@@ -38,6 +38,12 @@ _MINIMAX_TTS_DEFAULT_MODEL = "speech-2.8-hd"
 _OPENAI_STT_DEFAULT_MODEL = "whisper-1"
 _VOLCENGINE_TTS_DEFAULT_MODEL = "seed-tts-2.0"
 _VOLCENGINE_STT_DEFAULT_MODEL = "volc.bigasr.sauc.duration"
+_SHARED_KEY_STT_PROVIDER_ALIASES = {
+    "minimax",
+    "openai",
+    "whisper",
+    *_VOLCENGINE_PROVIDER_ALIASES,
+}
 
 
 def _normalized_provider(value: object | None) -> str:
@@ -95,6 +101,15 @@ def _effective_volcengine_stt_model(value: str | None) -> str:
     if value and value != _OPENAI_STT_DEFAULT_MODEL:
         return value
     return _VOLCENGINE_STT_DEFAULT_MODEL
+
+
+def _effective_stt_api_key() -> str | None:
+    voice_cfg = settings.voice
+    if voice_cfg.stt_api_key:
+        return voice_cfg.stt_api_key
+    if _normalized_provider(voice_cfg.stt_provider) in _SHARED_KEY_STT_PROVIDER_ALIASES:
+        return voice_cfg.tts_api_key or settings.llm.api_key
+    return None
 
 
 # ---- TTS ----
@@ -208,10 +223,14 @@ async def init_stt_client() -> None:
         return
 
     voice_cfg = settings.voice
-    if not voice_cfg.stt_api_key:
+    stt_api_key = _effective_stt_api_key()
+    if not stt_api_key:
         logger.warning(
             "stt_client_skipped",
-            reason="VOICE__STT_API_KEY not configured; STT features will be unavailable",
+            reason=(
+                "VOICE__STT_API_KEY not configured and no supported shared "
+                "voice/LLM key fallback is available; STT features will be unavailable"
+            ),
         )
         return
 
@@ -221,7 +240,7 @@ async def init_stt_client() -> None:
             from .minimax_stt import MinimaxSTTProvider
 
             _stt_client = MinimaxSTTProvider(
-                api_key=voice_cfg.stt_api_key,
+                api_key=stt_api_key,
                 base_url=voice_cfg.stt_base_url or "https://api.openai.com/v1",
                 model=voice_cfg.stt_model,
             )
@@ -229,7 +248,7 @@ async def init_stt_client() -> None:
             from .volcengine_voice import VolcengineSTTProvider
 
             _stt_client = VolcengineSTTProvider(
-                api_key=voice_cfg.stt_api_key,
+                api_key=stt_api_key,
                 model=_effective_volcengine_stt_model(voice_cfg.stt_model),
                 **({"base_url": voice_cfg.stt_base_url} if voice_cfg.stt_base_url else {}),
             )

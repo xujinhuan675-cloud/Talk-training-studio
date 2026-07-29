@@ -82,11 +82,6 @@ export default function ChatInput({
           {sendError}
         </div>
       )}
-      {realtimeVoiceControl && (
-        <div className="message-input-realtime-slot">
-          {realtimeVoiceControl}
-        </div>
-      )}
       <div className="message-input-bar">
         {mentionQuery !== null && mentionResults.length > 0 && (
           <div className="mention-dropdown">
@@ -116,6 +111,7 @@ export default function ChatInput({
           disabled={sending}
           rows={1}
         />
+        {realtimeVoiceControl}
         {roomId && showVoiceButton && (
           <VoiceRecorder
             roomId={roomId}

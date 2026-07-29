@@ -12,8 +12,15 @@ import {
 import type { TrainingFeedbackMode } from '../services/trainingMode'
 import { useI18n } from '../i18n'
 const LOCAL_VIDEO_PREFIX = '[video-answer]'
+const OPTIMISTIC_REALTIME_TRANSCRIPT_SOURCE = 'realtime_voice_final'
 const EMOTION_TAG_RE = /\s*<!--emotion:\s*\{[\s\S]*?\}\s*-->\s*/gi
 const EMOTION_PARTIAL_TAG_RE = /\s*<!--emotion:[\s\S]*$/i
+
+function createChatClientRequestId(roomId: number): string {
+  const randomId = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  return `chat:${roomId}:${randomId}`
+}
 
 function cleanDisplayMessageContent(content: string, options: { trimEnd?: boolean } = {}): string {
   const cleaned = content
@@ -125,6 +132,35 @@ function hydrateLocalVideoMessages(detail: ChatRoomDetail): ChatRoomDetail {
   }
 }
 
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function isOptimisticRealtimeTranscriptMessage(message: Message): boolean {
+  const metadata = recordValue(message.metadata)
+  const realtime = recordValue(metadata?.realtime)
+  return metadata?.source === OPTIMISTIC_REALTIME_TRANSCRIPT_SOURCE && realtime?.optimistic === true
+}
+
+function isSameVisibleRealtimeTranscriptMessage(message: Message, candidate: Message): boolean {
+  return message.room_id === candidate.room_id
+    && message.sender_type === candidate.sender_type
+    && message.content.trim() === candidate.content.trim()
+}
+
+function replaceOptimisticRealtimeTranscriptMessage(messages: Message[], message: Message): Message[] | null {
+  const optimisticIndex = messages.findIndex((item) => (
+    isOptimisticRealtimeTranscriptMessage(item)
+    && isSameVisibleRealtimeTranscriptMessage(message, item)
+  ))
+  if (optimisticIndex < 0) return null
+  const nextMessages = [...messages]
+  nextMessages[optimisticIndex] = message
+  return nextMessages
+}
+
 export function useChat(
   roomId: number | null,
   options?: {
@@ -153,6 +189,7 @@ export function useChat(
   const eventSourceVersionRef = useRef(0)
   const pendingTypingPersonaRef = useRef<string | null>(null)
   const audioChunkPersonaIdsRef = useRef<Set<string>>(new Set())
+  const sendingRef = useRef(false)
 
   const scrollToBottom = useCallback(() => {
     if (messageListRef.current) {
@@ -217,6 +254,8 @@ export function useChat(
         // Avoid duplicates
         const exists = prev.messages.some((m) => m.id === msg.id)
         if (exists) return prev
+        const mergedRealtimeMessages = replaceOptimisticRealtimeTranscriptMessage(prev.messages, msg)
+        if (mergedRealtimeMessages) return { ...prev, messages: mergedRealtimeMessages }
         return { ...prev, messages: [...prev.messages, msg] }
       })
       setTimeout(scrollToBottom, 50)
@@ -326,12 +365,13 @@ export function useChat(
     contentOverride?: string,
   ): Promise<boolean> => {
     const content = (contentOverride ?? inputValue).trim()
-    if (!content || !roomId || sending) return false
+    if (!content || !roomId || sendingRef.current) return false
 
     // Stop any playing audio when user sends a new message
     options?.audioPlayerRef?.current?.stop()
     audioChunkPersonaIdsRef.current.clear()
 
+    sendingRef.current = true
     setSending(true)
     setSendError(null)
     setInputValue('')
@@ -340,7 +380,11 @@ export function useChat(
     setDispatchSummary(null)
 
     try {
-      await apiSendMessage(roomId, content, metadata, {
+      const clientRequestId = createChatClientRequestId(roomId)
+      await apiSendMessage(roomId, content, {
+        ...(metadata || {}),
+        clientRequestId,
+      }, {
         trainingSessionId: options?.trainingSessionId,
       })
       setFallbackTyping()
@@ -364,18 +408,20 @@ export function useChat(
       }
       return false
     } finally {
+      sendingRef.current = false
       setSending(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValue, options?.audioPlayerRef, options?.trainingSessionId, roomId, sending, scrollToBottom, setFallbackTyping, tr])
+  }, [inputValue, options?.audioPlayerRef, options?.trainingSessionId, roomId, scrollToBottom, setFallbackTyping, tr])
 
   const sendVideoAnswer = useCallback(async (
     attachment: LocalVideoAttachment,
     caption = inputValue,
   ): Promise<boolean> => {
-    if (!roomId || sending) return false
+    if (!roomId || sendingRef.current) return false
     options?.audioPlayerRef?.current?.stop()
     audioChunkPersonaIdsRef.current.clear()
+    sendingRef.current = true
     setSending(true)
     setSendError(null)
     setInputValue('')
@@ -383,7 +429,9 @@ export function useChat(
     setMentionResults([])
     setDispatchSummary(null)
     try {
-      await apiSendMessage(roomId, serializeVideoMessage(attachment, caption), undefined, {
+      await apiSendMessage(roomId, serializeVideoMessage(attachment, caption), {
+        clientRequestId: createChatClientRequestId(roomId),
+      }, {
         trainingSessionId: options?.trainingSessionId,
       })
       setFallbackTyping()
@@ -403,9 +451,10 @@ export function useChat(
       setSendError(tr('视频消息发送失败，请稍后重试。', 'Video message failed to send. Please try again.'))
       return false
     } finally {
+      sendingRef.current = false
       setSending(false)
     }
-  }, [inputValue, options?.audioPlayerRef, options?.trainingSessionId, roomId, scrollToBottom, sending, setFallbackTyping, tr])
+  }, [inputValue, options?.audioPlayerRef, options?.trainingSessionId, roomId, scrollToBottom, setFallbackTyping, tr])
 
   const insertMention = useCallback((persona: PersonaSummary) => {
     setInputValue((prev) =>

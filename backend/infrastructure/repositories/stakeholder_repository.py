@@ -38,6 +38,16 @@ from infrastructure.models.stakeholder import (
 )
 
 
+def _metadata_text(metadata: object, *keys: str) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 class SQLAlchemyChatRoomRepository(ChatRoomRepository):
     """Persist stakeholder chat rooms using SQLAlchemy ORM."""
 
@@ -151,6 +161,34 @@ class SQLAlchemyStakeholderMessageRepository(MessageRepository):
         await self.session.flush()
         await self.session.refresh(model)
         return self._to_entity(model)
+
+    async def get_user_message_by_client_request_id(
+        self,
+        room_id: int,
+        client_request_id: str,
+    ) -> Optional[Message]:
+        request_id = (client_request_id or "").strip()
+        if not request_id:
+            return None
+        query = (
+            select(StakeholderMessageModel)
+            .where(
+                StakeholderMessageModel.room_id == room_id,
+                StakeholderMessageModel.sender_type == "user",
+            )
+            .order_by(StakeholderMessageModel.timestamp.desc())
+            .limit(200)
+        )
+        result = await self.session.execute(query)
+        for model in result.scalars().all():
+            stored_request_id = _metadata_text(
+                model.extra_metadata,
+                "clientRequestId",
+                "client_request_id",
+            )
+            if stored_request_id == request_id:
+                return self._to_entity(model)
+        return None
 
     async def list_by_room_id(
         self, room_id: int, *, skip: int = 0, limit: int = 50

@@ -321,8 +321,8 @@ export const STT_PROVIDER_PRESETS: VoiceProviderPreset[] = [
     status: 'runtime',
     baseUrl: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel',
     model: 'volc.bigasr.sauc.duration',
-    reuseTtsKey: false,
-    note: 'Supports pcm, wav, ogg, or mp3 input; browser WebM must be converted before this adapter can transcribe it.',
+    reuseTtsKey: true,
+    note: 'Can reuse the Volcengine Speech TTS key; supports pcm, wav, ogg, or mp3 input after browser WebM conversion.',
   },
   {
     value: 'deepgram',
@@ -425,11 +425,11 @@ export const REALTIME_PROVIDER_PRESETS: VoiceProviderPreset[] = [
   {
     value: 'volcengine.doubao_realtime',
     label: 'Volcengine Doubao Realtime',
-    status: 'inventory',
+    status: 'runtime',
     baseUrl: 'wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue',
     model: '1.2.6.0',
     realtimeVoice: 'your-volcengine-voice',
-    note: 'Key/config can be saved, but the Volcengine realtime runtime adapter is still pending.',
+    note: 'Wired through the backend Volcengine Doubao realtime runtime; requires a Realtime API key.',
   },
   {
     value: 'aws.nova_sonic',

@@ -812,7 +812,7 @@ def test_realtime_websocket_rejects_client_transcript_events() -> None:
 
     assert error["type"] == "error"
     assert error["payload"]["code"] == "UNSUPPORTED_EVENT"
-    assert "Pipecat realtime pipeline" in error["payload"]["message"]
+    assert "realtime pipeline" in error["payload"]["message"]
     assert state.messages == []
     assert adapter.closed is True
 
@@ -1155,20 +1155,34 @@ def test_realtime_websocket_configure_binding_rejects_other_mock_user() -> None:
     assert state.messages == []
 
 
-def test_realtime_websocket_rejects_openai_provider() -> None:
+def test_realtime_websocket_openai_provider_alias_routes_to_pipecat(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
     app, state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda provider: adapter if provider == "pipecat" else None
+    )
     client = TestClient(app)
 
     with client.websocket_connect(
         "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=openai"
     ) as ws:
-        error = ws.receive_json()
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        ws.send_json({"type": "session.close", "reason": "done"})
+        closed = ws.receive_json()
 
-    assert error["type"] == "error"
-    assert error["payload"]["code"] == "UNSUPPORTED_REALTIME_PROVIDER"
-    assert error["payload"]["phase"] == "provider"
-    assert error["payload"]["provider"] == "openai"
-    assert "Pipecat only" in error["payload"]["message"]
+    assert started["type"] == "session.started"
+    assert started["payload"]["provider"] == "pipecat"
+    assert started["payload"]["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
+    assert listening["status"] == "listening"
+    assert closed["type"] == "session.closed"
+    assert adapter.started_config is not None
+    assert adapter.started_config.provider == "pipecat"
+    assert adapter.started_config.runtime == REALTIME_RUNTIME_PIPECAT
     assert state.messages == []
 
 

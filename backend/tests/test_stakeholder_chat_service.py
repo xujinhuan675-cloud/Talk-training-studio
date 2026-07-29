@@ -165,6 +165,42 @@ async def test_send_message_saves_user_msg(session_factory):
     assert result.content == "Hello"
 
 
+@pytest.mark.asyncio
+async def test_send_message_with_status_is_idempotent_by_client_request_id(session_factory):
+    from application.services.stakeholder.stakeholder_chat_service import (
+        StakeholderChatService,
+    )
+
+    room_id = await _create_room(session_factory)
+    svc = StakeholderChatService(
+        uow_factory=_uow_factory(session_factory),
+        persona_loader=FakePersonaLoader(),
+        llm=FakeLLM(),
+    )
+
+    first = await svc.send_message_with_status(
+        room_id,
+        "Hello once",
+        metadata={"clientRequestId": "chat:req-1"},
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
+    duplicate = await svc.send_message_with_status(
+        room_id,
+        "Hello once",
+        metadata={"clientRequestId": "chat:req-1"},
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
+
+    assert first.created is True
+    assert duplicate.created is False
+    assert duplicate.message.id == first.message.id
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
+        messages = await uow.stakeholder_message_repository.list_by_room_id(room_id, limit=20)
+    user_messages = [message for message in messages if message.sender_type == "user"]
+    assert len(user_messages) == 1
+    assert user_messages[0].metadata["clientRequestId"] == "chat:req-1"
+
+
 # ---------------------------------------------------------------------------
 # AC2: Auto-triggers persona reply
 # ---------------------------------------------------------------------------

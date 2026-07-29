@@ -23,6 +23,7 @@ from urllib.parse import urlparse, urlunparse
 
 from application.ports.realtime import (
     REALTIME_EVENT_SCHEMA_VERSION,
+    REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
     RealtimeAudioChunk,
     RealtimeOutputAudio,
     RealtimePipelineConfig,
@@ -34,15 +35,28 @@ from application.ports.realtime import (
 logger = logging.getLogger(__name__)
 
 VOLCENGINE_DOUBAO_REALTIME_PROVIDER = "volcengine.doubao_realtime"
-REALTIME_RUNTIME_VOLCENGINE_DOUBAO = "volcengine_doubao_realtime"
 DEFAULT_VOLCENGINE_REALTIME_URL = (
     "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
 )
 DEFAULT_VOLCENGINE_REALTIME_MODEL = "1.2.6.0"
+DEFAULT_VOLCENGINE_REALTIME_VOICE = "zh_female_vv_uranus_bigtts"
 DEFAULT_INPUT_AUDIO_FORMAT = "pcm16"
 DEFAULT_OUTPUT_AUDIO_FORMAT = "pcm16"
 DEFAULT_INPUT_SAMPLE_RATE = 16000
 DEFAULT_OUTPUT_SAMPLE_RATE = 24000
+_VOLCENGINE_EVENT_SESSION_CREATE = "session.create"
+_VOLCENGINE_EVENT_SESSION_UPDATE = "session.update"
+_VOLCENGINE_EVENT_AUDIO_APPEND = "input_audio_buffer.append"
+_VOLCENGINE_EVENT_AUDIO_COMMIT = "input_audio_buffer.commit"
+_VOLCENGINE_EVENT_RESPONSE_CANCEL = "response.cancel"
+_VOLCENGINE_EVENT_SESSION_CLOSE = "session.close"
+_VOLCENGINE_REALTIME_PLACEHOLDER_VOICES = {
+    "marin",
+    "your-voice",
+    "your-doubao-voice",
+    "your-volcengine-voice",
+    "your-volcengine-realtime-voice",
+}
 _CLOSED = object()
 
 
@@ -110,7 +124,7 @@ class VolcengineDoubaoRealtimeAdapter:
         self._api_key = _clean_text(api_key)
         self._base_url = normalize_volcengine_realtime_url(base_url)
         self._model = _clean_text(model)
-        self._voice = _clean_text(voice)
+        self._voice = _clean_volcengine_realtime_voice(voice)
         self._timeout = timeout
         self._websocket_connector = websocket_connector or _connect_volcengine_realtime_websocket
         self._request_id_factory = request_id_factory or (lambda: str(uuid.uuid4()))
@@ -155,10 +169,11 @@ class VolcengineDoubaoRealtimeAdapter:
             or self._base_url
         )
         model = _config_model(self._config, fallback=self._model)
+        voice = _config_voice(self._config, fallback=self._voice) or DEFAULT_VOLCENGINE_REALTIME_VOICE
         headers = build_volcengine_realtime_headers(
             api_key=api_key,
-            model=model,
             request_id=self._request_id,
+            resource_id=_config_resource_id(self._config),
         )
 
         try:
@@ -169,16 +184,15 @@ class VolcengineDoubaoRealtimeAdapter:
             )
             self._websocket = await _enter_websocket(self._websocket_context)
             await self._send_provider_event(
-                "session.start",
+                _VOLCENGINE_EVENT_SESSION_CREATE,
                 build_volcengine_realtime_session_payload(
                     context,
                     self._config,
                     request_id=self._request_id,
                     model=model,
-                    voice=_config_voice(self._config, fallback=self._voice),
+                    voice=voice,
                 ),
             )
-            await self.configure({})
             await self._queue_event(
                 _base_event(
                     "session.ready",
@@ -199,7 +213,7 @@ class VolcengineDoubaoRealtimeAdapter:
                         "requestId": self._request_id,
                         "providerSessionId": self._request_id,
                         "model": model,
-                        "voice": _config_voice(self._config, fallback=self._voice),
+                        "voice": voice,
                     },
                     context=context,
                 )
@@ -233,7 +247,7 @@ class VolcengineDoubaoRealtimeAdapter:
             self._config,
             configure_payload,
         )
-        await self._send_provider_event("session.configure", merged_payload)
+        await self._send_provider_event(_VOLCENGINE_EVENT_SESSION_UPDATE, merged_payload)
 
     async def append_audio(self, chunk: RealtimeAudioChunk) -> None:
         self._require_open()
@@ -245,28 +259,22 @@ class VolcengineDoubaoRealtimeAdapter:
             sequence=self._audio_sequence,
             config=self._require_config(),
         )
-        await self._send_provider_event("audio.input", payload)
+        await self._send_provider_event(_VOLCENGINE_EVENT_AUDIO_APPEND, payload)
 
     async def commit_audio(self) -> None:
         self._require_open()
-        await self._send_provider_event(
-            "audio.commit",
-            {"sequence": self._audio_sequence or None},
-        )
+        await self._send_provider_event(_VOLCENGINE_EVENT_AUDIO_COMMIT, {})
 
     async def cancel_response(self, reason: str | None = None) -> None:
         self._require_open()
-        payload: dict[str, Any] = {}
-        if reason:
-            payload["reason"] = reason
-        await self._send_provider_event("response.cancel", payload)
+        await self._send_provider_event(_VOLCENGINE_EVENT_RESPONSE_CANCEL, {})
 
     async def handle_client_event(self, payload: Mapping[str, Any]) -> None:
         event_type = _event_type(payload)
-        if event_type == "session.configure":
+        if event_type in {"session.configure", "session.update"}:
             await self.configure(payload)
             return
-        if event_type == "audio.input":
+        if event_type in {"audio.input", "input.audio.buffer.append"}:
             audio = _decode_audio_payload(payload)
             await self.append_audio(
                 RealtimeAudioChunk(
@@ -289,7 +297,7 @@ class VolcengineDoubaoRealtimeAdapter:
                 )
             )
             return
-        if event_type == "audio.commit":
+        if event_type in {"audio.commit", "input.audio.buffer.commit"}:
             await self.commit_audio()
             return
         if event_type == "response.cancel":
@@ -323,8 +331,8 @@ class VolcengineDoubaoRealtimeAdapter:
         if not self._closed and self._websocket is not None:
             with suppress(Exception):
                 await self._send_provider_event(
-                    "session.close",
-                    {"reason": reason or "client_closed"},
+                    _VOLCENGINE_EVENT_SESSION_CLOSE,
+                    {},
                 )
         self._closed = True
         if self._receive_task is not None and not self._receive_task.done():
@@ -449,14 +457,17 @@ def normalize_volcengine_realtime_url(base_url: str | None = None) -> str:
 def build_volcengine_realtime_headers(
     *,
     api_key: str,
-    model: str,
     request_id: str,
+    resource_id: str | None = None,
+    model: str | None = None,
 ) -> dict[str, str]:
-    return {
+    headers = {
         "X-Api-Key": api_key,
-        "X-Api-Resource-Id": model,
         "X-Api-Request-Id": request_id,
     }
+    if resource_id:
+        headers["X-Api-Resource-Id"] = resource_id
+    return headers
 
 
 def build_volcengine_realtime_session_payload(
@@ -467,34 +478,28 @@ def build_volcengine_realtime_session_payload(
     model: str,
     voice: str | None,
 ) -> dict[str, Any]:
+    resolved_voice = voice or DEFAULT_VOLCENGINE_REALTIME_VOICE
     payload: dict[str, Any] = {
-        "request": {
-            "requestId": request_id,
+        "session": {
             "model": model,
-            "modalities": ["audio", "text"],
-        },
-        "audio": {
-            "inputFormat": config.input_audio_format or DEFAULT_INPUT_AUDIO_FORMAT,
-            "outputFormat": config.output_audio_format or DEFAULT_OUTPUT_AUDIO_FORMAT,
-            "inputSampleRate": _metadata_int(config.metadata, "inputSampleRate")
-            or DEFAULT_INPUT_SAMPLE_RATE,
-            "outputSampleRate": _metadata_int(config.metadata, "outputSampleRate")
-            or DEFAULT_OUTPUT_SAMPLE_RATE,
-            "channels": _metadata_int(config.metadata, "channels") or 1,
-        },
-        "training": {
-            "trainingSessionId": context.binding.training_session_id,
-            "roomId": context.binding.room_id,
-            "taskGoal": context.task_goal,
-            "rubric": dict(context.rubric),
-            "recentTurns": [dict(turn) for turn in context.recent_turns],
-            "metadata": dict(context.metadata),
-        },
+            "instructions": _volcengine_realtime_instructions(context, config),
+            "audio": {
+                "input": {
+                    "format": {
+                        "type": _volcengine_input_audio_format(config.input_audio_format),
+                        "sample_rate": DEFAULT_INPUT_SAMPLE_RATE,
+                    },
+                },
+                "output": {
+                    "format": {
+                        "type": _volcengine_output_audio_format(config.output_audio_format),
+                        "sample_rate": DEFAULT_OUTPUT_SAMPLE_RATE,
+                    },
+                    "voice": resolved_voice,
+                },
+            },
+        }
     }
-    if voice:
-        payload["request"]["voice"] = voice
-    if config.instructions:
-        payload["request"]["instructions"] = config.instructions
     safe_payload = sanitize_realtime_public_value(payload)
     return dict(safe_payload) if isinstance(safe_payload, Mapping) else {}
 
@@ -509,12 +514,30 @@ def build_volcengine_realtime_configure_payload(
         config,
         request_id=str(_metadata_text(overrides or {}, "requestId", "request_id") or ""),
         model=_config_model(config),
-        voice=_config_voice(config),
+        voice=_config_voice(config) or DEFAULT_VOLCENGINE_REALTIME_VOICE,
     )
     if overrides:
-        payload["overrides"] = dict(
-            sanitize_realtime_public_value(dict(overrides)) or {}
-        )
+        safe_overrides = sanitize_realtime_public_value(dict(overrides))
+        if isinstance(safe_overrides, Mapping):
+            session_overrides = safe_overrides.get("session")
+            if isinstance(session_overrides, Mapping):
+                payload["session"] = _merge_public_mappings(
+                    dict(payload.get("session") or {}),
+                    session_overrides,
+                )
+            instructions = _clean_text(safe_overrides.get("instructions"))
+            if instructions and isinstance(payload.get("session"), Mapping):
+                payload["session"]["instructions"] = instructions
+            model = _clean_text(safe_overrides.get("model"))
+            if model and isinstance(payload.get("session"), Mapping):
+                payload["session"]["model"] = model
+            voice = _clean_volcengine_realtime_voice(safe_overrides.get("voice"))
+            if voice and isinstance(payload.get("session"), Mapping):
+                audio = payload["session"].setdefault("audio", {})
+                if isinstance(audio, dict):
+                    output = audio.setdefault("output", {})
+                    if isinstance(output, dict):
+                        output["voice"] = voice
     return payload
 
 
@@ -524,23 +547,7 @@ def build_volcengine_realtime_audio_input_payload(
     sequence: int,
     config: RealtimePipelineConfig,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "audio": base64.b64encode(chunk.data).decode("ascii"),
-        "encoding": "base64",
-        "bytes": len(chunk.data),
-        "mimeType": chunk.mime_type or _audio_mime_type(config.input_audio_format),
-        "sequence": sequence,
-    }
-    sample_rate = _metadata_int(chunk.metadata, "sampleRate", "sample_rate", "inputSampleRate")
-    channels = _metadata_int(chunk.metadata, "channels", "numChannels")
-    if sample_rate is not None:
-        payload["sampleRate"] = sample_rate
-    if channels is not None:
-        payload["channels"] = channels
-    safe_metadata = sanitize_realtime_public_value(dict(chunk.metadata))
-    if isinstance(safe_metadata, Mapping) and safe_metadata:
-        payload["metadata"] = dict(safe_metadata)
-    return payload
+    return {"audio": base64.b64encode(chunk.data).decode("ascii")}
 
 
 def encode_volcengine_realtime_event(
@@ -552,8 +559,12 @@ def encode_volcengine_realtime_event(
     envelope: dict[str, Any] = {
         "type": event_type,
         "event_id": event_id or str(uuid.uuid4()),
-        "payload": dict(sanitize_realtime_public_value(dict(payload or {})) or {}),
     }
+    safe_payload = sanitize_realtime_public_value(dict(payload or {}))
+    if isinstance(safe_payload, Mapping):
+        for key, value in safe_payload.items():
+            if key not in {"type", "event_id"}:
+                envelope[str(key)] = value
     return json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -624,6 +635,15 @@ def map_volcengine_realtime_event(
         return (_base_event("session.configured", config, payload=provider_event, context=context),)
     if event_type in {"session.closed", "connection.closed"}:
         return (_base_event("session.closed", config, payload=provider_event, context=context),)
+    if event_type in {"input.audio.buffer.committed", "audio.input.committed"}:
+        return (
+            _base_event(
+                "audio.input.committed",
+                config,
+                payload=provider_event,
+                context=context,
+            ),
+        )
     if _is_audio_output_provider_event(event_type, provider_event):
         audio = _extract_audio_bytes(provider_event)
         if not audio:
@@ -687,7 +707,7 @@ def map_volcengine_realtime_event(
     if _is_turn_started_provider_event(event_type):
         return (
             _turn_event(
-                "turn.started",
+                _turn_contract_event_type(provider_event, "started"),
                 "started",
                 config,
                 provider_event=provider_event,
@@ -697,8 +717,8 @@ def map_volcengine_realtime_event(
     if _is_turn_ended_provider_event(event_type):
         return (
             _turn_event(
-                "turn.ended",
-                "ended",
+                _turn_contract_event_type(provider_event, "stopped"),
+                "stopped",
                 config,
                 provider_event=provider_event,
                 context=context,
@@ -707,7 +727,7 @@ def map_volcengine_realtime_event(
     if _is_interruption_started_provider_event(event_type):
         return (
             _interruption_event(
-                "interruption.started",
+                "interrupted",
                 "started",
                 config,
                 provider_event=provider_event,
@@ -717,7 +737,7 @@ def map_volcengine_realtime_event(
     if _is_interruption_ended_provider_event(event_type):
         return (
             _interruption_event(
-                "interruption.ended",
+                "interrupted",
                 "ended",
                 config,
                 provider_event=provider_event,
@@ -832,9 +852,19 @@ def _config_model(
 ) -> str:
     return (
         _clean_text(config.model)
-        or _metadata_text(config.metadata, "model", "resourceId", "resource_id")
+        or _metadata_text(config.metadata, "model")
         or fallback
         or DEFAULT_VOLCENGINE_REALTIME_MODEL
+    )
+
+
+def _config_resource_id(config: RealtimePipelineConfig) -> str | None:
+    return _metadata_text(
+        config.metadata,
+        "apiResourceId",
+        "api_resource_id",
+        "resourceId",
+        "resource_id",
     )
 
 
@@ -843,7 +873,73 @@ def _config_voice(
     *,
     fallback: str | None = None,
 ) -> str | None:
-    return _clean_text(config.voice) or _metadata_text(config.metadata, "voice", "voiceId") or fallback
+    return (
+        _clean_volcengine_realtime_voice(config.voice)
+        or _clean_volcengine_realtime_voice(_metadata_text(config.metadata, "voice", "voiceId"))
+        or _clean_volcengine_realtime_voice(fallback)
+    )
+
+
+def _volcengine_realtime_instructions(
+    context: TrainingVoiceContext,
+    config: RealtimePipelineConfig,
+) -> str:
+    parts: list[str] = []
+    instructions = _clean_text(config.instructions)
+    if instructions:
+        parts.append(instructions)
+    task_goal = _clean_text(context.task_goal)
+    if task_goal:
+        parts.append(f"Training goal: {task_goal}")
+    rubric = _public_json(context.rubric)
+    if rubric:
+        parts.append(f"Rubric: {rubric}")
+    recent_turns = _public_json([dict(turn) for turn in context.recent_turns])
+    if recent_turns:
+        parts.append(f"Recent turns: {recent_turns}")
+    scenario = _metadata_text(context.metadata, "scenario", "scenarioName", "scenario_name")
+    if scenario:
+        parts.append(f"Scenario: {scenario}")
+    return "\n\n".join(parts) or "You are a realtime role-play training agent."
+
+
+def _public_json(value: object) -> str | None:
+    safe = sanitize_realtime_public_value(value)
+    if safe is None:
+        return None
+    return json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
+
+
+def _volcengine_input_audio_format(value: str | None) -> str:
+    normalized = _normalized_audio_format(value)
+    if "opus" in normalized:
+        return "speech_opus"
+    return "pcm"
+
+
+def _volcengine_output_audio_format(value: str | None) -> str:
+    normalized = _normalized_audio_format(value)
+    if "opus" in normalized or "ogg" in normalized:
+        return "ogg_opus"
+    return "pcm_s16le"
+
+
+def _normalized_audio_format(value: str | None) -> str:
+    return (value or "").strip().lower().replace("-", "_").replace("/", "_")
+
+
+def _merge_public_mappings(
+    base: Mapping[str, Any],
+    updates: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
+    for key, value in updates.items():
+        existing = merged.get(str(key))
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            merged[str(key)] = _merge_public_mappings(existing, value)
+        else:
+            merged[str(key)] = value
+    return merged
 
 
 def _base_event(
@@ -944,6 +1040,16 @@ def _turn_event(
     if metadata:
         event["metadata"] = metadata
     return event
+
+
+def _turn_contract_event_type(provider_event: Mapping[str, Any], state: str) -> str:
+    participant = (
+        _metadata_text(provider_event, "participant", "role", "speaker") or "user"
+    ).lower()
+    suffix = "started" if state == "started" else "stopped"
+    if participant in {"assistant", "agent", "ai", "bot"}:
+        return f"assistant_speaking.{suffix}"
+    return f"user_turn.{suffix}"
 
 
 def _interruption_event(
@@ -1052,22 +1158,27 @@ def _normalized_provider_event_type(event: Mapping[str, Any]) -> str:
         "configured": "session.configured",
         "session.update": "session.configured",
         "session.updated": "session.configured",
-        "input_audio_buffer.speech_started": "turn.started",
-        "input_audio_buffer.speech_stopped": "turn.ended",
-        "user_turn.started": "turn.started",
-        "user_turn.stopped": "turn.ended",
-        "user_turn.ended": "turn.ended",
-        "response.interrupted": "interruption.started",
-        "interrupted": "interruption.started",
-        "response.cancelled": "interruption.started",
+        "input.audio.buffer.speech.started": "user.turn.started",
+        "input.audio.buffer.speech.stopped": "user.turn.stopped",
+        "user.turn.started": "user.turn.started",
+        "user.turn.stopped": "user.turn.stopped",
+        "user.turn.ended": "user.turn.stopped",
+        "assistant.speaking.started": "assistant.speaking.started",
+        "assistant.speaking.stopped": "assistant.speaking.stopped",
+        "response.interrupted": "interrupted",
+        "interrupted": "interrupted",
+        "response.cancelled": "interrupted",
         "response.cancel.done": "interruption.ended",
-        "input_audio_transcription.delta": "transcript.delta",
-        "input_audio_transcription.completed": "transcript.done",
-        "conversation.item.input_audio_transcription.delta": "transcript.delta",
-        "conversation.item.input_audio_transcription.completed": "transcript.done",
+        "input.audio.buffer.committed": "input.audio.buffer.committed",
+        "input.audio.transcription.delta": "transcript.delta",
+        "input.audio.transcription.completed": "transcript.done",
+        "conversation.item.input.audio.transcription.delta": "transcript.delta",
+        "conversation.item.input.audio.transcription.completed": "transcript.done",
         "response.audio_transcript.delta": "response.audio_transcript.delta",
         "response.audio_transcript.done": "response.audio_transcript.done",
-        "response.output_audio.delta": "audio.output",
+        "response.output.text.delta": "response.audio_transcript.delta",
+        "response.output.text.done": "response.audio_transcript.done",
+        "response.output.audio.delta": "audio.output",
         "response.audio.delta": "audio.output",
         "response.audio.done": "audio.output",
     }
@@ -1100,13 +1211,24 @@ def _is_transcript_done_event(event_type: str) -> bool:
 
 
 def _is_turn_started_provider_event(event_type: str) -> bool:
-    return event_type in {"turn.started", "turn.start"} or event_type.endswith(".speech.started")
+    return event_type in {
+        "turn.started",
+        "turn.start",
+        "user.turn.started",
+        "assistant.speaking.started",
+    } or event_type.endswith(".speech.started")
 
 
 def _is_turn_ended_provider_event(event_type: str) -> bool:
-    return event_type in {"turn.ended", "turn.end", "turn.stopped"} or event_type.endswith(
-        ".speech.stopped"
-    )
+    return event_type in {
+        "turn.ended",
+        "turn.end",
+        "turn.stopped",
+        "user.turn.stopped",
+        "user.turn.ended",
+        "assistant.speaking.stopped",
+        "assistant.speaking.ended",
+    } or event_type.endswith(".speech.stopped")
 
 
 def _is_interruption_started_provider_event(event_type: str) -> bool:
@@ -1268,6 +1390,16 @@ def _clean_text(value: object | None) -> str | None:
     return text or None
 
 
+def _clean_volcengine_realtime_voice(value: object | None) -> str | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    normalized = text.lower().replace("_", "-").replace(" ", "-")
+    if normalized in _VOLCENGINE_REALTIME_PLACEHOLDER_VOICES:
+        return None
+    return text
+
+
 def _audio_mime_type(value: str | None) -> str:
     text = (value or DEFAULT_INPUT_AUDIO_FORMAT).strip().lower()
     if "/" in text:
@@ -1324,6 +1456,7 @@ def _provider_error_status_code(payload: Mapping[str, Any]) -> int:
 __all__ = [
     "DEFAULT_VOLCENGINE_REALTIME_MODEL",
     "DEFAULT_VOLCENGINE_REALTIME_URL",
+    "DEFAULT_VOLCENGINE_REALTIME_VOICE",
     "REALTIME_RUNTIME_VOLCENGINE_DOUBAO",
     "VOLCENGINE_DOUBAO_REALTIME_PROVIDER",
     "VolcengineDoubaoRealtimeAdapter",

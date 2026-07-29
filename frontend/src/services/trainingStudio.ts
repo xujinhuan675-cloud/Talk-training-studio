@@ -135,6 +135,8 @@ export interface PipecatRealtimeCapability {
 
 export interface RealtimeCapabilities {
   pipecat: PipecatRealtimeCapability
+  volcengineDoubaoRealtime?: PipecatRealtimeCapability
+  providers?: Record<string, PipecatRealtimeCapability>
 }
 
 export type TrainingStudioReadinessStatus = 'ready' | 'warning' | 'blocked' | 'unknown'

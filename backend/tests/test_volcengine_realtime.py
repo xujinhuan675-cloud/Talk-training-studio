@@ -9,12 +9,14 @@ from typing import Any
 import pytest
 
 from application.ports.realtime import (
+    REALTIME_RUNTIME_VOLCENGINE_DOUBAO as PORT_REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
     RealtimeAudioChunk,
     RealtimePipelineConfig,
     RealtimeSessionBinding,
     TrainingVoiceContext,
 )
 from infrastructure.external.voice.volcengine_realtime import (
+    DEFAULT_VOLCENGINE_REALTIME_VOICE,
     REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
     VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
     VolcengineDoubaoRealtimeAdapter,
@@ -25,6 +27,10 @@ from infrastructure.external.voice.volcengine_realtime import (
     normalize_volcengine_realtime_url,
     parse_volcengine_realtime_frame,
 )
+
+
+def test_volcengine_realtime_uses_public_runtime_identifier() -> None:
+    assert REALTIME_RUNTIME_VOLCENGINE_DOUBAO == PORT_REALTIME_RUNTIME_VOLCENGINE_DOUBAO
 
 
 class _FakeWebSocket:
@@ -122,7 +128,7 @@ async def _start_adapter(
 
 
 @pytest.mark.asyncio
-async def test_volcengine_realtime_start_sends_session_start_and_configure_frames() -> None:
+async def test_volcengine_realtime_start_sends_session_create_frame() -> None:
     adapter, websocket, fake_context, captured = await _start_adapter()
 
     assert normalize_volcengine_realtime_url("openspeech.bytedance.com") == (
@@ -133,26 +139,26 @@ async def test_volcengine_realtime_start_sends_session_start_and_configure_frame
         "url": "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue",
         "headers": {
             "X-Api-Key": "volc-secret",
-            "X-Api-Resource-Id": "1.2.6.0",
             "X-Api-Request-Id": "req-realtime-1",
         },
         "timeout": 12.0,
     }
-    assert [_decode_sent(item)["type"] for item in websocket.sent] == [
-        "session.start",
-        "session.configure",
-    ]
+    assert [_decode_sent(item)["type"] for item in websocket.sent] == ["session.create"]
 
     start_frame = _decode_sent(websocket.sent[0])
-    configure_frame = _decode_sent(websocket.sent[1])
-    assert start_frame["payload"]["request"]["model"] == "1.2.6.0"
-    assert start_frame["payload"]["request"]["voice"] == "zh_female_vv_uranus_bigtts"
-    assert start_frame["payload"]["request"]["instructions"] == "Stay in role."
-    assert start_frame["payload"]["audio"]["inputSampleRate"] == 16000
-    assert start_frame["payload"]["audio"]["outputSampleRate"] == 24000
-    assert start_frame["payload"]["training"]["trainingSessionId"] == "training-1"
-    assert start_frame["payload"]["training"]["roomId"] == 7
-    assert configure_frame["payload"]["request"]["requestId"] == "req-realtime-1"
+    assert start_frame["session"]["model"] == "1.2.6.0"
+    assert start_frame["session"]["audio"]["output"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
+    assert start_frame["session"]["audio"]["input"]["format"] == {
+        "type": "pcm",
+        "sample_rate": 16000,
+    }
+    assert start_frame["session"]["audio"]["output"]["format"] == {
+        "type": "pcm_s16le",
+        "sample_rate": 24000,
+    }
+    assert "Stay in role." in start_frame["session"]["instructions"]
+    assert "Practice a renewal negotiation" in start_frame["session"]["instructions"]
+    assert "payload" not in start_frame
 
     ready = await _next_event(adapter)
     configured = await _next_event(adapter)
@@ -160,6 +166,32 @@ async def test_volcengine_realtime_start_sends_session_start_and_configure_frame
     assert ready["runtime"] == REALTIME_RUNTIME_VOLCENGINE_DOUBAO
     assert configured["type"] == "session.configured"
     assert configured["payload"]["model"] == "1.2.6.0"
+    assert configured["payload"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
+
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_volcengine_realtime_start_replaces_placeholder_voice_with_default() -> None:
+    fake_ws = _FakeWebSocket()
+    fake_context = _FakeWebSocketContext(fake_ws)
+
+    def connector(url: str, *, headers: Mapping[str, str], timeout: float):
+        return fake_context
+
+    adapter = VolcengineDoubaoRealtimeAdapter(
+        api_key="volc-secret",
+        voice="marin",
+        websocket_connector=connector,
+        request_id_factory=lambda: "req-realtime-1",
+    )
+    await adapter.start(
+        _voice_context(),
+        _realtime_config(voice="your-volcengine-voice"),
+    )
+
+    start_frame = _decode_sent(fake_ws.sent[0])
+    assert start_frame["session"]["audio"]["output"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
 
     await adapter.close()
 
@@ -184,20 +216,17 @@ async def test_volcengine_realtime_audio_commit_cancel_and_close_send_provider_f
 
     sent = [_decode_sent(item) for item in websocket.sent]
     assert [item["type"] for item in sent] == [
-        "session.start",
-        "session.configure",
-        "audio.input",
-        "audio.commit",
+        "session.create",
+        "input_audio_buffer.append",
+        "input_audio_buffer.commit",
         "response.cancel",
         "session.close",
     ]
-    audio_payload = sent[2]["payload"]
-    assert audio_payload["audio"] == base64.b64encode(b"pcm-audio").decode("ascii")
-    assert audio_payload["sequence"] == 4
-    assert audio_payload["sampleRate"] == 16000
-    assert sent[3]["payload"]["sequence"] == 4
-    assert sent[4]["payload"]["reason"] == "barge_in"
-    assert sent[5]["payload"]["reason"] == "finished"
+    assert sent[1]["audio"] == base64.b64encode(b"pcm-audio").decode("ascii")
+    assert "payload" not in sent[1]
+    assert "sequence" not in sent[2]
+    assert "reason" not in sent[3]
+    assert "reason" not in sent[4]
     assert websocket.closed is True
     assert fake_context.exited is True
 
@@ -210,10 +239,14 @@ async def test_volcengine_realtime_audio_commit_cancel_and_close_send_provider_f
 async def test_volcengine_realtime_receive_loop_maps_provider_events() -> None:
     websocket = _FakeWebSocket()
     events = [
-        {"type": "input_audio_transcription.delta", "text": "hello", "language": "en"},
-        {"type": "input_audio_transcription.completed", "text": "hello world"},
         {
-            "type": "response.audio.delta",
+            "type": "conversation.item.input_audio_transcription.delta",
+            "text": "hello",
+            "language": "en",
+        },
+        {"type": "conversation.item.input_audio_transcription.completed", "text": "hello world"},
+        {
+            "type": "response.output_audio.delta",
             "audio": base64.b64encode(b"assistant-pcm").decode("ascii"),
             "sequence": 2,
         },
@@ -235,10 +268,10 @@ async def test_volcengine_realtime_receive_loop_maps_provider_events() -> None:
         "transcript.delta",
         "transcript.done",
         "audio.output",
-        "turn.started",
-        "turn.ended",
-        "interruption.started",
-        "interruption.ended",
+        "user_turn.started",
+        "user_turn.stopped",
+        "interrupted",
+        "interrupted",
         "response.audio_transcript.done",
     ]
     assert observed[2]["text"] == "hello"
@@ -284,16 +317,16 @@ def test_volcengine_realtime_mapping_classifies_and_redacts_provider_errors() ->
 
 def test_volcengine_realtime_protocol_helpers_parse_batch_and_reject_binary() -> None:
     encoded = encode_volcengine_realtime_event(
-        "audio.commit",
+        "input_audio_buffer.commit",
         {"sequence": 3, "apiKey": "secret-removed"},
         event_id="event-1",
     )
     parsed = parse_volcengine_realtime_frame(encoded)
 
     assert parsed == {
-        "type": "audio.commit",
+        "type": "input_audio_buffer.commit",
         "event_id": "event-1",
-        "payload": {"sequence": 3},
+        "sequence": 3,
     }
     assert iter_volcengine_realtime_events(
         json.dumps({"events": [{"type": "session.ready"}, {"type": "session.configured"}]})

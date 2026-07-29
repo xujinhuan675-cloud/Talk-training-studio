@@ -31,6 +31,8 @@ export interface RealtimeVoiceRecorderProps {
   transcriptMetadata?: Record<string, unknown>
   onFinalTranscript?: (text: string, role: RealtimeTranscriptRole) => void
   onPersistedTranscript?: (text: string, role: RealtimeTranscriptRole, message?: ChatMessage) => void
+  onRecorderStatusChange?: (status: RealtimeSessionStatus, error: string | null) => void
+  onInputLevelChange?: (level: number) => void
 }
 
 function statusLabel(
@@ -107,6 +109,17 @@ function encodePcm16Mono(input: Float32Array, inputSampleRate: number, outputSam
   }
 
   return buffer
+}
+
+function inputLevelFromSamples(input: Float32Array): number {
+  if (input.length === 0) return 0
+  let sum = 0
+  for (let index = 0; index < input.length; index += 1) {
+    const sample = input[index]
+    sum += sample * sample
+  }
+  const rms = Math.sqrt(sum / input.length)
+  return Math.max(0, Math.min(1, rms * 8))
 }
 
 function realtimeRoleFromValue(value: unknown, fallback: RealtimeTranscriptRole = 'user'): RealtimeTranscriptRole {
@@ -265,6 +278,8 @@ export default function RealtimeVoiceRecorder({
   transcriptMetadata,
   onFinalTranscript,
   onPersistedTranscript,
+  onRecorderStatusChange,
+  onInputLevelChange,
 }: RealtimeVoiceRecorderProps) {
   const { tr } = useI18n()
   const realtimeSessionRef = useRef<RealtimeSession | null>(null)
@@ -283,9 +298,16 @@ export default function RealtimeVoiceRecorder({
   const startFailureLoggedRef = useRef(false)
   const savedRealtimeProviderRef = useRef<string | null>(null)
   const activeRealtimeProviderRef = useRef<string | null>(null)
+  const inputLevelRef = useRef(0)
+  const inputLevelEmitAtRef = useRef(0)
+  const inputLevelEmitValueRef = useRef(0)
   const [status, setStatus] = useState<RealtimeSessionStatus>('idle')
   const [preview, setPreview] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    onRecorderStatusChange?.(status, error)
+  }, [error, onRecorderStatusChange, status])
 
   const fallbackRealtimeProvider = resolveTrainingRealtimeWebSocketProvider(realtimeProvider)
 
@@ -335,6 +357,32 @@ export default function RealtimeVoiceRecorder({
     })
   }, [fallbackRealtimeProvider, realtimeProfile, realtimeProvider, roomId, trainingSessionId])
 
+  const resetInputLevel = useCallback(() => {
+    inputLevelRef.current = 0
+    inputLevelEmitAtRef.current = 0
+    inputLevelEmitValueRef.current = 0
+    onInputLevelChange?.(0)
+  }, [onInputLevelChange])
+
+  const emitInputLevel = useCallback((level: number) => {
+    const previous = inputLevelRef.current
+    const smoothed = level > previous
+      ? previous * 0.35 + level * 0.65
+      : previous * 0.78 + level * 0.22
+    inputLevelRef.current = smoothed
+    const rounded = Math.round(smoothed * 100) / 100
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    if (
+      now - inputLevelEmitAtRef.current < 80
+      && Math.abs(rounded - inputLevelEmitValueRef.current) < 0.04
+    ) {
+      return
+    }
+    inputLevelEmitAtRef.current = now
+    inputLevelEmitValueRef.current = rounded
+    onInputLevelChange?.(rounded)
+  }, [onInputLevelChange])
+
   const stopOutputAudio = useCallback(() => {
     outputAudioQueueRef.current?.clear()
     try {
@@ -366,6 +414,7 @@ export default function RealtimeVoiceRecorder({
       || outputAudioContextRef.current,
     )
     stopOutputAudio()
+    resetInputLevel()
     inputAudioProcessorRef.current?.disconnect()
     inputAudioProcessorRef.current = null
     inputAudioSourceRef.current?.disconnect()
@@ -406,7 +455,7 @@ export default function RealtimeVoiceRecorder({
       })
     }
     activeRealtimeProviderRef.current = null
-  }, [fallbackRealtimeProvider, logClientEvent, stopOutputAudio])
+  }, [fallbackRealtimeProvider, logClientEvent, resetInputLevel, stopOutputAudio])
 
   useEffect(() => {
     return () => closeRealtime('closed')
@@ -651,7 +700,14 @@ export default function RealtimeVoiceRecorder({
 
   const startRealtime = useCallback(async () => {
     if (!roomId || !trainingSessionId || disabled) return
-    closeRealtime('closed')
+    if (
+      realtimeSessionRef.current
+      || localStreamRef.current
+      || inputAudioContextRef.current
+      || outputAudioContextRef.current
+    ) {
+      closeRealtime('closed')
+    }
     transcriptKeysRef.current.clear()
     setError(null)
     setPreview(counterpartName ? tr('正在连接 {name}', 'Connecting to {name}', { name: counterpartName }) : '')
@@ -701,6 +757,7 @@ export default function RealtimeVoiceRecorder({
           profile: realtimeProfile,
         }),
         onStatusChange: (nextStatus) => {
+          if (realtimeSessionRef.current !== session) return
           setStatus(nextStatus)
           if (nextStatus === 'connected') {
             logClientEvent({
@@ -755,8 +812,12 @@ export default function RealtimeVoiceRecorder({
             setPreview(tr('实时语音教练已连接', 'Realtime voice agent connected'))
           }
         },
-        onEvent: handleRealtimeEvent,
+        onEvent: (event) => {
+          if (realtimeSessionRef.current !== session) return
+          handleRealtimeEvent(event)
+        },
         onError: (socketError) => {
+          if (realtimeSessionRef.current !== session) return
           logClientEvent({
             eventType: 'realtime.ws_error',
             provider: realtimeRuntimeProvider,
@@ -813,9 +874,10 @@ export default function RealtimeVoiceRecorder({
       inputAudioSilenceRef.current = silence
 
       processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0)
+        emitInputLevel(inputLevelFromSamples(input))
         const activeSession = realtimeSessionRef.current
         if (activeSession !== session || !activeSession.isConnected) return
-        const input = event.inputBuffer.getChannelData(0)
         const audio = encodePcm16Mono(input, audioContext.sampleRate, audioContract.inputSampleRate)
         try {
           activeSession.send({ type: 'audio.input', audio, mimeType: 'audio/pcm' })
@@ -901,7 +963,9 @@ export default function RealtimeVoiceRecorder({
           : active
             ? <Square size={14} />
             : <Mic size={14} />}
+        <span className="realtime-voice-action-label">
         {active ? tr('停止', 'Stop') : tr('开始', 'Start')}
+        </span>
       </Button>
     </div>
   )

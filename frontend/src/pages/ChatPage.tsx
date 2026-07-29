@@ -132,7 +132,7 @@ import {
   getScenarioCategoryLabel,
   getScenarioDifficultyLabel,
 } from '../utils/scenarioLabels'
-import type { RealtimeTranscriptRole } from '../services/realtimeSession'
+import type { RealtimeSessionStatus, RealtimeTranscriptRole } from '../services/realtimeSession'
 import '../App.css'
 import '../styles/panelControls.css'
 import './ChatPage.css'
@@ -418,10 +418,7 @@ type RefreshGuidanceOptions = {
 type MobileSheetKey = 'cheatsheet' | 'coaching' | 'analysis' | 'emotion'
 
 const OPTIMISTIC_REALTIME_TRANSCRIPT_SOURCE = 'realtime_voice_final'
-
-function senderTypeForRealtimeRole(role: RealtimeTranscriptRole): ChatMessage['sender_type'] {
-  return role === 'assistant' ? 'persona' : 'user'
-}
+const REALTIME_STATUS_WAVE_BARS = [0.35, 0.68, 0.48, 0.92, 0.56, 0.82, 0.44, 0.7, 0.38]
 
 function isOptimisticRealtimeTranscriptMessage(message: ChatMessage): boolean {
   const metadata = asRecord(message.metadata)
@@ -523,7 +520,6 @@ function ChatArea() {
   const guidanceStreamAbortRef = React.useRef<AbortController | null>(null)
   const guidanceStreamVersionRef = React.useRef(0)
   const trainingReportPollSeqRef = React.useRef(0)
-  const optimisticRealtimeMessageIdRef = React.useRef(-1)
   const initialRouteMessageKeyRef = React.useRef<string | null>(null)
   const trainingMode = getTrainingModeFromLocation(location.search, location.state)
   const interactionMode = getInteractionModeFromLocation(location.search, location.state)
@@ -554,6 +550,9 @@ function ChatArea() {
   const [lastVoiceTranscript, setLastVoiceTranscript] = useState<string | null>(null)
   const [voiceRecorderState, setVoiceRecorderState] = useState<VoiceRecorderState>('idle')
   const [voiceRecorderError, setVoiceRecorderError] = useState<string | null>(null)
+  const [realtimeRecorderStatus, setRealtimeRecorderStatus] = useState<RealtimeSessionStatus>('idle')
+  const [realtimeRecorderError, setRealtimeRecorderError] = useState<string | null>(null)
+  const [realtimeInputLevel, setRealtimeInputLevel] = useState(0)
   const [lastVideoAnswerAt, setLastVideoAnswerAt] = useState<string | null>(null)
   const [videoAnswerStatus, setVideoAnswerStatus] = useState<'idle' | 'uploading' | 'sent' | 'error'>('idle')
   const [videoAnswerError, setVideoAnswerError] = useState<string | null>(null)
@@ -1301,9 +1300,33 @@ function ChatArea() {
   const realtimeBarTitle = isLiveCoachSession
     ? tr('真实对话教练', 'Live conversation coach')
     : tr('实时语音训练', 'Realtime voice practice')
-  const realtimeBarCopy = isLiveCoachSession
-    ? liveCoachLanguageSummary || tr('实时通道已绑定真实对话教练', 'Realtime channel is bound to live coaching')
-    : latestPersonaPrompt || tr('实时通道已绑定当前训练房间', 'Realtime channel is bound to this training room')
+  const realtimeRecorderIsActive = realtimeRecorderStatus === 'connecting'
+    || realtimeRecorderStatus === 'connected'
+    || realtimeRecorderStatus === 'preparing'
+    || realtimeRecorderStatus === 'listening'
+    || realtimeRecorderStatus === 'processing'
+    || realtimeRecorderStatus === 'speaking'
+  const realtimeUserIsSpeaking = realtimeRecorderIsActive
+    && realtimeRecorderStatus !== 'speaking'
+    && realtimeInputLevel >= 0.08
+  const realtimeBarCopy = realtimeRecorderError
+    ? realtimeRecorderError
+    : realtimeRecorderStatus === 'connecting' || realtimeRecorderStatus === 'preparing'
+      ? tr('正在连接实时语音通道', 'Connecting realtime voice')
+      : realtimeRecorderStatus === 'speaking'
+        ? tr('AI 正在回复', 'AI is responding')
+        : realtimeRecorderStatus === 'processing'
+          ? tr('正在处理你的回答', 'Processing your answer')
+          : realtimeUserIsSpeaking
+            ? tr('正在听你说话', 'Listening to you')
+            : realtimeRecorderStatus === 'connected' || realtimeRecorderStatus === 'listening'
+              ? tr('等待你说话', 'Waiting for you to speak')
+              : realtimeRecorderStatus === 'closed'
+                ? tr('实时语音训练已停止', 'Realtime voice practice stopped')
+                : tr('点击开始进行实时语音训练', 'Start realtime voice practice')
+  const realtimeWaveLevel = realtimeRecorderIsActive
+    ? Math.max(realtimeInputLevel, realtimeRecorderStatus === 'speaking' ? 0.04 : 0.1)
+    : 0
 
   useEffect(() => {
     if (!trainingGuidanceEnabled || !latestGuidanceMessage || latestGuidanceMessage.sender_type !== 'persona') return
@@ -1366,8 +1389,16 @@ function ChatArea() {
     }
   }, [isVideoBattlePrep])
 
+  useEffect(() => {
+    if (!isRealtimeBattlePrep) {
+      setRealtimeRecorderStatus('idle')
+      setRealtimeRecorderError(null)
+      setRealtimeInputLevel(0)
+    }
+  }, [isRealtimeBattlePrep])
+
   const voicePracticeStatus = voice.playingPersonaId
-    ? tr('AI 正在语音回应', 'AI is speaking')
+    ? tr('AI 正在语音回复', 'AI is speaking')
     : chat.typingPersona
       ? tr('AI 正在组织回应', 'AI is preparing a reply')
       : voiceRecorderError
@@ -1375,20 +1406,20 @@ function ChatArea() {
         : voice.voiceError
         ? voice.voiceError
         : voiceRecorderState === 'recording'
-          ? tr('正在聆听你的回答', 'Listening to your answer')
+          ? tr('正在听你的语音回答', 'Listening to your voice answer')
           : voiceRecorderState === 'processing'
-            ? tr('正在识别你的语音', 'Recognizing your voice')
+            ? tr('正在识别你的语音回答', 'Recognizing your voice answer')
             : lastVoiceTranscript
-              ? tr('语音轮次已发送', 'Voice turn sent')
+              ? tr('本轮语音回答已发送', 'Voice answer sent')
               : voice.voiceEnabled && !voice.voiceMuted
-                ? tr('语音已就绪', 'Voice ready')
+                ? tr('AI 语音已开启', 'AI voice on')
                 : voice.voiceMuted
-                  ? tr('语音已静音', 'Voice muted')
-                  : tr('语音未开启', 'Voice off')
+                  ? tr('AI 语音已静音', 'AI voice muted')
+                  : tr('AI 语音未开启', 'AI voice off')
 
   const voicePracticeActionLabel = voice.voiceEnabled && !voice.voiceMuted
-    ? tr('静音', 'Mute')
-    : tr('开启语音', 'Enable voice')
+    ? tr('静音AI', 'Mute AI')
+    : tr('AI语音', 'AI voice')
 
   const handleVoicePracticeAction = () => {
     if (voice.voiceEnabled && !voice.voiceMuted) {
@@ -1426,65 +1457,13 @@ function ChatArea() {
     setTimeout(chat.scrollToBottom, 50)
   }, [chat.scrollToBottom, chat.setSelectedRoom])
 
-  const appendOptimisticRealtimeTranscriptMessage = React.useCallback((
-    text: string,
-    role: RealtimeTranscriptRole,
-  ) => {
-    const transcript = text.trim()
-    if (!transcript || !selectedRoomId) return
-    const senderType = senderTypeForRealtimeRole(role)
-    chat.setSelectedRoom((prev) => {
-      if (!prev || prev.room.id !== selectedRoomId) return prev
-      const alreadyPending = prev.messages.some((item) => (
-        isOptimisticRealtimeTranscriptMessage(item)
-        && item.room_id === selectedRoomId
-        && item.sender_type === senderType
-        && item.content.trim() === transcript
-      ))
-      if (alreadyPending) return prev
-      const messageId = optimisticRealtimeMessageIdRef.current
-      optimisticRealtimeMessageIdRef.current -= 1
-      const optimisticMessage: ChatMessage = {
-        id: messageId,
-        room_id: selectedRoomId,
-        sender_type: senderType,
-        sender_id: senderType === 'persona' ? 'assistant' : 'user',
-        content: transcript,
-        timestamp: new Date().toISOString(),
-        emotion_score: null,
-        emotion_label: null,
-        metadata: {
-          ...(realtimeTranscriptMetadata || {}),
-          source: OPTIMISTIC_REALTIME_TRANSCRIPT_SOURCE,
-          trainingMode: 'voice',
-          interactionMode: 'realtime',
-          trainingProfile,
-          trainingFeedbackMode,
-          realtime: {
-            role,
-            optimistic: true,
-          },
-        },
-      }
-      return { ...prev, messages: [...prev.messages, optimisticMessage] }
-    })
-    setTimeout(chat.scrollToBottom, 50)
-  }, [
-    chat.scrollToBottom,
-    chat.setSelectedRoom,
-    realtimeTranscriptMetadata,
-    selectedRoomId,
-    trainingFeedbackMode,
-    trainingProfile,
-  ])
-
   const handleRealtimeTranscriptFinal = React.useCallback((
-    text: string,
-    role: RealtimeTranscriptRole,
+    _text: string,
+    _role: RealtimeTranscriptRole,
   ) => {
-    if (role !== 'user') return
-    appendOptimisticRealtimeTranscriptMessage(text, role)
-  }, [appendOptimisticRealtimeTranscriptMessage])
+    // The chat list only shows messages saved by the backend. `transcript.done`
+    // updates recorder status; SSE or `transcript.persisted` carries the message.
+  }, [])
 
   const handleRealtimeTranscriptPersisted = React.useCallback((
     text: string,
@@ -1495,8 +1474,6 @@ function ChatArea() {
     if (!transcript) return
     if (message) {
       appendRealtimeTranscriptMessage(message)
-    } else if (role === 'user') {
-      appendOptimisticRealtimeTranscriptMessage(transcript, role)
     }
     setLastVoiceTranscript(transcript)
     scheduleGuidanceRefresh({
@@ -1520,7 +1497,6 @@ function ChatArea() {
     setTimeout(chat.scrollToBottom, 100)
   }, [
     appendRealtimeTranscriptMessage,
-    appendOptimisticRealtimeTranscriptMessage,
     chat.scrollToBottom,
     isDrillFeedbackMode,
     isLiveCoachSession,
@@ -1765,7 +1741,9 @@ function ChatArea() {
         : tr('点击输入区的视频按钮后再打开摄像头录制', 'Use the video button in the input area, then open the camera to record')
   const aiIsActive = Boolean(voice.playingPersonaId || chat.typingPersona)
   const userIsActive = voiceRecorderState === 'recording' || voiceRecorderState === 'processing' || videoAnswerStatus === 'uploading'
-  const voicePrompt = latestPersonaPrompt || voicePracticeStatus
+  const voicePrompt = voicePracticeStatus
+  const turnBasedVoiceIsActive = userIsActive || aiIsActive
+  const turnBasedWaveLevel = turnBasedVoiceIsActive ? 0.82 : 0.12
   const videoWorkspacePrompt = latestPersonaPrompt || (
     isVideoBattlePrep
       ? videoPracticeStatus
@@ -1889,6 +1867,16 @@ function ChatArea() {
   const trainingReportStatusCopy = trainingCompletionReportState
     ? getTrainingReportStatusCopy(trainingCompletionReportState, tr)
     : null
+  const handleRealtimeRecorderStatusChange = React.useCallback((
+    status: RealtimeSessionStatus,
+    error: string | null,
+  ) => {
+    setRealtimeRecorderStatus(status)
+    setRealtimeRecorderError(error)
+  }, [])
+  const handleRealtimeInputLevelChange = React.useCallback((level: number) => {
+    setRealtimeInputLevel(Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0)
+  }, [])
   const realtimeVoiceControl = isRealtimeBattlePrep ? (
     <RealtimeVoiceRecorder
       key={`${trainingSessionId || 'no-session'}:${selectedRoomId || 'no-room'}:${realtimeVoiceProfile || 'cascade'}`}
@@ -1901,9 +1889,10 @@ function ChatArea() {
       transcriptMetadata={realtimeTranscriptMetadata}
       onFinalTranscript={handleRealtimeTranscriptFinal}
       onPersistedTranscript={handleRealtimeTranscriptPersisted}
+      onRecorderStatusChange={handleRealtimeRecorderStatusChange}
+      onInputLevelChange={handleRealtimeInputLevelChange}
     />
   ) : null
-
   const handleMobileSheetChange = (sheet: MobileSheetKey) => {
     setMobileSheet((current) => (current === sheet ? null : sheet))
   }
@@ -2445,17 +2434,33 @@ function ChatArea() {
         <div className="chat-page-voice-call-bar" data-testid="voice-practice-bar">
           <PhoneCall size={15} />
           <div className="voice-call-copy">
-            <strong>{tr('电话式练习', 'Phone-style practice')}</strong>
-            <span>{voicePracticeStatus}</span>
+            <strong>{tr('回合制语音训练', 'Turn-based voice practice')}</strong>
+            <div
+              className={`voice-activity-wave voice-call-wave training-voice-wave ${userIsActive ? 'listening' : aiIsActive ? 'speaking' : ''}`}
+              aria-hidden="true"
+            >
+              {REALTIME_STATUS_WAVE_BARS.map((scale, index) => (
+                <span
+                  key={index}
+                  style={{
+                    height: `${4 + Math.round(18 * turnBasedWaveLevel * scale)}px`,
+                    animationDelay: `${index * 38}ms`,
+                  }}
+                />
+              ))}
+            </div>
+            <span title={voicePrompt}>{voicePrompt}</span>
           </div>
-          <Button
-            variant="secondary"
-            className="voice-call-action"
-            onClick={handleVoicePracticeAction}
-          >
-            {voice.voiceEnabled && !voice.voiceMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-            {voicePracticeActionLabel}
-          </Button>
+          <div className="voice-call-actions">
+            <Button
+              variant="secondary"
+              className="voice-call-action"
+              onClick={handleVoicePracticeAction}
+            >
+              {voice.voiceEnabled && !voice.voiceMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              {voicePracticeActionLabel}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -2468,6 +2473,20 @@ function ChatArea() {
           <Radio size={15} />
           <div className="realtime-call-copy">
             <strong>{realtimeBarTitle}</strong>
+            <div
+              className={`voice-activity-wave realtime-call-wave${realtimeRecorderIsActive ? ' active' : ''}${realtimeUserIsSpeaking ? ' speaking' : ''}`}
+              aria-hidden="true"
+            >
+              {REALTIME_STATUS_WAVE_BARS.map((scale, index) => (
+                <span
+                  key={index}
+                  style={{
+                    height: `${4 + Math.round(18 * realtimeWaveLevel * scale)}px`,
+                    animationDelay: `${index * 38}ms`,
+                  }}
+                />
+              ))}
+            </div>
             <span>{realtimeBarCopy}</span>
           </div>
         </div>
@@ -2524,37 +2543,6 @@ function ChatArea() {
         )}
 
         <div className="chat-page-chat-column">
-          {isVoiceBattlePrep && (
-            <section className="training-voice-panel" data-testid="training-voice-panel">
-              <div className="training-voice-persona">
-                <div
-                  className="training-voice-avatar"
-                  style={{ background: primaryPersona?.avatar_color || '#0F766E' }}
-                >
-                  {displayInitial(counterpartName)}
-                </div>
-                <div className="training-voice-copy">
-                  <strong>{counterpartName}</strong>
-                  <span>{aiIsActive ? tr('AI 正在回应', 'AI is responding') : tr('电话式练习已就绪', 'Phone-style practice ready')}</span>
-                </div>
-              </div>
-              <div className="training-voice-current">
-                <div className={`training-voice-wave ${userIsActive ? 'listening' : aiIsActive ? 'speaking' : ''}`}>
-                  {Array.from({ length: 21 }, (_, i) => (
-                    <span
-                      key={i}
-                      style={{
-                        height: `${8 + ((i * 7) % 24)}px`,
-                        animationDelay: `${i * 38}ms`,
-                      }}
-                    />
-                  ))}
-                </div>
-                <p>{voicePrompt}</p>
-              </div>
-            </section>
-          )}
-
           <MessageList
             messages={chat.selectedRoom?.messages ?? []}
             streamingEntries={chat.streamingEntries}
@@ -2601,7 +2589,8 @@ function ChatArea() {
             roomId={chat.selectedRoom?.room.id ?? null}
             trainingSessionId={trainingSessionId}
             messageMetadata={outgoingMessageMetadata}
-            showVoiceButton={!isRealtimeBattlePrep}
+            showVoiceButton={!isRealtimeBattlePrep && !isVideoBattlePrep}
+            showVideoButton={isVideoBattlePrep}
             realtimeVoiceControl={realtimeVoiceControl}
             onVoiceTranscription={(text) => {
               const transcript = text.trim()

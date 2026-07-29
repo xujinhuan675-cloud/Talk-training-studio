@@ -8,8 +8,13 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_chatroom_service, get_stakeholder_chat_service
-from api.routes.stakeholder import router
+from api.dependencies import (
+    CurrentUser,
+    get_chatroom_service,
+    get_current_user,
+    get_stakeholder_chat_service,
+)
+from api.routes.stakeholder import get_stakeholder_training_session_service, router
 from application.ports.stt import TranscriptionResult
 from application.services.stakeholder.dto import MessageDTO
 from domain.stakeholder.entity import ChatRoom
@@ -101,6 +106,12 @@ def _make_client(
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_stakeholder_chat_service] = lambda: fake_chat
     app.dependency_overrides[get_chatroom_service] = lambda: fake_rooms or _FakeChatRoomService()
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id="admin",
+        username="admin",
+        system_role="admin",
+    )
+    app.dependency_overrides[get_stakeholder_training_session_service] = lambda: SimpleNamespace()
     return TestClient(app)
 
 

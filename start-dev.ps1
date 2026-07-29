@@ -1045,6 +1045,7 @@ Set-EnvValue $BackendEnvPath "AUTO_RUN_MIGRATIONS" "true"
 Set-EnvValue $BackendEnvPath "PORT" "$backendPort"
 Set-EnvValue $BackendEnvPath "DATABASE__URL" $databaseUrl
 Set-EnvValue $BackendEnvPath "CORS_ORIGINS" $corsOriginsValue
+Set-EnvValue $BackendEnvPath "LOG_FILE" "../logs/backend-runtime.log"
 Set-EnvValue $BackendEnvPath "STORAGE__LOCAL_BASE_PATH" "./storage"
 Set-EnvValue $BackendEnvPath "NEWAPI_BASE_URL" $newApiBaseUrl
 Set-EnvValue $BackendEnvPath "NEWAPI_ACCESS_TOKEN" $newApiAccessToken

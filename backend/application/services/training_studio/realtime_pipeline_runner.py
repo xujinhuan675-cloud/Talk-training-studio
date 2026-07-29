@@ -436,6 +436,15 @@ class RealtimePipelineSessionRunner:
     async def commit_audio(self) -> None:
         await self.commit()
 
+    async def cancel_response(self, reason: str | None = None) -> None:
+        self._require_open()
+        cancel = getattr(self._adapter, "cancel_response", None)
+        if not callable(cancel):
+            return
+        maybe_awaitable = cancel(reason)
+        if isinstance(maybe_awaitable, Awaitable):
+            await maybe_awaitable
+
     def raise_if_failed(self) -> None:
         self._raise_events_error()
 
@@ -498,6 +507,19 @@ class RealtimePipelineSessionRunner:
             raise
         except BaseException as exc:
             self._events_error = exc
+            logger.warning(
+                "Realtime pipeline event pump failed",
+                extra={
+                    "realtime_error": _event_pump_error_payload(
+                        exc,
+                        context=context,
+                        config=config,
+                        realtime_session_id=realtime_session_id,
+                        telemetry=self._telemetry.to_summary(),
+                    )
+                },
+                exc_info=True,
+            )
             raise
 
     async def _persist_final_transcript(
@@ -831,29 +853,54 @@ def _is_transcript_event(payload: Mapping[str, object]) -> bool:
 
 
 def _provider_error_message(payload: Mapping[str, object]) -> str:
-    for key in ("message", "detail", "error"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return redact_realtime_secret_text(value.strip())
-        if isinstance(value, Mapping):
-            nested = value.get("message") or value.get("detail")
-            if isinstance(nested, str) and nested.strip():
-                return redact_realtime_secret_text(nested.strip())
+    for item in _iter_provider_error_mappings(payload):
+        for key in ("message", "detail", "details", "reason", "msg", "error"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return redact_realtime_secret_text(value.strip())
     return "Realtime pipeline provider error"
 
 
 def _provider_error_code(payload: Mapping[str, object]) -> str:
-    for key in ("code", "error_code", "errorCode"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    error = payload.get("error")
-    if isinstance(error, Mapping):
-        for key in ("code", "type"):
-            value = error.get(key)
+    mappings = _iter_provider_error_mappings(payload)
+    for item in mappings:
+        for key in ("code", "error_code", "errorCode"):
+            value = item.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
+            if isinstance(value, int | float) and not isinstance(value, bool):
+                return str(value)
+    for item in mappings[1:]:
+        value = item.get("type")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return "PIPECAT_PROVIDER_ERROR"
+
+
+def _iter_provider_error_mappings(payload: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+    items: list[Mapping[str, object]] = []
+    seen: set[int] = set()
+
+    def _visit(value: object, depth: int) -> None:
+        if not isinstance(value, Mapping):
+            return
+        marker = id(value)
+        if marker in seen:
+            return
+        seen.add(marker)
+        items.append(value)
+        if depth <= 0:
+            return
+        for key in ("payload", "error", "data", "body", "details", "detail"):
+            nested = value.get(key)
+            if isinstance(nested, Mapping):
+                _visit(nested, depth - 1)
+            elif isinstance(nested, Sequence) and not isinstance(nested, str | bytes | bytearray):
+                for item in nested:
+                    _visit(item, depth - 1)
+
+    _visit(payload, 4)
+    return tuple(items)
 
 
 def _provider_error_source_code(payload: Mapping[str, object]) -> str | None:
@@ -881,17 +928,13 @@ def _provider_error_retryable(category: str) -> bool:
 
 
 def _provider_error_fatal(category: str, payload: Mapping[str, object]) -> bool:
-    value = payload.get("fatal")
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
-        return value.strip().lower() == "true"
-    error = payload.get("error")
-    if isinstance(error, Mapping):
+    for item in _iter_provider_error_mappings(payload):
         for key in ("fatal", "isFatal"):
-            nested = error.get(key)
-            if isinstance(nested, bool):
-                return nested
+            value = item.get(key)
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+                return value.strip().lower() == "true"
     item = _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY[
         "provider_error"
     ]
@@ -899,14 +942,9 @@ def _provider_error_fatal(category: str, payload: Mapping[str, object]) -> bool:
 
 
 def _provider_error_processor(payload: Mapping[str, object]) -> str | None:
-    for key in ("processor", "service", "sourceProcessor", "source_processor"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    error = payload.get("error")
-    if isinstance(error, Mapping):
+    for item in _iter_provider_error_mappings(payload):
         for key in ("processor", "service", "sourceProcessor", "source_processor"):
-            value = error.get(key)
+            value = item.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
@@ -956,34 +994,71 @@ def _provider_error_category(payload: Mapping[str, object]) -> str:
 
 
 def _provider_error_status_code(payload: Mapping[str, object]) -> int:
-    for key in ("status", "statusCode", "status_code"):
-        value = payload.get(key)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, str) and value.isdigit():
-            return int(value)
-    error = payload.get("error")
-    if isinstance(error, Mapping):
-        return _provider_error_status_code(error)
+    for item in _iter_provider_error_mappings(payload):
+        for key in ("status", "statusCode", "status_code", "httpStatus", "http_status"):
+            value = item.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
     return 0
 
 
 def _provider_error_metadata(payload: Mapping[str, object]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
-    for key in ("request_id", "requestId", "trace_id", "traceId"):
-        value = payload.get(key)
-        if isinstance(value, str | int | float | bool):
-            metadata[key] = value
+    for item in _iter_provider_error_mappings(payload):
+        for key in ("request_id", "requestId", "trace_id", "traceId", "event_id", "eventId"):
+            value = item.get(key)
+            if isinstance(value, str | int | float | bool):
+                metadata[key] = value
     status_code = _provider_error_status_code(payload)
     if status_code:
         metadata["statusCode"] = status_code
-    nested_metadata = payload.get("metadata")
-    if isinstance(nested_metadata, Mapping):
-        for key, value in nested_metadata.items():
-            safe_item = sanitize_realtime_public_value({key: value})
-            if isinstance(safe_item, Mapping):
-                metadata.update(dict(safe_item))
+    for item in _iter_provider_error_mappings(payload):
+        nested_metadata = item.get("metadata")
+        if isinstance(nested_metadata, Mapping):
+            for key, value in nested_metadata.items():
+                safe_item = sanitize_realtime_public_value({key: value})
+                if isinstance(safe_item, Mapping):
+                    metadata.update(dict(safe_item))
     return metadata
+
+
+def _event_pump_error_payload(
+    exc: BaseException,
+    *,
+    context: TrainingVoiceContext,
+    config: RealtimePipelineConfig,
+    realtime_session_id: str,
+    telemetry: Mapping[str, Any],
+) -> dict[str, Any]:
+    structured = _realtime_error_from_exception(exc)
+    runtime = normalize_realtime_runtime(config.runtime, provider=config.provider)
+    payload: dict[str, Any] = {
+        "code": structured.get("code") or "REALTIME_EVENT_PUMP_FAILED",
+        "message": structured.get("message") or str(exc),
+        "phase": structured.get("phase") or "provider_event",
+        "provider": structured.get("provider") or config.provider,
+        "runtime": runtime,
+        "realtimeRuntime": structured.get("realtimeRuntime") or runtime,
+        "trainingSessionId": context.binding.training_session_id,
+        "roomId": context.binding.room_id,
+        "realtimeSessionId": realtime_session_id,
+        "telemetry": telemetry,
+    }
+    for key in (
+        "errorCategory",
+        "eventType",
+        "sourceCode",
+        "processor",
+        "retryable",
+        "fatal",
+        "metadata",
+    ):
+        if key in structured:
+            payload[key] = structured[key]
+    safe_payload = sanitize_realtime_public_value(payload)
+    return dict(safe_payload) if isinstance(safe_payload, Mapping) else payload
 
 
 def _pipeline_start_error(

@@ -760,20 +760,16 @@ async def send_message(
         chatroom_svc,
         access_scope,
     )
-    if body.metadata:
-        msg, room = await svc.send_message(
-            room_id,
-            body.content,
-            metadata=body.metadata,
-            access_scope=access_scope,
-        )
-    else:
-        msg, room = await svc.send_message(
-            room_id,
-            body.content,
-            access_scope=access_scope,
-        )
-    background_tasks.add_task(svc.generate_replies, room_id, room)
+    result = await svc.send_message_with_status(
+        room_id,
+        body.content,
+        metadata=body.metadata,
+        access_scope=access_scope,
+    )
+    msg = result.message
+    room = result.room
+    if result.created:
+        background_tasks.add_task(svc.generate_replies, room_id, room)
     return success_response(data=msg.model_dump())
 
 
