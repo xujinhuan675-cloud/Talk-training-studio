@@ -4,8 +4,6 @@
   color: var(--text-primary);
 }
 
-.training-history-toolbar,
-.training-history-filter-summary,
 .training-history-alerts,
 .training-history-list {
   max-width: var(--page-max-width);
@@ -13,12 +11,15 @@
   margin-right: auto;
 }
 
+.training-history-toolbar-surface {
+  margin-bottom: 14px;
+}
+
 .training-history-toolbar {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(190px, auto) minmax(160px, auto);
-  gap: 10px;
+  grid-template-columns: minmax(260px, 1fr) minmax(190px, 260px) minmax(300px, max-content);
+  gap: 12px;
   align-items: center;
-  margin-bottom: 10px;
 }
 
 .training-history-search,
@@ -42,7 +43,28 @@
 .training-history-select .ui-form-control {
   min-height: 42px;
   padding-left: 38px;
-  background-color: var(--bg-card);
+  background-color: var(--bg-base);
+}
+
+.training-history-status-filter {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.training-history-status-filter::-webkit-scrollbar {
+  display: none;
+}
+
+.training-history-status-filter .ui-segmented-control {
+  width: max-content;
+  min-width: 100%;
+  background: var(--bg-base);
+}
+
+.training-history-status-filter .ui-segmented-control-button {
+  min-width: auto;
+  padding: 0 9px;
 }
 
 .training-history-filter-summary {
@@ -51,7 +73,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 750;
@@ -137,6 +161,7 @@
   min-height: 86px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border-light);
+  transition: background var(--transition-fast);
 }
 
 .training-history-row:last-child {
@@ -144,7 +169,7 @@
 }
 
 .training-history-row:hover {
-  background: var(--green-soft);
+  background: var(--bg-elevated);
 }
 
 .training-history-time {

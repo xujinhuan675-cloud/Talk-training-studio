@@ -47,13 +47,17 @@ import {
   scenarioStatusOptions,
   type ScenarioStatusFilter,
 } from '../utils/scenarioLabels'
+import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Input, Select } from '../components/ui/form'
+import { SegmentedControl } from '../components/ui/segmented-control'
+import { Surface } from '../components/ui/surface'
 import './TrainingHistoryPage.css'
 
 type HistoryStatus = ScenarioTrainingStatus
 type StatusFilter = ScenarioStatusFilter
 type LocalizedText = readonly [zh: string, en: string]
+type HistoryBadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'accent' | 'violet'
 
 interface HistoryEntry {
   key: string
@@ -275,6 +279,24 @@ function gradeKey(score?: number): string {
   if (score >= 80) return 'good'
   if (score >= 70) return 'solid'
   return 'weak'
+}
+
+function statusTone(status: HistoryStatus): HistoryBadgeTone {
+  if (status === 'completed') return 'success'
+  if (status === 'in_progress') return 'warning'
+  if (status === 'failed') return 'danger'
+  return 'neutral'
+}
+
+function scoreTone(scoreClass: string): HistoryBadgeTone {
+  if (scoreClass === 'excellent' || scoreClass === 'good') return 'success'
+  if (scoreClass === 'solid') return 'warning'
+  if (scoreClass === 'weak') return 'danger'
+  return 'neutral'
+}
+
+function sourceTone(source: HistoryEntry['source']): HistoryBadgeTone {
+  return source === 'progress' ? 'warning' : 'neutral'
 }
 
 function entryTimestamp(entry: HistoryEntry): number {
@@ -534,6 +556,10 @@ export default function TrainingHistoryPage() {
   const selectedStatusLabel = statusFilter === 'all'
     ? tr('全部状态', 'All statuses')
     : getScenarioStatusFilterLabel(statusFilter, tr)
+  const statusFilterOptions = statusOptions.map((option) => ({
+    label: getScenarioStatusFilterLabel(option, tr),
+    value: option,
+  }))
   const filterCountText = hasActiveFilters
     ? tr('{filtered} / {total} 条', '{filtered} of {total} records', {
       filtered: filteredEntries.length,
@@ -556,62 +582,59 @@ export default function TrainingHistoryPage() {
         )}
       />
 
-      <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>
-        <label className="training-history-search">
-          <Search size={16} />
-          <Input
-            aria-label={tr('搜索训练记录', 'Search training history')}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={tr('搜索场景、会话、分类...', 'Search scenario, session, category...')}
-          />
-        </label>
+      <Surface as="div" className="training-history-toolbar-surface" padding="md">
+        <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>
+          <label className="training-history-search">
+            <Search size={16} />
+            <Input
+              aria-label={tr('搜索训练记录', 'Search training history')}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={tr('搜索场景、会话、分类...', 'Search scenario, session, category...')}
+            />
+          </label>
 
-        <label className="training-history-select">
-          <FileText size={15} />
-          <Select
-            aria-label={tr('场景筛选', 'Scenario filter')}
-            value={scenarioFilter}
-            onChange={(event) => setScenarioFilter(event.target.value)}
-          >
-            <option value="all">{tr('全部场景', 'All scenarios')}</option>
-            {scenarioOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </label>
+          <label className="training-history-select">
+            <FileText size={15} />
+            <Select
+              aria-label={tr('场景筛选', 'Scenario filter')}
+              value={scenarioFilter}
+              onChange={(event) => setScenarioFilter(event.target.value)}
+            >
+              <option value="all">{tr('全部场景', 'All scenarios')}</option>
+              {scenarioOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </label>
 
-        <label className="training-history-select">
-          <CheckCircle2 size={15} />
-          <Select
-            aria-label={tr('状态筛选', 'Status filter')}
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-          >
-            {statusOptions.map((option) => (
-              <option key={option} value={option}>
-                {getScenarioStatusFilterLabel(option, tr)}
-              </option>
-            ))}
-          </Select>
-        </label>
-      </section>
+          <div className="training-history-status-filter">
+            <SegmentedControl
+              ariaLabel={tr('状态筛选', 'Status filter')}
+              value={statusFilter}
+              onValueChange={(value) => setStatusFilter(value)}
+              options={statusFilterOptions}
+              size="sm"
+            />
+          </div>
+        </section>
 
-      <section className="training-history-filter-summary" aria-label={tr('当前筛选', 'Current filters')}>
-        <div>
-          <span>{filterCountText}</span>
-          {scenarioFilter !== 'all' && <strong>{selectedScenarioLabel}</strong>}
-          {statusFilter !== 'all' && <strong>{selectedStatusLabel}</strong>}
-          {query.trim() && <strong>{query.trim()}</strong>}
-        </div>
-        {hasActiveFilters && (
-          <Button type="button" variant="secondary" size="sm" onClick={resetFilters}>
-            {tr('清空筛选', 'Clear filters')}
-          </Button>
-        )}
-      </section>
+        <section className="training-history-filter-summary" aria-label={tr('当前筛选', 'Current filters')}>
+          <div>
+            <span>{filterCountText}</span>
+            {scenarioFilter !== 'all' && <strong>{selectedScenarioLabel}</strong>}
+            {statusFilter !== 'all' && <strong>{selectedStatusLabel}</strong>}
+            {query.trim() && <strong>{query.trim()}</strong>}
+          </div>
+          {hasActiveFilters && (
+            <Button type="button" variant="secondary" size="sm" onClick={resetFilters}>
+              {tr('清空筛选', 'Clear filters')}
+            </Button>
+          )}
+        </section>
+      </Surface>
 
       {(sessionError || progressError) && (
         <section className="training-history-alerts">
@@ -694,9 +717,9 @@ export default function TrainingHistoryPage() {
                   <span>{historyEntryMetaText(entry, tr)}</span>
                 </div>
                 <div className="training-history-tags">
-                  <span className={`training-history-source-tag ${entry.source}`}>
+                  <Badge tone={sourceTone(entry.source)} className={`training-history-source-tag ${entry.source}`}>
                     {translateLabel(sourceLabels[entry.source], tr)}
-                  </span>
+                  </Badge>
                   {entry.difficulty && (
                     <span>{translatedDifficulty(entry.difficulty, tr)}</span>
                   )}
@@ -726,24 +749,24 @@ export default function TrainingHistoryPage() {
               </div>
 
               <div>
-                <span className={`training-history-status ${entry.status}`}>
+                <Badge tone={statusTone(entry.status)} className={`training-history-status ${entry.status}`}>
                   {entry.status === 'completed' && <CheckCircle2 size={14} />}
                   {entry.status === 'in_progress' && <Clock3 size={14} />}
                   {entry.status === 'not_started' && <FileText size={14} />}
                   {entry.status === 'failed' && <AlertCircle size={14} />}
                   {getScenarioStatusLabel(entry.status, tr)}
-                </span>
+                </Badge>
               </div>
 
               <div>
-                <span className={`training-history-score ${scoreClass}`}>
+                <Badge tone={scoreTone(scoreClass)} className={`training-history-score ${scoreClass}`}>
                   <Trophy size={14} />
                   {entry.score === undefined
                     ? entry.scoreStatus === 'pending'
                       ? tr('评分中', 'Scoring')
                       : '--'
                     : `${entry.score}/100`}
-                </span>
+                </Badge>
               </div>
 
               <div className="training-history-actions">
