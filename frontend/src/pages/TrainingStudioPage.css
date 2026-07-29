@@ -86,7 +86,7 @@
 }
 
 .training-studio-mode-panel {
-  order: 3;
+  order: 4;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
@@ -236,7 +236,7 @@
 }
 
 .training-studio-feedback-panel {
-  order: 4;
+  order: 5;
   display: grid;
   gap: 12px;
   border: 1px solid var(--training-workbench-border);
@@ -354,7 +354,7 @@
 }
 
 .training-studio-grid {
-  order: 5;
+  order: 6;
   display: block;
 }
 
@@ -422,7 +422,9 @@
 .training-studio-tabs-panel {
   order: 1;
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
@@ -435,6 +437,13 @@
   gap: 6px;
 }
 
+.training-studio-page-tabs .ui-segmented-control-button:hover:not(:disabled),
+.training-studio-page-tabs .ui-segmented-control-button[data-state='on'] {
+  border-color: var(--training-workbench-primary);
+  background: var(--training-workbench-primary-soft);
+  color: var(--training-workbench-primary);
+}
+
 .training-studio-training-panel {
   order: 2;
   display: grid;
@@ -443,24 +452,17 @@
 }
 
 .training-studio-parameters-panel {
-  order: 6;
+  order: 2;
   display: grid;
-  gap: 0;
-  margin-top: 16px;
+  gap: 10px;
+  margin: 8px 0 16px;
 }
 
 .training-studio-battle-panel {
   order: 2;
   min-width: 0;
-}
-
-.training-studio-parameters-head {
-  border: 1px solid var(--training-workbench-border);
-  border-radius: var(--training-workbench-radius);
-  padding: 14px;
-  margin-bottom: 16px;
-  background: var(--training-workbench-surface);
-  box-shadow: var(--training-workbench-shadow);
+  --amber: var(--training-workbench-primary);
+  --amber-soft: var(--training-workbench-primary-soft);
 }
 
 .training-studio-config-inline {
@@ -470,13 +472,13 @@
 .training-studio-training-actions {
   order: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(148px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
   align-items: center;
   gap: 12px;
   border: 1px solid var(--training-workbench-border);
   border-radius: var(--training-workbench-radius);
-  padding: 14px;
-  margin-top: 16px;
+  padding: 12px 14px;
+  margin: 0;
   background: var(--training-workbench-surface);
   box-shadow: var(--training-workbench-shadow);
 }
@@ -497,40 +499,42 @@
 
 .training-studio-training-action-copy p {
   margin: 0;
-  overflow: hidden;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .training-studio-action-stack {
-  min-width: 320px;
+  min-width: 0;
   width: 100%;
   display: grid;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  justify-self: end;
 }
 
 .training-studio-start-steps {
+  order: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0;
   min-width: 0;
+  padding-bottom: 2px;
 }
 
 .training-studio-start-step {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .training-studio-start-step-dot {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -538,9 +542,13 @@
   border-radius: 999px;
   background: var(--training-workbench-bg);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   line-height: 1;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .training-studio-start-step-dot.done {
@@ -556,24 +564,34 @@
 }
 
 .training-studio-start-step-label {
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 800;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.training-studio-start-step-label.active {
+  color: var(--training-workbench-primary);
 }
 
 .training-studio-start-step-line {
-  width: 16px;
+  width: 28px;
   height: 2px;
-  flex: 0 0 16px;
-  margin: 0 6px;
-  border-radius: 999px;
+  flex: 0 0 28px;
+  margin: 0 8px;
   background: var(--training-workbench-border);
+  transition: background var(--transition-fast);
+}
+
+.training-studio-start-step-line.done {
+  background: var(--training-workbench-primary);
 }
 
 .training-studio-action {
   width: 100%;
+  min-height: 36px;
 }
 
 .training-studio-parameters-toggle.ui-button {
@@ -612,7 +630,7 @@
 }
 
 .training-studio-error {
-  order: 2;
+  order: 3;
   grid-column: 1 / -1;
   border: 1px solid var(--training-workbench-danger);
   border-radius: var(--training-workbench-radius);
@@ -694,6 +712,11 @@
   .training-studio-page-tabs.ui-segmented-control {
     min-width: 0;
     width: 100%;
+  }
+
+  .training-studio-tabs-panel {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .training-studio-training-action-copy p {

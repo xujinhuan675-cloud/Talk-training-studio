@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Loader2, Zap, ArrowLeft, ArrowRight } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
@@ -34,7 +34,9 @@ function getBattlePrepRouteState(state: unknown): BattlePrepRouteState {
 interface BattlePrepFlowProps {
   backAction?: ReactNode
   embedded?: boolean
+  onStepChange?: (step: 1 | 2) => void
   onStudioConfigChange: (next: TrainingStudioConfig) => void
+  showSteps?: boolean
   studioConfig: TrainingStudioConfig
 }
 
@@ -60,7 +62,9 @@ function getErrorMessage(error: unknown, fallback: string): string {
 export function BattlePrepFlow({
   backAction,
   embedded = false,
+  onStepChange,
   onStudioConfigChange,
+  showSteps = true,
   studioConfig,
 }: BattlePrepFlowProps) {
   const navigate = useNavigate()
@@ -79,6 +83,11 @@ export function BattlePrepFlow({
     selectedPoints,
     submitting,
   } = state
+  const showHeaderHeading = !embedded || Boolean(backAction)
+
+  useEffect(() => {
+    onStepChange?.(step)
+  }, [onStepChange, step])
 
   // ---- Step 1: generate persona ----
   const handleGenerate = async () => {
@@ -133,35 +142,39 @@ export function BattlePrepFlow({
   return (
     <div className={`bpp-page${embedded ? ' bpp-page--embedded' : ''}`}>
       <div className="bpp-container">
-        <header className="bpp-header">
-          {(!embedded || backAction) && (
-            <div className="bpp-heading">
-              {backAction}
-              {!embedded && (
-                <div className="bpp-title-row">
-                  <Zap size={22} className="bpp-title-icon" />
-                  <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="bpp-steps" aria-label={tr('准备流程', 'Preparation steps')}>
-            {[1, 2].map((n) => (
-              <div key={n} className="bpp-step-item">
-                <div className={`bpp-step-dot ${step === n ? 'active' : step > n ? 'done' : ''}`}>
-                  {n}
-                </div>
-                <span className={`bpp-step-label ${step === n ? 'active' : ''}`}>
-                  {n === 1
-                    ? tr('描述会议', 'Describe Meeting')
-                    : tr('确认对手', 'Confirm opponent')}
-                </span>
-                {n < 2 && <div className={`bpp-step-line ${step > n ? 'done' : ''}`} />}
+        {(showHeaderHeading || showSteps) && (
+          <header className="bpp-header">
+            {showHeaderHeading && (
+              <div className="bpp-heading">
+                {backAction}
+                {!embedded && (
+                  <div className="bpp-title-row">
+                    <Zap size={22} className="bpp-title-icon" />
+                    <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
-        </header>
+            )}
+
+            {showSteps && (
+              <div className="bpp-steps" aria-label={tr('准备流程', 'Preparation steps')}>
+                {[1, 2].map((n) => (
+                  <div key={n} className="bpp-step-item">
+                    <div className={`bpp-step-dot ${step === n ? 'active' : step > n ? 'done' : ''}`}>
+                      {n}
+                    </div>
+                    <span className={`bpp-step-label ${step === n ? 'active' : ''}`}>
+                      {n === 1
+                        ? tr('描述会议', 'Describe Meeting')
+                        : tr('确认对手', 'Confirm opponent')}
+                    </span>
+                    {n < 2 && <div className={`bpp-step-line ${step > n ? 'done' : ''}`} />}
+                  </div>
+                ))}
+              </div>
+            )}
+          </header>
+        )}
 
         {/* ---- Step 1: Describe Meeting ---- */}
         {step === 1 && (

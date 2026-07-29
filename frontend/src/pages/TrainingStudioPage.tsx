@@ -280,6 +280,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : routeMode ?? 'voice')
   const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>(() => routeFeedbackMode ?? 'simulation')
   const [activeTab, setActiveTab] = useState<StudioTab>('training')
+  const [battlePrepStep, setBattlePrepStep] = useState<1 | 2>(1)
   const [parametersOpen, setParametersOpen] = useState(false)
   const [liveCoachSourceLanguage, setLiveCoachSourceLanguage] = useState(() => getRouteStringValue(routeState, 'liveCoachSourceLanguage') ?? 'zh-CN')
   const [liveCoachTargetLanguage, setLiveCoachTargetLanguage] = useState(() => getRouteStringValue(routeState, 'liveCoachTargetLanguage') ?? 'en-US')
@@ -540,6 +541,48 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             size="sm"
             value={activeTab}
           />
+
+          {activeTab === 'training' && (
+            <div className="training-studio-start-steps" aria-label={tr('快速开始流程', 'Quick start steps')}>
+              <div className="training-studio-start-step">
+                <span className="training-studio-start-step-dot done">1</span>
+                <span className="training-studio-start-step-label">{tr('选择模式', 'Choose mode')}</span>
+              </div>
+              <div className="training-studio-start-step-line done" />
+              <div className="training-studio-start-step">
+                <span className="training-studio-start-step-dot done">2</span>
+                <span className="training-studio-start-step-label">{tr('选择练法', 'Choose practice')}</span>
+              </div>
+              <div className="training-studio-start-step-line done" />
+              <div className="training-studio-start-step">
+                <span className="training-studio-start-step-dot active">3</span>
+                <span className="training-studio-start-step-label active">{t('common.startTraining')}</span>
+              </div>
+            </div>
+          )}
+          {activeTab === 'battle' && (
+            <div className="training-studio-start-steps" aria-label={tr('准备流程', 'Preparation steps')}>
+              {[1, 2].map((stepNumber) => (
+                <div key={stepNumber} className="training-studio-start-step">
+                  <span
+                    className={`training-studio-start-step-dot ${
+                      battlePrepStep === stepNumber ? 'active' : battlePrepStep > stepNumber ? 'done' : ''
+                    }`}
+                  >
+                    {stepNumber}
+                  </span>
+                  <span className={`training-studio-start-step-label${battlePrepStep === stepNumber ? ' active' : ''}`}>
+                    {stepNumber === 1
+                      ? tr('描述会议', 'Describe Meeting')
+                      : tr('确认对手', 'Confirm opponent')}
+                  </span>
+                  {stepNumber < 2 && (
+                    <div className={`training-studio-start-step-line${battlePrepStep > stepNumber ? ' done' : ''}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {activeTab === 'training' ? (
@@ -550,22 +593,6 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 <p>{selectedModeLabel} · {selectedFeedbackModeLabel} · {trainingConfigSummary}</p>
               </div>
               <div className="training-studio-action-stack">
-                <div className="training-studio-start-steps" aria-label={tr('快速开始流程', 'Quick start steps')}>
-                  <div className="training-studio-start-step">
-                    <span className="training-studio-start-step-dot done">1</span>
-                    <span className="training-studio-start-step-label">{tr('选择模式', 'Choose mode')}</span>
-                  </div>
-                  <div className="training-studio-start-step-line" />
-                  <div className="training-studio-start-step">
-                    <span className="training-studio-start-step-dot done">2</span>
-                    <span className="training-studio-start-step-label">{tr('选择练法', 'Choose practice')}</span>
-                  </div>
-                  <div className="training-studio-start-step-line" />
-                  <div className="training-studio-start-step">
-                    <span className="training-studio-start-step-dot active">3</span>
-                    <span className="training-studio-start-step-label">{t('common.startTraining')}</span>
-                  </div>
-                </div>
                 <Button
                   className="training-studio-action"
                   variant="primary"
@@ -594,6 +621,18 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 </Button>
               </div>
             </div>
+
+            {parametersOpen && (
+              <section
+                id="training-studio-parameters-panel"
+                className="training-studio-parameters-panel"
+                aria-label={t('training.launch.summaryTitle')}
+              >
+                <div className="training-studio-config-inline">
+                  <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
+                </div>
+              </section>
+            )}
 
             {error && (
               <div className="training-studio-error" role="alert">
@@ -745,32 +784,14 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
           </div>
         </div>
 
-            {parametersOpen && (
-              <section
-                id="training-studio-parameters-panel"
-                className="training-studio-parameters-panel"
-                aria-label={t('training.launch.summaryTitle')}
-              >
-                <div className="training-studio-panel-head training-studio-parameters-head">
-                  <div>
-                    <h2>{tr('本次训练参数', 'Session parameters')}</h2>
-                    <p>
-                      {selectedModeLabel} · {selectedFeedbackModeLabel} · {trainingConfigSummary}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="training-studio-config-inline">
-                  <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
-                </div>
-              </section>
-            )}
           </section>
         ) : (
           <div className="training-studio-battle-panel">
             <BattlePrepFlow
               embedded
+              onStepChange={setBattlePrepStep}
               onStudioConfigChange={setConfig}
+              showSteps={false}
               studioConfig={config}
             />
           </div>
