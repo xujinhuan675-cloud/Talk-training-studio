@@ -1,5 +1,5 @@
 # input: 无（pytest 自动加载）
-# output: pytest rootdir-level sys.path 修复（确保 backend/ 优先于 tests/）
+# output: pytest 根级测试基线与 sys.path 修复（确保 mock auth 稳定且 backend/ 优先于 tests/）
 # owner: wanhua.gu
 # pos: 测试根 conftest - 解决 tests/infrastructure/external/ 命名空间包遮蔽真实 infrastructure/external/ 的问题；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Backend rootdir conftest.
@@ -17,6 +17,12 @@ from pathlib import Path
 
 # Mandatory secret key for settings validation (mirror tests/conftest.py)
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
+
+# Keep the unit suite on its mock-auth baseline before eager imports create the
+# global settings instance. Local deployment credentials remain production-only;
+# auth-specific tests enable NewAPI mode explicitly with monkeypatch.
+os.environ["NEWAPI_AUTH_ENABLED"] = "false"
+os.environ["NEWAPI_AUTH_ALLOW_MOCK_FALLBACK"] = "true"
 
 _BACKEND_ROOT = str(Path(__file__).resolve().parent)
 _TESTS_ROOT = str(Path(__file__).resolve().parent / "tests")
