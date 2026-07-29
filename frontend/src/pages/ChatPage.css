@@ -1230,6 +1230,48 @@
   line-height: 1.45;
 }
 
+.guidance-card--primary blockquote {
+  margin-top: 0;
+}
+
+.guidance-details-toggle.ui-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  margin-top: 6px;
+  padding: 0 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.guidance-details {
+  margin-top: 8px;
+}
+
+.guidance-detail-reason {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-accent);
+  background: var(--bg-subtle, #f7faf8);
+}
+
+.guidance-detail-reason span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.guidance-detail-reason p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .chat-page-guidance-panel .panel-toggle.ui-button {
   width: 32px;
   height: 32px;

@@ -76,10 +76,23 @@ test('Bottom voice controls keep text labels across realtime and turn-based mode
 
   assert.match(voiceRecorder, /const actionLabel = state === 'idle'[\s\S]*'Voice reply'/)
   assert.match(voiceRecorder, /<span className="voice-btn-label">\{actionLabel\}<\/span>/)
+  assert.doesNotMatch(voiceRecorder, /className="voice-status"/)
   assert.match(realtimeRecorder, /className="realtime-voice-action-label"/)
   assert.match(voiceCss, /\.voice-btn\s*\{[\s\S]*min-width: 84px[\s\S]*border-radius: 999px/)
   assert.match(chatInputCss, /\.message-input-bar \.voice-btn,[\s\S]*\.message-input-bar \.realtime-voice-action\s*\{[\s\S]*width: auto/)
   assert.doesNotMatch(chatInputCss, /realtime-voice-action-label[\s\S]*display:\s*none/)
+})
+
+test('Turn-based voice normalizes browser recordings before sending them to STT', () => {
+  const voiceRecorder = readSource('src/components/VoiceRecorder.tsx')
+  const voiceAudio = readSource('src/services/turnBasedVoiceAudio.ts')
+
+  assert.match(voiceRecorder, /normalizeRecordedAudioToWav\(sourceAudio\)/)
+  assert.match(voiceRecorder, /format: TURN_BASED_STT_AUDIO_FORMAT/)
+  assert.match(voiceRecorder, /VOICE_WEBSOCKET_CHUNK_BYTES/)
+  assert.doesNotMatch(voiceRecorder, /format: 'webm'/)
+  assert.match(voiceAudio, /TURN_BASED_STT_SAMPLE_RATE = 16_000/)
+  assert.match(voiceAudio, /TURN_BASED_STT_AUDIO_FORMAT = 'wav'/)
 })
 
 test('ChatPage keeps voice and video controls mode-specific in ChatInput', () => {
@@ -126,6 +139,25 @@ test('Realtime voice status bar shows activity state and mic wave, not latest re
   assert.match(css, /\.voice-activity-wave\.active span,[\s\S]*\.training-voice-wave\.listening span,[\s\S]*\.training-voice-wave\.speaking span[\s\S]*animation: voice-activity-wave-pulse 820ms ease-in-out infinite alternate/)
   assert.match(css, /@keyframes voice-activity-wave-pulse/)
   assert.doesNotMatch(css, /\.chat-page-realtime-call-bar span\s*\{/)
+})
+
+test('Live coach prioritizes one next action and keeps diagnostics collapsed by default', () => {
+  const source = readSource('src/pages/ChatPage.tsx')
+  const css = readSource('src/pages/ChatPage.css')
+
+  assert.match(source, /const GUIDANCE_EVENT_PRIORITY: Record<string, number> = \{[\s\S]*risk: 0,[\s\S]*ask_back: 1,[\s\S]*next_reply: 3,/)
+  assert.match(source, /function getPrimaryGuidanceEventIndex\(events: GuideEventDTO\[\]\): number/)
+  assert.match(source, /const primaryGuidanceEventIndex = React\.useMemo/)
+  assert.match(source, /guidanceDetailsExpanded && \(/)
+  assert.match(source, /aria-controls="training-guidance-details"/)
+  assert.match(source, /hidden=\{!guidanceDetailsExpanded\}/)
+  assert.match(source, /const guidanceEventsSignatureRef = React\.useRef<string \| null>\(null\)/)
+  assert.match(source, /const guidanceChanged = guidanceEventsSignatureRef\.current !== nextEventsSignature/)
+  assert.match(source, /if \(guidanceChanged\) setGuidanceDetailsExpanded\(false\)/)
+  assert.doesNotMatch(source, /autoOpenOnSignal/)
+  assert.match(source, /if \(isDrillFeedbackMode && data\.events\.length > 0\)/)
+  assert.match(css, /\.guidance-details-toggle\.ui-button/)
+  assert.match(css, /\.guidance-detail-reason/)
 })
 
 test('RealtimeVoiceRecorder handles payload transcript text and user final transcript callbacks', () => {

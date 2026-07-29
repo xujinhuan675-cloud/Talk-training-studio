@@ -14,6 +14,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
   ArrowLeft,
   Settings,
   ListTree,
@@ -132,6 +133,7 @@ import {
   getScenarioCategoryLabel,
   getScenarioDifficultyLabel,
 } from '../utils/scenarioLabels'
+import { getRoomDisplayName } from '../services/roomList'
 import type { RealtimeSessionStatus, RealtimeTranscriptRole } from '../services/realtimeSession'
 import '../App.css'
 import '../styles/panelControls.css'
@@ -380,6 +382,23 @@ function localizeGuideEvent(event: GuideEventDTO, tr: TranslateInline): Localize
   }
 }
 
+const GUIDANCE_EVENT_PRIORITY: Record<string, number> = {
+  risk: 0,
+  ask_back: 1,
+  omission: 1,
+  delivery_nudge: 2,
+  next_reply: 3,
+}
+
+function getPrimaryGuidanceEventIndex(events: GuideEventDTO[]): number {
+  if (events.length === 0) return -1
+  return events.reduce((bestIndex, event, index) => {
+    const bestPriority = GUIDANCE_EVENT_PRIORITY[events[bestIndex].event_type] ?? Number.MAX_SAFE_INTEGER
+    const eventPriority = GUIDANCE_EVENT_PRIORITY[event.event_type] ?? Number.MAX_SAFE_INTEGER
+    return eventPriority < bestPriority ? index : bestIndex
+  }, 0)
+}
+
 function guidanceEventsSignature(events: GuideEventDTO[]): string {
   return JSON.stringify(events.map((event) => {
     const stableEvent = { ...event }
@@ -411,7 +430,6 @@ function getTrainingFeedbackModeLabel(mode: TrainingFeedbackMode, tr: TranslateI
 type RefreshGuidanceOptions = {
   open?: boolean
   extraTurn?: TranscriptTurnDTO
-  autoOpenOnSignal?: boolean
   minIntervalMs?: number
 }
 
@@ -516,6 +534,7 @@ function ChatArea() {
   const guidanceRequestSeqRef = React.useRef(0)
   const guidanceLastRequestedAtRef = React.useRef(0)
   const lastAutoGuidanceMessageKeyRef = React.useRef<string | null>(null)
+  const guidanceEventsSignatureRef = React.useRef<string | null>(null)
   const persistedGuidanceSignatureRef = React.useRef<string | null>(null)
   const guidanceStreamAbortRef = React.useRef<AbortController | null>(null)
   const guidanceStreamVersionRef = React.useRef(0)
@@ -571,10 +590,22 @@ function ChatArea() {
   const [guidanceLoading, setGuidanceLoading] = useState(false)
   const [guidanceError, setGuidanceError] = useState<string | null>(null)
   const [guidanceEvents, setGuidanceEvents] = useState<GuideEventDTO[]>([])
+  const [guidanceDetailsExpanded, setGuidanceDetailsExpanded] = useState(false)
   const [guidanceStreamConnected, setGuidanceStreamConnected] = useState(false)
   const localizedGuidanceEvents = React.useMemo(
     () => guidanceEvents.map((event) => localizeGuideEvent(event, tr)),
     [guidanceEvents, tr],
+  )
+  const primaryGuidanceEventIndex = React.useMemo(
+    () => getPrimaryGuidanceEventIndex(guidanceEvents),
+    [guidanceEvents],
+  )
+  const primaryGuidanceEvent = primaryGuidanceEventIndex >= 0
+    ? localizedGuidanceEvents[primaryGuidanceEventIndex]
+    : undefined
+  const guidanceDetailEvents = React.useMemo(
+    () => localizedGuidanceEvents.filter((_, index) => index !== primaryGuidanceEventIndex),
+    [localizedGuidanceEvents, primaryGuidanceEventIndex],
   )
   const [cheatSheetData, setCheatSheetData] = useState<CheatSheetData | null>(null)
   const [cheatSheetPersona, setCheatSheetPersona] = useState('')
@@ -822,9 +853,11 @@ function ChatArea() {
     setGuidanceOpen(false)
     setGuidanceError(null)
     setGuidanceEvents([])
+    setGuidanceDetailsExpanded(false)
     setGuidanceStreamConnected(false)
     guidanceRequestSeqRef.current += 1
     lastAutoGuidanceMessageKeyRef.current = null
+    guidanceEventsSignatureRef.current = null
     persistedGuidanceSignatureRef.current = null
     if (guidanceTimerRef.current !== null) {
       window.clearTimeout(guidanceTimerRef.current)
@@ -891,11 +924,12 @@ function ChatArea() {
           setGuidanceStreamConnected(true)
           setGuidanceLoading(false)
           setGuidanceError(null)
+          const nextEventsSignature = guidanceEventsSignature(data.events)
+          const guidanceChanged = guidanceEventsSignatureRef.current !== nextEventsSignature
+          guidanceEventsSignatureRef.current = nextEventsSignature
           setGuidanceEvents(data.events)
-          if (
-            (isDrillFeedbackMode && data.events.length > 0)
-            || data.events.some((item) => item.severity !== 'info')
-          ) {
+          if (guidanceChanged) setGuidanceDetailsExpanded(false)
+          if (isDrillFeedbackMode && data.events.length > 0) {
             setGuidanceOpen(true)
           }
         },
@@ -1039,13 +1073,11 @@ function ChatArea() {
     try {
       const result = await requestTrainingGuidance(trainingSessionId, requestBody)
       if (guidanceRequestSeqRef.current !== requestId) return
+      const nextEventsSignature = guidanceEventsSignature(result.events)
+      const guidanceChanged = guidanceEventsSignatureRef.current !== nextEventsSignature
+      guidanceEventsSignatureRef.current = nextEventsSignature
       setGuidanceEvents(result.events)
-      const shouldAutoOpen = isDrillFeedbackMode
-        ? result.events.length > 0
-        : result.events.some((event) => event.severity !== 'info')
-      if (options.autoOpenOnSignal && shouldAutoOpen) {
-        setGuidanceOpen(true)
-      }
+      if (guidanceChanged) setGuidanceDetailsExpanded(false)
     } catch (e: unknown) {
       if (guidanceRequestSeqRef.current !== requestId) return
       setGuidanceError(e instanceof Error ? e.message : tr('实时提示失败', 'Live guidance failed'))
@@ -1086,7 +1118,6 @@ function ChatArea() {
           },
         },
         open: isDrillFeedbackMode,
-        autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
         minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
       })
     }
@@ -1159,7 +1190,7 @@ function ChatArea() {
     'realtime',
   )
   const primaryPersona = roomPersonas[0]
-  const roomCounterpartName = (chat.selectedRoom?.room.name || '').replace(/^备战[:：]\s*/, '').trim()
+  const roomCounterpartName = getRoomDisplayName(chat.selectedRoom?.room.name)
   const counterpartName = primaryPersona?.name || roomCounterpartName || tr('AI 面试官', 'AI Interviewer')
   const latestPersonaPrompt = React.useMemo(() => {
     const personaMessages = (selectedRoomMessages || []).filter(
@@ -1215,7 +1246,7 @@ function ChatArea() {
   const trainingBackPath = scenarioTrainingId ? APP_ROUTES.practiceScenarios : APP_ROUTES.practiceCustom
   const trainingContextTitle = scenarioTitleFromState
     || scenarioTrainingCard?.title
-    || chat.selectedRoom?.room.name
+    || getRoomDisplayName(chat.selectedRoom?.room.name)
     || tr('训练会话', 'Training session')
   const trainingContextTags = compactTags([
     scenarioCategory ? { label: getScenarioCategoryLabel(scenarioCategory, tr), tone: 'category' } : null,
@@ -1335,16 +1366,13 @@ function ChatArea() {
     lastAutoGuidanceMessageKeyRef.current = messageKey
     scheduleGuidanceRefresh({
       open: isDrillFeedbackMode,
-      autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
       minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
     })
   }, [
     isDrillFeedbackMode,
-    isLiveCoachSession,
     latestGuidanceMessage,
     scheduleGuidanceRefresh,
     selectedRoomId,
-    trainingFeedbackMode,
     trainingGuidanceEnabled,
   ])
 
@@ -1491,7 +1519,6 @@ function ChatArea() {
         },
       },
       open: isDrillFeedbackMode,
-      autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
       minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
     })
     setTimeout(chat.scrollToBottom, 100)
@@ -1838,14 +1865,13 @@ function ChatArea() {
           },
         },
         open: isDrillFeedbackMode,
-        autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
         minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
       })
     } else if (isVideoBattlePrep) {
       setVideoAnswerStatus('error')
       setVideoAnswerError(tr('视频消息发送失败', 'Video message failed to send'))
     }
-  }, [chat, isDrillFeedbackMode, isLiveCoachSession, isVideoBattlePrep, scheduleGuidanceRefresh, trainingFeedbackMetadata, trainingFeedbackMode, tr])
+  }, [chat, isDrillFeedbackMode, isVideoBattlePrep, scheduleGuidanceRefresh, trainingFeedbackMetadata, trainingFeedbackMode, tr])
 
   const mobileSheetOptions = [
     { value: 'cheatsheet', label: tr('锦囊', 'Tips') },
@@ -1924,7 +1950,7 @@ function ChatArea() {
               <ArrowLeft size={16} />
             </Button>
           )}
-          <h3>{chat.selectedRoom?.room.name ?? ''}</h3>
+          <h3>{getRoomDisplayName(chat.selectedRoom?.room.name)}</h3>
           {chat.selectedRoom && (
             <span className={`room-type-badge ${chat.selectedRoom.room.type}`}>
               {chat.selectedRoom.room.type === 'private'
@@ -2240,7 +2266,7 @@ function ChatArea() {
             <span>
               {guidanceError
                 ? guidanceError
-                : localizedGuidanceEvents[0]?.displayMessage || (
+                : primaryGuidanceEvent?.displaySuggestedText || primaryGuidanceEvent?.displayMessage || (
                   guidanceStreamConnected
                     ? resolvedGuidanceStreamingText
                     : resolvedGuidanceReadyText
@@ -2294,22 +2320,59 @@ function ChatArea() {
           {guidanceError && (
             <div className="guidance-error">{guidanceError}</div>
           )}
-          {guidanceEvents.length > 0 && (
-            <div className="guidance-event-list">
-              {localizedGuidanceEvents.map((event, index) => (
-                <article
-                  className={`guidance-card ${event.severity || 'info'}`}
-                  key={`${event.event_type}-${index}`}
-                >
-                  <div className="guidance-card-header">
-                    <span>{event.displayTitle}</span>
-                    <small>{event.displayType}</small>
-                  </div>
-                  <p>{event.displayMessage}</p>
-                  {event.displaySuggestedText && <blockquote>{event.displaySuggestedText}</blockquote>}
-                </article>
-              ))}
-            </div>
+          {primaryGuidanceEvent && (
+            <>
+              <article className={`guidance-card guidance-card--primary ${primaryGuidanceEvent.severity || 'info'}`}>
+                <div className="guidance-card-header">
+                  <span>{primaryGuidanceEvent.displayTitle}</span>
+                  <small>{primaryGuidanceEvent.displayType}</small>
+                </div>
+                <blockquote>{primaryGuidanceEvent.displaySuggestedText || primaryGuidanceEvent.displayMessage}</blockquote>
+              </article>
+              <Button
+                aria-controls="training-guidance-details"
+                aria-expanded={guidanceDetailsExpanded}
+                className="guidance-details-toggle"
+                onClick={() => setGuidanceDetailsExpanded((expanded) => !expanded)}
+                variant="ghost"
+              >
+                {guidanceDetailsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {guidanceDetailsExpanded ? tr('收起分析', 'Hide analysis') : tr('展开分析', 'Show analysis')}
+              </Button>
+              <div
+                className="guidance-details"
+                hidden={!guidanceDetailsExpanded}
+                id="training-guidance-details"
+              >
+                {guidanceDetailsExpanded && (
+                  <>
+                  {primaryGuidanceEvent.displaySuggestedText && (
+                    <div className="guidance-detail-reason">
+                      <span>{tr('为什么现在建议这一步', 'Why this move now')}</span>
+                      <p>{primaryGuidanceEvent.displayMessage}</p>
+                    </div>
+                  )}
+                  {guidanceDetailEvents.length > 0 && (
+                    <div className="guidance-event-list guidance-event-list--details">
+                      {guidanceDetailEvents.map((event, index) => (
+                        <article
+                          className={`guidance-card ${event.severity || 'info'}`}
+                          key={`${event.event_type}-${index}`}
+                        >
+                          <div className="guidance-card-header">
+                            <span>{event.displayTitle}</span>
+                            <small>{event.displayType}</small>
+                          </div>
+                          <p>{event.displayMessage}</p>
+                          {event.displaySuggestedText && <blockquote>{event.displaySuggestedText}</blockquote>}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  </>
+                )}
+              </div>
+            </>
           )}
         </section>
       )}
@@ -2614,7 +2677,6 @@ function ChatArea() {
                   },
                 },
                 open: isDrillFeedbackMode,
-                autoOpenOnSignal: trainingFeedbackMode !== 'simulation' || isLiveCoachSession,
                 minIntervalMs: GUIDANCE_AUTO_MIN_INTERVAL_MS,
               })
               setTimeout(chat.scrollToBottom, 100)
