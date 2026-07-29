@@ -40,8 +40,11 @@ import {
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import { Field, Select, Textarea } from '../components/ui/form'
+import { PageHeader } from '../components/ui/page'
 import { SegmentedControl } from '../components/ui/segmented-control'
+import { Surface } from '../components/ui/surface'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslationKey } from '../i18n'
 import { BattlePrepFlow } from './BattlePrepPage'
@@ -512,14 +515,18 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
   return (
     <div className="training-studio-page" data-workbench-skin="training">
       <div className="training-studio-shell">
-        <header className="training-studio-header">
-          <div>
-            <h1>{t('training.page.title')}</h1>
-            <p>{t('training.page.subtitle')}</p>
-          </div>
-        </header>
+        <PageHeader
+          className="training-studio-header"
+          title={t('training.page.title')}
+          description={t('training.page.subtitle')}
+        />
 
-        <section className="training-studio-tabs-panel" aria-label={tr('训练工作台页面', 'Training studio pages')}>
+        <Surface
+          as="section"
+          className="training-studio-tabs-panel"
+          padding="md"
+          aria-label={tr('训练工作台页面', 'Training studio pages')}
+        >
           <SegmentedControl
             ariaLabel={tr('训练工作台页面', 'Training studio pages')}
             className="training-studio-page-tabs"
@@ -583,7 +590,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               ))}
             </div>
           )}
-        </section>
+        </Surface>
 
         {activeTab === 'training' ? (
           <section className="training-studio-training-panel" aria-label={t('training.launch.quickStart')}>
@@ -686,7 +693,11 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                           <span className="training-studio-interaction-label">
                             <OptionIcon size={14} />
                             {t(option.labelKey)}
-                            {option.badgeKey && <em>{t(option.badgeKey)}</em>}
+                            {option.badgeKey && (
+                              <Badge tone="neutral" className="training-studio-interaction-badge">
+                                {t(option.badgeKey)}
+                              </Badge>
+                            )}
                           </span>
                           <small>{t(option.descriptionKey)}</small>
                         </Button>
@@ -706,7 +717,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
               <p>{t('training.feedback.subtitle')}</p>
             </div>
             {mode === 'live_coach' && (
-              <span>{t('training.feedback.liveCoachLock')}</span>
+              <Badge tone="neutral">{t('training.feedback.liveCoachLock')}</Badge>
             )}
           </div>
           <SegmentedControl

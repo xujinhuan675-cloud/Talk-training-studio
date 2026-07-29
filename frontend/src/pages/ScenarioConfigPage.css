@@ -35,10 +35,6 @@
 }
 
 .scenario-config-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
   margin-bottom: 14px;
   border: 1px solid var(--config-border-soft);
   border-radius: 8px;
@@ -65,6 +61,7 @@
 
 .scenario-config-header-actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 9px;
@@ -172,6 +169,8 @@
   align-items: center;
   overflow-x: auto;
   margin-bottom: 10px;
+  background: var(--config-surface);
+  box-shadow: var(--config-shadow-soft);
 }
 
 .scenario-config-tabs.ui-segmented-control {
@@ -719,10 +718,6 @@
   .scenario-config-header,
   .scenario-config-workspace {
     grid-template-columns: 1fr;
-  }
-
-  .scenario-config-header {
-    flex-direction: column;
   }
 
   .scenario-config-header-actions {

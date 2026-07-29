@@ -51,7 +51,9 @@ import { SettingsShell } from './SettingsPage'
 import { Button } from '../components/ui/button'
 import { Checkbox } from '../components/ui/checkbox'
 import { Input, Select, Textarea } from '../components/ui/form'
+import { PageHeader } from '../components/ui/page'
 import { SegmentedControl, type SegmentedControlOption } from '../components/ui/segmented-control'
+import { Surface } from '../components/ui/surface'
 import './ScenarioConfigPage.css'
 
 type ScenarioConfigTab = 'scenarios' | 'dimensions'
@@ -492,31 +494,37 @@ export default function ScenarioConfigPage() {
   return (
     <SettingsShell activeTab="training" canUseManagementTabs={true}>
       <div className="scenario-config-page" data-workbench-skin="training">
-      <header className="scenario-config-header">
-        <div>
-          <h1>{tr('训练场景与评分规则', 'Training scenarios and rubrics')}</h1>
-          <p>{tr('统一管理可练习场景、评分维度与权重。', 'Manage practice scenarios, scoring dimensions, and weights.')}</p>
-        </div>
-        <div className="scenario-config-header-actions">
-          <Button variant="secondary" onClick={createDimensionDraft} disabled={isRemoteSaving}>
-            <Library size={16} />
-            {tr('新建维度', 'New dimension')}
-          </Button>
-          <Button className="primary" variant="primary" onClick={createScenarioDraft} disabled={isRemoteSaving}>
-            <Plus size={16} />
-            {tr('新建场景', 'New scenario')}
-          </Button>
-        </div>
-      </header>
+      <PageHeader
+        className="scenario-config-header"
+        title={tr('训练场景与评分规则', 'Training scenarios and rubrics')}
+        description={tr('统一管理可练习场景、评分维度与权重。', 'Manage practice scenarios, scoring dimensions, and weights.')}
+        actions={(
+          <div className="scenario-config-header-actions">
+            <Button variant="secondary" onClick={createDimensionDraft} disabled={isRemoteSaving}>
+              <Library size={16} />
+              {tr('新建维度', 'New dimension')}
+            </Button>
+            <Button className="primary" variant="primary" onClick={createScenarioDraft} disabled={isRemoteSaving}>
+              <Plus size={16} />
+              {tr('新建场景', 'New scenario')}
+            </Button>
+          </div>
+        )}
+      />
 
       {notice && (
-        <div className={`scenario-config-notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>
+        <Surface
+          as="div"
+          className={`scenario-config-notice ${notice.tone}`}
+          padding="sm"
+          role={notice.tone === 'error' ? 'alert' : 'status'}
+        >
           {notice.tone === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
           <span>{notice.message}</span>
-        </div>
+        </Surface>
       )}
 
-      <div className="scenario-config-tabbar">
+      <Surface as="div" className="scenario-config-tabbar" padding="sm">
         <SegmentedControl
           ariaLabel={tr('配置区域', 'Configuration areas')}
           className="scenario-config-tabs"
@@ -525,7 +533,7 @@ export default function ScenarioConfigPage() {
           size="sm"
           value={activeTab}
         />
-      </div>
+      </Surface>
 
       {activeTab === 'scenarios' && (
         <main className="scenario-config-workspace">
