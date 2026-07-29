@@ -31,8 +31,10 @@ import { useAuthContext } from '../contexts/AuthContext'
 import { getLiveCoachLanguageLabel } from '../data/liveCoachLanguages'
 import { useI18n, type Locale, type Translate, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
-import { PageShell } from '../components/ui/page'
+import { PageHeader, PageShell } from '../components/ui/page'
+import { StateBlock, StateSpinner } from '../components/ui/state'
 import {
   getScenarioTrainingCardById,
   getScenarioTrainingProgress,
@@ -804,11 +806,14 @@ export default function TrainingResultPage() {
   if (loadState === 'loading' || loadState === 'idle') {
     return (
       <PageShell width="wide" className="training-result-page">
-        <section className="training-result-state">
-          <Loader2 className="training-result-spin" size={24} />
-          <strong>{tr('正在加载训练结果...', 'Loading training result...')}</strong>
-          <span>{tr('正在读取会话、复盘报告和回放转写。', 'Reading the session, report, and replay transcript.')}</span>
-        </section>
+        <StateBlock
+          className="training-result-state"
+          description={tr('正在读取会话、复盘报告和回放转写。', 'Reading the session, report, and replay transcript.')}
+          icon={<StateSpinner />}
+          size="lg"
+          title={tr('正在加载训练结果...', 'Loading training result...')}
+          tone="loading"
+        />
       </PageShell>
     )
   }
@@ -816,55 +821,78 @@ export default function TrainingResultPage() {
   if (loadState === 'error') {
     return (
       <PageShell width="wide" className="training-result-page">
-        <section className="training-result-state error">
-          <AlertCircle size={24} />
-          <strong>{tr('训练结果不可用', 'Training result unavailable')}</strong>
-          <span>{error}</span>
-          <Link to={APP_ROUTES.reviewSessions} className="training-result-primary-link">
-            {tr('返回训练记录', 'Back to training records')}
-          </Link>
-        </section>
+        <StateBlock
+          actions={(
+            <Button asChild variant="primary">
+              <Link to={APP_ROUTES.reviewSessions}>
+                {tr('返回训练记录', 'Back to training records')}
+              </Link>
+            </Button>
+          )}
+          className="training-result-state error"
+          description={error}
+          icon={<AlertCircle size={22} />}
+          size="lg"
+          title={tr('训练结果不可用', 'Training result unavailable')}
+          tone="danger"
+        />
       </PageShell>
     )
   }
 
   return (
     <PageShell width="wide" className="training-result-page">
-      <header className="training-result-topbar">
-        <div className="training-result-title">
+      <PageHeader
+        className="training-result-header"
+        leading={(
           <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label={tr('返回', 'Go back')}>
             <ArrowLeft size={17} />
           </Button>
-          <div>
-            <span>{isLiveCoachSession ? tr('实时陪跑复盘', 'Live coach review') : tr('训练结果', 'Training result')}</span>
-            <h1>{scenarioTitle}</h1>
-            {scenarioDescription && <p>{scenarioDescription}</p>}
-            {isLiveCoachSession && <p>{tr('双语辅助：{pair}', 'Bilingual assist: {pair}', { pair: liveCoachLanguagePair })}</p>}
-            {sourceBadges.length > 0 && (
-              <div className="training-result-source-strip" aria-label={tr('复盘数据来源', 'Review data sources')}>
-                {sourceBadges.map((label) => (
-                  <span key={label}>{label}</span>
-                ))}
-              </div>
+        )}
+        eyebrow={isLiveCoachSession ? tr('实时陪跑复盘', 'Live coach review') : tr('训练结果', 'Training result')}
+        title={scenarioTitle}
+        description={(scenarioDescription || isLiveCoachSession) ? (
+          <>
+            {scenarioDescription}
+            {isLiveCoachSession && (
+              <>
+                {scenarioDescription ? <br /> : null}
+                {tr('双语辅助：{pair}', 'Bilingual assist: {pair}', { pair: liveCoachLanguagePair })}
+              </>
             )}
+          </>
+        ) : undefined}
+        meta={sourceBadges.length > 0 ? (
+          <div className="training-result-source-strip" aria-label={tr('复盘数据来源', 'Review data sources')}>
+            {sourceBadges.map((label) => (
+              <Badge key={label} tone="neutral">{label}</Badge>
+            ))}
           </div>
-        </div>
-        <div className="training-result-actions">
-          <Link to={APP_ROUTES.practiceScenarios} className="training-result-secondary-link">
-            <RotateCcw size={15} />
-            {tr('回到训练', 'Back to training')}
-          </Link>
-          <Link to={APP_ROUTES.reviewSessions} className="training-result-secondary-link">
-            {tr('训练记录', 'Training records')}
-          </Link>
-          {chatPath && (
-            <Link to={chatPath} className="training-result-primary-link">
-              <ExternalLink size={15} />
-              {isLiveCoachSession ? tr('打开陪跑房间', 'Open coach room') : tr('打开对话', 'Open chat')}
-            </Link>
-          )}
-        </div>
-      </header>
+        ) : undefined}
+        actions={(
+          <>
+            <Button asChild variant="secondary" size="sm" className="training-result-secondary-link">
+              <Link to={APP_ROUTES.practiceScenarios}>
+                <RotateCcw size={15} />
+                {tr('回到训练', 'Back to training')}
+              </Link>
+            </Button>
+            <Button asChild variant="secondary" size="sm" className="training-result-secondary-link">
+              <Link to={APP_ROUTES.reviewSessions}>
+                {tr('训练记录', 'Training records')}
+              </Link>
+            </Button>
+            {chatPath && (
+              <Button asChild variant="primary" size="sm" className="training-result-primary-link">
+                <Link to={chatPath}>
+                  <ExternalLink size={15} />
+                  {isLiveCoachSession ? tr('打开陪跑房间', 'Open coach room') : tr('打开对话', 'Open chat')}
+                </Link>
+              </Button>
+            )}
+          </>
+        )}
+      />
 
       <section className="training-result-main-grid">
         <article className={`training-result-score-card ${session?.status ?? 'unknown'}`}>

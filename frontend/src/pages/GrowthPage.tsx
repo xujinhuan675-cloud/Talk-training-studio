@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import html2canvas from 'html2canvas'
 import {
+  AlertCircle,
   Loader2,
   Sparkles,
   Check,
@@ -27,8 +28,11 @@ import { generateProfileCard, type ProfileCard as ProfileCardData } from '../ser
 import ProfileCard from '../components/ProfileCard'
 import { useI18n, type Translate, type TranslateInline } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
+import { Badge, type BadgeTone } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageShell } from '../components/ui/page'
+import { StateBlock, StateSpinner } from '../components/ui/state'
+import { Surface } from '../components/ui/surface'
 import { GROWTH_DIMENSIONS, getGrowthDimensionLabel, growthSkillKey } from '../utils/growthLabels'
 import './GrowthPage.css'
 
@@ -80,6 +84,12 @@ function gradeClass(score: number): string {
   if (score >= 3.5) return 'high'
   if (score >= 2.5) return 'mid'
   return 'low'
+}
+
+function gradeTone(score: number): BadgeTone {
+  if (score >= 3.5) return 'success'
+  if (score >= 2.5) return 'warning'
+  return 'danger'
 }
 
 /** Compute week-over-week change per dimension. Compares latest vs second-latest eval. */
@@ -257,10 +267,13 @@ const GrowthPage: React.FC = () => {
     return (
       <PageShell className="growth-page">
         {pageHeader}
-        <div className="gp-loading">
-          <Loader2 size={24} className="gp-spin" />
-          <span>{tr('加载成长数据...', 'Loading growth data...')}</span>
-        </div>
+        <StateBlock
+          className="gp-loading"
+          icon={<StateSpinner />}
+          size="lg"
+          title={tr('加载成长数据...', 'Loading growth data...')}
+          tone="loading"
+        />
       </PageShell>
     )
   }
@@ -270,9 +283,14 @@ const GrowthPage: React.FC = () => {
     return (
       <PageShell className="growth-page">
         {pageHeader}
-        <div className="gp-empty">
-          <p>{tr('加载失败: {error}', 'Failed to load: {error}', { error })}</p>
-        </div>
+        <StateBlock
+          className="gp-empty"
+          description={error}
+          icon={<AlertCircle size={22} />}
+          size="lg"
+          title={tr('加载失败', 'Failed to load')}
+          tone="danger"
+        />
       </PageShell>
     )
   }
@@ -283,16 +301,19 @@ const GrowthPage: React.FC = () => {
       <PageShell className="growth-page">
         {pageHeader}
         {levelPanel}
-        <div className="gp-empty">
-          <div className="gp-empty-icon">
-            <Sparkles size={48} strokeWidth={1.5} />
-          </div>
-          <h2>{tr('暂无评估数据', 'No evaluation data yet')}</h2>
-          <p>{tr('完成一次练习并生成评估后，这里会显示总览和趋势。', 'Complete one practice and generate an evaluation to see the overview and trends.')}</p>
-          <Button variant="primary" className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
-            {t('common.startPractice')}
-          </Button>
-        </div>
+        <StateBlock
+          actions={(
+            <Button variant="primary" className="gp-empty-btn" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
+              {t('common.startPractice')}
+            </Button>
+          )}
+          className="gp-empty"
+          description={tr('完成一次练习并生成评估后，这里会显示总览和趋势。', 'Complete one practice and generate an evaluation to see the overview and trends.')}
+          icon={<Sparkles size={22} />}
+          size="lg"
+          title={tr('暂无评估数据', 'No evaluation data yet')}
+          tone="accent"
+        />
       </PageShell>
     )
   }
@@ -307,17 +328,19 @@ const GrowthPage: React.FC = () => {
       {pageHeader}
       {levelPanel}
       {/* 1. Overall Score Header */}
-      <section className="gp-score-header">
+      <Surface as="section" className="gp-score-header" padding="lg">
         <div className="gp-score-header-top">
           <span className="gp-section-label">{tr('能力总览', 'Ability Overview')}</span>
           <div className="gp-score-header-actions">
-            <span className="gp-section-count">
+            <Badge tone="neutral" className="gp-section-count">
               {tr('{count} 次评估', '{count} evaluations', { count: overview.total_evaluations })}
-            </span>
-            <Link to={APP_ROUTES.growthLeaderboard} className="gp-section-link">
-              {t('common.teamBoard')}
-              <ChevronRight size={14} />
-            </Link>
+            </Badge>
+            <Button asChild variant="secondary" size="sm" className="gp-section-link">
+              <Link to={APP_ROUTES.growthLeaderboard}>
+                {t('common.teamBoard')}
+                <ChevronRight size={14} />
+              </Link>
+            </Button>
           </div>
         </div>
 
@@ -399,16 +422,18 @@ const GrowthPage: React.FC = () => {
             })}
           </div>
         )}
-      </section>
+      </Surface>
 
       {/* 2. Evaluation History */}
-      <section className="gp-eval-history">
+      <Surface as="section" className="gp-eval-history" padding="lg">
         <div className="gp-section-heading">
           <h3 className="gp-eval-history-title">{tr('近期复盘', 'Recent reviews')}</h3>
-          <Link to={APP_ROUTES.reviewSessions} className="gp-section-link">
-            {t('common.viewAllReviews')}
-            <ChevronRight size={14} />
-          </Link>
+          <Button asChild variant="secondary" size="sm" className="gp-section-link">
+            <Link to={APP_ROUTES.reviewSessions}>
+              {t('common.viewAllReviews')}
+              <ChevronRight size={14} />
+            </Link>
+          </Button>
         </div>
         <div className="gp-eval-list">
           {recentEvaluations.map((ev) => {
@@ -424,9 +449,9 @@ const GrowthPage: React.FC = () => {
                 to={APP_ROUTES.conversation(ev.room_id)}
                 className="gp-eval-card"
               >
-                <div className={`gp-eval-grade gp-eval-grade--${cls}`}>
+                <Badge tone={gradeTone(ev.overall_score)} className={`gp-eval-grade gp-eval-grade--${cls}`}>
                   {grade}
-                </div>
+                </Badge>
                 <div className="gp-eval-info">
                   <span className="gp-eval-name">
                     {ev.room_name || tr('评估 #{id}', 'Evaluation #{id}', { id: ev.id })}
@@ -443,10 +468,10 @@ const GrowthPage: React.FC = () => {
             )
           })}
         </div>
-      </section>
+      </Surface>
 
       {/* 3. Skill Path Detail (vertical timeline) */}
-      <section className="gp-skill-path">
+      <Surface as="section" className="gp-skill-path" padding="lg">
         <h3 className="gp-skill-path-title">{tr('技能路径', 'Skill Path')}</h3>
         <div className="gp-timeline">
           {skillPath.map((node, idx) => {
@@ -467,9 +492,9 @@ const GrowthPage: React.FC = () => {
                   {t(growthSkillKey(dim, 'desc'))}
                 </div>
                 {status === 'completed' && (
-                  <div className="gp-timeline-status-badge completed">
+                  <Badge tone="success" className="gp-timeline-status-badge completed">
                     <Check size={11} /> {tr('已完成 · 平均 {score}/5', 'Completed · Average {score}/5', { score: node.averageScore })}
-                  </div>
+                  </Badge>
                 )}
                 {status === 'current' && (
                   <Link to={APP_ROUTES.practiceScenarios} className="gp-timeline-suggestion">
@@ -479,18 +504,18 @@ const GrowthPage: React.FC = () => {
                   </Link>
                 )}
                 {status === 'locked' && (
-                  <div className="gp-timeline-status-badge locked">
+                  <Badge tone="neutral" className="gp-timeline-status-badge locked">
                     <Lock size={11} /> {t(growthSkillKey(dim, 'unlock'))}
-                  </div>
+                  </Badge>
                 )}
               </div>
             )
           })}
         </div>
-      </section>
+      </Surface>
 
       {/* 4. Profile Card */}
-      <section className="gp-profile-section">
+      <Surface as="section" className="gp-profile-section" padding="lg">
         <div className="gp-profile-header">
           <h3 className="gp-profile-title">{tr('沟通力名片', 'Communication Profile Card')}</h3>
           {profileCard && (
@@ -539,7 +564,7 @@ const GrowthPage: React.FC = () => {
             <ProfileCard data={profileCard} cardRef={cardRef} />
           </div>
         )}
-      </section>
+      </Surface>
     </PageShell>
   )
 }

@@ -11,8 +11,10 @@ interface PageShellProps extends React.HTMLAttributes<HTMLDivElement> {
 interface PageHeaderProps extends Omit<React.HTMLAttributes<HTMLElement>, 'title'> {
   eyebrow?: React.ReactNode
   icon?: React.ReactNode
+  leading?: React.ReactNode
   title: React.ReactNode
   description?: React.ReactNode
+  meta?: React.ReactNode
   actions?: React.ReactNode
   stats?: React.ReactNode
 }
@@ -41,8 +43,10 @@ function PageShell({ width = 'default', className, ...props }: PageShellProps) {
 function PageHeader({
   eyebrow,
   icon,
+  leading,
   title,
   description,
+  meta,
   actions,
   stats,
   className,
@@ -61,10 +65,16 @@ function PageHeader({
           </div>
         ) : null}
         <div className="ui-page-title-row">
-          <h1>{title}</h1>
+          <div className="ui-page-title-main">
+            {leading ? <div className="ui-page-leading">{leading}</div> : null}
+            <div className="ui-page-title-copy">
+              <h1>{title}</h1>
+              {description ? <p>{description}</p> : null}
+              {meta ? <div className="ui-page-meta">{meta}</div> : null}
+            </div>
+          </div>
           {actions ? <div className="ui-page-actions">{actions}</div> : null}
         </div>
-        {description ? <p>{description}</p> : null}
       </div>
       {stats ? <div className="ui-page-header-stats">{stats}</div> : null}
     </header>

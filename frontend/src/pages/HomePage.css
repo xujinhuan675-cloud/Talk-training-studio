@@ -131,7 +131,7 @@
   gap: 6px;
 }
 
-.home-scenario-meta span {
+.home-scenario-meta .ui-badge {
   display: inline-flex;
   align-items: center;
   min-height: 22px;
@@ -142,31 +142,6 @@
   font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
-}
-
-.home-scenario-meta .required {
-  background: var(--rose-soft);
-  color: var(--rose);
-}
-
-.home-scenario-meta .difficulty.easy {
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.home-scenario-meta .difficulty.medium {
-  background: var(--amber-soft);
-  color: var(--amber);
-}
-
-.home-scenario-meta .difficulty.hard {
-  background: var(--rose-soft);
-  color: var(--rose);
-}
-
-.home-scenario-meta .difficulty.expert {
-  background: var(--violet-soft);
-  color: var(--violet);
 }
 
 .home-scenario-option h3 {
@@ -381,19 +356,9 @@
 
 .home-empty-block {
   min-height: 86px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   border: 1px dashed var(--border);
   border-radius: 8px;
   background: var(--bg-elevated);
-}
-
-.home-empty-block p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.55;
 }
 
 @media (max-width: 640px) {

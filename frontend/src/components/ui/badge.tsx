@@ -13,3 +13,4 @@ function Badge({ tone = 'neutral', className, ...props }: BadgeProps) {
 }
 
 export { Badge }
+export type { BadgeProps, BadgeTone }

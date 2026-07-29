@@ -36,8 +36,10 @@ import {
 } from '../services/trainingMode'
 import { useGrowth } from '../hooks/useGrowth'
 import { getErrorMessage } from '../utils/errors'
+import { Badge, type BadgeTone } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageSection, PageShell } from '../components/ui/page'
+import { StateBlock, StateSpinner } from '../components/ui/state'
 import { Surface } from '../components/ui/surface'
 import './HomePage.css'
 
@@ -46,6 +48,13 @@ const AVATAR_COLORS = ['#0F766E', '#334155', '#2563EB', '#475569', '#6366F1', '#
 function getAvatarColor(id: string | number): string {
   const hash = String(id).split('').reduce((a, c) => a + c.charCodeAt(0), 0)
   return AVATAR_COLORS[hash % AVATAR_COLORS.length]
+}
+
+function difficultyTone(difficulty: ScenarioTrainingCard['difficulty']): BadgeTone {
+  if (difficulty === 'easy') return 'success'
+  if (difficulty === 'medium') return 'warning'
+  if (difficulty === 'hard') return 'danger'
+  return 'accent'
 }
 
 function getInitial(name: string): string {
@@ -420,11 +429,13 @@ const HomePage: React.FC = () => {
                     <article className="home-scenario-option" key={scenario.id}>
                       <div className="home-scenario-body">
                         <div className="home-scenario-meta">
-                          <span className={`difficulty ${scenario.difficulty}`}>
+                          <Badge tone={difficultyTone(scenario.difficulty)} className={`difficulty ${scenario.difficulty}`}>
                             {getScenarioDifficultyLabel(scenario.difficulty, tr)}
-                          </span>
-                          <span>{getScenarioCategoryLabel(scenario.category, tr)}</span>
-                          {scenario.required && <span className="required">{tr('必练', 'Required')}</span>}
+                          </Badge>
+                          <Badge tone="neutral">{getScenarioCategoryLabel(scenario.category, tr)}</Badge>
+                          {scenario.required && (
+                            <Badge tone="danger" className="required">{tr('必练', 'Required')}</Badge>
+                          )}
                         </div>
                         <h3>{scenario.title}</h3>
                         <p>{scenario.description}</p>
@@ -470,9 +481,13 @@ const HomePage: React.FC = () => {
           >
             <Surface className="home-recent-surface" padding="sm">
               {recentSessions.length === 0 ? (
-                <div className="home-empty-block">
-                  <p>{sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}</p>
-                </div>
+                <StateBlock
+                  className="home-empty-block"
+                  icon={sessionsLoading ? <StateSpinner /> : undefined}
+                  size="sm"
+                  title={sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}
+                  tone={sessionsLoading ? 'loading' : 'neutral'}
+                />
               ) : (
                 <div className="home-recent-list">
                   {recentSessions.map((session) => {
