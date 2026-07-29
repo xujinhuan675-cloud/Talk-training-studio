@@ -105,7 +105,6 @@ export const mobileNavItems: AppNavItem[] = [
     to: APP_ROUTES.practiceScenarios,
     icon: <ClipboardList size={20} />,
     labelKey: 'nav.practice',
-    elevated: true,
     matchPrefix: APP_ROUTES.practice,
   },
   {

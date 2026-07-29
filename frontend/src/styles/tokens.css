@@ -46,6 +46,18 @@
   --page-max-width: 1180px;
   --page-gutter: 28px;
   --page-gutter-mobile: 16px;
+  --shell-header-height: 60px;
+  --shell-sidebar-width: 248px;
+  --shell-sidebar-collapsed-width: 64px;
+  --shell-mobile-tabbar-height: 64px;
+  --shell-bg: #F8FAFC;
+  --shell-header-bg: rgba(255,255,255,0.92);
+  --shell-sidebar-bg: #FFFFFF;
+  --shell-search-bg: #F8FAFC;
+  --shell-hover-bg: #F1F5F9;
+  --shell-active-bg: rgba(37,99,235,0.10);
+  --shell-active-text: #1D4ED8;
+  --shell-ring: rgba(37,99,235,0.18);
 
   /* Semantic aliases */
   --primary: var(--green);
@@ -133,6 +145,18 @@
   --page-max-width: 1180px;
   --page-gutter: 28px;
   --page-gutter-mobile: 16px;
+  --shell-header-height: 60px;
+  --shell-sidebar-width: 248px;
+  --shell-sidebar-collapsed-width: 64px;
+  --shell-mobile-tabbar-height: 64px;
+  --shell-bg: #0B1118;
+  --shell-header-bg: rgba(17,24,39,0.92);
+  --shell-sidebar-bg: #0F172A;
+  --shell-search-bg: #111827;
+  --shell-hover-bg: #182235;
+  --shell-active-bg: rgba(96,165,250,0.16);
+  --shell-active-text: #93C5FD;
+  --shell-ring: rgba(96,165,250,0.24);
   --primary: var(--green);
   --primary-hover: var(--green-hover);
   --primary-light: var(--green-soft);

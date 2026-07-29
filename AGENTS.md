@@ -10,6 +10,7 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 
 - 文本侧优先对齐和迁移 LibreChat 的成熟能力。
 - 实时语音/多模态侧优先对齐和迁移 Pipecat 的成熟能力。
+- 平台壳、账号、登录、用量、公告、计费和管理控制面优先对齐 NewAPI；TalkWise 作为 NewAPI 生态中的训练产品模块演进，而不是继续维持一个孤立 UI。
 - 语音体验允许两条画像并存：低成本、低延迟的转写式近实时链路，以及基于 Pipecat 的真正实时语音链路；两者都应接入同一训练闭环。
 - TalkWise 不以完整复制 Pipecat 平台为目标；目标是把语音、视频和多模态训练中不该自研的基础运行能力，优先站到 Pipecat 或同等级成熟方案上，必要时做 TalkWise 本地化适配。
 - TalkWise 当前训练能力保留为产品差异化：训练目标、persona/stakeholder、scenario、dispatcher、evaluation、growth/report、live guidance、训练复盘和能力沉淀。
@@ -19,6 +20,10 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 一句话判断标准：
 
 > 先看 LibreChat / Pipecat 有没有成熟底座可以迁移或站上去改造；只有它们不适合时，才在 TalkWise 中自研。自研也要做成可接入成熟底座的扩展，而不是新的孤岛。
+
+NewAPI 是账号、控制面和平台体验的默认来源。凡是登录、用户菜单、余额/用量、API Keys、公告、计费、系统设置、主题、导航壳和 admin console 相关需求，先看 NewAPI 已有实现，再决定复制、改写、链接回 NewAPI，或把 TalkWise 迁成 NewAPI 内的模块。
+
+TalkWise 前台产品界面不暴露 NewAPI 品牌名。NewAPI 可以作为源码、账号桥、计费、用量、公告和控制面能力来源，但可见导航、页面标题、tabs、菜单、badge、公告标题和用户菜单必须使用 TalkWise 自己的信息架构或中性功能名，例如“配置”“账号控制台”“用量”“公告”，不要显示“NewAPI”。
 
 ## 2. 成熟底座优先原则
 
@@ -64,6 +69,33 @@ Pipecat 迁移的定位必须保持清楚：迁移目标不是完整抄 Pipecat 
 - 再按训练产品需要迁入 WebRTC、视频、avatar、更多 provider、RTVI 事件子集或 Pipecat Cloud/worker 能力。
 - 不因为 Pipecat 有某项平台能力就直接加入核心路径；只有它能服务当前或明确下一阶段的训练闭环，才进入迁移范围。
 
+### NewAPI 优先承接的方向
+
+NewAPI 是 TalkWise 短中期平台化的首选底座，优先承接：
+
+- 登录、session handoff、用户、团队、角色和 admin 控制面。
+- 余额、用量、API Keys、订阅、钱包、模型/渠道和 OpenAI-compatible gateway 入口。
+- 公告、系统状态、通知、系统设置和运营配置入口。
+- 登录后平台 shell：header、sidebar、user menu、theme/customization、layout density、top nav 和移动端导航。
+- 表格、弹层、tabs/segmented、badge、profile dropdown、notification popover 等可复用 UI 组件形态。
+
+项目 owner 已说明对 NewAPI 源码复用有授权，AGPL 不作为本仓库迁移和复制的阻塞项。后续 AI 可以直接从 `outside-project/new-api-main` 复制或改写源码，但必须保持范围清楚：记录来源文件、复制目的、适配点，并优先保留 TalkWise 训练语义。不要因为授权可用就整站搬迁或引入无关后台模块。
+
+短中期默认路线：
+
+- 保留当前 Vite + React Router，不为了 UI shell 迁移到 Rsbuild 或 TanStack Router。
+- 保留 TalkWise 后端训练语义和现有 NewAPI auth bridge。
+- 先建立 NewAPI-style adapter layer：shell token、header/sidebar、user menu、公告/通知入口、余额/用量入口、NewAPI-like UI primitives 和 route/nav metadata。
+- 替换全局导航形态；业务页内部 tabs 保留语义，只改成 NewAPI-like Tabs/Segmented 视觉。
+- 路由内类似结构也遵循同一原则：换壳和交互，不换 TalkWise 产品信息架构；不改 tab key、URL、权限、API、表单字段或训练状态。
+- 复杂页面按风险逐页换肤：Home/Growth/History 优先，TrainingStudio 第二批，Settings/Chat/实时语音沉浸页最后处理。
+
+长期默认路线：
+
+- 当需求开始系统性复用 NewAPI billing、announcements、permissions、theme/customization、system settings 和 admin console 时，评估把 TalkWise 前端迁成 NewAPI web 内的训练模块。
+- 候选模块路径可以是 `/training`、`/training/sessions`、`/training/review`、`/training/settings` 或同等 NewAPI sidebar module。
+- 长期迁移必须先写清 route 迁移、API base/proxy、role mapping、gateway 用量归因、测试矩阵和回滚策略。
+
 ### TalkWise 保留和可变的部分
 
 必须保留的不是当前实现形状，而是产品能力：
@@ -87,6 +119,7 @@ Pipecat 迁移的定位必须保持清楚：迁移目标不是完整抄 Pipecat 
 1. 成熟运行底座
    - 文本聊天底座：LibreChat-style conversation runtime。
    - 语音/多模态底座：低成本转写式 near-realtime voice pipeline + Pipecat true realtime voice/multimodal runtime。
+   - 平台控制面底座：NewAPI account/session/billing/gateway/admin console。
 
 2. TalkWise 训练语义层
    - TrainingCore 或等价核心只负责训练语义、适配器契约、session 语义、复盘上下文和评估边界。
@@ -124,12 +157,13 @@ Pipecat 迁移的定位必须保持清楚：迁移目标不是完整抄 Pipecat 
 
 - LibreChat 是否已有成熟实现？
 - Pipecat 是否已有原生依赖或成熟实现？
+- NewAPI 是否已有账号、控制面、计费、公告、主题或平台壳实现可以复制、改写或链接复用？
 - 语音链路是否需要真正实时能力，还是低成本低延迟的转写式近实时已经满足场景？
 - 当前 TalkWise 核心是否需要保留、改造、迁移或替换？
 - 是否能通过 adapter/plugin/workflow 接入，而不是新造一套？
 - 本轮是否会破坏现有训练闭环？
 
-如果决定不采用 LibreChat/Pipecat 的成熟能力，需要在最终说明中写出原因：太重、太耦合、当前范围不适合、审计成本太高、或会破坏训练目标。
+如果决定不采用 LibreChat/Pipecat/NewAPI 的成熟能力，需要在最终说明中写出原因：太重、太耦合、当前范围不适合、审计成本太高、或会破坏训练目标。
 如果选择转写式近实时语音链路而不是 Pipecat，需要说明成本、延迟、质量和训练体验的取舍；只要指标满足目标，就不视为迁移链路不完整。
 
 ### 4.3 多智能体协作
@@ -157,7 +191,7 @@ Pipecat 迁移的定位必须保持清楚：迁移目标不是完整抄 Pipecat 
 
 - 优先小步、可测、可回退的变更。
 - 不做无关重构。
-- 不为短期功能复制大段成熟项目代码；先建立 adapter 或清晰迁移边界。
+- 不为短期功能无边界复制大段成熟项目代码；NewAPI 源码已获授权可直接复制，但仍要先建立 adapter 或清晰迁移边界。
 - 如果迁移成熟项目代码，保留来源、范围和适配理由。
 - UI 以工具型、可扫描、稳定交互为主，不做营销式页面。
 - 文本、语音、视频能力接入时，必须保持训练语义可追踪。
@@ -199,7 +233,11 @@ git diff --check
 
 ## 6. 前端开发规则
 
-- 保持现有 UI 风格，优先工具型、紧凑、可扫描。
+- 全局平台 shell 默认对齐 NewAPI：header/sidebar/user menu/notification/quota/theme/navigation 使用 NewAPI 风格和可复制源码作为第一参考。
+- 业务训练页面保持工具型、紧凑、可扫描；不要回到 AI demo、营销页或一套孤立自研皮肤。
+- 前台 UI 不显示 NewAPI 品牌名；只显示 TalkWise 品牌、TalkWise 业务命名或中性功能命名。
+- 保留当前 Vite + React Router，除非任务明确进入长期 NewAPI module migration；不要为了单轮 UI 调整迁移构建和路由栈。
+- 全局导航可以被 NewAPI-like shell 替换；业务页内部 tabs 只改视觉，不改变训练状态、评分、复盘或配置语义。
 - 不做 landing page 式包装。
 - message tree / branch 操作必须有清楚的 loading、disabled、success、error 状态。
 - edit / retry / fork 失败时必须保留当前路径，不要让用户误以为已切换。
@@ -238,6 +276,7 @@ git diff --check
 - 已有 TrainingCore / training session / branch metadata 的雏形。
 - 文本侧已开始接近 LibreChat-style message tree、edit/retry/fork。
 - 语音侧已开始形成转写式 near-realtime voice pipeline 与 Pipecat realtime pipeline 两种链路画像，并接近 audio output、readiness diagnostics 等能力。
+- 平台侧已开始接入 NewAPI：已有 auth bridge、handoff、用户/团队/余额字段，以及第一批 NewAPI-style shell token/header/sidebar/user menu。
 - 结果页/历史页开始支持 branch-aware review。
 - API 已有小范围 conversation/chat/training 隔离测试。
 
@@ -245,6 +284,7 @@ git diff --check
 
 - LibreChat 尚未成为系统性文本底座。
 - Pipecat 不再被定义为必须成为唯一稳定语音 runtime；低成本、低延迟的转写式近实时链路可以与真正实时语音链路并存。
+- NewAPI 尚未成为完整内嵌平台模块；短中期先用 NewAPI-style shell 和控制面入口，长期再评估迁入 NewAPI web。
 - TrainingCore 尚未完全统一文本/语音/视频训练编排。
 - legacy stakeholder room、conversation tree、training session、转写式 near-realtime pipeline、Pipecat realtime pipeline 仍需收口 adapter 边界，但并存本身不是问题。
 

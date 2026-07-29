@@ -18,11 +18,7 @@ const BottomTabBar: React.FC = () => {
             to={tab.to}
             className={`bottom-tab-item${active ? ' active' : ''}${tab.elevated ? ' elevated' : ''}`}
           >
-            {tab.elevated ? (
-              <span className="bottom-tab-elevated-icon">{tab.icon}</span>
-            ) : (
-              <span className="bottom-tab-icon">{tab.icon}</span>
-            )}
+            <span className="bottom-tab-icon">{tab.icon}</span>
             <span className="bottom-tab-label">{t(tab.labelKey)}</span>
           </Link>
         )

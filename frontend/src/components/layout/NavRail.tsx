@@ -1,26 +1,18 @@
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import {
-  PanelLeftClose,
-  PanelLeftOpen,
-} from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n'
-import { Button } from '../ui/button'
 import { desktopNavSections, isNavItemActive } from './navigation'
-import '../../styles/panelControls.css'
 import './NavRail.css'
 
-const STORAGE_KEY = 'talkwise.navrail.collapsed'
+interface NavRailProps {
+  collapsed?: boolean
+}
 
-const NavRail: React.FC = () => {
+const NavRail: React.FC<NavRailProps> = ({ collapsed = false }) => {
   const location = useLocation()
   const { t, tr } = useI18n()
   const { hasAnySystemRole } = useAuthContext()
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.localStorage.getItem(STORAGE_KEY) === 'true'
-  })
 
   const visibleSections = desktopNavSections
     .map((section) => ({
@@ -32,12 +24,6 @@ const NavRail: React.FC = () => {
     }))
     .filter((section) => section.items.length > 0)
 
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, String(collapsed))
-  }, [collapsed])
-
-  const toggleLabel = collapsed ? tr('展开侧边栏', 'Expand sidebar') : tr('收起侧边栏', 'Collapse sidebar')
-  const toggleText = collapsed ? tr('展开', 'Expand') : tr('收起', 'Collapse')
   return (
     <nav className={`navrail${collapsed ? ' navrail--collapsed' : ''}`} aria-label={tr('主导航', 'Primary navigation')}>
       <div className="navrail-content">
@@ -69,21 +55,6 @@ const NavRail: React.FC = () => {
             </div>
           </div>
         ))}
-      </div>
-      <div className="navrail-footer">
-        <Button
-          variant="ghost"
-          className="navrail-toggle panel-toggle panel-toggle--wide"
-          aria-label={toggleLabel}
-          title={toggleLabel}
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsed((value) => !value)}
-          >
-          <span className="navrail-toggle-icon panel-toggle-icon" aria-hidden="true">
-            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-          </span>
-          <span className="navrail-toggle-label panel-toggle-label">{toggleText}</span>
-        </Button>
       </div>
     </nav>
   )

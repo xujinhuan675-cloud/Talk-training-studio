@@ -23,6 +23,20 @@ import {
 } from '../ui/dropdown-menu'
 import './UserMenu.css'
 
+function formatAccountMetric(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
+function productNeutralLabel(value: string | null | undefined, fallback: string): string {
+  const label = value?.trim()
+  if (!label) return fallback
+  return /new\s*api/i.test(label) ? fallback : label
+}
+
 const UserMenu: React.FC = () => {
   const { currentUser, users, connectNewApiToken, requestSignIn, switchUser, signOut } = useAuthContext()
   const { tr } = useI18n()
@@ -33,6 +47,14 @@ const UserMenu: React.FC = () => {
   const userName = currentUser?.name ?? tr('未登录', 'Signed out')
   const roleName = currentUser ? getUserDisplayRoleName(currentUser) : tr('选择一个模拟用户', 'Choose a mock user')
   const avatarInitial = currentUser?.avatarInitial ?? '?'
+  const teamName = currentUser?.teamName ?? tr('未分配团队', 'No team')
+  const quotaRemaining = formatAccountMetric(currentUser?.quotaRemaining)
+  const quotaUsed = formatAccountMetric(currentUser?.quotaUsed)
+  const requestCount = formatAccountMetric(currentUser?.requestCount)
+  const planLabel = productNeutralLabel(
+    currentUser?.subscriptionPlan || currentUser?.subscriptionStatus,
+    tr('默认', 'Default'),
+  )
   const currentUserValue = currentUser?.authProvider === 'mock' ? currentUser.id : ''
   const isNewApiUser = currentUser?.authProvider === 'newapi'
   const newApiLoginUrl = React.useMemo(() => buildNewApiLoginUrl(), [])
@@ -90,11 +112,47 @@ const UserMenu: React.FC = () => {
           <span className="user-menu-avatar" aria-hidden="true">
             {avatarInitial}
           </span>
+          <span className="user-menu-summary">
+            <span className="user-menu-name">{userName}</span>
+            <span className="user-menu-role">{roleName}</span>
+          </span>
           <ChevronDown className="user-menu-chevron" size={15} aria-hidden="true" />
         </DropdownMenuTrigger>
       </Button>
 
       <DropdownMenuContent className="user-menu-popover" align="end">
+        <div className="user-menu-profile-card">
+          <span className="user-menu-profile-avatar" aria-hidden="true">
+            {avatarInitial}
+          </span>
+          <span className="user-menu-profile-copy">
+            <span className="user-menu-profile-name">{userName}</span>
+            <span className="user-menu-profile-meta">{teamName}</span>
+          </span>
+        </div>
+
+        <div className="user-menu-account-grid" aria-label={tr('账号概览', 'Account overview')}>
+          <span>
+            <em>{tr('余额', 'Balance')}</em>
+            <strong>{quotaRemaining}</strong>
+          </span>
+          <span>
+            <em>{tr('已用', 'Used')}</em>
+            <strong>{quotaUsed}</strong>
+          </span>
+          <span>
+            <em>{tr('请求', 'Requests')}</em>
+            <strong>{requestCount}</strong>
+          </span>
+        </div>
+
+        <div className="user-menu-plan-row">
+          <span>{tr('计划', 'Plan')}</span>
+          <strong>{planLabel}</strong>
+        </div>
+
+        <DropdownMenuSeparator className="user-menu-divider" />
+
         {!NEWAPI_AUTH_ENABLED ? (
           <>
             <DropdownMenuLabel className="user-menu-heading">{tr('模拟用户', 'Mock users')}</DropdownMenuLabel>

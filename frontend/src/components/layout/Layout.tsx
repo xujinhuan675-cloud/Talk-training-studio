@@ -10,10 +10,16 @@ import { fetchRooms, type ChatRoom } from '../../services/api'
 import { getTrainingSessionIdFromLocation } from '../../services/trainingMode'
 import './Layout.css'
 
+const NAV_COLLAPSED_STORAGE_KEY = 'talkwise.navrail.collapsed'
+
 const Layout: React.FC = () => {
   const { personaMap } = useAppContext()
   const location = useLocation()
   const [rooms, setRooms] = useState<ChatRoom[]>([])
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY) === 'true'
+  })
 
   useEffect(() => {
     fetchRooms()
@@ -21,16 +27,27 @@ const Layout: React.FC = () => {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    window.localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, String(navCollapsed))
+  }, [navCollapsed])
+
   const palette = useCommandPalette(rooms, personaMap)
   const isTrainingChatRoute = (
     /^\/conversations\/[^/]+/.test(location.pathname)
   ) && Boolean(getTrainingSessionIdFromLocation(location.search, location.state))
 
   return (
-    <div className={`app-layout-shell${isTrainingChatRoute ? ' immersive-chat-layout' : ''}`}>
-      <TopBar onSearchClick={palette.open} />
+    <div
+      className={`app-layout-shell${isTrainingChatRoute ? ' immersive-chat-layout' : ''}`}
+      data-shell="platform"
+    >
+      <TopBar
+        navCollapsed={navCollapsed}
+        onNavToggle={() => setNavCollapsed((value) => !value)}
+        onSearchClick={palette.open}
+      />
       <div className="app-body">
-        <NavRail />
+        <NavRail collapsed={navCollapsed} />
         <main className="app-content">
           <Outlet />
         </main>
