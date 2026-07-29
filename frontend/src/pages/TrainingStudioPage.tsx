@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   ChevronDown,
   CheckCircle2,
@@ -44,11 +44,12 @@ import { Field, Select, Textarea } from '../components/ui/form'
 import { SegmentedControl } from '../components/ui/segmented-control'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Translate, type TranslationKey } from '../i18n'
-import { APP_ROUTES } from '../appRoutes'
+import { BattlePrepFlow } from './BattlePrepPage'
 import './TrainingStudioPage.css'
 
 type LaunchMode = TrainingMode | 'realtime' | 'live_coach'
 type TopLevelMode = TrainingMode | 'live_coach'
+type StudioTab = 'training' | 'battle'
 
 const supportsRealtimeVideo = false
 
@@ -92,6 +93,34 @@ const feedbackModeOptions: Array<{
 
 interface TrainingStudioPageProps {
   initialProfile?: TrainingProfile
+}
+
+function getRouteStateObject(state: unknown): Record<string, unknown> {
+  return state && typeof state === 'object' ? state as Record<string, unknown> : {}
+}
+
+function getRouteTrainingStudioConfig(state: unknown): TrainingStudioConfig | null {
+  const value = getRouteStateObject(state).trainingStudioConfig
+  return value && typeof value === 'object' ? value as TrainingStudioConfig : null
+}
+
+function getRouteLaunchMode(state: unknown): LaunchMode | null {
+  const value = getRouteStateObject(state).trainingStudioMode
+  return typeof value === 'string' && ['text', 'voice', 'video', 'realtime', 'live_coach'].includes(value)
+    ? value as LaunchMode
+    : null
+}
+
+function getRouteFeedbackMode(state: unknown): TrainingFeedbackMode | null {
+  const value = getRouteStateObject(state).trainingFeedbackMode
+  return typeof value === 'string' && ['simulation', 'assisted', 'drill'].includes(value)
+    ? value as TrainingFeedbackMode
+    : null
+}
+
+function getRouteStringValue(state: unknown, key: string): string | null {
+  const value = getRouteStateObject(state)[key]
+  return typeof value === 'string' ? value : null
 }
 
 const modeOptions: Array<{
@@ -239,16 +268,22 @@ function splitTechStack(value: string, fallback: string): string[] {
 
 export default function TrainingStudioPage({ initialProfile = 'practice' }: TrainingStudioPageProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { locale, t, tr } = useI18n()
   const { requireAuthenticated } = useAuthContext()
-  const [config, setConfig] = useState<TrainingStudioConfig>(() => getDefaultTrainingStudioConfig(t))
+  const routeState = location.state
+  const routeConfig = getRouteTrainingStudioConfig(routeState)
+  const routeMode = getRouteLaunchMode(routeState)
+  const routeFeedbackMode = getRouteFeedbackMode(routeState)
+  const [config, setConfig] = useState<TrainingStudioConfig>(() => routeConfig ?? getDefaultTrainingStudioConfig(t))
   const previousDefaultsRef = useRef(getDefaultTrainingStudioConfig(t))
-  const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : 'voice')
-  const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
-  const [trainingConfigOpen, setTrainingConfigOpen] = useState(false)
-  const [liveCoachSourceLanguage, setLiveCoachSourceLanguage] = useState('zh-CN')
-  const [liveCoachTargetLanguage, setLiveCoachTargetLanguage] = useState('en-US')
-  const [goal, setGoal] = useState('')
+  const [mode, setMode] = useState<LaunchMode>(() => initialProfile === 'live_coach' ? 'live_coach' : routeMode ?? 'voice')
+  const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>(() => routeFeedbackMode ?? 'simulation')
+  const [activeTab, setActiveTab] = useState<StudioTab>('training')
+  const [parametersOpen, setParametersOpen] = useState(false)
+  const [liveCoachSourceLanguage, setLiveCoachSourceLanguage] = useState(() => getRouteStringValue(routeState, 'liveCoachSourceLanguage') ?? 'zh-CN')
+  const [liveCoachTargetLanguage, setLiveCoachTargetLanguage] = useState(() => getRouteStringValue(routeState, 'liveCoachTargetLanguage') ?? 'en-US')
+  const [goal, setGoal] = useState(() => getRouteStringValue(routeState, 'trainingGoal') ?? '')
   const [starting, setStarting] = useState<'quick' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const effectiveFeedbackMode = mode === 'live_coach' ? 'assisted' : feedbackMode
@@ -297,6 +332,8 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
       },
     )
   }, [config.difficulty, config.framework, config.questionCount, config.scenario, t, tr])
+  const selectedModeLabel = getModeLabel(mode, t)
+  const selectedFeedbackModeLabel = getFeedbackModeLabel(effectiveFeedbackMode, t)
 
   const startQuickSession = async () => {
     if (!requireAuthenticated()) return
@@ -471,10 +508,6 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
     }
   }
 
-  const startGuidedBattle = async () => {
-    navigate(APP_ROUTES.practiceBattle)
-  }
-
   return (
     <div className="training-studio-page" data-workbench-skin="training">
       <div className="training-studio-shell">
@@ -483,30 +516,92 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             <h1>{t('training.page.title')}</h1>
             <p>{t('training.page.subtitle')}</p>
           </div>
-          <div className="training-studio-header-actions" aria-label={t('training.side.aria')}>
-            <Button
-              className="training-studio-action"
-              variant="primary"
-              onClick={startQuickSession}
-              disabled={starting !== null}
-            >
-              {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Wand2 size={16} />}
-              {t('training.page.startRoom')}
-            </Button>
-            <Button
-              className="training-studio-action secondary"
-              variant="secondary"
-              onClick={startGuidedBattle}
-              disabled={starting !== null}
-            >
-              <Wand2 size={16} />
-              {t('training.launch.openBattlePrep')}
-            </Button>
-            {error && <div className="training-studio-error">{error}</div>}
-          </div>
         </header>
 
-        <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
+        <section className="training-studio-tabs-panel" aria-label={tr('训练工作台页面', 'Training studio pages')}>
+          <SegmentedControl
+            ariaLabel={tr('训练工作台页面', 'Training studio pages')}
+            className="training-studio-page-tabs"
+            onValueChange={setActiveTab}
+            options={[
+              {
+                value: 'training',
+                ariaLabel: t('training.launch.quickStart'),
+                label: t('training.launch.quickStart'),
+                disabled: starting !== null,
+              },
+              {
+                value: 'battle',
+                ariaLabel: t('training.launch.prepareFirst'),
+                label: t('training.launch.prepareFirst'),
+                disabled: starting !== null,
+              },
+            ]}
+            size="sm"
+            value={activeTab}
+          />
+        </section>
+
+        {activeTab === 'training' ? (
+          <section className="training-studio-training-panel" aria-label={t('training.launch.quickStart')}>
+            <div className="training-studio-training-actions">
+              <div className="training-studio-training-action-copy">
+                <h2>{t('training.launch.quickStart')}</h2>
+                <p>{selectedModeLabel} · {selectedFeedbackModeLabel} · {trainingConfigSummary}</p>
+              </div>
+              <div className="training-studio-action-stack">
+                <div className="training-studio-start-steps" aria-label={tr('快速开始流程', 'Quick start steps')}>
+                  <div className="training-studio-start-step">
+                    <span className="training-studio-start-step-dot done">1</span>
+                    <span className="training-studio-start-step-label">{tr('选择模式', 'Choose mode')}</span>
+                  </div>
+                  <div className="training-studio-start-step-line" />
+                  <div className="training-studio-start-step">
+                    <span className="training-studio-start-step-dot done">2</span>
+                    <span className="training-studio-start-step-label">{tr('选择练法', 'Choose practice')}</span>
+                  </div>
+                  <div className="training-studio-start-step-line" />
+                  <div className="training-studio-start-step">
+                    <span className="training-studio-start-step-dot active">3</span>
+                    <span className="training-studio-start-step-label">{t('common.startTraining')}</span>
+                  </div>
+                </div>
+                <Button
+                  className="training-studio-action"
+                  variant="primary"
+                  onClick={startQuickSession}
+                  disabled={starting !== null}
+                >
+                  {starting === 'quick' ? <Loader2 size={16} className="training-studio-spin" /> : <Wand2 size={16} />}
+                  {t('common.startTraining')}
+                </Button>
+                <Button
+                  className="training-studio-parameters-toggle"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setParametersOpen((open) => !open)}
+                  disabled={starting !== null}
+                  aria-expanded={parametersOpen}
+                  aria-controls="training-studio-parameters-panel"
+                >
+                  <SlidersHorizontal size={14} />
+                  {parametersOpen ? tr('收起训练参数', 'Hide training parameters') : tr('调整训练参数', 'Adjust training parameters')}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={`training-studio-parameters-toggle-chevron${parametersOpen ? ' open' : ''}`}
+                    size={14}
+                  />
+                </Button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="training-studio-error" role="alert">
+                {error}
+              </div>
+            )}
+
+            <section className="training-studio-mode-panel" aria-label={t('training.page.responseModeAria')}>
           {modeOptions.map((item) => {
             const Icon = item.icon
             const selected = isModeCardSelected(item.value, mode)
@@ -647,40 +742,39 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
                 </div>
               </section>
             )}
-
-            <section
-              className="training-studio-config-panel"
-              aria-label={tr('训练参数', 'Training parameters')}
-            >
-              <Button
-                type="button"
-                className="training-studio-config-toggle"
-                variant="secondary"
-                onClick={() => setTrainingConfigOpen((open) => !open)}
-                aria-expanded={trainingConfigOpen}
-                aria-controls="training-studio-config-options"
-                disabled={starting !== null}
-              >
-                <span className="training-studio-config-title">
-                  <SlidersHorizontal size={16} />
-                  {tr('训练参数', 'Training parameters')}
-                </span>
-                <span className="training-studio-config-summary">{trainingConfigSummary}</span>
-                <ChevronDown
-                  size={16}
-                  className={`training-studio-config-chevron${trainingConfigOpen ? ' open' : ''}`}
-                />
-              </Button>
-
-              {trainingConfigOpen && (
-                <div id="training-studio-config-options" className="training-studio-config-content">
-                  <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
-                </div>
-              )}
-            </section>
           </div>
         </div>
 
+            {parametersOpen && (
+              <section
+                id="training-studio-parameters-panel"
+                className="training-studio-parameters-panel"
+                aria-label={t('training.launch.summaryTitle')}
+              >
+                <div className="training-studio-panel-head training-studio-parameters-head">
+                  <div>
+                    <h2>{tr('本次训练参数', 'Session parameters')}</h2>
+                    <p>
+                      {selectedModeLabel} · {selectedFeedbackModeLabel} · {trainingConfigSummary}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="training-studio-config-inline">
+                  <TrainingStudioLauncher value={config} onChange={setConfig} disabled={starting !== null} />
+                </div>
+              </section>
+            )}
+          </section>
+        ) : (
+          <div className="training-studio-battle-panel">
+            <BattlePrepFlow
+              embedded
+              onStudioConfigChange={setConfig}
+              studioConfig={config}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

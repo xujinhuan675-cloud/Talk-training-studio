@@ -8,7 +8,9 @@ param(
     [switch]$ShowServiceWindows,
     [switch]$NoBrowser,
     [switch]$SkipHealthCheck,
+    [switch]$SkipGateway,
     [switch]$AutoPort,
+    [int]$GatewayPort = 0,
     [int]$BackendPort = 0,
     [int]$FrontendPort = 0,
     [int]$DockerTimeoutSeconds = 180,
@@ -44,6 +46,9 @@ foreach ($pathToAdd in $CandidatePathAdds) {
 
 $BackendDir = Join-Path $RepoRoot "backend"
 $FrontendDir = Join-Path $RepoRoot "frontend"
+$NewApiDir = Join-Path $RepoRoot "outside-project\new-api-main"
+$NewApiExePath = Join-Path $NewApiDir "new-api-talkwise.exe"
+$NewApiDbPath = Join-Path $NewApiDir "one-api.db"
 $LogDir = Join-Path $RepoRoot "logs"
 $BackendVenvDir = Join-Path $RepoRoot ".venv-backend"
 $RootEnvPath = Join-Path $RepoRoot ".env"
@@ -286,6 +291,43 @@ function Stop-DockerAppServices {
     }
 }
 
+function Stop-DockerNewApiServicesIfRunning {
+    if (-not (Test-CommandExists "docker")) {
+        return
+    }
+
+    if (-not (Test-DockerEngine)) {
+        return
+    }
+
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $containerIds = @(& docker ps -q --filter "name=talkwise_newapi" 2>$null)
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+
+    $containerIds = @($containerIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($containerIds.Count -eq 0) {
+        return
+    }
+
+    Write-Step "Stopping Docker NewAPI services"
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker stop @containerIds 2>&1 | ForEach-Object { Write-Host $_ }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+
+    if ($exitCode -ne 0) {
+        Write-Warn "Could not stop all Docker NewAPI containers; continuing with local gateway startup."
+    }
+}
+
 function Wait-PostgresHealthy {
     param([int]$HostPort)
 
@@ -382,6 +424,75 @@ function Test-PortListening {
     }
 }
 
+function Test-PortBindable {
+    param([int]$Port)
+
+    $listener = $null
+    try {
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Parse("127.0.0.1"), $Port)
+        $listener.Server.ExclusiveAddressUse = $true
+        $listener.Start()
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($listener) {
+            $listener.Stop()
+        }
+    }
+}
+
+function Get-PortBindFailureSummary {
+    param([int]$Port)
+
+    $listener = $null
+    try {
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Parse("127.0.0.1"), $Port)
+        $listener.Server.ExclusiveAddressUse = $true
+        $listener.Start()
+        return ""
+    } catch {
+        $exception = $_.Exception
+        while ($exception.InnerException) {
+            $exception = $exception.InnerException
+        }
+        return $exception.Message
+    } finally {
+        if ($listener) {
+            $listener.Stop()
+        }
+    }
+}
+
+function Get-PortListenerOwnerIds {
+    param([int]$Port)
+
+    try {
+        $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    } catch {
+        return @()
+    }
+
+    return @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
+}
+
+function Test-PortHasOnlyStaleOwners {
+    param([int]$Port)
+
+    $ownerIds = @(Get-PortListenerOwnerIds -Port $Port)
+    if ($ownerIds.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($ownerId in $ownerIds) {
+        if (Get-Process -Id $ownerId -ErrorAction SilentlyContinue) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Get-PortOwnerSummary {
     param([int]$Port)
 
@@ -401,7 +512,7 @@ function Get-PortOwnerSummary {
         if ($process) {
             "$($process.ProcessName) pid=$ownerId"
         } else {
-            "pid=$ownerId"
+            "stale pid=$ownerId (process not found)"
         }
     }
 
@@ -435,18 +546,32 @@ function Resolve-DevPort {
         [switch]$AllowAutoPort
     )
 
-    if (-not (Test-PortListening $Port)) {
+    if (Test-PortBindable $Port) {
         return $Port
     }
 
     $ownerSummary = Get-PortOwnerSummary $Port
-    if ($AllowAutoPort) {
+    $bindFailure = Get-PortBindFailureSummary $Port
+    if ([string]::IsNullOrWhiteSpace($bindFailure)) {
+        $bindFailure = "bind check failed for an unknown reason"
+    }
+
+    $hasOnlyStaleOwners = Test-PortHasOnlyStaleOwners $Port
+    $hasNoListener = $ownerSummary -eq "no listener"
+    if ($AllowAutoPort -or $hasOnlyStaleOwners -or $hasNoListener) {
         $fallbackPort = Get-AvailablePort ($Port + 1)
-        Write-Warn "$Name port $Port is already in use by $ownerSummary; using $fallbackPort because -AutoPort was passed."
+        $fallbackReason = if ($AllowAutoPort) {
+            "because -AutoPort was passed"
+        } elseif ($hasOnlyStaleOwners) {
+            "because the listener appears stale"
+        } else {
+            "because no listener was visible but the port could not be bound"
+        }
+        Write-Warn "$Name port $Port is unavailable ($ownerSummary; $bindFailure); using $fallbackPort $fallbackReason."
         return $fallbackPort
     }
 
-    throw "$Name port $Port is already in use by $ownerSummary. Stop that process, change $Name port in .env, or rerun start-dev.cmd -AutoPort."
+    throw "$Name port $Port is unavailable ($ownerSummary; $bindFailure). Stop that process, change $Name port in .env, or rerun start-dev.cmd -AutoPort."
 }
 
 function Get-DecodedPowerShellCommandLine {
@@ -473,7 +598,7 @@ function Stop-ExistingDevProcesses {
     Write-Step "Stopping existing project dev processes"
 
     $escapedRoot = [regex]::Escape($RepoRoot)
-    $processes = Get-CimInstance Win32_Process |
+    $processes = @(Get-CimInstance Win32_Process |
         Where-Object {
             $commandText = $_.CommandLine
             $decodedCommandText = Get-DecodedPowerShellCommandLine $_.CommandLine
@@ -484,12 +609,14 @@ function Stop-ExistingDevProcesses {
             $_.ProcessId -ne $PID -and
             $commandText -and
             $commandText -match $escapedRoot -and
-            $commandText -match "vite|npm|uv\.exe|uv run|uvicorn|main\.py|\.venv-backend|backend\\\.venv|Start-Transcript"
-        }
+            $commandText -match "vite|npm|uv\.exe|uv run|uvicorn|main\.py|\.venv-backend|backend\\\.venv|Start-Transcript|new-api|newapi"
+        })
 
+    $stoppedProcessIds = @()
     foreach ($process in $processes) {
         try {
             Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+            $stoppedProcessIds += [int]$process.ProcessId
             Write-Ok "Stopped process $($process.ProcessId) ($($process.Name))"
         } catch {
             if (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue) {
@@ -498,8 +625,20 @@ function Stop-ExistingDevProcesses {
         }
     }
 
-    if ($processes) {
-        Start-Sleep -Seconds 1
+    if ($stoppedProcessIds.Count -gt 0) {
+        $deadline = (Get-Date).AddSeconds(10)
+        do {
+            $remainingProcessIds = @($stoppedProcessIds | Where-Object {
+                Get-Process -Id $_ -ErrorAction SilentlyContinue
+            })
+            if ($remainingProcessIds.Count -eq 0) {
+                Start-Sleep -Milliseconds 500
+                return
+            }
+            Start-Sleep -Milliseconds 500
+        } while ((Get-Date) -lt $deadline)
+
+        Write-Warn "Some stopped processes are still exiting: $($remainingProcessIds -join ', ')"
     }
 }
 
@@ -603,7 +742,11 @@ function Get-AvailablePort {
 
     for ($offset = 0; $offset -lt $MaxAttempts; $offset++) {
         $port = $StartAt + $offset
-        if (-not (Test-PortListening $port)) {
+        if ($port -gt 65535) {
+            break
+        }
+
+        if (Test-PortBindable $port) {
             return $port
         }
     }
@@ -645,6 +788,65 @@ $Command
         Start-Process -FilePath "powershell.exe" -ArgumentList $argumentList
     } else {
         Start-Process -FilePath "powershell.exe" -ArgumentList $argumentList -WindowStyle Hidden
+    }
+}
+
+function Start-LocalNewApiGateway {
+    param(
+        [int]$Port,
+        [string]$GatewayBaseUrl,
+        [string]$RedirectUri,
+        [string]$LogPath,
+        [string]$ErrLogPath
+    )
+
+    if (-not (Test-Path -LiteralPath $NewApiExePath)) {
+        throw "Local NewAPI executable was not found at $NewApiExePath."
+    }
+
+    if (-not (Test-Path -LiteralPath $NewApiDbPath)) {
+        throw "Local NewAPI database was not found at $NewApiDbPath."
+    }
+
+    $runtimeLogDir = Join-Path $NewApiDir "logs"
+    if (-not (Test-Path -LiteralPath $runtimeLogDir)) {
+        New-Item -ItemType Directory -Path $runtimeLogDir -Force | Out-Null
+    }
+
+    Remove-Item -LiteralPath $LogPath, $ErrLogPath -ErrorAction SilentlyContinue
+
+    $redirectUris = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" "$RedirectUri,http://localhost:$frontendPort/login"
+    $envValues = @{
+        PORT = "$Port"
+        SESSION_SECRET = Get-EnvValue $RootEnvPath "NEWAPI_SESSION_SECRET" "newapi-local-session-dev-change-me"
+        TALKWISE_CLIENT_ID = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
+        TALKWISE_CLIENT_SECRET = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" "talkwise-local-handoff-dev-secret"
+        TALKWISE_REDIRECT_URIS = $redirectUris
+        TALKWISE_GATEWAY_BASE_URL = $GatewayBaseUrl
+        TZ = "Asia/Shanghai"
+        NODE_NAME = "talkwise-newapi-local"
+        SQL_DSN = ""
+        REDIS_CONN_STRING = ""
+    }
+
+    $previousEnvValues = @{}
+    foreach ($key in $envValues.Keys) {
+        $previousEnvValues[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, $envValues[$key], "Process")
+    }
+
+    try {
+        Start-Process `
+            -FilePath $NewApiExePath `
+            -ArgumentList @("--log-dir", $runtimeLogDir) `
+            -WorkingDirectory $NewApiDir `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $LogPath `
+            -RedirectStandardError $ErrLogPath | Out-Null
+    } finally {
+        foreach ($key in $previousEnvValues.Keys) {
+            [Environment]::SetEnvironmentVariable($key, $previousEnvValues[$key], "Process")
+        }
     }
 }
 
@@ -711,7 +913,12 @@ if (-not (Test-Path -LiteralPath $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 }
 Stop-ExistingDevProcesses
-Remove-Item -LiteralPath (Join-Path $LogDir "backend-dev.log"), (Join-Path $LogDir "frontend-dev.log") -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath `
+    (Join-Path $LogDir "backend-dev.log"), `
+    (Join-Path $LogDir "frontend-dev.log"), `
+    (Join-Path $LogDir "newapi-dev.log"), `
+    (Join-Path $LogDir "newapi-dev.err.log") `
+    -ErrorAction SilentlyContinue
 
 Ensure-EnvValue $RootEnvPath "POSTGRES_USER" "stakecoach"
 Ensure-EnvValue $RootEnvPath "POSTGRES_PASSWORD" "stakecoach_dev_password"
@@ -719,40 +926,57 @@ Ensure-EnvValue $RootEnvPath "POSTGRES_DB" "stakecoachdb"
 Ensure-EnvValue $RootEnvPath "POSTGRES_HOST_PORT" "15432"
 Ensure-EnvValue $RootEnvPath "BACKEND_PORT" "8012"
 Ensure-EnvValue $RootEnvPath "FRONTEND_PORT" "5177"
+Ensure-EnvValue $RootEnvPath "NEWAPI_HOST_PORT" "18080"
 Ensure-EnvValue $RootEnvPath "SECRET_KEY" "dev-secret-change-me"
 Ensure-EnvValue $RootEnvPath "DEBUG" "true"
-Ensure-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
+Ensure-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "http://127.0.0.1:18080"
 Ensure-EnvValue $RootEnvPath "NEWAPI_ACCESS_TOKEN" ""
-Ensure-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "https://newapi.flowguide.cc/v1"
-Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_ENABLED" "false"
+Ensure-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "http://127.0.0.1:18080/v1"
+Ensure-EnvValue $RootEnvPath "NEWAPI_PUBLIC_GATEWAY_BASE_URL" "http://127.0.0.1:18080/v1"
+Ensure-EnvValue $RootEnvPath "NEWAPI_INTERNAL_BASE_URL" "http://127.0.0.1:18080"
+Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_ENABLED" "true"
 Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK" "false"
 Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_TIMEOUT_SECONDS" "5"
 Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
-Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" ""
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" "talkwise-local-handoff-dev-secret"
 Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH" "/api/talkwise/auth/exchange"
-Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" ""
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" "http://127.0.0.1:5177/login"
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" "http://127.0.0.1:5177/login,http://localhost:5177/login"
+Ensure-EnvValue $RootEnvPath "NEWAPI_SESSION_SECRET" "newapi-local-session-dev-change-me"
 Ensure-EnvValue $RootEnvPath "TALKWISE_SESSION_COOKIE_NAME" "talkwise_session"
 Ensure-EnvValue $RootEnvPath "TALKWISE_SESSION_TTL_SECONDS" "28800"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" "false"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "https://newapi.flowguide.cc/login"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" "http://127.0.0.1:18080"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" "true"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "http://127.0.0.1:18080/sign-in"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "embedded"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" "https://newapi.flowguide.cc"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "https://newapi.flowguide.cc/usage-logs/common"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "https://newapi.flowguide.cc/keys"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" "http://127.0.0.1:18080"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "http://127.0.0.1:18080/usage-logs/common"
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "http://127.0.0.1:18080/keys"
 Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" ""
+Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" "http://127.0.0.1:5177/login"
+
+if (-not $SkipGateway) {
+    Stop-DockerNewApiServicesIfRunning
+}
 
 $pgUser = Get-EnvValue $RootEnvPath "POSTGRES_USER" "stakecoach"
 $pgPassword = Get-EnvValue $RootEnvPath "POSTGRES_PASSWORD" "stakecoach_dev_password"
 $pgDb = Get-EnvValue $RootEnvPath "POSTGRES_DB" "stakecoachdb"
 $pgHostPort = [int](Get-EnvValue $RootEnvPath "POSTGRES_HOST_PORT" "15432")
+$configuredGatewayPort = if ($SkipGateway) { 0 } else { Get-ConfiguredPort -Key "NEWAPI_HOST_PORT" -DefaultValue 18080 -OverrideValue $GatewayPort }
 $configuredBackendPort = Get-ConfiguredPort -Key "BACKEND_PORT" -DefaultValue 8012 -OverrideValue $BackendPort
 $configuredFrontendPort = Get-ConfiguredPort -Key "FRONTEND_PORT" -DefaultValue 5177 -OverrideValue $FrontendPort
+$resolvedGatewayPort = if ($SkipGateway) { 0 } else { Resolve-DevPort -Name "gateway" -Port $configuredGatewayPort -AllowAutoPort:$AutoPort }
 $backendPort = Resolve-DevPort -Name "backend" -Port $configuredBackendPort -AllowAutoPort:$AutoPort
 $frontendPort = Resolve-DevPort -Name "frontend" -Port $configuredFrontendPort -AllowAutoPort:$AutoPort
 if ($backendPort -eq $frontendPort) {
     throw "BACKEND_PORT and FRONTEND_PORT must be different; both resolved to $backendPort."
+}
+if (-not $SkipGateway -and ($resolvedGatewayPort -eq $backendPort -or $resolvedGatewayPort -eq $frontendPort)) {
+    throw "NEWAPI_HOST_PORT must be different from BACKEND_PORT and FRONTEND_PORT; gateway resolved to $resolvedGatewayPort."
+}
+if (-not $SkipGateway) {
+    Set-EnvValue $RootEnvPath "NEWAPI_HOST_PORT" "$resolvedGatewayPort"
 }
 Set-EnvValue $RootEnvPath "BACKEND_PORT" "$backendPort"
 Set-EnvValue $RootEnvPath "FRONTEND_PORT" "$frontendPort"
@@ -765,9 +989,33 @@ $databaseUrl = if ($UsePostgres) { $postgresDatabaseUrl } else { $sqliteDatabase
 $usingSqlite = -not [bool]$UsePostgres
 $frontendUrl = "http://127.0.0.1:$frontendPort"
 $backendUrl = "http://127.0.0.1:$backendPort"
+$newApiUrl = if ($SkipGateway) { Get-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc" } else { "http://127.0.0.1:$resolvedGatewayPort" }
+$newApiGatewayUrl = if ($SkipGateway) { Get-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "$newApiUrl/v1" } else { "$newApiUrl/v1" }
+$newApiRedirectUri = "$frontendUrl/login"
+$newApiRedirectUris = "$newApiRedirectUri,http://localhost:$frontendPort/login"
 $backendLogPath = Join-Path $LogDir "backend-dev.log"
 $frontendLogPath = Join-Path $LogDir "frontend-dev.log"
+$newApiLogPath = Join-Path $LogDir "newapi-dev.log"
+$newApiErrLogPath = Join-Path $LogDir "newapi-dev.err.log"
 $corsOriginsValue = "[`"http://127.0.0.1:$frontendPort`",`"http://localhost:$frontendPort`",`"http://127.0.0.1:$backendPort`",`"http://localhost:$backendPort`"]"
+
+if (-not $SkipGateway) {
+    Set-EnvValue $RootEnvPath "NEWAPI_BASE_URL" $newApiUrl
+    Set-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" $newApiGatewayUrl
+    Set-EnvValue $RootEnvPath "NEWAPI_PUBLIC_GATEWAY_BASE_URL" $newApiGatewayUrl
+    Set-EnvValue $RootEnvPath "NEWAPI_INTERNAL_BASE_URL" $newApiUrl
+    Set-EnvValue $RootEnvPath "NEWAPI_AUTH_ENABLED" "true"
+    Set-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" $newApiRedirectUri
+    Set-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" $newApiRedirectUris
+    Set-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" $newApiUrl
+    Set-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" "true"
+    Set-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "$newApiUrl/sign-in"
+    Set-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" $newApiUrl
+    Set-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "$newApiUrl/usage-logs/common"
+    Set-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "$newApiUrl/keys"
+    Set-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" $newApiRedirectUri
+}
+
 $newApiBaseUrl = Get-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
 $newApiAccessToken = Get-EnvValue $RootEnvPath "NEWAPI_ACCESS_TOKEN" ""
 $newApiGatewayBaseUrl = Get-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "$newApiBaseUrl/v1"
@@ -848,6 +1096,16 @@ if ($UsePostgres) {
     Write-Host "Pass -UsePostgres to run against the local Docker Postgres database."
 }
 
+if (-not $SkipGateway) {
+    Write-Step "Starting local NewAPI gateway on port $resolvedGatewayPort"
+    Start-LocalNewApiGateway `
+        -Port $resolvedGatewayPort `
+        -GatewayBaseUrl $newApiGatewayUrl `
+        -RedirectUri $newApiRedirectUri `
+        -LogPath $newApiLogPath `
+        -ErrLogPath $newApiErrLogPath
+}
+
 Write-Step "Starting backend locally with FastAPI on port $backendPort"
 Start-DevWindow `
     -Title "Talk Training Studio - Backend" `
@@ -865,6 +1123,15 @@ Start-DevWindow `
     -ShowWindow:$ShowServiceWindows
 
 if (-not $SkipHealthCheck) {
+    if (-not $SkipGateway) {
+        Wait-HttpEndpoint `
+            -Name "NewAPI gateway" `
+            -Url "$newApiUrl/api/status" `
+            -LogPath $newApiLogPath `
+            -TimeoutSeconds $ServiceTimeoutSeconds `
+            -ExpectedContentPattern '"success":true'
+    }
+
     Wait-HttpEndpoint `
         -Name "backend" `
         -Url "$backendUrl/health/live" `
@@ -896,6 +1163,10 @@ Write-Host "Frontend: $frontendUrl"
 Write-Host "Backend docs: $backendUrl/docs"
 Write-Host "Backend health: $backendUrl/health/live"
 Write-Host "Frontend API proxy health: $frontendUrl/health/live"
+if (-not $SkipGateway) {
+    Write-Host "NewAPI status: $newApiUrl/api/status"
+    Write-Host "NewAPI login: $newApiUrl/sign-in"
+}
 Write-Host "NewAPI console: $viteNewApiConsoleUrl"
 Write-Host "NewAPI API keys: $viteNewApiApiKeysUrl"
 Write-Host "NewAPI usage: $viteNewApiUsageUrl"

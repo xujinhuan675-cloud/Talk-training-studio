@@ -25,10 +25,6 @@
 
 .training-studio-header {
   order: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
   margin-bottom: 18px;
 }
 
@@ -49,15 +45,8 @@
   line-height: 1.55;
 }
 
-.training-studio-header-actions {
-  width: 220px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .training-studio-action {
+  min-width: 0;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -97,7 +86,7 @@
 }
 
 .training-studio-mode-panel {
-  order: 2;
+  order: 3;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
@@ -247,7 +236,7 @@
 }
 
 .training-studio-feedback-panel {
-  order: 3;
+  order: 4;
   display: grid;
   gap: 12px;
   border: 1px solid var(--training-workbench-border);
@@ -365,7 +354,7 @@
 }
 
 .training-studio-grid {
-  order: 4;
+  order: 5;
   display: block;
 }
 
@@ -430,71 +419,184 @@
   white-space: nowrap;
 }
 
-.training-studio-config-panel {
-  display: grid;
-  gap: 10px;
+.training-studio-tabs-panel {
+  order: 1;
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 16px;
 }
 
-.training-studio-config-toggle.ui-button {
-  min-height: 54px;
+.training-studio-page-tabs.ui-segmented-control {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.training-studio-page-tabs .ui-segmented-control-button {
+  gap: 6px;
+}
+
+.training-studio-training-panel {
+  order: 2;
   display: grid;
-  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
+  gap: 0;
+  min-width: 0;
+}
+
+.training-studio-parameters-panel {
+  order: 6;
+  display: grid;
+  gap: 0;
+  margin-top: 16px;
+}
+
+.training-studio-battle-panel {
+  order: 2;
+  min-width: 0;
+}
+
+.training-studio-parameters-head {
+  border: 1px solid var(--training-workbench-border);
+  border-radius: var(--training-workbench-radius);
+  padding: 14px;
+  margin-bottom: 16px;
+  background: var(--training-workbench-surface);
+  box-shadow: var(--training-workbench-shadow);
+}
+
+.training-studio-config-inline {
+  margin-top: 0;
+}
+
+.training-studio-training-actions {
+  order: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(148px, auto);
   align-items: center;
-  justify-content: stretch;
   gap: 12px;
   border: 1px solid var(--training-workbench-border);
   border-radius: var(--training-workbench-radius);
-  padding: 10px 14px;
+  padding: 14px;
+  margin-top: 16px;
   background: var(--training-workbench-surface);
-  color: var(--text-primary);
   box-shadow: var(--training-workbench-shadow);
-  text-align: left;
 }
 
-.training-studio-config-toggle.ui-button:hover:not(:disabled) {
-  border-color: var(--training-workbench-border-accent);
-  background: var(--training-workbench-surface-raised);
-  color: var(--text-primary);
-}
-
-.training-studio-config-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.training-studio-config-title svg {
-  color: var(--training-workbench-primary);
-}
-
-.training-studio-config-summary {
+.training-studio-training-action-copy {
   min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.training-studio-training-action-copy h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.training-studio-training-action-copy p {
+  margin: 0;
   overflow: hidden;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.training-studio-config-chevron {
-  color: var(--text-secondary);
-  transition: transform var(--transition-fast);
-}
-
-.training-studio-config-chevron.open {
-  transform: rotate(180deg);
-}
-
-.training-studio-config-content {
+.training-studio-action-stack {
+  min-width: 320px;
+  width: 100%;
   display: grid;
+  gap: 8px;
+}
+
+.training-studio-start-steps {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  min-width: 0;
+}
+
+.training-studio-start-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.training-studio-start-step-dot {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--training-workbench-border);
+  border-radius: 999px;
+  background: var(--training-workbench-bg);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.training-studio-start-step-dot.done {
+  border-color: var(--training-workbench-primary);
+  background: var(--training-workbench-primary-soft);
+  color: var(--training-workbench-primary);
+}
+
+.training-studio-start-step-dot.active {
+  border-color: var(--training-workbench-primary);
+  background: var(--training-workbench-primary);
+  color: var(--training-workbench-on-primary);
+}
+
+.training-studio-start-step-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.training-studio-start-step-line {
+  width: 16px;
+  height: 2px;
+  flex: 0 0 16px;
+  margin: 0 6px;
+  border-radius: 999px;
+  background: var(--training-workbench-border);
 }
 
 .training-studio-action {
   width: 100%;
+}
+
+.training-studio-parameters-toggle.ui-button {
+  width: 100%;
+  gap: 6px;
+  border-color: var(--training-workbench-border);
+  background: var(--training-workbench-bg);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.training-studio-parameters-toggle.ui-button:hover:not(:disabled) {
+  border-color: var(--training-workbench-primary);
+  background: var(--training-workbench-primary-soft);
+  color: var(--training-workbench-primary);
+}
+
+.training-studio-parameters-toggle-chevron {
+  transition: transform var(--transition-fast);
+}
+
+.training-studio-parameters-toggle-chevron.open {
+  transform: rotate(180deg);
 }
 
 .training-studio-action.secondary {
@@ -510,6 +612,8 @@
 }
 
 .training-studio-error {
+  order: 2;
+  grid-column: 1 / -1;
   border: 1px solid var(--training-workbench-danger);
   border-radius: var(--training-workbench-radius);
   padding: 9px 10px;
@@ -546,8 +650,7 @@
   }
 
   .training-studio-header {
-    flex-direction: column;
-    gap: 14px;
+    margin-bottom: 14px;
   }
 
   .training-studio-header h1 {
@@ -556,10 +659,6 @@
 
   .training-studio-header p {
     font-size: 13px;
-  }
-
-  .training-studio-header-actions {
-    width: 100%;
   }
 
   .training-studio-mode-panel {
@@ -578,12 +677,26 @@
     justify-content: flex-start;
   }
 
-  .training-studio-config-toggle.ui-button {
-    grid-template-columns: minmax(0, 1fr) auto;
+  .training-studio-training-actions {
+    grid-template-columns: 1fr;
   }
 
-  .training-studio-config-summary {
-    grid-column: 1 / -1;
+  .training-studio-action-stack {
+    min-width: 0;
+  }
+
+  .training-studio-start-steps {
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .training-studio-page-tabs.ui-segmented-control {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .training-studio-training-action-copy p {
     white-space: normal;
   }
 }

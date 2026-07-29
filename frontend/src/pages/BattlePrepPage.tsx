@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Loader2, Zap, ArrowLeft, ArrowRight } from 'lucide-react'
 import TrainingStudioLauncher from '../components/TrainingStudioLauncher'
 import { generateBattlePrep, startBattle, type BattlePrepResult } from '../services/api'
@@ -9,18 +9,39 @@ import {
   toBattleDifficulty,
   type TrainingStudioConfig,
 } from '../services/trainingStudio'
-import { useI18n, type Translate } from '../i18n'
+import { useI18n } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import { Button } from '../components/ui/button'
 import { Checkbox } from '../components/ui/checkbox'
 import { Input, Textarea } from '../components/ui/form'
 import './BattlePrepPage.css'
 
-function initialState(t: Translate) {
+interface BattlePrepRouteState {
+  source?: string
+  returnTo?: string
+  trainingStudioConfig?: TrainingStudioConfig
+  trainingStudioMode?: string
+  trainingFeedbackMode?: string
+  trainingGoal?: string
+  liveCoachSourceLanguage?: string
+  liveCoachTargetLanguage?: string
+}
+
+function getBattlePrepRouteState(state: unknown): BattlePrepRouteState {
+  return state && typeof state === 'object' ? state as BattlePrepRouteState : {}
+}
+
+interface BattlePrepFlowProps {
+  backAction?: ReactNode
+  embedded?: boolean
+  onStudioConfigChange: (next: TrainingStudioConfig) => void
+  studioConfig: TrainingStudioConfig
+}
+
+function initialState() {
   return {
     step: 1 as 1 | 2,
     description: '',
-    studioConfig: getDefaultTrainingStudioConfig(t) as TrainingStudioConfig,
     loading: false,
     error: null as string | null,
     prepResult: null as BattlePrepResult | null,
@@ -36,15 +57,19 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-export default function BattlePrepPage() {
+export function BattlePrepFlow({
+  backAction,
+  embedded = false,
+  onStudioConfigChange,
+  studioConfig,
+}: BattlePrepFlowProps) {
   const navigate = useNavigate()
   const { t, tr } = useI18n()
-  const [state, setState] = useState(() => initialState(t))
+  const [state, setState] = useState(() => initialState())
 
   const {
     step,
     description,
-    studioConfig,
     loading,
     error,
     prepResult,
@@ -106,19 +131,20 @@ export default function BattlePrepPage() {
   }
 
   return (
-    <div className="bpp-page">
+    <div className={`bpp-page${embedded ? ' bpp-page--embedded' : ''}`}>
       <div className="bpp-container">
         <header className="bpp-header">
-          <div className="bpp-heading">
-            <Button className="bpp-back" variant="ghost" size="sm" onClick={() => navigate(APP_ROUTES.practiceScenarios)}>
-              <ArrowLeft size={16} />
-              <span>{t('common.backToTrainingCatalog')}</span>
-            </Button>
-            <div className="bpp-title-row">
-              <Zap size={22} className="bpp-title-icon" />
-              <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
+          {(!embedded || backAction) && (
+            <div className="bpp-heading">
+              {backAction}
+              {!embedded && (
+                <div className="bpp-title-row">
+                  <Zap size={22} className="bpp-title-icon" />
+                  <h1 className="bpp-title">{t('nav.battlePrep')}</h1>
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           <div className="bpp-steps" aria-label={tr('准备流程', 'Preparation steps')}>
             {[1, 2].map((n) => (
@@ -161,7 +187,7 @@ export default function BattlePrepPage() {
 
               <TrainingStudioLauncher
                 value={studioConfig}
-                onChange={(next) => setState((s) => ({ ...s, studioConfig: next }))}
+                onChange={onStudioConfigChange}
                 disabled={loading}
               />
             </div>
@@ -292,5 +318,47 @@ export default function BattlePrepPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function BattlePrepPage() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { t, tr } = useI18n()
+  const routeState = getBattlePrepRouteState(location.state)
+  const [studioConfig, setStudioConfig] = useState(
+    () => routeState.trainingStudioConfig ?? getDefaultTrainingStudioConfig(t),
+  )
+
+  const fromTrainingStudio = routeState.source === 'training-studio' && routeState.returnTo === APP_ROUTES.practiceCustom
+  const handleBack = () => {
+    if (!fromTrainingStudio) {
+      navigate(APP_ROUTES.practiceScenarios)
+      return
+    }
+
+    navigate(APP_ROUTES.practiceCustom, {
+      state: {
+        trainingStudioConfig: studioConfig,
+        trainingStudioMode: routeState.trainingStudioMode,
+        trainingFeedbackMode: routeState.trainingFeedbackMode,
+        trainingGoal: routeState.trainingGoal,
+        liveCoachSourceLanguage: routeState.liveCoachSourceLanguage,
+        liveCoachTargetLanguage: routeState.liveCoachTargetLanguage,
+      },
+    })
+  }
+
+  return (
+    <BattlePrepFlow
+      backAction={(
+        <Button className="bpp-back" variant="ghost" size="sm" onClick={handleBack}>
+          <ArrowLeft size={16} />
+          <span>{fromTrainingStudio ? tr('返回训练工作台', 'Back to training studio') : t('common.backToTrainingCatalog')}</span>
+        </Button>
+      )}
+      onStudioConfigChange={setStudioConfig}
+      studioConfig={studioConfig}
+    />
   )
 }
