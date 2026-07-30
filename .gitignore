@@ -161,7 +161,9 @@ AGENTS.md
 chat-session/
 graphify-out/
 **/graphify-out/
-outside-project/
+# Keep external reference projects local, but version the NewAPI product host.
+outside-project/*
+!outside-project/new-api-main/
 
 # Local dev runtime artifacts
 .codex-run/

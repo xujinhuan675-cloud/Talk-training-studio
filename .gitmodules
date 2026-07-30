@@ -1,0 +1,4 @@
+[submodule "outside-project/new-api-main"]
+	path = outside-project/new-api-main
+	url = https://github.com/xujinhuan675-cloud/talkwise-newapi.git
+	branch = talkwise-auth-handoff
