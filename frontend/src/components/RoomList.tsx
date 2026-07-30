@@ -4,6 +4,7 @@ import { ChevronDown, Filter, MessageSquare, Plus, Search, Swords, Trash2, Users
 import { fetchRooms, deleteRoom, type ChatRoom } from '../services/api'
 import {
   filterRooms,
+  getRoomDisplayName,
   groupRoomsByActivity,
   roomFilterCount,
   type RoomActivityGroupId,
@@ -164,7 +165,7 @@ export default function RoomList({ selectedRoomId, onSelectRoom, onRoomDeleted, 
             : <Users size={16} />}
       </div>
       <div className="room-info">
-        <span className="room-name">{room.name}</span>
+        <span className="room-name">{getRoomDisplayName(room.name)}</span>
       </div>
       <Button
         className="room-delete-btn"

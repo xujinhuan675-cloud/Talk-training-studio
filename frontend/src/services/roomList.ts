@@ -14,6 +14,13 @@ export interface RoomListFilterOptions {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+const GENERATED_TRAINING_TITLE_PREFIX = /^(?:training|备战)\s*[:：]\s*/i
+
+export function getRoomDisplayName(name: string | null | undefined): string {
+  const rawName = name?.trim() ?? ''
+  const displayName = rawName.replace(GENERATED_TRAINING_TITLE_PREFIX, '').trim()
+  return displayName || rawName
+}
 
 function timestampFromIso(value: string | null | undefined): number {
   if (!value) return 0

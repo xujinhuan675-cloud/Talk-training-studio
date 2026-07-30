@@ -276,6 +276,7 @@ export interface ProductScenarioPreset extends LocalizedOption<ProductScenarioPr
   personaNameKey: TranslationKey
   personaRoleKey: TranslationKey
   personaStyleKey: TranslationKey
+  openingKey: TranslationKey
   framework: ExpressionFramework
   difficulty: TrainingDifficulty
   questionMix: QuestionMix
@@ -290,6 +291,7 @@ export interface InterviewScenarioPreset extends LocalizedOption<InterviewScenar
   personaNameKey: TranslationKey
   personaRoleKey: TranslationKey
   personaStyleKey: TranslationKey
+  openingKey: TranslationKey
   framework: ExpressionFramework
   difficulty: TrainingDifficulty
   questionMix: QuestionMix
@@ -478,6 +480,7 @@ export const INTERVIEW_SCENARIO_PRESETS: InterviewScenarioPreset[] = [
     personaNameKey: 'training.interviewScenario.selfIntro.personaName',
     personaRoleKey: 'training.interviewScenario.selfIntro.personaRole',
     personaStyleKey: 'training.interviewScenario.selfIntro.personaStyle',
+    openingKey: 'training.interviewScenario.selfIntro.opening',
     fallbackLabel: 'Self-intro',
     fallbackDesc: 'Open with a crisp PM career story',
     fallbackFocus: '60-90 second self-introduction, motivation, role fit, career transitions',
@@ -496,6 +499,7 @@ export const INTERVIEW_SCENARIO_PRESETS: InterviewScenarioPreset[] = [
     personaNameKey: 'training.interviewScenario.resumeDeepDive.personaName',
     personaRoleKey: 'training.interviewScenario.resumeDeepDive.personaRole',
     personaStyleKey: 'training.interviewScenario.resumeDeepDive.personaStyle',
+    openingKey: 'training.interviewScenario.resumeDeepDive.opening',
     fallbackLabel: 'Resume deep dive',
     fallbackDesc: 'Defend project impact and exact contribution',
     fallbackFocus: 'resume project, product ownership, metrics, trade-offs, retrospective',
@@ -514,6 +518,7 @@ export const INTERVIEW_SCENARIO_PRESETS: InterviewScenarioPreset[] = [
     personaNameKey: 'training.interviewScenario.productSense.personaName',
     personaRoleKey: 'training.interviewScenario.productSense.personaRole',
     personaStyleKey: 'training.interviewScenario.productSense.personaStyle',
+    openingKey: 'training.interviewScenario.productSense.opening',
     fallbackLabel: 'Product case',
     fallbackDesc: 'Structure users, problems, solutions, and metrics',
     fallbackFocus: 'product sense, user segmentation, problem framing, prioritization, success metrics',
@@ -532,6 +537,7 @@ export const INTERVIEW_SCENARIO_PRESETS: InterviewScenarioPreset[] = [
     personaNameKey: 'training.interviewScenario.metricsGrowth.personaName',
     personaRoleKey: 'training.interviewScenario.metricsGrowth.personaRole',
     personaStyleKey: 'training.interviewScenario.metricsGrowth.personaStyle',
+    openingKey: 'training.interviewScenario.metricsGrowth.opening',
     fallbackLabel: 'Metrics case',
     fallbackDesc: 'Diagnose metric movement and propose experiments',
     fallbackFocus: 'metric tree, diagnosis, experiment design, guardrail metrics, trade-offs',
@@ -550,6 +556,7 @@ export const INTERVIEW_SCENARIO_PRESETS: InterviewScenarioPreset[] = [
     personaNameKey: 'training.interviewScenario.behavioral.personaName',
     personaRoleKey: 'training.interviewScenario.behavioral.personaRole',
     personaStyleKey: 'training.interviewScenario.behavioral.personaStyle',
+    openingKey: 'training.interviewScenario.behavioral.opening',
     fallbackLabel: 'Behavioral',
     fallbackDesc: 'Answer conflict, failure, influence, ambiguity',
     fallbackFocus: 'conflict, failure, influence without authority, ambiguity, learning',
@@ -568,6 +575,7 @@ export const INTERVIEW_SCENARIO_PRESETS: InterviewScenarioPreset[] = [
     personaNameKey: 'training.interviewScenario.crossFunctional.personaName',
     personaRoleKey: 'training.interviewScenario.crossFunctional.personaRole',
     personaStyleKey: 'training.interviewScenario.crossFunctional.personaStyle',
+    openingKey: 'training.interviewScenario.crossFunctional.opening',
     fallbackLabel: 'XFN round',
     fallbackDesc: 'Show collaboration with engineering, design, data, business',
     fallbackFocus: 'technical trade-offs, design conflict, data uncertainty, stakeholder alignment',
@@ -586,6 +594,7 @@ export const INTERVIEW_SCENARIO_PRESETS: InterviewScenarioPreset[] = [
     personaNameKey: 'training.interviewScenario.offer.personaName',
     personaRoleKey: 'training.interviewScenario.offer.personaRole',
     personaStyleKey: 'training.interviewScenario.offer.personaStyle',
+    openingKey: 'training.interviewScenario.offer.opening',
     fallbackLabel: 'Offer negotiation',
     fallbackDesc: 'Discuss comp, level, scope, and timeline',
     fallbackFocus: 'salary expectations, level, scope, competing process, timeline, goodwill',
@@ -662,6 +671,7 @@ export const PRODUCT_SCENARIO_PRESETS: ProductScenarioPreset[] = [
     personaNameKey: 'training.productScenario.roadmap.personaName',
     personaRoleKey: 'training.productScenario.roadmap.personaRole',
     personaStyleKey: 'training.productScenario.roadmap.personaStyle',
+    openingKey: 'training.productScenario.roadmap.opening',
     fallbackLabel: 'Roadmap priority',
     fallbackDesc: 'Say no, defend sequencing, and keep stakeholders aligned',
     fallbackFocus: 'roadmap prioritization, revenue requests, opportunity sizing, trade-offs',
@@ -680,6 +690,7 @@ export const PRODUCT_SCENARIO_PRESETS: ProductScenarioPreset[] = [
     personaNameKey: 'training.productScenario.prd.personaName',
     personaRoleKey: 'training.productScenario.prd.personaRole',
     personaStyleKey: 'training.productScenario.prd.personaStyle',
+    openingKey: 'training.productScenario.prd.opening',
     fallbackLabel: 'PRD review',
     fallbackDesc: 'Clarify scope, acceptance criteria, and engineering trade-offs',
     fallbackFocus: 'PRD review, scope, acceptance criteria, feasibility, dependencies',
@@ -698,6 +709,7 @@ export const PRODUCT_SCENARIO_PRESETS: ProductScenarioPreset[] = [
     personaNameKey: 'training.productScenario.launchRisk.personaName',
     personaRoleKey: 'training.productScenario.launchRisk.personaRole',
     personaStyleKey: 'training.productScenario.launchRisk.personaStyle',
+    openingKey: 'training.productScenario.launchRisk.opening',
     fallbackLabel: 'Launch risk',
     fallbackDesc: 'Make a go/no-go recommendation under imperfect information',
     fallbackFocus: 'launch readiness, risk mitigation, go/no-go decision, owner alignment',
@@ -716,6 +728,7 @@ export const PRODUCT_SCENARIO_PRESETS: ProductScenarioPreset[] = [
     personaNameKey: 'training.productScenario.feedback.personaName',
     personaRoleKey: 'training.productScenario.feedback.personaRole',
     personaStyleKey: 'training.productScenario.feedback.personaStyle',
+    openingKey: 'training.productScenario.feedback.opening',
     fallbackLabel: 'Feedback triage',
     fallbackDesc: 'Separate signal from anecdotes and turn feedback into action',
     fallbackFocus: 'user feedback, severity, frequency, segmentation, follow-up plan',
@@ -734,6 +747,7 @@ export const PRODUCT_SCENARIO_PRESETS: ProductScenarioPreset[] = [
     personaNameKey: 'training.productScenario.executive.personaName',
     personaRoleKey: 'training.productScenario.executive.personaRole',
     personaStyleKey: 'training.productScenario.executive.personaStyle',
+    openingKey: 'training.productScenario.executive.opening',
     fallbackLabel: 'Executive update',
     fallbackDesc: 'Communicate progress, risk, asks, and decision options clearly',
     fallbackFocus: 'executive update, progress, risk, options, decision ask',
@@ -752,6 +766,7 @@ export const PRODUCT_SCENARIO_PRESETS: ProductScenarioPreset[] = [
     personaNameKey: 'training.productScenario.conflict.personaName',
     personaRoleKey: 'training.productScenario.conflict.personaRole',
     personaStyleKey: 'training.productScenario.conflict.personaStyle',
+    openingKey: 'training.productScenario.conflict.opening',
     fallbackLabel: 'Stakeholder conflict',
     fallbackDesc: 'Align design, engineering, and business when incentives diverge',
     fallbackFocus: 'stakeholder conflict, shared goal, constraints, decision facilitation',

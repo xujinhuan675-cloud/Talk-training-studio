@@ -322,7 +322,7 @@ export const STT_PROVIDER_PRESETS: VoiceProviderPreset[] = [
     baseUrl: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel',
     model: 'volc.bigasr.sauc.duration',
     reuseTtsKey: true,
-    note: 'Can reuse the Volcengine Speech TTS key; supports pcm, wav, ogg, or mp3 input after browser WebM conversion.',
+    note: 'Can reuse the Volcengine Speech TTS key; browser recordings are normalized to 16 kHz PCM WAV before transcription.',
   },
   {
     value: 'deepgram',

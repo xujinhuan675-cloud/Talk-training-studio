@@ -10,7 +10,7 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 
 - 文本侧优先对齐和迁移 LibreChat 的成熟能力。
 - 实时语音/多模态侧优先对齐和迁移 Pipecat 的成熟能力。
-- 平台壳、账号、登录、用量、公告、计费和管理控制面优先对齐 NewAPI；TalkWise 作为 NewAPI 生态中的训练产品模块演进，而不是继续维持一个孤立 UI。
+- 平台壳、账号、登录、用量、公告、计费和管理控制面由 NewAPI 承接；TalkWise 的已确认目标架构是成为 NewAPI web 内的一等训练产品模块，而不是长期维持独立前端或孤立 UI。
 - 语音体验允许两条画像并存：低成本、低延迟的转写式近实时链路，以及基于 Pipecat 的真正实时语音链路；两者都应接入同一训练闭环。
 - TalkWise 不以完整复制 Pipecat 平台为目标；目标是把语音、视频和多模态训练中不该自研的基础运行能力，优先站到 Pipecat 或同等级成熟方案上，必要时做 TalkWise 本地化适配。
 - TalkWise 当前训练能力保留为产品差异化：训练目标、persona/stakeholder、scenario、dispatcher、evaluation、growth/report、live guidance、训练复盘和能力沉淀。
@@ -21,7 +21,7 @@ Talk Training Studio 的长期目标不是继续堆一个自研 MVP，而是演�
 
 > 先看 LibreChat / Pipecat 有没有成熟底座可以迁移或站上去改造；只有它们不适合时，才在 TalkWise 中自研。自研也要做成可接入成熟底座的扩展，而不是新的孤岛。
 
-NewAPI 是账号、控制面和平台体验的默认来源。凡是登录、用户菜单、余额/用量、API Keys、公告、计费、系统设置、主题、导航壳和 admin console 相关需求，先看 NewAPI 已有实现，再决定复制、改写、链接回 NewAPI，或把 TalkWise 迁成 NewAPI 内的模块。
+NewAPI 是账号、控制面、平台体验和最终前端宿主的默认来源。凡是登录、用户菜单、余额/用量、API Keys、公告、计费、系统设置、主题、导航壳和 admin console 相关需求，先看 NewAPI 已有实现，再决定迁入、复用、复制、改写或暂时链接回 NewAPI。TalkWise 迁成 NewAPI 内的训练模块已是目标架构，不再作为每轮重新讨论的可选方向。
 
 TalkWise 前台产品界面不暴露 NewAPI 品牌名。NewAPI 可以作为源码、账号桥、计费、用量、公告和控制面能力来源，但可见导航、页面标题、tabs、菜单、badge、公告标题和用户菜单必须使用 TalkWise 自己的信息架构或中性功能名，例如“配置”“账号控制台”“用量”“公告”，不要显示“NewAPI”。
 
@@ -83,18 +83,20 @@ NewAPI 是 TalkWise 短中期平台化的首选底座，优先承接：
 
 短中期默认路线：
 
-- 保留当前 Vite + React Router，不为了 UI shell 迁移到 Rsbuild 或 TanStack Router。
+- 迁移窗口内保留当前 Vite + React Router，不为了单轮 UI shell 调整一次性迁移到 Rsbuild 或 TanStack Router；该前端是过渡宿主，不是长期平行平台。
 - 保留 TalkWise 后端训练语义和现有 NewAPI auth bridge。
 - 先建立 NewAPI-style adapter layer：shell token、header/sidebar、user menu、公告/通知入口、余额/用量入口、NewAPI-like UI primitives 和 route/nav metadata。
 - 替换全局导航形态；业务页内部 tabs 保留语义，只改成 NewAPI-like Tabs/Segmented 视觉。
 - 路由内类似结构也遵循同一原则：换壳和交互，不换 TalkWise 产品信息架构；不改 tab key、URL、权限、API、表单字段或训练状态。
 - 复杂页面按风险逐页换肤：Home/Growth/History 优先，TrainingStudio 第二批，Settings/Chat/实时语音沉浸页最后处理。
+- 迁移窗口内新增平台能力时，优先形成可被 NewAPI host 直接消费的 adapter、route metadata 和数据契约；不要继续扩展一套只服务独立 TalkWise shell 的平行基础设施。
 
-长期默认路线：
+目标架构路线：
 
-- 当需求开始系统性复用 NewAPI billing、announcements、permissions、theme/customization、system settings 和 admin console 时，评估把 TalkWise 前端迁成 NewAPI web 内的训练模块。
-- 候选模块路径可以是 `/training`、`/training/sessions`、`/training/review`、`/training/settings` 或同等 NewAPI sidebar module。
-- 长期迁移必须先写清 route 迁移、API base/proxy、role mapping、gateway 用量归因、测试矩阵和回滚策略。
+- NewAPI web 是唯一长期前端宿主；TalkWise 以 `/training` 为根路径注册正式 sidebar/top-nav module，共享 NewAPI 的 authenticated layout、session、permissions、theme、notifications、billing/usage 和 admin console。
+- 目标模块路径默认包括 `/training`、`/training/scenarios`、`/training/sessions`、`/training/growth`、`/training/settings`；实时训练可使用 `/training/live/:sessionId` 或等价沉浸式子路由。
+- TalkWise 后端继续拥有训练 session、scenario、persona、evaluation、growth、live guidance 和媒体语义；前端迁入 NewAPI 不等于把训练业务数据或 TrainingCore 塞进 NewAPI 网关核心。
+- 迁移前必须写清 route migration、API base/proxy、role mapping、gateway usage attribution、test matrix、rollback plan 和独立 Vite shell 退场条件。它们是实施门槛，不是是否迁移的决策门槛。
 
 ### TalkWise 保留和可变的部分
 
@@ -236,7 +238,7 @@ git diff --check
 - 全局平台 shell 默认对齐 NewAPI：header/sidebar/user menu/notification/quota/theme/navigation 使用 NewAPI 风格和可复制源码作为第一参考。
 - 业务训练页面保持工具型、紧凑、可扫描；不要回到 AI demo、营销页或一套孤立自研皮肤。
 - 前台 UI 不显示 NewAPI 品牌名；只显示 TalkWise 品牌、TalkWise 业务命名或中性功能命名。
-- 保留当前 Vite + React Router，除非任务明确进入长期 NewAPI module migration；不要为了单轮 UI 调整迁移构建和路由栈。
+- 迁移窗口内保留当前 Vite + React Router；只有进入已规划的 NewAPI module migration 页面簇时才迁移构建和路由栈，不要为了单轮 UI 调整做无边界重写。
 - 全局导航可以被 NewAPI-like shell 替换；业务页内部 tabs 只改视觉，不改变训练状态、评分、复盘或配置语义。
 - 不做 landing page 式包装。
 - message tree / branch 操作必须有清楚的 loading、disabled、success、error 状态。
@@ -284,7 +286,7 @@ git diff --check
 
 - LibreChat 尚未成为系统性文本底座。
 - Pipecat 不再被定义为必须成为唯一稳定语音 runtime；低成本、低延迟的转写式近实时链路可以与真正实时语音链路并存。
-- NewAPI 尚未成为完整内嵌平台模块；短中期先用 NewAPI-style shell 和控制面入口，长期再评估迁入 NewAPI web。
+- NewAPI 尚未成为完整内嵌平台模块；当前 NewAPI-style shell 和控制面入口只是迁移期适配，最终迁入 NewAPI web 已确定，尚缺 route contract、host integration、分批迁移和独立 shell 退场。
 - TrainingCore 尚未完全统一文本/语音/视频训练编排。
 - legacy stakeholder room、conversation tree、training session、转写式 near-realtime pipeline、Pipecat realtime pipeline 仍需收口 adapter 边界，但并存本身不是问题。
 

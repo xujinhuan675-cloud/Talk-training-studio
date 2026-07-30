@@ -9,6 +9,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Loader2, Square } from 'lucide-react'
 import { getRoomVoiceWebSocketUrl } from '../services/api'
+import {
+  normalizeRecordedAudioToWav,
+  TURN_BASED_STT_AUDIO_FORMAT,
+} from '../services/turnBasedVoiceAudio'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
 import './VoiceRecorder.css'
@@ -27,6 +31,16 @@ interface VoiceRecorderProps {
 const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
 const HOLD_START_DELAY_MS = 250
 const TRANSCRIPTION_TIMEOUT_MS = 45000
+const VOICE_WEBSOCKET_CHUNK_BYTES = 48 * 1024
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const binaryChunkSize = 0x2000
+  for (let offset = 0; offset < bytes.length; offset += binaryChunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + binaryChunkSize))
+  }
+  return btoa(binary)
+}
 
 const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   roomId,
@@ -52,7 +66,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const suppressNextClickRef = useRef(false)
   const stopAfterStartRef = useRef(false)
   const startingRef = useRef(false)
-  const pendingSendsRef = useRef(0)
   const chunksRef = useRef<Blob[]>([])
   const metadataRef = useRef<Record<string, unknown> | undefined>(metadata)
 
@@ -226,67 +239,69 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       mediaRecorderRef.current = recorder
       chunksRef.current = []
 
-      let chunksSentCount = 0
-
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data)
-          pendingSendsRef.current++
-          const reader = new FileReader()
-          reader.onloadend = () => {
-            if (ws.readyState === WebSocket.OPEN && reader.result) {
-              const base64 = (reader.result as string).split(',')[1]
-              if (base64) {
-                ws.send(JSON.stringify({ type: 'audio_chunk', data: base64 }))
-                chunksSentCount++
-              }
-            }
-            pendingSendsRef.current--
-          }
-          reader.readAsDataURL(e.data)
         }
       }
 
       recorder.onstop = () => {
-        // Wait for all pending audio chunks to be sent before sending speech_end
-        const flushAndEnd = () => {
-          if (pendingSendsRef.current > 0) {
-            setTimeout(flushAndEnd, 50)
-            return
-          }
-          if (chunksSentCount === 0) {
-            // No audio data was actually sent — don't send speech_end
-            setError(tr('未录到音频数据，请重试', 'No audio was recorded. Please try again.'))
-            setTimeout(() => setError(null), 3000)
-            setRecordState('idle')
-            setDuration(0)
-            if (ws.readyState === WebSocket.OPEN) ws.close()
-            return
-          }
-          if (ws.readyState === WebSocket.OPEN) {
-            const message: Record<string, unknown> = { type: 'speech_end', format: 'webm' }
+        void (async () => {
+          if (wsRef.current !== ws) return
+
+          try {
+            const sourceAudio = new Blob(chunksRef.current, { type: recorder.mimeType || mimeType })
+            const wavAudio = await normalizeRecordedAudioToWav(sourceAudio)
+            if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return
+
+            const audioBytes = new Uint8Array(await wavAudio.arrayBuffer())
+            if (!audioBytes.length) {
+              throw new Error('No audio data was recorded.')
+            }
+
+            for (let offset = 0; offset < audioBytes.length; offset += VOICE_WEBSOCKET_CHUNK_BYTES) {
+              ws.send(JSON.stringify({
+                type: 'audio_chunk',
+                data: encodeBase64(audioBytes.subarray(offset, offset + VOICE_WEBSOCKET_CHUNK_BYTES)),
+              }))
+            }
+
+            const message: Record<string, unknown> = {
+              type: 'speech_end',
+              format: TURN_BASED_STT_AUDIO_FORMAT,
+            }
             if (metadataRef.current && Object.keys(metadataRef.current).length > 0) {
               message.metadata = metadataRef.current
             }
             ws.send(JSON.stringify(message))
-          }
-          setRecordState('processing')
-          if (transcriptionTimeoutRef.current) {
-            clearTimeout(transcriptionTimeoutRef.current)
-          }
-          // Auto-close WS after a delay to receive transcription
-          transcriptionTimeoutRef.current = window.setTimeout(() => {
-            if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) {
-              wsRef.current.close()
+            setRecordState('processing')
+            if (transcriptionTimeoutRef.current) {
+              clearTimeout(transcriptionTimeoutRef.current)
             }
-            transcriptionTimeoutRef.current = 0
-            setError(tr('语音识别超时，请重试', 'Speech recognition timed out. Please try again.'))
-            setTimeout(() => setError(null), 3000)
+            // Auto-close WS after a delay to receive transcription.
+            transcriptionTimeoutRef.current = window.setTimeout(() => {
+              if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) {
+                wsRef.current.close()
+              }
+              transcriptionTimeoutRef.current = 0
+              setError(tr('语音识别超时，请重试', 'Speech recognition timed out. Please try again.'))
+              setTimeout(() => setError(null), 3000)
+              setRecordState('idle')
+              setDuration(0)
+            }, TRANSCRIPTION_TIMEOUT_MS)
+          } catch (err: unknown) {
+            if (wsRef.current !== ws) return
+            console.error('Failed to prepare turn-based voice audio:', err)
+            setError(tr(
+              '录音音频无法转换为标准 WAV，请重试或检查浏览器音频设置。',
+              'The recording could not be converted to standard WAV audio. Please try again or check your browser audio settings.',
+            ))
+            setTimeout(() => setError(null), 5000)
             setRecordState('idle')
             setDuration(0)
-          }, TRANSCRIPTION_TIMEOUT_MS)
-        }
-        flushAndEnd()
+            if (ws.readyState <= WebSocket.OPEN) ws.close()
+          }
+        })()
       }
 
       recorder.start(500) // 500ms chunks
@@ -401,9 +416,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       )}
       {state === 'recording' && (
         <span className="voice-duration">{formatDuration(duration)}</span>
-      )}
-      {state === 'processing' && (
-        <span className="voice-status">{tr('识别中...', 'Recognizing...')}</span>
       )}
       <Button
         variant={state === 'recording' ? 'danger' : state === 'processing' ? 'primary' : 'secondary'}

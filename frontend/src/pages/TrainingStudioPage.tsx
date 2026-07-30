@@ -386,6 +386,17 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             targetLanguage: targetLanguageLabel,
           })}`
         : prompt
+      const openingMessage = !isLiveCoachMode && scenarioStakeholder
+        ? {
+            content: t(scenarioStakeholder.openingKey),
+            metadata: {
+              source: 'training_studio_opening',
+              scenario: config.scenario,
+              scenarioPreset: scenarioStakeholder.value,
+              replyLanguage,
+            },
+          }
+        : undefined
       const runtimeTrainingPoints = isLiveCoachMode
         ? [
             t('training.liveCoach.nextReplyPoint'),
@@ -471,6 +482,7 @@ export default function TrainingStudioPage({ initialProfile = 'practice' }: Trai
             training_points: runtimeTrainingPoints,
             difficulty: toTrainingRuntimeDifficulty(config.difficulty),
           },
+          ...(openingMessage ? { opening_message: openingMessage } : {}),
         },
         startTrainingSession,
         buildTrainingSessionStartRequest: buildRoomBackedTrainingSessionStartRequest,

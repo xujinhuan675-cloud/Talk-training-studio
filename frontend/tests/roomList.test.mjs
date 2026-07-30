@@ -75,6 +75,14 @@ test('filterRooms searches room names and personas while preserving recent-first
   assert.deepEqual(roomList.filterRooms(rooms, { query: 'alice' }).map((room) => room.id), [2])
 })
 
+test('getRoomDisplayName hides generated training prefixes without changing ordinary titles', () => {
+  assert.equal(roomList.getRoomDisplayName('Training: Regional sales review'), 'Regional sales review')
+  assert.equal(roomList.getRoomDisplayName('training：董事会答辩'), '董事会答辩')
+  assert.equal(roomList.getRoomDisplayName('备战: Alex'), 'Alex')
+  assert.equal(roomList.getRoomDisplayName('备战：直属负责人'), '直属负责人')
+  assert.equal(roomList.getRoomDisplayName('Customer renewal'), 'Customer renewal')
+})
+
 test('groupRoomsByActivity buckets active rooms into time sections', () => {
   const now = new Date(2026, 6, 27, 12, 0, 0)
   const groups = roomList.groupRoomsByActivity([
@@ -116,6 +124,7 @@ test('RoomList keeps search local and shows room rows as title-only items', () =
 
   assert.match(source, /Filter current conversations/)
   assert.match(source, /collapsedGroups/)
+  assert.match(source, /getRoomDisplayName\(room\.name\)/)
   assert.match(source, /aria-expanded=\{!collapsed\}/)
   assert.match(source, /<ChevronDown size=\{13\} aria-hidden="true" \/>/)
   assert.doesNotMatch(source, /<small>\{group\.rooms\.length\}<\/small>/)

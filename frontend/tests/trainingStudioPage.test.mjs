@@ -168,6 +168,18 @@ test('TrainingStudioPage embeds battle prep as the second page tab', () => {
   assert.match(battlePrepCss, /\.bpp-page--embedded \.bpp-header\s*\{[\s\S]*justify-content: flex-end;/)
 })
 
+test('TrainingStudioPage starts preset counterpart sessions with a persisted opening message', () => {
+  const source = readSource('src/pages/TrainingStudioPage.tsx')
+  const presets = readSource('src/services/trainingStudio.ts')
+
+  assert.match(source, /const openingMessage = !isLiveCoachMode && scenarioStakeholder/)
+  assert.match(source, /content: t\(scenarioStakeholder\.openingKey\)/)
+  assert.match(source, /source: 'training_studio_opening'/)
+  assert.match(source, /opening_message: openingMessage/)
+  assert.match(presets, /openingKey: 'training\.interviewScenario\.resumeDeepDive\.opening'/)
+  assert.match(presets, /openingKey: 'training\.productScenario\.roadmap\.opening'/)
+})
+
 test('BattlePrepPage returns to training studio when launched from the workbench', () => {
   const source = readSource('src/pages/BattlePrepPage.tsx')
 
