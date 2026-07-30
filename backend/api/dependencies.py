@@ -32,7 +32,6 @@ from infrastructure.external.newapi_auth import (
     NewAPIAuthError,
     NewAPIAuthUnavailableError,
     NewAPIIdentity,
-    authenticate_newapi_credentials,
     exchange_newapi_authorization_code,
     fetch_newapi_identity,
 )
@@ -64,11 +63,11 @@ class CurrentUser:
 
     @property
     def is_leader(self) -> bool:
-        return self.system_role == "leader"
+        return False
 
     @property
     def is_staff(self) -> bool:
-        return self.system_role == "staff"
+        return not self.is_admin
 
 
 @dataclass(frozen=True)
@@ -88,7 +87,7 @@ _MOCK_USERS: dict[str, CurrentUser] = {
     "leader": CurrentUser(
         user_id="user-leader-001",
         username="leader",
-        system_role="leader",
+        system_role="staff",
         business_role="sales",
         team_id="team-revenue",
     ),
@@ -108,7 +107,7 @@ _MOCK_USERS: dict[str, CurrentUser] = {
     ),
 }
 _MOCK_USERS_BY_USER_ID = {user.user_id: user for user in _MOCK_USERS.values()}
-_SYSTEM_ROLES = {"admin", "leader", "staff"}
+_SYSTEM_ROLES = {"admin", "staff"}
 _AI_RATE_WINDOWS: dict[str, tuple[int, int]] = {}
 
 
@@ -133,10 +132,10 @@ def _has_mock_auth_signal(*values: object | None) -> bool:
     return any(_coerce_optional_text(value) for value in values)
 
 
-def _system_role_from_newapi_role(role: int) -> str:
+def _is_admin_from_newapi_role(role: int) -> bool:
     if role >= settings.NEWAPI_ADMIN_ROLE_VALUE:
-        return "admin"
-    return "staff"
+        return True
+    return False
 
 
 def _current_user_from_newapi_identity(identity: NewAPIIdentity) -> CurrentUser:
@@ -151,11 +150,12 @@ def _current_user_from_newapi_identity(identity: NewAPIIdentity) -> CurrentUser:
         if quota_remaining is not None and quota_used is not None
         else None
     )
+    is_admin = _is_admin_from_newapi_role(identity.role)
     return CurrentUser(
         user_id=f"newapi:{identity.id}",
         username=identity.username,
         display_name=identity.display_name,
-        system_role=_system_role_from_newapi_role(identity.role),
+        system_role="admin" if is_admin else "staff",
         business_role=settings.NEWAPI_DEFAULT_BUSINESS_ROLE,
         team_id=team_id or (f"newapi:{group}" if group else settings.NEWAPI_DEFAULT_TEAM_ID),
         team_name=team_name or group,
@@ -184,28 +184,6 @@ async def get_current_user_from_newapi_token(access_token: str) -> CurrentUser:
         ) from exc
     except NewAPIAuthError as exc:
         raise HTTPException(status_code=401, detail="Invalid access token") from exc
-    return _current_user_from_newapi_identity(identity)
-
-
-async def get_current_user_from_newapi_credentials(username: str, password: str) -> CurrentUser:
-    try:
-        identity = await authenticate_newapi_credentials(
-            username,
-            password,
-            base_url=settings.NEWAPI_BASE_URL,
-            login_path=settings.NEWAPI_LOGIN_PATH,
-            timeout_seconds=settings.NEWAPI_AUTH_TIMEOUT_SECONDS,
-        )
-    except NewAPIAuthUnavailableError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Authentication service unavailable",
-        ) from exc
-    except NewAPIAuthError as exc:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password",
-        ) from exc
     return _current_user_from_newapi_identity(identity)
 
 
@@ -311,6 +289,8 @@ async def get_current_user(
         role = "staff"
     else:
         business_role = None
+    if role == "leader":
+        role = "staff"
     if role is not None and role not in _SYSTEM_ROLES:
         raise HTTPException(status_code=401, detail="Unsupported mock user role")
 
@@ -347,11 +327,6 @@ def training_scope_for(
 ) -> TrainingScope:
     user_id = _coerce_optional_text(requested_user_id)
     if current_user.is_admin:
-        return TrainingScope(
-            user_id=user_id,
-            team_id=current_user.team_id,
-        )
-    if current_user.is_leader:
         return TrainingScope(user_id=user_id, team_id=current_user.team_id)
     return TrainingScope(user_id=current_user.user_id, team_id=current_user.team_id)
 

@@ -185,7 +185,7 @@ def test_training_material_tool_consumer_lists_scoped_safe_materials() -> None:
     assert fake.read_calls == []
 
 
-def test_training_material_tool_consumer_leader_uses_team_scope() -> None:
+def test_training_material_tool_consumer_legacy_leader_uses_own_scope() -> None:
     fake = _FakeFileAssetService(
         assets=[
             _material_asset(
@@ -209,7 +209,7 @@ def test_training_material_tool_consumer_leader_uses_team_scope() -> None:
     scope = fake.list_calls[0]["metadata_scope"]
     assert scope.user_id == "user-leader-001"
     assert scope.team_id == "team-revenue"
-    assert scope.include_team_scope is True
+    assert scope.include_team_scope is False
     assert scope.allow_unscoped is False
 
 

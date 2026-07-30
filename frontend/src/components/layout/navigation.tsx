@@ -10,7 +10,6 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import type { TranslationKey } from '../../i18n'
-import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from '../../services/auth'
 import { APP_ROUTES } from '../../appRoutes'
 
 export interface AppNavItem {
@@ -21,7 +20,7 @@ export interface AppNavItem {
   matchPaths?: string[]
   matchPrefix?: string
   matchPrefixes?: string[]
-  roles?: readonly SystemRole[]
+  requiresAdmin?: boolean
   elevated?: boolean
 }
 
@@ -48,7 +47,7 @@ export const desktopNavSections: AppNavSection[] = [
         icon: <Dumbbell size={18} />,
         labelKey: 'nav.trainingStudio',
         exact: true,
-        roles: MANAGEMENT_SYSTEM_ROLES,
+        requiresAdmin: true,
       },
       {
         to: APP_ROUTES.conversations,

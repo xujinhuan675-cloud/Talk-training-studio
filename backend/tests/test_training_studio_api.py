@@ -339,19 +339,26 @@ async def test_scenario_config_reads_default_state(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scenario_config_admin_and_leader_can_save(client: AsyncClient) -> None:
-    for mock_user in ("admin", "leader"):
-        payload = await read_scenario_config_state(client)
-        payload["scenarios"][0]["dimensionWeights"] = scenario_dimension_weights()
+async def test_scenario_config_only_admin_can_save(client: AsyncClient) -> None:
+    payload = await read_scenario_config_state(client)
+    payload["scenarios"][0]["dimensionWeights"] = scenario_dimension_weights()
 
-        resp = await client.put(
-            "/api/v1/training-studio/scenario-config",
-            headers={"X-Mock-User": mock_user},
-            json=payload,
-        )
+    admin_response = await client.put(
+        "/api/v1/training-studio/scenario-config",
+        headers={"X-Mock-User": "admin"},
+        json=payload,
+    )
 
-        assert resp.status_code == 200
-        assert resp.json()["data"]["scenarios"][0]["dimensionWeights"] == scenario_dimension_weights()
+    assert admin_response.status_code == 200
+    assert admin_response.json()["data"]["scenarios"][0]["dimensionWeights"] == scenario_dimension_weights()
+
+    leader_response = await client.put(
+        "/api/v1/training-studio/scenario-config",
+        headers={"X-Mock-User": "leader"},
+        json=payload,
+    )
+
+    assert leader_response.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -1546,7 +1553,7 @@ async def test_staff_session_list_ignores_forged_user_filter(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_leader_scenario_progress_is_limited_to_own_team(client: AsyncClient) -> None:
+async def test_legacy_leader_scenario_progress_is_limited_to_own_user(client: AsyncClient) -> None:
     revenue_admin = admin_team_headers("team-revenue")
     service_admin = admin_team_headers("team-service")
     revenue_resp = await client.post(
@@ -1588,8 +1595,7 @@ async def test_leader_scenario_progress_is_limited_to_own_team(client: AsyncClie
 
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert [item["team_id"] for item in data] == ["team-revenue"]
-    assert [item["scenario_id"] for item in data] == ["revenue-scenario"]
+    assert data == []
 
 
 @pytest.mark.asyncio

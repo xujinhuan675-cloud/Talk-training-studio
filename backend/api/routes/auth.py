@@ -10,7 +10,6 @@ from api.dependencies import (
     extract_bearer_token,
     get_current_user,
     get_current_user_from_newapi_code,
-    get_current_user_from_newapi_credentials,
     get_current_user_from_newapi_token,
 )
 from core.config import settings
@@ -37,6 +36,7 @@ class AuthUserDTO(BaseModel):
     username: str | None = None
     display_name: str | None = None
     system_role: str
+    is_admin: bool
     business_role: str | None = None
     team_id: str | None = None
     team_name: str | None = None
@@ -57,11 +57,6 @@ class NewAPIExchangeRequest(BaseModel):
     redirect_uri: str | None = None
 
 
-class NewAPILoginRequest(BaseModel):
-    username: str | None = None
-    password: str | None = None
-
-
 class AuthTeamDTO(BaseModel):
     id: str
     name: str
@@ -75,6 +70,7 @@ class AuthTeamMemberDTO(BaseModel):
     display_name: str | None = None
     email: str | None = None
     system_role: str | None = None
+    is_admin: bool = False
     group: str | None = None
     team_id: str | None = None
     team_name: str | None = None
@@ -108,7 +104,8 @@ def _auth_user_payload(current_user: CurrentUser) -> AuthUserDTO:
         user_id=current_user.user_id,
         username=current_user.username,
         display_name=current_user.display_name,
-        system_role=current_user.system_role,
+        system_role="admin" if current_user.is_admin else "staff",
+        is_admin=current_user.is_admin,
         business_role=current_user.business_role,
         team_id=current_user.team_id,
         team_name=current_user.team_name or current_user.team_id,
@@ -149,7 +146,7 @@ def _newapi_group_for_current_user(current_user: CurrentUser) -> str:
 
 
 def _require_team_manager(current_user: CurrentUser) -> None:
-    if current_user.system_role not in {"admin", "leader"}:
+    if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
@@ -159,6 +156,10 @@ def _system_role_from_newapi_member_role(role: int | None) -> str | None:
     if role >= settings.NEWAPI_ADMIN_ROLE_VALUE:
         return "admin"
     return "staff"
+
+
+def _is_admin_from_newapi_member_role(role: int | None) -> bool:
+    return bool(role is not None and role >= settings.NEWAPI_ADMIN_ROLE_VALUE)
 
 
 def _team_payload(team: NewAPITeam) -> AuthTeamDTO:
@@ -178,6 +179,7 @@ def _team_member_payload(member: NewAPITeamMember) -> AuthTeamMemberDTO:
         display_name=member.display_name,
         email=member.email,
         system_role=_system_role_from_newapi_member_role(member.role),
+        is_admin=_is_admin_from_newapi_member_role(member.role),
         group=member.group,
         team_id=member.team_id,
         team_name=member.team_name,
@@ -221,7 +223,8 @@ def _current_user_team_member_payload(
         username=username,
         display_name=current_user.display_name,
         email=None,
-        system_role=current_user.system_role,
+        system_role="admin" if current_user.is_admin else "staff",
+        is_admin=current_user.is_admin,
         group=team.group,
         team_id=team.id,
         team_name=team.name,
@@ -260,31 +263,6 @@ async def create_newapi_session(
         raise HTTPException(status_code=401, detail="Access token required")
 
     current_user = await get_current_user_from_newapi_token(access_token)
-    _set_talkwise_session_cookie(response, current_user)
-    return success_response(
-        data=_auth_user_payload(current_user),
-        message="Session verified",
-    )
-
-
-@router.post(
-    "/newapi/login",
-    summary="Sign in with account username and password",
-    response_model=ApiResponse[AuthUserDTO],
-)
-async def create_newapi_login_session(
-    payload: NewAPILoginRequest,
-    response: Response,
-):
-    username = _optional_text(payload.username)
-    password = payload.password or ""
-    if not username or not password:
-        raise HTTPException(
-            status_code=422,
-            detail="Username and password are required",
-        )
-
-    current_user = await get_current_user_from_newapi_credentials(username, password)
     _set_talkwise_session_cookie(response, current_user)
     return success_response(
         data=_auth_user_payload(current_user),

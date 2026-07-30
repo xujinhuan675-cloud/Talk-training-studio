@@ -44,7 +44,7 @@ test('ScenarioLeaderboardPage labels NewAPI Team Board by the loaded current tea
 
   assert.match(source, /const teamLabel = isNewApiSession/)
   assert.match(source, /newApiTeam\?\.name \?\? currentUser\?\.teamName/)
-  assert.match(source, /: currentUser\?\.systemRole === 'admin'/)
+  assert.match(source, /: isAdmin/)
   assert.match(source, /'All teams'/)
 })
 

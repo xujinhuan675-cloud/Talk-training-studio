@@ -1,4 +1,4 @@
-export type SystemRole = 'admin' | 'leader' | 'staff'
+export type SystemRole = 'admin' | 'staff'
 
 export type BusinessRole = 'operations' | 'sales' | 'customer_service'
 
@@ -20,6 +20,7 @@ export interface AuthUser {
   name: string
   systemRole: SystemRole | null
   systemRoleName?: string
+  isAdmin: boolean
   businessRole: BusinessRole
   businessRoleName: string
   teamId: string
@@ -46,7 +47,8 @@ export interface NewApiSessionUser {
   user_id: string
   username?: string | null
   display_name?: string | null
-  system_role: string
+  system_role?: string | null
+  is_admin?: boolean | null
   business_role?: string | null
   team_id?: string | null
   team_name?: string | null
@@ -74,6 +76,7 @@ export interface AuthTeamMember {
   displayName: string | null
   email: string | null
   systemRole: SystemRole | null
+  isAdmin: boolean
   group: string | null
   teamId: string | null
   teamName: string | null
@@ -128,6 +131,7 @@ interface AuthTeamMemberDTO {
   display_name?: string | null
   email?: string | null
   system_role?: string | null
+  is_admin?: boolean | null
   group?: string | null
   team_id?: string | null
   team_name?: string | null
@@ -153,16 +157,18 @@ interface AuthTeamUserSearchDTO {
 export const AUTH_STORAGE_KEY = 'talkwise.auth.state'
 export const NEWAPI_AUTO_SIGN_IN_SUPPRESSION_KEY = 'talkwise.auth.newapi_auto_sign_in_suppressed_until'
 
-export const MANAGEMENT_SYSTEM_ROLES: readonly SystemRole[] = ['admin', 'leader']
+export const MANAGEMENT_SYSTEM_ROLES: readonly SystemRole[] = ['admin']
 
 const DEFAULT_NEWAPI_BASE_URL = 'https://newapi.flowguide.cc'
 const NEWAPI_AUTO_SIGN_IN_SUPPRESSION_MS = 15 * 60 * 1000
+export const DEFAULT_TALKWISE_RETURN_PATH = '/workspace'
+const TALKWISE_LOGIN_CALLBACK_PATH = '/login'
 
 export const NEWAPI_BASE_URL = readViteEnvValue('VITE_NEWAPI_BASE_URL', DEFAULT_NEWAPI_BASE_URL)
 export const NEWAPI_AUTH_ENABLED = readViteEnvBoolean('VITE_NEWAPI_AUTH_ENABLED', false)
 export const NEWAPI_LOGIN_URL = readViteEnvValue('VITE_NEWAPI_LOGIN_URL', `${NEWAPI_BASE_URL}/login`)
 export const NEWAPI_LOGIN_MODE = normalizeNewApiLoginMode(
-  readViteEnvValue('VITE_NEWAPI_LOGIN_MODE', 'embedded'),
+  readViteEnvValue('VITE_NEWAPI_LOGIN_MODE', 'redirect'),
 )
 export const NEWAPI_CONSOLE_URL = readViteEnvValue('VITE_NEWAPI_CONSOLE_URL', NEWAPI_BASE_URL)
 export const NEWAPI_USAGE_URL = readViteEnvValue('VITE_NEWAPI_USAGE_URL', `${NEWAPI_BASE_URL}/usage-logs/common`)
@@ -186,8 +192,7 @@ export interface NewApiTalkWiseHandoffMessage {
 
 const SYSTEM_ROLE_NAMES: Record<SystemRole, string> = {
   admin: 'Admin',
-  leader: 'Leader',
-  staff: 'Staff',
+  staff: 'Member',
 }
 
 const BUSINESS_ROLE_NAMES: Record<BusinessRole, string> = {
@@ -205,6 +210,7 @@ export const MOCK_USERS: readonly MockAuthUser[] = [
     name: 'Admin',
     systemRole: 'admin',
     systemRoleName: 'Admin',
+    isAdmin: true,
     businessRole: 'operations',
     businessRoleName: 'Operations',
     teamId: 'team-ops',
@@ -217,8 +223,9 @@ export const MOCK_USERS: readonly MockAuthUser[] = [
     userId: 'user-leader-001',
     username: 'leader',
     name: 'Team Lead',
-    systemRole: 'leader',
-    systemRoleName: 'Leader',
+    systemRole: 'staff',
+    systemRoleName: 'Member',
+    isAdmin: false,
     businessRole: 'sales',
     businessRoleName: 'Sales',
     teamId: 'team-revenue',
@@ -232,7 +239,8 @@ export const MOCK_USERS: readonly MockAuthUser[] = [
     username: 'sales',
     name: 'Sales User',
     systemRole: 'staff',
-    systemRoleName: 'Staff',
+    systemRoleName: 'Member',
+    isAdmin: false,
     businessRole: 'sales',
     businessRoleName: 'Sales',
     teamId: 'team-revenue',
@@ -246,7 +254,8 @@ export const MOCK_USERS: readonly MockAuthUser[] = [
     username: 'customer_service',
     name: 'Service User',
     systemRole: 'staff',
-    systemRoleName: 'Staff',
+    systemRoleName: 'Member',
+    isAdmin: false,
     businessRole: 'customer_service',
     businessRoleName: 'Customer Service',
     teamId: 'team-service',
@@ -349,33 +358,6 @@ export async function connectNewApiAccessToken(accessToken: string): Promise<Aut
   return nextState
 }
 
-export async function connectNewApiCredentials(username: string, password: string): Promise<AuthState> {
-  const loginUsername = username.trim()
-  if (!loginUsername || !password) {
-    throw new Error('Username and password are required')
-  }
-
-  const resp = await fetch('/api/v1/auth/newapi/login', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ username: loginUsername, password }),
-  })
-  if (!resp.ok) {
-    throw await readAuthError(resp, `Failed to sign in: ${resp.status}`)
-  }
-
-  const json = (await resp.json()) as ApiResponse<NewApiSessionUser>
-  if (!json.data) {
-    throw new Error(publicAuthErrorMessage(json.message || 'Failed to sign in'))
-  }
-  const nextState = createNewApiAuthenticatedState(json.data)
-  clearNewApiAutoSignInSuppression()
-  return nextState
-}
-
 export async function connectNewApiAuthorizationCode(
   code: string,
   redirectUri?: string | null,
@@ -423,16 +405,32 @@ export async function connectNewApiBrowserSession(): Promise<AuthState | null> {
   return connectNewApiAccessToken(accessToken)
 }
 
+export function normalizeTalkWiseReturnTo(returnTo?: string | null): string {
+  const target = normalizeText(returnTo)
+  if (!target || !target.startsWith('/') || target.startsWith('//') || target.startsWith('/\\')) {
+    return DEFAULT_TALKWISE_RETURN_PATH
+  }
+
+  try {
+    const origin = currentTalkWiseOrigin() || 'https://talkwise.invalid'
+    const url = new URL(target, origin)
+    if (url.origin !== origin || url.pathname === TALKWISE_LOGIN_CALLBACK_PATH) {
+      return DEFAULT_TALKWISE_RETURN_PATH
+    }
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return DEFAULT_TALKWISE_RETURN_PATH
+  }
+}
+
 export function buildNewApiLoginUrl(returnTo?: string): string {
   try {
     const url = new URL(NEWAPI_LOGIN_URL)
-    const redirectTarget = normalizeText(returnTo) || currentBrowserUrl()
-    if (redirectTarget) {
-      url.searchParams.set('talkwise_return', redirectTarget)
-      url.searchParams.set(
-        'talkwise_redirect_uri',
-        normalizeText(NEWAPI_TALKWISE_REDIRECT_URI) || redirectTarget,
-      )
+    const callbackUrl = talkWiseLoginCallbackUrl()
+    if (callbackUrl) {
+      url.searchParams.set('talkwise_return', callbackUrl)
+      url.searchParams.set('talkwise_redirect_uri', callbackUrl)
+      url.searchParams.set('state', normalizeTalkWiseReturnTo(returnTo))
     }
     url.searchParams.set('talkwise_client_id', NEWAPI_TALKWISE_CLIENT_ID)
     return url.toString()
@@ -650,7 +648,7 @@ export function hasAnySystemRole(user: AuthUser | null | undefined, roles: reado
 }
 
 export function canAccessManagementFeatures(user: AuthUser | null | undefined): boolean {
-  return hasAnySystemRole(user, MANAGEMENT_SYSTEM_ROLES)
+  return Boolean(user?.isAdmin)
 }
 
 export function canAccessTeamLeaderboard(user: AuthUser | null | undefined): boolean {
@@ -697,7 +695,10 @@ function createNewApiUser(user: NewApiSessionUser): AuthUser {
   const userId = normalizeText(user.user_id) || 'newapi:unknown'
   const username = normalizeText(user.username) || userId
   const displayName = normalizeText(user.display_name) || username
-  const systemRole = normalizeSystemRole(user.system_role)
+  const isAdmin = typeof user.is_admin === 'boolean'
+    ? user.is_admin
+    : normalizeSystemRole(user.system_role) === 'admin'
+  const systemRole: SystemRole = isAdmin ? 'admin' : 'staff'
   const businessRole = normalizeBusinessRole(user.business_role)
   const teamId = normalizeText(user.team_id) || 'newapi'
   const teamName = normalizeText(user.team_name) || teamId
@@ -709,7 +710,8 @@ function createNewApiUser(user: NewApiSessionUser): AuthUser {
     username,
     name: displayName,
     systemRole,
-    systemRoleName: systemRole ? SYSTEM_ROLE_NAMES[systemRole] : undefined,
+    systemRoleName: SYSTEM_ROLE_NAMES[systemRole],
+    isAdmin,
     businessRole,
     businessRoleName: BUSINESS_ROLE_NAMES[businessRole],
     teamId,
@@ -734,6 +736,7 @@ function toNewApiStoredUser(user: AuthUser): NewApiSessionUser {
     username: user.username,
     display_name: user.name,
     system_role: user.systemRole ?? 'staff',
+    is_admin: user.isAdmin,
     business_role: user.businessRole,
     team_id: user.teamId,
     team_name: user.teamName,
@@ -771,13 +774,17 @@ function normalizeTeamMemberDTO(
     throw new Error('Team member response missing username')
   }
   const group = normalizeText(member.group) || fallbackTeam?.group || null
+  const isAdmin = typeof member.is_admin === 'boolean'
+    ? member.is_admin
+    : normalizeSystemRole(member.system_role) === 'admin'
   return {
     id: userId,
     userId,
     username,
     displayName: normalizeText(member.display_name),
     email: normalizeText(member.email),
-    systemRole: normalizeSystemRole(member.system_role),
+    systemRole: isAdmin ? 'admin' : 'staff',
+    isAdmin,
     group,
     teamId: normalizeText(member.team_id) || (group ? `newapi:${group}` : (fallbackTeam?.id ?? null)),
     teamName: normalizeText(member.team_name) || group || (fallbackTeam?.name ?? null),
@@ -945,9 +952,28 @@ function removeSensitiveHandoffParamsFromHash(hash: string): string {
   return nextParamText ? `#${nextParamText}` : ''
 }
 
-function currentBrowserUrl(): string | undefined {
-  if (typeof window === 'undefined') return undefined
-  return window.location.href
+function currentTalkWiseOrigin(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const origin = normalizeText(window.location?.origin)
+    if (origin) return new URL(origin).origin
+    const href = normalizeText(window.location?.href)
+    return href ? new URL(href).origin : null
+  } catch {
+    return null
+  }
+}
+
+function talkWiseLoginCallbackUrl(): string | null {
+  const origin = currentTalkWiseOrigin()
+  if (origin) {
+    try {
+      return new URL(TALKWISE_LOGIN_CALLBACK_PATH, origin).toString()
+    } catch {
+      // Fall through to the configured callback outside a browser context.
+    }
+  }
+  return normalizeText(NEWAPI_TALKWISE_REDIRECT_URI)
 }
 
 function readStoredAuthState(): AuthState | null {
@@ -1020,7 +1046,8 @@ function normalizeMockUserId(value: unknown): MockUserId | null {
 }
 
 function normalizeSystemRole(value: unknown): SystemRole | null {
-  if (value === 'admin' || value === 'leader' || value === 'staff') return value
+  if (value === 'admin' || value === 'root') return 'admin'
+  if (value === 'leader' || value === 'staff') return 'staff'
   return null
 }
 

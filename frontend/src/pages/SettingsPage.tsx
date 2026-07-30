@@ -83,7 +83,6 @@ import {
 import { useI18n, type TranslateInline, type TranslationKey } from '../i18n'
 import { APP_ROUTES } from '../appRoutes'
 import {
-  MANAGEMENT_SYSTEM_ROLES,
   assignNewApiTeamMember,
   fetchCurrentTeamMembers,
   searchNewApiTeamUsers,
@@ -929,8 +928,7 @@ function teamMemberDisplayName(member: AuthTeamMember): string {
 }
 
 function teamMemberAvatarColor(member: AuthTeamMember): string {
-  if (member.systemRole === 'admin') return '#2563EB'
-  if (member.systemRole === 'leader') return '#0F766E'
+  if (member.isAdmin) return '#2563EB'
   return '#64748B'
 }
 
@@ -957,9 +955,9 @@ function TeamMemberRow({
         <div className="settings-item-name">{displayName}</div>
         {subtitle && <div className="settings-item-role">{subtitle}</div>}
         <div className="settings-member-chips">
-          {member.systemRole && (
-            <span className="settings-member-chip">{member.systemRole}</span>
-          )}
+          <span className="settings-member-chip">
+            {member.isAdmin ? tr('管理员', 'Administrator') : tr('成员', 'Member')}
+          </span>
           {member.group && (
             <span className="settings-member-chip">{tr('组 {group}', 'Group {group}', { group: member.group })}</span>
           )}
@@ -981,9 +979,9 @@ function TeamMemberRow({
 
 function TeamMembersTab() {
   const { t, tr } = useI18n()
-  const { currentUser, hasAnySystemRole, refreshSession } = useAuthContext()
+  const { currentUser, isAdmin, refreshSession } = useAuthContext()
   const isNewApiSession = currentUser?.authProvider === 'newapi'
-  const canManageMembers = isNewApiSession && hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
+  const canManageMembers = isNewApiSession && isAdmin
 
   const [team, setTeam] = useState<AuthTeam | null>(null)
   const [members, setMembers] = useState<AuthTeamMember[]>([])
@@ -2439,8 +2437,8 @@ function ConfigTab() {
 
 const SettingsPage: React.FC = () => {
   const [searchParams] = useSearchParams()
-  const { hasAnySystemRole } = useAuthContext()
-  const canUseManagementTabs = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
+  const { isAdmin } = useAuthContext()
+  const canUseManagementTabs = isAdmin
   const requestedTab = searchParams.get('tab')
   const availableTabs = canUseManagementTabs ? SETTINGS_TAB_KEYS : PERSONAL_SETTINGS_TAB_KEYS
   const activeTab = availableTabs.includes(requestedTab as TabKey)

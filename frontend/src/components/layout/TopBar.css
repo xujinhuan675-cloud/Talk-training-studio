@@ -1,9 +1,9 @@
 .topbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 520px) minmax(0, 1fr);
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 480px) minmax(180px, 1fr);
   align-items: center;
-  height: var(--shell-header-height, 60px);
-  padding: 0 18px;
+  height: 52px;
+  padding: 0 12px;
   background: var(--shell-header-bg, var(--bg-card));
   border-bottom: 1px solid var(--border-light);
   color: var(--text-primary);
@@ -21,23 +21,23 @@
   display: flex;
   align-items: center;
   justify-self: start;
-  gap: 14px;
+  gap: 8px;
   min-width: 0;
 }
 
 .topbar-logo {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
-  min-height: 34px;
+  min-height: 30px;
   color: inherit;
   text-decoration: none;
 }
 
 .topbar-logo-mark {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   display: block;
   border-radius: 7px;
   flex-shrink: 0;
@@ -46,8 +46,8 @@
 
 .topbar-wordmark {
   color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 700;
   letter-spacing: 0;
   line-height: 1;
 }
@@ -59,10 +59,10 @@
   gap: 8px;
   width: 100%;
   min-width: 0;
-  min-height: 36px;
-  padding: 0 11px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: var(--shell-search-bg, var(--bg-base));
   color: inherit;
   cursor: pointer;
@@ -78,7 +78,7 @@
 
 .topbar-search.ui-button:hover:not(:disabled) {
   background: var(--bg-card);
-  border-color: var(--border);
+  border-color: var(--border-light);
   color: inherit;
 }
 
@@ -108,9 +108,9 @@
 .topbar-search-kbd {
   flex-shrink: 0;
   border: 1px solid var(--border-light);
-  border-radius: 5px;
-  padding: 1px 5px;
-  background: var(--bg-card);
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: transparent;
   color: var(--text-muted);
   font-family: inherit;
   font-size: 11px;
@@ -121,21 +121,21 @@
   display: flex;
   align-items: center;
   justify-self: end;
-  gap: 8px;
+  gap: 2px;
   min-width: 0;
 }
 
 .topbar-account-chip,
 .topbar-icon-trigger {
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  background: var(--bg-card);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-secondary);
 }
 
 .topbar-sidebar-toggle {
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-secondary);
 }
@@ -145,9 +145,9 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  max-width: 132px;
-  min-height: 34px;
-  padding: 0 10px;
+  max-width: 124px;
+  min-height: 32px;
+  padding: 0 8px;
   text-decoration: none;
   transition:
     background var(--transition-fast),
@@ -156,7 +156,7 @@
 }
 
 .topbar-account-chip:hover {
-  border-color: var(--border);
+  border-color: transparent;
   background: var(--shell-hover-bg, var(--bg-base));
   color: var(--text-primary);
 }
@@ -178,30 +178,30 @@
 
 .topbar-sidebar-toggle,
 .topbar-icon-trigger {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
   padding: 0;
 }
 
 .topbar-icon-trigger.ui-button:hover:not(:disabled),
 .topbar-icon-trigger.ui-button[aria-expanded='true'] {
-  border-color: var(--border);
+  border-color: transparent;
   background: var(--shell-hover-bg, var(--bg-base));
   color: var(--text-primary);
 }
 
 .topbar-sidebar-toggle.ui-button:hover:not(:disabled) {
-  border-color: var(--border);
+  border-color: transparent;
   background: var(--shell-hover-bg, var(--bg-base));
   color: var(--text-primary);
 }
 
 .topbar-quick-menu,
 .topbar-notice-menu {
-  padding: 8px;
+  padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--bg-card);
   box-shadow: var(--shadow-lg);
 }
@@ -215,21 +215,20 @@
 }
 
 .topbar-notice-menu {
-  width: 284px;
+  width: 304px;
 }
 
 .topbar-quick-menu-heading {
-  padding: 4px 7px 7px;
+  padding: 5px 6px 6px;
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-weight: 700;
 }
 
 .topbar-quick-menu-group {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
 }
 
 .topbar-quick-menu-item {
@@ -237,17 +236,17 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 34px;
+  min-height: 32px;
   min-width: 0;
   border: 0;
-  border-radius: 6px;
-  padding: 7px 8px;
+  border-radius: 4px;
+  padding: 6px 8px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   text-align: left;
 }
 
@@ -283,14 +282,29 @@
   color: var(--shell-active-text, var(--primary));
 }
 
+.topbar-notice-list {
+  display: grid;
+  gap: 0;
+  max-height: min(52vh, 360px);
+  overflow-y: auto;
+}
+
+.topbar-notice-heading {
+  padding: 5px 6px 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .topbar-notice-card {
   display: flex;
   gap: 10px;
   min-width: 0;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--shell-hover-bg, var(--bg-base));
+  border: 0;
+  border-top: 1px solid var(--border-light);
+  border-radius: 0;
+  padding: 9px 6px;
+  background: transparent;
 }
 
 .topbar-notice-dot {
@@ -312,14 +326,14 @@
 .topbar-notice-copy strong {
   color: var(--text-primary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
 }
 
 .topbar-notice-copy span {
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.35;
 }
 
@@ -336,7 +350,7 @@
 @media (max-width: 767px) {
   .topbar {
     display: flex;
-    height: 56px;
+    height: 52px;
     padding: 0 10px;
     gap: 8px;
   }
@@ -367,6 +381,6 @@
   }
 
   .topbar-notice-menu {
-    width: min(284px, calc(100vw - 20px));
+    width: min(304px, calc(100vw - 20px));
   }
 }

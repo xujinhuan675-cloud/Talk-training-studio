@@ -32,7 +32,6 @@ import { Badge, type BadgeTone } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageShell } from '../components/ui/page'
 import { StateBlock, StateSpinner } from '../components/ui/state'
-import { Surface } from '../components/ui/surface'
 import { GROWTH_DIMENSIONS, getGrowthDimensionLabel, growthSkillKey } from '../utils/growthLabels'
 import './GrowthPage.css'
 
@@ -327,8 +326,7 @@ const GrowthPage: React.FC = () => {
     <PageShell className="growth-page">
       {pageHeader}
       {levelPanel}
-      {/* 1. Overall Score Header */}
-      <Surface as="section" className="gp-score-header" padding="lg">
+      <section className="gp-score-header">
         <div className="gp-score-header-top">
           <span className="gp-section-label">{tr('能力总览', 'Ability Overview')}</span>
           <div className="gp-score-header-actions">
@@ -422,10 +420,9 @@ const GrowthPage: React.FC = () => {
             })}
           </div>
         )}
-      </Surface>
+      </section>
 
-      {/* 2. Evaluation History */}
-      <Surface as="section" className="gp-eval-history" padding="lg">
+      <section className="gp-eval-history">
         <div className="gp-section-heading">
           <h3 className="gp-eval-history-title">{tr('近期复盘', 'Recent reviews')}</h3>
           <Button asChild variant="secondary" size="sm" className="gp-section-link">
@@ -468,10 +465,9 @@ const GrowthPage: React.FC = () => {
             )
           })}
         </div>
-      </Surface>
+      </section>
 
-      {/* 3. Skill Path Detail (vertical timeline) */}
-      <Surface as="section" className="gp-skill-path" padding="lg">
+      <section className="gp-skill-path">
         <h3 className="gp-skill-path-title">{tr('技能路径', 'Skill Path')}</h3>
         <div className="gp-timeline">
           {skillPath.map((node, idx) => {
@@ -512,10 +508,9 @@ const GrowthPage: React.FC = () => {
             )
           })}
         </div>
-      </Surface>
+      </section>
 
-      {/* 4. Profile Card */}
-      <Surface as="section" className="gp-profile-section" padding="lg">
+      <section className="gp-profile-section">
         <div className="gp-profile-header">
           <h3 className="gp-profile-title">{tr('沟通力名片', 'Communication Profile Card')}</h3>
           {profileCard && (
@@ -564,7 +559,7 @@ const GrowthPage: React.FC = () => {
             <ProfileCard data={profileCard} cardRef={cardRef} />
           </div>
         )}
-      </Surface>
+      </section>
     </PageShell>
   )
 }

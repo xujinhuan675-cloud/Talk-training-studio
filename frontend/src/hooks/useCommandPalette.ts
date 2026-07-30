@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import type { ChatRoom, PersonaSummary } from '../services/api'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n } from '../i18n'
-import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from '../services/auth'
 import { APP_ROUTES } from '../appRoutes'
 
 export interface CommandResult {
@@ -17,7 +16,7 @@ export interface CommandResult {
 }
 
 interface CommandAction extends CommandResult {
-  roles?: readonly SystemRole[]
+  requiresAdmin?: boolean
 }
 
 export interface UseCommandPaletteReturn {
@@ -39,7 +38,7 @@ export function useCommandPalette(
   const [selectedIndex, setSelectedIndex] = useState(0)
   const navigate = useNavigate()
   const { t } = useI18n()
-  const { hasAnySystemRole } = useAuthContext()
+  const { isAdmin } = useAuthContext()
 
   const setQuery = useCallback((nextQuery: string) => {
     setQueryState(nextQuery)
@@ -76,7 +75,7 @@ export function useCommandPalette(
         type: 'action' as const,
         label: t('command.action.customPractice'),
         icon: 'Dumbbell',
-        roles: MANAGEMENT_SYSTEM_ROLES,
+        requiresAdmin: true,
         onSelect: () => {
           close()
           navigate(APP_ROUTES.practiceCustom)
@@ -87,7 +86,7 @@ export function useCommandPalette(
         type: 'action' as const,
         label: t('command.action.liveCoach'),
         icon: 'Radio',
-        roles: MANAGEMENT_SYSTEM_ROLES,
+        requiresAdmin: true,
         onSelect: () => {
           close()
           navigate(APP_ROUTES.practiceLiveCoach)
@@ -161,7 +160,7 @@ export function useCommandPalette(
         type: 'action' as const,
         label: t('command.action.scenarioConfig'),
         icon: 'SlidersHorizontal',
-        roles: MANAGEMENT_SYSTEM_ROLES,
+        requiresAdmin: true,
         onSelect: () => {
           close()
           navigate(APP_ROUTES.configScenarios)
@@ -202,8 +201,7 @@ export function useCommandPalette(
 
     // Filter actions
     const visibleActions = actions.filter((action) => {
-      if (!action.roles) return true
-      return hasAnySystemRole(action.roles)
+      return !action.requiresAdmin || isAdmin
     })
     const matchingActions = q
       ? visibleActions.filter((a) => a.label.toLowerCase().includes(q))
@@ -232,7 +230,7 @@ export function useCommandPalette(
     }
 
     return items
-  }, [query, rooms, personaMap, actions, close, navigate, t, hasAnySystemRole])
+  }, [query, rooms, personaMap, actions, close, navigate, t, isAdmin])
 
   const currentSelectedIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : 0
 

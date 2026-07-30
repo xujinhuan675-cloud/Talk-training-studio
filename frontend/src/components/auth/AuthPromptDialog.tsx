@@ -10,12 +10,15 @@ import {
   DialogTitle,
 } from '../ui/dialog'
 import CredentialLoginPanel from './CredentialLoginPanel'
+import { useLocation } from 'react-router-dom'
 import './AuthPromptDialog.css'
 
 export default function AuthPromptDialog() {
   const { currentUser, closeSignInPrompt, isSignInPromptOpen } = useAuthContext()
   const { tr } = useI18n()
+  const location = useLocation()
   const open = isSignInPromptOpen && !currentUser
+  const returnTo = `${location.pathname}${location.search}${location.hash}`
 
   React.useEffect(() => {
     if (currentUser) closeSignInPrompt()
@@ -45,6 +48,7 @@ export default function AuthPromptDialog() {
         <CredentialLoginPanel
           className="login-panel--prompt"
           headingId="auth-prompt-heading"
+          returnTo={returnTo}
           onAuthenticated={closeSignInPrompt}
         />
       </DialogContent>

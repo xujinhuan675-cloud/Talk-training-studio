@@ -64,7 +64,7 @@ function completionWidth(value: number): string {
 
 function visibleUsersForViewer(users: AuthUser[], currentUser: AuthUser | null): AuthUser[] {
   if (!currentUser) return []
-  if (currentUser.systemRole === 'admin') return users
+  if (currentUser.isAdmin) return users
   return users.filter((user) => user.teamId === currentUser.teamId)
 }
 
@@ -116,7 +116,7 @@ function buildProgressUsers(
 
 export default function ScenarioLeaderboardPage() {
   const { t, tr, locale } = useI18n()
-  const { currentUser, users } = useAuthContext()
+  const { currentUser, isAdmin, users } = useAuthContext()
   const [progressVersion, setProgressVersion] = useState(0)
   const [selectedUserId, setSelectedUserId] = useState(currentUser?.userId ?? '')
   const [newApiTeam, setNewApiTeam] = useState<AuthTeam | null>(null)
@@ -191,7 +191,7 @@ export default function ScenarioLeaderboardPage() {
     },
     [currentUser, isNewApiSession, newApiTeamUsers, users],
   )
-  const isManagementView = currentUser?.systemRole === 'admin' || currentUser?.systemRole === 'leader'
+  const isManagementView = isAdmin
   const selectedUser = isManagementView
     ? visibleTeamUsers.find((user) => user.userId === selectedUserId)
       ?? visibleTeamUsers[0]
@@ -215,7 +215,7 @@ export default function ScenarioLeaderboardPage() {
     : 0
   const teamLabel = isNewApiSession
     ? newApiTeam?.name ?? currentUser?.teamName ?? selectedUser?.teamName ?? tr('当前团队', 'Current team')
-    : currentUser?.systemRole === 'admin'
+    : isAdmin
       ? tr('全部团队', 'All teams')
       : currentUser?.teamName ?? selectedUser?.teamName ?? tr('当前团队', 'Current team')
   const pageTitle = isManagementView ? t('common.teamBoard') : tr('我的进度', 'My progress')

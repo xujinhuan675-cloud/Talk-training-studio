@@ -296,7 +296,7 @@ def test_material_review_rejects_material_id_outside_scope() -> None:
     assert scope.allow_unscoped is False
 
 
-def test_material_review_leader_uses_team_scoped_session_and_material_access() -> None:
+def test_legacy_leader_material_review_cannot_access_team_session_or_materials() -> None:
     session_service = _FakeTrainingSessionService(
         [_session(user_id="user-sales-001", team_id="team-revenue")]
     )
@@ -309,17 +309,12 @@ def test_material_review_leader_uses_team_scoped_session_and_material_access() -
         headers={"X-Mock-User": "leader"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 403
     session_scope = session_service.get_calls[0]["access_scope"]
     assert session_scope.user_id == "user-leader-001"
     assert session_scope.team_id == "team-revenue"
-    assert session_scope.include_team_scope is True
-    material_scope = file_service.get_calls[0]["metadata_scope"]
-    assert material_scope.user_id == "user-leader-001"
-    assert material_scope.team_id == "team-revenue"
-    assert material_scope.include_team_scope is True
-    assert material_scope.allow_unscoped is False
-    assert response.json()["data"]["referenced_materials"][0]["id"] == 7
+    assert session_scope.include_team_scope is False
+    assert file_service.get_calls == []
 
 
 def test_material_review_rejects_existing_material_outside_scope_without_reading_content() -> None:

@@ -1,6 +1,7 @@
 .app-layout-shell {
   display: flex;
   flex-direction: column;
+  isolation: isolate;
   height: 100vh;
   background: var(--shell-bg, var(--bg-base));
   color: var(--text-primary);
@@ -25,6 +26,7 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--shell-bg, var(--bg-base));
 }
 
@@ -46,7 +48,7 @@
 
   .app-content {
     /* Account for fixed BottomTabBar */
-    padding-bottom: calc(var(--shell-mobile-tabbar-height, 64px) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
   }
 
   .topbar-search {

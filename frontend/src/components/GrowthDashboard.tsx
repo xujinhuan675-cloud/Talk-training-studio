@@ -125,7 +125,10 @@ export default function GrowthDashboard({ onCreateRoom }: Props) {
 
   return (
     <div className="growth-dashboard">
-      <h2 className="growth-title">{tr('成长轨迹', 'Growth Trajectory')}</h2>
+      <header className="growth-dashboard-heading">
+        <h2 className="growth-title">{tr('成长轨迹', 'Growth Trajectory')}</h2>
+        <span>{tr('训练评估汇总', 'Training evaluation summary')}</span>
+      </header>
 
       {/* Stats cards */}
       <div className="growth-stats">

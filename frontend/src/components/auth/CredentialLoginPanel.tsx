@@ -1,12 +1,12 @@
 import React from 'react'
-import { Eye, EyeOff, Loader2, Lock, Mail } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n'
 import {
+  buildNewApiLoginUrl,
   clearNewApiAutoSignInSuppression,
-  isNewApiAutoSignInSuppressed,
-  NEWAPI_AUTH_ENABLED,
-  NEWAPI_BASE_URL,
+  NEWAPI_LOGIN_MODE,
+  parseNewApiTalkWiseHandoffMessage,
 } from '../../services/auth'
 import { Button } from '../ui/button'
 import '../../pages/LoginPage.css'
@@ -15,100 +15,90 @@ interface CredentialLoginPanelProps {
   className?: string
   headingId?: string
   showHeading?: boolean
-  autoCheckStoredSession?: boolean
+  returnTo?: string
   onAuthenticated?: () => void
 }
 
-function newApiUrl(pathname: string): string {
-  try {
-    return new URL(pathname, `${NEWAPI_BASE_URL.replace(/\/+$/, '')}/`).toString()
-  } catch {
-    return NEWAPI_BASE_URL
-  }
-}
-
+// Kept under its existing name while callers move to the control-plane handoff.
 export default function CredentialLoginPanel({
   className,
   headingId = 'login-page-title',
   showHeading = true,
-  autoCheckStoredSession = true,
+  returnTo,
   onAuthenticated,
 }: CredentialLoginPanelProps) {
-  const { status, currentUser, connectNewApiCredentials, connectStoredNewApiSession } = useAuthContext()
+  const { connectNewApiCode } = useAuthContext()
   const { tr } = useI18n()
-  const [usernameInput, setUsernameInput] = React.useState('')
-  const [passwordInput, setPasswordInput] = React.useState('')
-  const [isPasswordVisible, setIsPasswordVisible] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
+  const [isRedirecting, setIsRedirecting] = React.useState(false)
+  const [isEmbeddedOpen, setIsEmbeddedOpen] = React.useState(NEWAPI_LOGIN_MODE === 'embedded')
   const [isConnecting, setIsConnecting] = React.useState(false)
-  const [isAutoConnecting, setIsAutoConnecting] = React.useState(false)
-  const [autoAttempted, setAutoAttempted] = React.useState(false)
-  const [autoSignInSuppressed, setAutoSignInSuppressed] = React.useState(() => isNewApiAutoSignInSuppressed())
-  const registerUrl = React.useMemo(() => newApiUrl('/register'), [])
-  const forgotPasswordUrl = React.useMemo(() => newApiUrl('/login'), [])
-  const shouldWaitForAuthSession = NEWAPI_AUTH_ENABLED && status === 'loading'
-  const isSubmitting = isConnecting || isAutoConnecting
+  const [error, setError] = React.useState<string | null>(null)
+  const iframeRef = React.useRef<HTMLIFrameElement>(null)
+  const consumedCodesRef = React.useRef(new Set<string>())
+  const loginUrl = React.useMemo(() => buildNewApiLoginUrl(returnTo), [returnTo])
 
-  const tryConnectStoredSession = React.useCallback(async () => {
-    if (!autoCheckStoredSession) return
-    if (isNewApiAutoSignInSuppressed()) {
-      setAutoSignInSuppressed(true)
-      setAutoAttempted(true)
-      return
-    }
-    setError(null)
-    setIsAutoConnecting(true)
-    try {
-      const nextState = await connectStoredNewApiSession()
-      if (!nextState) {
-        setAutoAttempted(true)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : tr('登录失败', 'Sign-in failed'))
-      setAutoAttempted(true)
-    } finally {
-      setIsAutoConnecting(false)
-    }
-  }, [autoCheckStoredSession, connectStoredNewApiSession, tr])
-
-  React.useEffect(() => {
-    if (currentUser) {
-      onAuthenticated?.()
-      return
-    }
-    if (!autoCheckStoredSession || autoSignInSuppressed || autoAttempted || shouldWaitForAuthSession) return
-    void tryConnectStoredSession()
-  }, [
-    autoAttempted,
-    autoCheckStoredSession,
-    autoSignInSuppressed,
-    currentUser,
-    onAuthenticated,
-    shouldWaitForAuthSession,
-    tryConnectStoredSession,
-  ])
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const username = usernameInput.trim()
-    if (!username || !passwordInput) {
-      setError(tr('请输入用户名或邮箱和密码', 'Enter your username or email and password'))
-      return
-    }
+  const completeHandoff = React.useCallback((code: string, redirectUri: string | null) => {
+    if (consumedCodesRef.current.has(code)) return
+    consumedCodesRef.current.add(code)
 
     setError(null)
     setIsConnecting(true)
-    clearNewApiAutoSignInSuppression()
-    setAutoSignInSuppressed(false)
+    void connectNewApiCode(code, redirectUri, 'session')
+      .then(() => {
+        setIsEmbeddedOpen(false)
+        onAuthenticated?.()
+      })
+      .catch((err) => {
+        consumedCodesRef.current.delete(code)
+        setError(err instanceof Error ? err.message : tr('登录失败', 'Sign-in failed'))
+      })
+      .finally(() => {
+        setIsConnecting(false)
+      })
+  }, [connectNewApiCode, onAuthenticated, tr])
+
+  const handleHandoffMessage = React.useCallback((event: MessageEvent) => {
+    if (iframeRef.current?.contentWindow && event.source !== iframeRef.current.contentWindow) return
+    const handoff = parseNewApiTalkWiseHandoffMessage(event)
+    if (!handoff) return
+    completeHandoff(handoff.code, handoff.redirectUri)
+  }, [completeHandoff])
+
+  const handleEmbeddedLoad = React.useCallback(() => {
     try {
-      await connectNewApiCredentials(username, passwordInput, 'session')
-      setPasswordInput('')
-      onAuthenticated?.()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : tr('登录失败', 'Sign-in failed'))
-    } finally {
-      setIsConnecting(false)
+      const frameLocation = iframeRef.current?.contentWindow?.location
+      if (!frameLocation) return
+      if (frameLocation.origin !== window.location.origin || frameLocation.pathname !== '/login') return
+      const params = new URLSearchParams(frameLocation.search)
+      const code = params.get('talkwise_code') || params.get('code')
+      if (!code) return
+      completeHandoff(code, `${frameLocation.origin}${frameLocation.pathname}`)
+    } catch {
+      // Cross-origin frame access is expected while the account form is open.
     }
+  }, [completeHandoff])
+
+  React.useEffect(() => {
+    if (!isEmbeddedOpen) return
+    clearNewApiAutoSignInSuppression()
+    window.addEventListener('message', handleHandoffMessage)
+    return () => window.removeEventListener('message', handleHandoffMessage)
+  }, [handleHandoffMessage, isEmbeddedOpen])
+
+  const handleSignIn = () => {
+    clearNewApiAutoSignInSuppression()
+    setError(null)
+    if (NEWAPI_LOGIN_MODE === 'embedded') {
+      setIsEmbeddedOpen(true)
+      return
+    }
+    setIsRedirecting(true)
+    window.location.assign(loginUrl)
+  }
+
+  const closeEmbeddedLogin = () => {
+    if (isConnecting) return
+    setIsEmbeddedOpen(false)
   }
 
   return (
@@ -119,77 +109,47 @@ export default function CredentialLoginPanel({
         </div>
       ) : null}
 
-      <form className="login-credential-form" onSubmit={handleSubmit}>
-        <div className="login-field">
-          <label className="login-field-label" htmlFor="newapi-username-input">
-            {tr('用户名或邮箱', 'Username or email')}
-          </label>
-          <div className="login-field-control">
-            <Mail className="login-field-icon" size={18} aria-hidden="true" />
-            <input
-              id="newapi-username-input"
-              type="text"
-              value={usernameInput}
-              autoComplete="username"
-              autoCapitalize="none"
-              spellCheck={false}
-              disabled={isSubmitting}
-              onChange={(event) => setUsernameInput(event.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="login-field">
-          <label className="login-field-label" htmlFor="newapi-password-input">
-            {tr('密码', 'Password')}
-          </label>
-          <div className="login-field-control">
-            <Lock className="login-field-icon" size={18} aria-hidden="true" />
-            <input
-              id="newapi-password-input"
-              type={isPasswordVisible ? 'text' : 'password'}
-              value={passwordInput}
-              autoComplete="current-password"
-              disabled={isSubmitting}
-              onChange={(event) => setPasswordInput(event.target.value)}
-            />
-            <button
-              className="login-password-toggle"
-              type="button"
-              aria-label={isPasswordVisible ? tr('隐藏密码', 'Hide password') : tr('显示密码', 'Show password')}
-              disabled={isSubmitting}
-              onClick={() => setIsPasswordVisible((visible) => !visible)}
-            >
-              {isPasswordVisible ? (
-                <EyeOff size={18} aria-hidden="true" />
-              ) : (
-                <Eye size={18} aria-hidden="true" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        <Button className="login-submit" type="submit" variant="primary" disabled={isSubmitting}>
-          {isConnecting ? <Loader2 size={16} aria-hidden="true" /> : null}
-          <span>{tr('继续', 'Continue')}</span>
+      {!isEmbeddedOpen ? (
+        <Button
+          className="login-submit"
+          type="button"
+          variant="primary"
+          disabled={isRedirecting || isConnecting}
+          onClick={handleSignIn}
+        >
+          {isRedirecting ? <Loader2 size={16} aria-hidden="true" /> : null}
+          <span>{tr('继续登录', 'Continue to sign in')}</span>
         </Button>
-      </form>
+      ) : null}
 
-      <a className="login-forgot-link" href={forgotPasswordUrl} target="_blank" rel="noreferrer">
-        {tr('忘记密码?', 'Forgot password?')}
-      </a>
-
-      <div className="login-register">
-        <span>{tr('没有账户?', 'No account?')}</span>
-        <a href={registerUrl} target="_blank" rel="noreferrer">
-          {tr('注册', 'Register')}
-        </a>
-      </div>
-
-      {isAutoConnecting ? (
-        <div className="login-status" role="status" aria-live="polite">
-          <Loader2 size={14} aria-hidden="true" />
-          <span>{tr('正在检查登录状态', 'Checking sign-in')}</span>
+      {isEmbeddedOpen ? (
+        <div className="login-embedded-shell" aria-label={tr('账号登录', 'Account sign-in')}>
+          <div className="login-embedded-toolbar">
+            <span>{tr('账号登录', 'Account sign-in')}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={tr('关闭登录', 'Close sign-in')}
+              title={tr('关闭登录', 'Close sign-in')}
+              disabled={isConnecting}
+              onClick={closeEmbeddedLogin}
+            >
+              <X size={16} aria-hidden="true" />
+            </Button>
+          </div>
+          <iframe
+            ref={iframeRef}
+            title={tr('账号登录', 'Account sign-in')}
+            src={loginUrl}
+            onLoad={handleEmbeddedLoad}
+          />
+          {isConnecting ? (
+            <div className="login-status" role="status" aria-live="polite">
+              <Loader2 size={14} aria-hidden="true" />
+              <span>{tr('正在连接账号', 'Connecting account')}</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

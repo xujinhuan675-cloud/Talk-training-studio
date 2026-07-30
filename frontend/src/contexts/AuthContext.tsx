@@ -1,19 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { APP_ROUTES } from '../appRoutes'
 import {
-  canAccessManagementFeatures,
-  canAccessMemberWorkspace,
-  canAccessTeamLeaderboard,
   clearBrowserAuthSession,
   connectNewApiAccessToken,
   connectNewApiAuthorizationCode,
   connectNewApiBrowserSession,
-  connectNewApiCredentials as connectNewApiCredentialsService,
   createAuthenticatedState,
   createSignedOutState,
   fetchCurrentAuthSession,
   getMockUsers,
-  hasAnySystemRole as authHasAnySystemRole,
   loadInitialAuthState,
   persistAuthState,
   suppressNewApiAutoSignIn,
@@ -22,7 +17,6 @@ import {
   type AuthUser,
   type MockAuthUser,
   type MockUserId,
-  type SystemRole,
 } from '../services/auth'
 
 export interface AuthContextValue {
@@ -31,24 +25,16 @@ export interface AuthContextValue {
   currentUser: AuthUser | null
   users: MockAuthUser[]
   isAdmin: boolean
-  isLeader: boolean
-  isStaff: boolean
-  canManageTeam: boolean
-  canViewTeamLeaderboard: boolean
-  canUseMemberWorkspace: boolean
   isSignInPromptOpen: boolean
   requestSignIn: () => void
   closeSignInPrompt: () => void
   requireAuthenticated: () => boolean
-  connectNewApiCredentials: (username: string, password: string, scope?: AuthStorageScope) => Promise<AuthUser>
   connectNewApiCode: (code: string, redirectUri?: string | null, scope?: AuthStorageScope) => Promise<AuthUser>
   connectNewApiToken: (accessToken: string, scope?: AuthStorageScope) => Promise<AuthUser>
   connectStoredNewApiSession: () => Promise<AuthState | null>
   refreshSession: () => Promise<AuthState>
   switchUser: (userId: MockUserId, scope?: AuthStorageScope) => void
   signOut: (scope?: AuthStorageScope) => Promise<void>
-  hasSystemRole: (role: SystemRole) => boolean
-  hasAnySystemRole: (roles: readonly SystemRole[]) => boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -89,20 +75,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     return nextState.user
   }, [])
-
-  const connectNewApiCredentials = useCallback(
-    async (username: string, password: string, scope: AuthStorageScope = 'session') => {
-      const nextState = await connectNewApiCredentialsService(username, password)
-      setAuthState(nextState)
-      setIsSignInPromptOpen(false)
-      persistAuthState(nextState, scope)
-      if (!nextState.user) {
-        throw new Error('Sign-in session did not return a user')
-      }
-      return nextState.user
-    },
-    [],
-  )
 
   const connectNewApiCode = useCallback(
     async (code: string, redirectUri?: string | null, scope: AuthStorageScope = 'session') => {
@@ -177,51 +149,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const hasSystemRole = useCallback(
-    (role: SystemRole) => authState.user?.systemRole === role,
-    [authState.user?.systemRole],
-  )
-  const hasAnySystemRole = useCallback(
-    (roles: readonly SystemRole[]) => authHasAnySystemRole(authState.user, roles),
-    [authState.user],
-  )
-
   const value = useMemo<AuthContextValue>(
     () => ({
       status: authState.status,
       isLoading: authState.status === 'loading',
       currentUser: authState.user,
       users,
-      isAdmin: authState.user?.systemRole === 'admin',
-      isLeader: authState.user?.systemRole === 'leader',
-      isStaff: authState.user?.systemRole === 'staff',
-      canManageTeam: canAccessManagementFeatures(authState.user),
-      canViewTeamLeaderboard: canAccessTeamLeaderboard(authState.user),
-      canUseMemberWorkspace: canAccessMemberWorkspace(authState.user),
+      isAdmin: Boolean(authState.user?.isAdmin),
       isSignInPromptOpen,
       requestSignIn,
       closeSignInPrompt,
       requireAuthenticated,
-      connectNewApiCredentials,
       connectNewApiCode,
       connectNewApiToken,
       connectStoredNewApiSession,
       refreshSession,
       switchUser,
       signOut,
-      hasSystemRole,
-      hasAnySystemRole,
     }),
     [
       authState.status,
       authState.user,
       connectNewApiCode,
-      connectNewApiCredentials,
       connectNewApiToken,
       connectStoredNewApiSession,
       closeSignInPrompt,
-      hasAnySystemRole,
-      hasSystemRole,
       isSignInPromptOpen,
       requestSignIn,
       requireAuthenticated,

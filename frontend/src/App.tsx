@@ -6,7 +6,6 @@ import { AppProvider } from './contexts/AppContext'
 import { AuthProvider, useAuthContext } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { I18nProvider, useI18n } from './i18n'
-import { MANAGEMENT_SYSTEM_ROLES, type SystemRole } from './services/auth'
 import { APP_ROUTES } from './appRoutes'
 import {
   createRedirectTarget,
@@ -18,6 +17,7 @@ import { getDocumentTitle } from './routeTitles'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
+const PublicLandingPage = lazy(() => import('./pages/PublicLandingPage'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const TrainingStudioPage = lazy(() => import('./pages/TrainingStudioPage'))
 const ScenarioTrainingPage = lazy(() => import('./pages/ScenarioTrainingPage'))
@@ -52,17 +52,19 @@ function DocumentTitleSync() {
   return null
 }
 
-function RequireSystemRole({
-  roles,
-  children,
-}: {
-  roles: readonly SystemRole[]
-  children: ReactNode
-}) {
-  const location = useLocation()
-  const { currentUser, hasAnySystemRole } = useAuthContext()
+function PublicLandingRoute() {
+  const { currentUser, isLoading } = useAuthContext()
 
-  if (currentUser && !hasAnySystemRole(roles)) {
+  if (isLoading) return <RouteLoadingFallback />
+  if (currentUser) return <Navigate to={APP_ROUTES.workbench} replace />
+  return <PublicLandingPage />
+}
+
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  const { currentUser, isAdmin } = useAuthContext()
+
+  if (currentUser && !isAdmin) {
     return <Navigate to={APP_ROUTES.practiceScenarios} replace state={{ from: location }} />
   }
 
@@ -70,7 +72,7 @@ function RequireSystemRole({
 }
 
 function managementOnly(element: ReactNode) {
-  return <RequireSystemRole roles={MANAGEMENT_SYSTEM_ROLES}>{element}</RequireSystemRole>
+  return <RequireAdmin>{element}</RequireAdmin>
 }
 
 function RedirectTo({ to }: { to: string }) {
@@ -110,8 +112,9 @@ function App() {
           <Suspense fallback={<RouteLoadingFallback />}>
             <Routes>
               <Route path="login" element={<LoginPage />} />
+              <Route index element={<PublicLandingRoute />} />
               <Route element={<AppProvider><Layout /></AppProvider>}>
-                <Route index element={<HomePage />} />
+                <Route path="workspace" element={<HomePage />} />
                 <Route path="practice" element={<Outlet />}>
                   <Route index element={<RedirectTo to={APP_ROUTES.practiceScenarios} />} />
                   <Route path="scenarios" element={<ScenarioTrainingPage />} />

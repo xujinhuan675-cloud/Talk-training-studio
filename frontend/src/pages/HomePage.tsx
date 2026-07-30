@@ -40,25 +40,13 @@ import { Badge, type BadgeTone } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { PageHeader, PageSection, PageShell } from '../components/ui/page'
 import { StateBlock, StateSpinner } from '../components/ui/state'
-import { Surface } from '../components/ui/surface'
 import './HomePage.css'
-
-const AVATAR_COLORS = ['#0F766E', '#334155', '#2563EB', '#475569', '#6366F1', '#0B5F59']
-
-function getAvatarColor(id: string | number): string {
-  const hash = String(id).split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length]
-}
 
 function difficultyTone(difficulty: ScenarioTrainingCard['difficulty']): BadgeTone {
   if (difficulty === 'easy') return 'success'
   if (difficulty === 'medium') return 'warning'
   if (difficulty === 'hard') return 'danger'
   return 'accent'
-}
-
-function getInitial(name: string): string {
-  return name.trim().charAt(0) || '?'
 }
 
 function timeAgo(dateStr: string | null, tr: TranslateInline): string {
@@ -345,6 +333,8 @@ const HomePage: React.FC = () => {
     [scenarios],
   )
   const recentSessions = sessions.slice(0, 3)
+  const completedScenarioCount = scenarios.filter((scenario) => scenario.status === 'completed').length
+  const activeScenarioCount = scenarios.filter((scenario) => scenario.status === 'in_progress').length
   const growthLevelText = growthLoading ? '--' : tr('Lv.{level}', 'Lv.{level}', { level: levelInfo.level })
   const growthXpText = growthLoading
     ? t('common.loading')
@@ -381,32 +371,45 @@ const HomePage: React.FC = () => {
       />
 
       <div className="home-main-stack">
-        <div className="home-workflow-stack">
-          <Surface className="home-start-panel" variant="accent" padding="lg">
-            <div className="home-start-header">
-              <div className="home-start-copy">
-                <h2>{t('common.startTraining')}</h2>
-                <p>
-                  {tr(
-                    '先从推荐场景立即开始；需要临场准备时，直接进入紧急备战。',
-                    'Start from the recommended scenario, or use battle prep for an urgent conversation.',
-                  )}
-                </p>
-              </div>
+        <section className="home-metric-strip" aria-label={tr('训练概览', 'Training overview')}>
+          <Link to={APP_ROUTES.growth} className="home-metric home-metric-growth">
+            <TrendingUp size={16} aria-hidden="true" />
+            <span>
+              <em>{t('nav.growth')}</em>
+              <strong>{growthLevelText}</strong>
+            </span>
+            <span className="home-metric-progress" aria-label={growthXpText}>
+              <span style={{ width: `${growthProgress}%` }} />
+            </span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </Link>
+          <div className="home-metric">
+            <em>{tr('已完成场景', 'Completed scenarios')}</em>
+            <strong>{completedScenarioCount}</strong>
+          </div>
+          <div className="home-metric">
+            <em>{tr('进行中', 'In progress')}</em>
+            <strong>{activeScenarioCount}</strong>
+          </div>
+          <div className="home-metric">
+            <em>{tr('最近记录', 'Recent records')}</em>
+            <strong>{sessionsLoading ? '--' : sessions.length}</strong>
+          </div>
+        </section>
 
-              <Link to={APP_ROUTES.growth} className="home-start-growth" aria-label={t('nav.growth')}>
-                <span className="home-start-growth-icon" aria-hidden="true">
-                  <TrendingUp size={16} />
-                </span>
-                <span className="home-start-growth-copy">
-                  <strong>{growthLevelText}</strong>
-                  <em>{growthXpText}</em>
-                  <span className="home-start-growth-meter" aria-hidden="true">
-                    <span style={{ width: `${growthProgress}%` }} />
-                  </span>
-                </span>
-                <ChevronRight size={15} />
-              </Link>
+        <div className="home-workflow-grid">
+          <section className="home-training-panel" aria-label={tr('推荐训练场景', 'Recommended training scenarios')}>
+            <div className="home-section-heading">
+              <div>
+                <h2>{t('common.startTraining')}</h2>
+                <p>{tr('根据当前进度安排下一次练习。', 'Start the next practice from your current progress.')}</p>
+              </div>
+              <Button asChild variant="secondary" size="sm">
+                <Link to={APP_ROUTES.practiceBattle}>
+                  <Swords size={15} />
+                  {tr('快速备战', 'Quick prep')}
+                </Link>
+              </Button>
             </div>
 
             {scenarioLaunchError && (
@@ -416,56 +419,41 @@ const HomePage: React.FC = () => {
               </div>
             )}
 
-            <section className="home-recommendations" aria-label={tr('推荐训练场景', 'Recommended training scenarios')}>
-              <div className="home-recommendation-head">
-                <span>{tr('推荐下一场训练', 'Recommended next practice')}</span>
-                <em>{tr('根据进度优先继续、必练或补练', 'Prioritizes active, required, or recovery practice')}</em>
-              </div>
-
-              <div className="home-recommendation-grid">
-                {recommendedScenarios.map((scenario) => {
-                  const starting = startingScenarioId === scenario.id
-                  return (
-                    <article className="home-scenario-option" key={scenario.id}>
-                      <div className="home-scenario-body">
-                        <div className="home-scenario-meta">
-                          <Badge tone={difficultyTone(scenario.difficulty)} className={`difficulty ${scenario.difficulty}`}>
-                            {getScenarioDifficultyLabel(scenario.difficulty, tr)}
-                          </Badge>
-                          <Badge tone="neutral">{getScenarioCategoryLabel(scenario.category, tr)}</Badge>
-                          {scenario.required && (
-                            <Badge tone="danger" className="required">{tr('必练', 'Required')}</Badge>
-                          )}
-                        </div>
-                        <h3>{scenario.title}</h3>
-                        <p>{scenario.description}</p>
-                        <div className="home-scenario-reason">{recommendationReason(scenario, tr)}</div>
+            <div className="home-recommendation-grid">
+              {recommendedScenarios.map((scenario) => {
+                const starting = startingScenarioId === scenario.id
+                return (
+                  <article className="home-scenario-option" key={scenario.id}>
+                    <div className="home-scenario-body">
+                      <div className="home-scenario-meta">
+                        <Badge tone={difficultyTone(scenario.difficulty)} className={`difficulty ${scenario.difficulty}`}>
+                          {getScenarioDifficultyLabel(scenario.difficulty, tr)}
+                        </Badge>
+                        <Badge tone="neutral">{getScenarioCategoryLabel(scenario.category, tr)}</Badge>
+                        {scenario.required && (
+                          <Badge tone="danger" className="required">{tr('必练', 'Required')}</Badge>
+                        )}
                       </div>
-                      <div className="home-scenario-actions">
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="sm"
-                          className="home-scenario-start"
-                          onClick={() => void startRecommendedScenario(scenario)}
-                          disabled={startingScenarioId !== null}
-                        >
-                          {starting ? <Loader2 size={15} className="home-scenario-spin" /> : <Play size={15} />}
-                          {starting ? t('common.starting') : tr('立即开始', 'Start now')}
-                        </Button>
-                        <Button asChild variant="secondary" size="sm" className="home-scenario-prep">
-                          <Link to={APP_ROUTES.practiceBattle}>
-                            <Swords size={15} />
-                            {tr('快速备战', 'Quick prep')}
-                          </Link>
-                        </Button>
-                      </div>
-                    </article>
-                  )
-                })}
-              </div>
-            </section>
-          </Surface>
+                      <h3>{scenario.title}</h3>
+                      <p>{scenario.description}</p>
+                      <span className="home-scenario-reason">{recommendationReason(scenario, tr)}</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      className="home-scenario-start"
+                      onClick={() => void startRecommendedScenario(scenario)}
+                      disabled={startingScenarioId !== null}
+                    >
+                      {starting ? <Loader2 size={15} className="home-scenario-spin" /> : <Play size={15} />}
+                      {starting ? t('common.starting') : tr('立即开始', 'Start now')}
+                    </Button>
+                  </article>
+                )
+              })}
+            </div>
+          </section>
 
           <PageSection
             className="home-recent-section"
@@ -479,43 +467,32 @@ const HomePage: React.FC = () => {
               </Button>
             )}
           >
-            <Surface className="home-recent-surface" padding="sm">
-              {recentSessions.length === 0 ? (
-                <StateBlock
-                  className="home-empty-block"
-                  icon={sessionsLoading ? <StateSpinner /> : undefined}
-                  size="sm"
-                  title={sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}
-                  tone={sessionsLoading ? 'loading' : 'neutral'}
-                />
-              ) : (
-                <div className="home-recent-list">
-                  {recentSessions.map((session) => {
-                    const title = sessionTitle(session, tr)
-                    const initial = getInitial(title)
-                    const color = getAvatarColor(session.session_id)
-                    return (
-                      <Link key={session.session_id} to={sessionPath(session)} className="home-recent-item">
-                        <span className="home-recent-avatar" style={{ backgroundColor: color }}>
-                          {initial}
-                        </span>
-                        <span className="home-recent-copy">
-                          <strong>{title}</strong>
-                          <em>
-                            {statusLabel(session.status, tr)}
-                            {' · '}
-                            {trainingModeLabel(session, tr)}
-                            {' · '}
-                            {timeAgo(sessionTime(session), tr) || tr('未记录时间', 'No time')}
-                          </em>
-                        </span>
-                        <ChevronRight size={15} />
-                      </Link>
-                    )
-                  })}
-                </div>
-              )}
-            </Surface>
+            {recentSessions.length === 0 ? (
+              <StateBlock
+                className="home-empty-block"
+                icon={sessionsLoading ? <StateSpinner /> : undefined}
+                size="sm"
+                title={sessionsLoading ? t('common.loading') : tr('暂无训练记录', 'No training records yet')}
+                tone={sessionsLoading ? 'loading' : 'neutral'}
+              />
+            ) : (
+              <div className="home-recent-list" role="list">
+                {recentSessions.map((session) => {
+                  const title = sessionTitle(session, tr)
+                  return (
+                    <Link key={session.session_id} to={sessionPath(session)} className="home-recent-item" role="listitem">
+                      <span className="home-recent-copy">
+                        <strong>{title}</strong>
+                        <em>{trainingModeLabel(session, tr)}</em>
+                      </span>
+                      <span className="home-recent-status">{statusLabel(session.status, tr)}</span>
+                      <span className="home-recent-time">{timeAgo(sessionTime(session), tr) || tr('未记录时间', 'No time')}</span>
+                      <ChevronRight size={15} aria-hidden="true" />
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
           </PageSection>
         </div>
       </div>

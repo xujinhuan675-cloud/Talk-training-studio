@@ -46,9 +46,9 @@ const Layout: React.FC = () => {
         onNavToggle={() => setNavCollapsed((value) => !value)}
         onSearchClick={palette.open}
       />
-      <div className="app-body">
+      <div className="app-body" data-sidebar={navCollapsed ? 'collapsed' : 'expanded'}>
         <NavRail collapsed={navCollapsed} />
-        <main className="app-content">
+        <main className="app-content" id="main-content">
           <Outlet />
         </main>
       </div>

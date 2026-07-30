@@ -502,7 +502,7 @@ def test_cross_user_conversation_mutations_are_blocked_by_scoped_service_call() 
     assert conversation_service.delete_call is None
 
 
-def test_leader_single_resource_routes_use_team_metadata_scope() -> None:
+def test_legacy_leader_single_resource_routes_are_limited_to_own_metadata_scope() -> None:
     team_metadata = {
         "ownerUserId": "user-peer-001",
         "teamId": "team-revenue",
@@ -523,13 +523,13 @@ def test_leader_single_resource_routes_use_team_metadata_scope() -> None:
         client.delete("/api/v1/agent-configs/8", headers=headers),
     ]
 
-    assert [response.status_code for response in responses] == [200, 200, 200, 200, 200, 200]
-    assert conversation_service.get_scope_calls[0].include_team_scope is True
-    assert conversation_service.update_scope_calls[0].include_team_scope is True
-    assert conversation_service.delete_scope_calls[0].include_team_scope is True
-    assert conversation_service.agent_config_get_scope_calls[0].include_team_scope is True
-    assert conversation_service.agent_config_update_scope_calls[0].include_team_scope is True
-    assert conversation_service.agent_config_delete_scope_calls[0].include_team_scope is True
+    assert [response.status_code for response in responses] == [404, 404, 404, 404, 404, 404]
+    assert conversation_service.get_scope_calls[0].include_team_scope is False
+    assert conversation_service.update_scope_calls[0].include_team_scope is False
+    assert conversation_service.delete_scope_calls[0].include_team_scope is False
+    assert conversation_service.agent_config_get_scope_calls[0].include_team_scope is False
+    assert conversation_service.agent_config_update_scope_calls == []
+    assert conversation_service.agent_config_delete_scope_calls[0].include_team_scope is False
 
 
 def test_admin_single_resource_routes_use_explicit_metadata_scope() -> None:

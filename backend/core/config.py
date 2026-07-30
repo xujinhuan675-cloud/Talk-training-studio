@@ -276,6 +276,24 @@ class Settings(BaseSettings):
         default=5.0,
         validation_alias=AliasChoices("NEWAPI_AUTH_TIMEOUT_SECONDS"),
     )
+    NEWAPI_ANNOUNCEMENT_TIMEOUT_SECONDS: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=10.0,
+        validation_alias=AliasChoices("NEWAPI_ANNOUNCEMENT_TIMEOUT_SECONDS"),
+    )
+    NEWAPI_ANNOUNCEMENT_CACHE_TTL_SECONDS: int = Field(
+        default=60,
+        ge=1,
+        le=300,
+        validation_alias=AliasChoices("NEWAPI_ANNOUNCEMENT_CACHE_TTL_SECONDS"),
+    )
+    NEWAPI_ANNOUNCEMENT_MAX_ITEMS: int = Field(
+        default=20,
+        ge=1,
+        le=50,
+        validation_alias=AliasChoices("NEWAPI_ANNOUNCEMENT_MAX_ITEMS"),
+    )
     NEWAPI_TALKWISE_CLIENT_ID: str = Field(
         default="talkwise",
         validation_alias=AliasChoices("NEWAPI_TALKWISE_CLIENT_ID"),

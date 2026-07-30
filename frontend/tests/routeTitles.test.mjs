@@ -44,6 +44,7 @@ test('getRouteTitleKey resolves static and dynamic route titles', async () => {
   const routeTitles = await loadTsModule('src/routeTitles.ts', 'route-titles')
 
   assert.equal(routeTitles.getRouteTitleKey('/'), 'nav.home')
+  assert.equal(routeTitles.getRouteTitleKey('/workspace'), 'nav.home')
   assert.equal(routeTitles.getRouteTitleKey('/practice/scenarios'), 'nav.scenarioTraining')
   assert.equal(routeTitles.getRouteTitleKey('/practice/custom'), 'nav.trainingStudio')
   assert.equal(routeTitles.getRouteTitleKey('/practice/live-coach'), 'nav.liveCoach')

@@ -3,14 +3,14 @@
   align-items: center;
   flex-shrink: 0;
   justify-content: center;
-  gap: 8px;
-  min-width: 156px;
-  max-width: 220px;
-  height: 36px;
-  padding: 3px 8px 3px 4px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  background: var(--bg-card);
+  gap: 0;
+  min-width: 32px;
+  max-width: 32px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
@@ -22,7 +22,7 @@
 
 .user-menu-trigger.ui-button:hover:not(:disabled),
 .user-menu-trigger.ui-button[aria-expanded='true'] {
-  border-color: var(--border);
+  border-color: transparent;
   background: var(--shell-hover-bg, var(--bg-base));
   color: var(--text-primary);
 }
@@ -42,9 +42,9 @@
 }
 
 .user-menu-avatar {
-  width: 28px;
-  height: 28px;
-  font-size: 12px;
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
 }
 
 .user-menu-summary,
@@ -55,6 +55,11 @@
   flex: 1;
   flex-direction: column;
   align-items: flex-start;
+}
+
+.user-menu-trigger .user-menu-summary,
+.user-menu-trigger .user-menu-chevron {
+  display: none;
 }
 
 .user-menu-name,
@@ -93,9 +98,12 @@
 }
 
 .user-menu-login {
-  min-width: 72px;
+  min-width: 68px;
   max-width: none;
-  padding: 3px 12px;
+  padding: 3px 10px;
+  gap: 6px;
+  border-color: var(--border-light);
+  background: var(--bg-card);
 }
 
 .user-menu-login svg {
@@ -111,10 +119,10 @@
 }
 
 .user-menu-popover {
-  width: 320px;
-  padding: 8px;
+  width: 304px;
+  padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--bg-card);
   box-shadow: var(--shadow-lg);
 }
@@ -122,38 +130,44 @@
 .user-menu-profile-card {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   min-width: 0;
-  padding: 8px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  background: var(--shell-hover-bg, var(--bg-base));
+  padding: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .user-menu-profile-avatar {
-  width: 36px;
-  height: 36px;
-  font-size: 14px;
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
 }
 
 .user-menu-account-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 8px;
+  gap: 0;
+  margin-top: 6px;
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .user-menu-account-grid span {
   display: flex;
   min-width: 0;
-  min-height: 54px;
+  min-height: 48px;
   flex-direction: column;
   justify-content: center;
   gap: 3px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: 8px;
-  background: var(--bg-card);
+  border: 0;
+  border-radius: 0;
+  padding: 7px 8px;
+  background: transparent;
+}
+
+.user-menu-account-grid span + span {
+  border-left: 1px solid var(--border-light);
 }
 
 .user-menu-account-grid em,
@@ -186,12 +200,13 @@
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
-  min-height: 34px;
-  margin-top: 7px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: 0 10px;
-  background: var(--bg-card);
+  min-height: 32px;
+  margin-top: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-light);
+  border-radius: 0;
+  padding: 0 8px;
+  background: transparent;
 }
 
 .user-menu-plan-row strong {
@@ -200,17 +215,16 @@
 }
 
 .user-menu-heading {
-  padding: 4px 7px 7px;
+  padding: 5px 6px 6px;
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-weight: 700;
 }
 
 .user-menu-options {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
 }
 
 .user-menu-option,
@@ -220,7 +234,7 @@
   width: 100%;
   min-width: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -229,9 +243,9 @@
 }
 
 .user-menu-option {
-  min-height: 44px;
+  min-height: 40px;
   gap: 9px;
-  padding: 6px 8px;
+  padding: 5px 8px;
 }
 
 .user-menu-option:hover,
@@ -253,15 +267,15 @@
 
 .user-menu-divider {
   height: 1px;
-  margin: 7px 0;
+  margin: 6px 0;
   background: var(--border-light);
 }
 
 .user-menu-newapi {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 2px 0;
+  gap: 6px;
+  padding: 1px 2px;
 }
 
 .user-menu-newapi-header,
@@ -309,7 +323,7 @@
 .user-menu-newapi-links {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
+  gap: 2px;
 }
 
 .user-menu-newapi-links a {
@@ -318,10 +332,10 @@
   justify-content: center;
   min-width: 0;
   gap: 4px;
-  min-height: 28px;
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  background: var(--bg-card);
+  min-height: 30px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 800;
@@ -329,7 +343,7 @@
 }
 
 .user-menu-newapi-links a:hover {
-  border-color: var(--border);
+  border-color: transparent;
   background: var(--shell-hover-bg, var(--bg-base));
   color: var(--text-primary);
 }
@@ -412,10 +426,10 @@
 
 .user-menu-action {
   gap: 8px;
-  min-height: 34px;
+  min-height: 32px;
   padding: 7px 8px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .user-menu-action svg {
@@ -425,8 +439,8 @@
 
 @media (max-width: 767px) {
   .user-menu-trigger {
-    min-width: 34px;
-    width: 34px;
+    min-width: 32px;
+    width: 32px;
     padding: 3px;
     justify-content: center;
   }
@@ -443,7 +457,7 @@
   }
 
   .user-menu-popover {
-    width: min(320px, calc(100vw - 20px));
+    width: min(304px, calc(100vw - 20px));
   }
 }
 

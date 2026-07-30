@@ -8,14 +8,18 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  RefreshCw,
   Search,
   Sun,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { APP_ROUTES } from '../../appRoutes'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useTheme, type ThemePreference } from '../../contexts/ThemeContext'
+import { useAnnouncements } from '../../hooks/useAnnouncements'
 import { SUPPORTED_LOCALES, useI18n, type Locale } from '../../i18n'
 import { NEWAPI_USAGE_URL } from '../../services/auth'
+import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -36,6 +40,26 @@ function formatQuota(value: number | null | undefined): string | null {
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(value)
+}
+
+function announcementDotColor(type: string, read: boolean): string {
+  if (read) return 'var(--text-muted)'
+  if (type === 'warning') return 'var(--warning)'
+  if (type === 'error') return 'var(--danger)'
+  if (type === 'success') return 'var(--success)'
+  return 'var(--primary)'
+}
+
+function formatAnnouncementDate(value: string | null): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }
 
 interface TopBarProps {
@@ -61,6 +85,20 @@ const TopBar: React.FC<TopBarProps> = ({ navCollapsed = false, onNavToggle, onSe
   const currentLocaleLabel = t(SUPPORTED_LOCALES.find((item) => item.value === locale)?.labelKey ?? 'language.zh')
   const ActiveThemeIcon = themeItems.find((item) => item.value === mode)?.Icon ?? Sun
   const quotaText = formatQuota(currentUser?.quotaRemaining)
+  const {
+    feed: announcementFeed,
+    loading: announcementsLoading,
+    refresh: refreshAnnouncements,
+    unreadCount,
+    markVisibleAsRead,
+    isNoticeRead,
+    isAnnouncementRead,
+  } = useAnnouncements()
+  const handleAnnouncementsOpenChange = (open: boolean) => {
+    if (!open) return
+    markVisibleAsRead()
+    void refreshAnnouncements()
+  }
   const quotaLabel = quotaText
     ? tr('余额 {count}', 'Balance {count}', { count: quotaText })
     : tr('账户', 'Account')
@@ -80,7 +118,7 @@ const TopBar: React.FC<TopBarProps> = ({ navCollapsed = false, onNavToggle, onSe
         >
           {navCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
         </Button>
-        <Link className="topbar-logo" to="/" aria-label="TalkWise">
+        <Link className="topbar-logo" to={APP_ROUTES.workbench} aria-label="TalkWise">
           <img className="topbar-logo-mark" src={TALKWISE_ICON_SRC} alt="" aria-hidden="true" />
           <span className="topbar-wordmark">TalkWise</span>
         </Link>
@@ -108,24 +146,105 @@ const TopBar: React.FC<TopBarProps> = ({ navCollapsed = false, onNavToggle, onSe
           <span>{quotaLabel}</span>
         </a>
 
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={handleAnnouncementsOpenChange}>
           <Button asChild className="topbar-icon-trigger" variant="secondary" size="icon">
             <DropdownMenuTrigger
               aria-label={tr('公告', 'Announcements')}
               title={tr('公告', 'Announcements')}
+              style={{ position: 'relative' }}
             >
               <Bell size={16} aria-hidden="true" />
+              {unreadCount > 0 ? (
+                <Badge
+                  tone="danger"
+                  aria-label={tr('{count} 条未读公告', '{count} unread announcements', { count: unreadCount })}
+                  style={{
+                    position: 'absolute',
+                    top: -7,
+                    right: -7,
+                    minWidth: 18,
+                    minHeight: 18,
+                    padding: '0 4px',
+                    fontSize: 10,
+                    lineHeight: '18px',
+                    textAlign: 'center',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Badge>
+              ) : null}
             </DropdownMenuTrigger>
           </Button>
 
           <DropdownMenuContent className="topbar-notice-menu" align="end">
-            <DropdownMenuLabel className="topbar-quick-menu-heading">{tr('公告', 'Announcements')}</DropdownMenuLabel>
-            <div className="topbar-notice-card">
-              <span className="topbar-notice-dot" aria-hidden="true" />
-              <span className="topbar-notice-copy">
-                <strong>{tr('公告中心', 'Announcements')}</strong>
-                <span>{tr('账号、公告和系统状态会在这里展示', 'Account, notices, and status appear here')}</span>
-              </span>
+            <div className="topbar-notice-list" aria-live="polite">
+              <strong className="topbar-notice-heading">{tr('公告', 'Announcements')}</strong>
+              {announcementsLoading ? (
+                <div className="topbar-notice-card" role="status">
+                  <span className="topbar-notice-dot" aria-hidden="true" />
+                  <span className="topbar-notice-copy">
+                    <strong>{tr('正在加载公告...', 'Loading announcements...')}</strong>
+                    <span>{tr('请稍候', 'Please wait')}</span>
+                  </span>
+                </div>
+              ) : announcementFeed.state === 'unavailable' ? (
+                <div className="topbar-notice-card" role="status">
+                  <span className="topbar-notice-dot" style={{ background: 'var(--warning)' }} aria-hidden="true" />
+                  <span className="topbar-notice-copy">
+                    <strong>{tr('公告暂时无法获取', 'Announcements are temporarily unavailable')}</strong>
+                    <span>{tr('请稍后重试', 'Try again shortly')}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={tr('重新加载公告', 'Reload announcements')}
+                    title={tr('重新加载公告', 'Reload announcements')}
+                    onClick={() => { void refreshAnnouncements() }}
+                  >
+                    <RefreshCw size={15} aria-hidden="true" />
+                  </Button>
+                </div>
+              ) : !announcementFeed.notice && announcementFeed.announcements.length === 0 ? (
+                <div className="topbar-notice-card" role="status">
+                  <span className="topbar-notice-dot" style={{ background: 'var(--text-muted)' }} aria-hidden="true" />
+                  <span className="topbar-notice-copy">
+                    <strong>{tr('暂无公告', 'No announcements')}</strong>
+                    <span>{tr('最新通知会显示在这里', 'Latest notices will appear here')}</span>
+                  </span>
+                </div>
+              ) : (
+                <>
+                  {announcementFeed.notice ? (() => {
+                    const read = isNoticeRead(announcementFeed.notice)
+                    return (
+                      <div className="topbar-notice-card" aria-label={read ? tr('通知，已读', 'Notice, read') : tr('通知，未读', 'Notice, unread')}>
+                        <span className="topbar-notice-dot" style={{ background: announcementDotColor('default', read) }} aria-hidden="true" />
+                        <span className="topbar-notice-copy">
+                          <strong>{tr('通知', 'Notice')}</strong>
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{announcementFeed.notice}</span>
+                          <span>{read ? tr('已读', 'Read') : tr('未读', 'Unread')}</span>
+                        </span>
+                      </div>
+                    )
+                  })() : null}
+                  {announcementFeed.announcements.map((item) => {
+                    const read = isAnnouncementRead(item)
+                    const publishedAt = formatAnnouncementDate(item.publishedAt)
+                    return (
+                      <div key={item.id} className="topbar-notice-card" aria-label={read ? tr('系统公告，已读', 'System announcement, read') : tr('系统公告，未读', 'System announcement, unread')}>
+                        <span className="topbar-notice-dot" style={{ background: announcementDotColor(item.type, read) }} aria-hidden="true" />
+                        <span className="topbar-notice-copy">
+                          <strong>{tr('系统公告', 'System announcement')}</strong>
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{item.content}</span>
+                          {item.extra ? <span style={{ whiteSpace: 'pre-wrap' }}>{item.extra}</span> : null}
+                          <span>{[publishedAt, read ? tr('已读', 'Read') : tr('未读', 'Unread')].filter(Boolean).join(' · ')}</span>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </>
+              )}
             </div>
           </DropdownMenuContent>
         </DropdownMenu>

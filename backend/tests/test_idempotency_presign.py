@@ -356,7 +356,7 @@ async def test_confirm_presigned_upload_by_key_uses_current_user_scope() -> None
     confirm_scope = fake.complete_calls[0]["metadata_scope"]
     assert get_scope.user_id == "user-leader-001"
     assert get_scope.team_id == "team-revenue"
-    assert get_scope.include_team_scope is True
+    assert get_scope.include_team_scope is False
     assert get_scope.allow_unscoped is False
     assert confirm_scope == get_scope
     assert fake.complete_calls[0]["asset_id"] == 17

@@ -391,87 +391,6 @@ async def fetch_newapi_identity(
     return _identity_from_payload(payload)
 
 
-def _login_access_token_from_payload(payload: Mapping[str, Any]) -> str | None:
-    data = payload.get("data")
-    data_mapping = _optional_mapping(data)
-    candidates: list[Any] = [
-        payload.get("access_token"),
-        payload.get("token"),
-    ]
-    if data_mapping is not None:
-        candidates.extend(
-            [
-                data_mapping.get("access_token"),
-                data_mapping.get("token"),
-                data_mapping.get("session_token"),
-                data_mapping.get("key"),
-            ]
-        )
-    return _coerce_optional_text(_first_present(*candidates))
-
-
-async def authenticate_newapi_credentials(
-    username: str,
-    password: str,
-    *,
-    base_url: str,
-    login_path: str,
-    timeout_seconds: float,
-) -> NewAPIIdentity:
-    login_username = username.strip()
-    if not login_username:
-        raise NewAPIAuthError("NewAPI username is required")
-    if not password:
-        raise NewAPIAuthError("NewAPI password is required")
-
-    endpoint = _join_url(base_url, login_path)
-    try:
-        async with httpx.AsyncClient(
-            timeout=timeout_seconds,
-            follow_redirects=False,
-            trust_env=False,
-        ) as client:
-            response = await client.post(
-                endpoint,
-                headers={"Accept": "application/json"},
-                json={"username": login_username, "password": password},
-            )
-    except httpx.HTTPError as exc:
-        raise NewAPIAuthUnavailableError("NewAPI authentication service unavailable") from exc
-
-    if response.status_code in {400, 401, 403}:
-        raise NewAPIAuthError("NewAPI username or password was rejected")
-    if response.status_code >= 400:
-        raise NewAPIAuthUnavailableError("NewAPI authentication service returned an error")
-
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise NewAPIAuthUnavailableError(
-            "NewAPI authentication service returned invalid JSON"
-        ) from exc
-
-    if not isinstance(payload, Mapping):
-        raise NewAPIAuthUnavailableError("NewAPI authentication service returned invalid payload")
-    if payload.get("success") is False:
-        message = _coerce_optional_text(payload.get("message")) or (
-            "NewAPI username or password was rejected"
-        )
-        raise NewAPIAuthError(message)
-
-    access_token = _login_access_token_from_payload(payload)
-    try:
-        return _identity_from_payload(payload)
-    except NewAPIAuthError as exc:
-        if access_token:
-            return await fetch_newapi_identity(
-                access_token,
-                base_url=base_url,
-                timeout_seconds=timeout_seconds,
-            )
-        raise exc
-
-
 async def fetch_newapi_team_members(
     *,
     group: str,
@@ -656,7 +575,6 @@ __all__ = [
     "NewAPITeamMembersResult",
     "NewAPITeamUserSearchResult",
     "assign_newapi_team_member",
-    "authenticate_newapi_credentials",
     "exchange_newapi_authorization_code",
     "fetch_newapi_identity",
     "fetch_newapi_team_members",

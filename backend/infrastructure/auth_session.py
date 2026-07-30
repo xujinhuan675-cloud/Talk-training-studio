@@ -58,8 +58,8 @@ def current_user_from_session_cookie(cookie_value: str | None) -> CurrentUser | 
         if not isinstance(user, Mapping):
             raise AuthSessionError("Session missing user")
         user_id = _optional_text(user.get("user_id"))
-        system_role = _optional_text(user.get("system_role"))
-        if not user_id or system_role not in {"admin", "leader", "staff"}:
+        system_role = _normalize_product_system_role(user.get("system_role"))
+        if not user_id or not system_role:
             raise AuthSessionError("Session has invalid user")
         from api.dependencies import CurrentUser
 
@@ -144,6 +144,15 @@ def _optional_int(value: object | None) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_product_system_role(value: object | None) -> str | None:
+    role = _optional_text(value)
+    if role in {"admin", "root"}:
+        return "admin"
+    if role in {"leader", "staff"}:
+        return "staff"
+    return None
 
 
 __all__ = [

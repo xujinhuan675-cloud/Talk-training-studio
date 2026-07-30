@@ -41,7 +41,7 @@ function createStorage(initialEntries = {}) {
   }
 }
 
-test('mock users expose admin, leader, and staff role capabilities', async () => {
+test('mock users expose only normalized admin and member capabilities', async () => {
   const auth = await loadTsModule('src/services/auth.ts', 'auth-service-roles')
 
   const admin = auth.getMockUser('admin')
@@ -50,25 +50,27 @@ test('mock users expose admin, leader, and staff role capabilities', async () =>
   const customerService = auth.getMockUser('customer_service')
 
   assert.equal(admin.systemRole, 'admin')
-  assert.equal(leader.systemRole, 'leader')
+  assert.equal(admin.isAdmin, true)
+  assert.equal(leader.systemRole, 'staff')
+  assert.equal(leader.isAdmin, false)
   assert.equal(sales.systemRole, 'staff')
   assert.equal(customerService.systemRole, 'staff')
   assert.equal(auth.canAccessManagementFeatures(admin), true)
-  assert.equal(auth.canAccessManagementFeatures(leader), true)
+  assert.equal(auth.canAccessManagementFeatures(leader), false)
   assert.equal(auth.canAccessManagementFeatures(sales), false)
-  assert.equal(auth.canAccessTeamLeaderboard(leader), true)
+  assert.equal(auth.canAccessTeamLeaderboard(leader), false)
   assert.equal(auth.canAccessTeamLeaderboard(customerService), false)
   assert.equal(auth.canAccessMemberWorkspace(sales), true)
   assert.equal(auth.hasAnySystemRole(customerService, ['staff']), true)
 })
 
-test('NewAPI login defaults to embedded mode for same-page sign-in', async () => {
+test('NewAPI login defaults to redirect mode when no build env is present', async () => {
   const auth = await loadTsModule('src/services/auth.ts', 'auth-service-default-login-mode')
 
-  assert.equal(auth.NEWAPI_LOGIN_MODE, 'embedded')
+  assert.equal(auth.NEWAPI_LOGIN_MODE, 'redirect')
 })
 
-test('stored leader mock user is restored', async () => {
+test('stored leader mock user is restored as a normal product user', async () => {
   const localStorage = createStorage({
     'talkwise.auth.state': JSON.stringify({ status: 'authenticated', userId: 'leader' }),
   })
@@ -80,12 +82,13 @@ test('stored leader mock user is restored', async () => {
 
   assert.equal(initialState.status, 'authenticated')
   assert.equal(initialState.user.id, 'leader')
-  assert.equal(initialState.user.systemRole, 'leader')
-  assert.equal(auth.canAccessManagementFeatures(initialState.user), true)
+  assert.equal(initialState.user.systemRole, 'staff')
+  assert.equal(initialState.user.isAdmin, false)
+  assert.equal(auth.canAccessManagementFeatures(initialState.user), false)
   assert.deepEqual(auth.getAuthRequestHeaders(initialState), {
     'X-Mock-User': 'leader',
     'X-User-Id': 'user-leader-001',
-    'X-System-Role': 'leader',
+    'X-System-Role': 'staff',
     'X-Team-Id': 'team-revenue',
   })
   assert.deepEqual(auth.getAuthRequestHeaders(auth.createSignedOutState()), {})
@@ -120,6 +123,8 @@ test('newapi authenticated state uses server session instead of stored bearer to
   assert.equal(state.status, 'authenticated')
   assert.equal(state.provider, 'newapi')
   assert.equal(state.user.name, 'Alice Zhang')
+  assert.equal(state.user.systemRole, 'staff')
+  assert.equal(state.user.isAdmin, false)
   assert.equal(state.user.newapiGroup, 'paid')
   assert.equal(state.user.newapiGatewayBaseUrl, 'https://gateway.example/v1')
   assert.equal(state.user.quotaRemaining, 900)
@@ -174,49 +179,6 @@ test('connectNewApiAccessToken exchanges bearer token for a cookie session witho
   assert.deepEqual(calls[0].init.headers, { Authorization: 'Bearer newapi-token' })
   assert.equal(state.provider, 'newapi')
   assert.equal(sessionStorage.getItem('talkwise.auth.state').includes('newapi-token'), false)
-})
-
-test('connectNewApiCredentials posts credentials for a cookie session without persisting secrets', async () => {
-  const localStorage = createStorage()
-  const sessionStorage = createStorage()
-  globalThis.window = { localStorage, sessionStorage }
-  const calls = []
-  globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url, init })
-    return {
-      ok: true,
-      json: async () => ({
-        code: 0,
-        message: 'ok',
-        data: {
-          provider: 'newapi',
-          user_id: 'newapi:42',
-          username: 'alice',
-          display_name: 'Alice Zhang',
-          system_role: 'leader',
-          business_role: 'sales',
-          team_id: 'newapi:paid',
-          team_name: 'paid',
-        },
-      }),
-    }
-  }
-
-  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-connect-newapi-credentials')
-  const state = await auth.connectNewApiCredentials('  alice@example.com  ', 'secret-password')
-  auth.persistAuthState(state, 'session')
-
-  assert.equal(calls[0].url, '/api/v1/auth/newapi/login')
-  assert.equal(calls[0].init.method, 'POST')
-  assert.equal(calls[0].init.credentials, 'same-origin')
-  assert.deepEqual(calls[0].init.headers, { 'Content-Type': 'application/json' })
-  assert.deepEqual(JSON.parse(calls[0].init.body), {
-    username: 'alice@example.com',
-    password: 'secret-password',
-  })
-  assert.equal(state.provider, 'newapi')
-  assert.equal(state.user.username, 'alice')
-  assert.equal(sessionStorage.getItem('talkwise.auth.state').includes('secret-password'), false)
 })
 
 test('connectNewApiAuthorizationCode exchanges a handoff code for a cookie session', async () => {
@@ -478,7 +440,7 @@ test('connectNewApiBrowserSession consumes and removes NewAPI token hash params'
   delete globalThis.document
 })
 
-test('buildNewApiLoginUrl appends TalkWise return target', async () => {
+test('buildNewApiLoginUrl uses a TalkWise callback with a local return target', async () => {
   const localStorage = createStorage()
   const sessionStorage = createStorage()
   globalThis.window = {
@@ -488,13 +450,57 @@ test('buildNewApiLoginUrl appends TalkWise return target', async () => {
   }
 
   const auth = await loadTsModule('src/services/auth.ts', 'auth-service-login-url')
-  const url = new URL(auth.buildNewApiLoginUrl('https://talkwise.example/practice'))
+  const url = new URL(auth.buildNewApiLoginUrl('/practice?mode=voice'))
+  const callback = new URL(url.searchParams.get('talkwise_return'))
 
   assert.equal(url.origin, 'https://newapi.flowguide.cc')
   assert.equal(url.pathname, '/login')
-  assert.equal(url.searchParams.get('talkwise_return'), 'https://talkwise.example/practice')
-  assert.equal(url.searchParams.get('talkwise_redirect_uri'), 'https://talkwise.example/practice')
+  assert.equal(callback.origin, 'https://talkwise.example')
+  assert.equal(callback.pathname, '/login')
+  assert.equal(callback.search, '')
+  assert.equal(url.searchParams.get('talkwise_redirect_uri'), callback.toString())
+  assert.equal(url.searchParams.get('state'), '/practice?mode=voice')
   assert.equal(url.searchParams.get('talkwise_client_id'), 'talkwise')
+})
+
+test('buildNewApiLoginUrl rejects external and protocol-relative return targets', async () => {
+  const localStorage = createStorage()
+  const sessionStorage = createStorage()
+  globalThis.window = {
+    localStorage,
+    sessionStorage,
+    location: { origin: 'https://talkwise.example', href: 'https://talkwise.example/login' },
+  }
+
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-safe-login-url')
+  for (const target of [
+    'https://talkwise.example/practice',
+    'https://evil.example/phish',
+    '//evil.example/phish',
+    '/\\evil.example/phish',
+  ]) {
+    const loginUrl = new URL(auth.buildNewApiLoginUrl(target))
+    const callback = new URL(loginUrl.searchParams.get('talkwise_return'))
+    assert.equal(callback.origin, 'https://talkwise.example')
+    assert.equal(callback.pathname, '/login')
+    assert.equal(callback.search, '')
+    assert.equal(loginUrl.searchParams.get('talkwise_redirect_uri'), callback.toString())
+    assert.equal(loginUrl.searchParams.get('state'), '/workspace')
+  }
+})
+
+test('NewAPI root identity is normalized to product admin', async () => {
+  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-root-admin')
+  const state = auth.createNewApiAuthenticatedState({
+    provider: 'newapi',
+    user_id: 'newapi:1',
+    username: 'root',
+    system_role: 'root',
+  })
+
+  assert.equal(state.user.systemRole, 'admin')
+  assert.equal(state.user.isAdmin, true)
+  assert.equal(auth.canAccessManagementFeatures(state.user), true)
 })
 
 test('fetchCurrentAuthSession restores a NewAPI user from the HttpOnly session cookie', async () => {
@@ -596,27 +602,6 @@ test('fetchCurrentTeamMembers sanitizes legacy integration error text', async ()
     () => auth.fetchCurrentTeamMembers(),
     (error) => {
       assert.equal(error.message, 'Team member service unavailable')
-      assert.doesNotMatch(error.message, /NewAPI/)
-      return true
-    },
-  )
-})
-
-test('credential login sanitizes legacy integration credential errors', async () => {
-  globalThis.fetch = async () => ({
-    ok: false,
-    status: 401,
-    json: async () => ({
-      detail: 'Invalid NewAPI username or password',
-    }),
-  })
-
-  const auth = await loadTsModule('src/services/auth.ts', 'auth-service-credential-error')
-
-  await assert.rejects(
-    () => auth.connectNewApiCredentials('alice@example.com', 'wrong-password'),
-    (error) => {
-      assert.equal(error.message, 'Invalid username or password')
       assert.doesNotMatch(error.message, /NewAPI/)
       return true
     },

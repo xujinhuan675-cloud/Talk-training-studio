@@ -12,15 +12,12 @@ interface NavRailProps {
 const NavRail: React.FC<NavRailProps> = ({ collapsed = false }) => {
   const location = useLocation()
   const { t, tr } = useI18n()
-  const { hasAnySystemRole } = useAuthContext()
+  const { isAdmin } = useAuthContext()
 
   const visibleSections = desktopNavSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => {
-        if (!item.roles) return true
-        return hasAnySystemRole(item.roles)
-      }),
+      items: section.items.filter((item) => !item.requiresAdmin || isAdmin),
     }))
     .filter((section) => section.items.length > 0)
 

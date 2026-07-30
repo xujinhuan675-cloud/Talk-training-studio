@@ -178,23 +178,23 @@ def test_file_list_hides_assets_outside_current_user_scope() -> None:
     assert [item["id"] for item in data["items"]] == [1]
 
 
-def test_file_detail_and_delete_use_current_user_metadata_scope() -> None:
+def test_legacy_leader_file_detail_and_delete_are_limited_to_own_metadata_scope() -> None:
     fake = FakeFileAssetService()
     client = _client(fake)
 
     detail = client.get("/api/v1/files/1", headers={"X-Mock-User": "leader"})
     deleted = client.delete("/api/v1/files/1", headers={"X-Mock-User": "leader"})
 
-    assert detail.status_code == 200
-    assert deleted.status_code == 200
+    assert detail.status_code == 404
+    assert deleted.status_code == 404
     get_scope = fake.get_scopes[0]
     delete_scope = fake.delete_scopes[0]
     assert get_scope.user_id == "user-leader-001"
     assert get_scope.team_id == "team-revenue"
-    assert get_scope.include_team_scope is True
+    assert get_scope.include_team_scope is False
     assert get_scope.allow_unscoped is False
     assert delete_scope.user_id == "user-leader-001"
-    assert delete_scope.include_team_scope is True
+    assert delete_scope.include_team_scope is False
 
 
 def test_file_url_routes_use_scope_and_reject_before_signing() -> None:

@@ -75,6 +75,7 @@ async def test_newapi_bearer_token_maps_to_talkwise_user(monkeypatch: pytest.Mon
     assert current_user.username == "alice"
     assert current_user.display_name == "Alice Zhang"
     assert current_user.system_role == "admin"
+    assert current_user.is_admin is True
     assert current_user.business_role == "sales"
     assert current_user.team_id == "newapi:paid"
     assert current_user.quota_remaining == 1200
@@ -156,55 +157,6 @@ async def test_newapi_authorization_code_exchange_maps_control_plane_claims(
 
 
 @pytest.mark.asyncio
-async def test_newapi_credentials_login_maps_to_talkwise_user(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def fake_authenticate_credentials(
-        username: str,
-        password: str,
-        *,
-        base_url: str,
-        login_path: str,
-        timeout_seconds: float,
-    ):
-        assert username == "alice@example.com"
-        assert password == "secret-password"
-        assert base_url == "https://newapi.example"
-        assert login_path == "/api/user/login"
-        assert timeout_seconds == 2.5
-        return NewAPIIdentity(
-            id=42,
-            username="alice",
-            display_name="Alice Zhang",
-            role=10,
-            status=1,
-            group="paid",
-            quota=1200,
-            used_quota=300,
-            request_count=12,
-        )
-
-    monkeypatch.setattr(deps.settings, "NEWAPI_BASE_URL", "https://newapi.example")
-    monkeypatch.setattr(deps.settings, "NEWAPI_LOGIN_PATH", "/api/user/login")
-    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_TIMEOUT_SECONDS", 2.5)
-    monkeypatch.setattr(deps, "authenticate_newapi_credentials", fake_authenticate_credentials)
-
-    current_user = await deps.get_current_user_from_newapi_credentials(
-        "alice@example.com",
-        "secret-password",
-    )
-
-    assert current_user.user_id == "newapi:42"
-    assert current_user.username == "alice"
-    assert current_user.display_name == "Alice Zhang"
-    assert current_user.system_role == "admin"
-    assert current_user.team_id == "newapi:paid"
-    assert current_user.quota_remaining == 1200
-    assert current_user.quota_used == 300
-    assert current_user.quota_total == 1500
-
-
-@pytest.mark.asyncio
 async def test_newapi_exchange_route_sets_talkwise_session_cookie(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -215,7 +167,7 @@ async def test_newapi_exchange_route_sets_talkwise_session_cookie(
             user_id="newapi:88",
             username="carol",
             display_name="Carol Chen",
-            system_role="leader",
+            system_role="staff",
             business_role="sales",
             team_id="team-acme",
             team_name="Acme Revenue",
@@ -239,54 +191,10 @@ async def test_newapi_exchange_route_sets_talkwise_session_cookie(
 
     assert result.data is not None
     assert result.data.user_id == "newapi:88"
+    assert result.data.is_admin is False
     assert result.data.team_name == "Acme Revenue"
     assert result.data.quota_remaining == 900
     assert result.data.subscription_plan == "enterprise"
-    set_cookie = response.headers["set-cookie"]
-    assert deps.settings.TALKWISE_SESSION_COOKIE_NAME in set_cookie
-    assert "HttpOnly" in set_cookie
-
-
-@pytest.mark.asyncio
-async def test_newapi_login_route_sets_talkwise_session_cookie(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def fake_get_user_from_credentials(username: str, password: str):
-        assert username == "alice@example.com"
-        assert password == "secret-password"
-        return deps.CurrentUser(
-            user_id="newapi:42",
-            username="alice",
-            display_name="Alice Zhang",
-            system_role="leader",
-            business_role="sales",
-            team_id="newapi:paid",
-            team_name="paid",
-            quota_remaining=1200,
-            quota_used=300,
-            quota_total=1500,
-        )
-
-    monkeypatch.setattr(
-        auth_routes,
-        "get_current_user_from_newapi_credentials",
-        fake_get_user_from_credentials,
-    )
-    response = Response()
-
-    result = await auth_routes.create_newapi_login_session(
-        auth_routes.NewAPILoginRequest(
-            username="  alice@example.com  ",
-            password="secret-password",
-        ),
-        response,
-    )
-
-    assert result.data is not None
-    assert result.data.user_id == "newapi:42"
-    assert result.data.username == "alice"
-    assert result.data.team_name == "paid"
-    assert result.data.quota_total == 1500
     set_cookie = response.headers["set-cookie"]
     assert deps.settings.TALKWISE_SESSION_COOKIE_NAME in set_cookie
     assert "HttpOnly" in set_cookie
@@ -365,6 +273,7 @@ async def test_newapi_team_members_route_uses_current_users_group(
     assert result.data.team.id == "newapi:paid"
     assert result.data.members[0].user_id == 42
     assert result.data.members[0].system_role == "admin"
+    assert result.data.members[0].is_admin is True
     assert result.data.members[0].quota_total == 150
 
 
@@ -397,7 +306,7 @@ async def test_newapi_team_members_route_falls_back_to_current_user_when_service
             user_id="newapi:42",
             username="alice",
             display_name="Alice Zhang",
-            system_role="leader",
+            system_role="staff",
             team_id="team-paid",
             team_name="Paid Team",
             newapi_group="paid",
@@ -416,7 +325,8 @@ async def test_newapi_team_members_route_falls_back_to_current_user_when_service
     assert result.data.members[0].user_id == 42
     assert result.data.members[0].username == "alice"
     assert result.data.members[0].display_name == "Alice Zhang"
-    assert result.data.members[0].system_role == "leader"
+    assert result.data.members[0].system_role == "staff"
+    assert result.data.members[0].is_admin is False
     assert result.data.members[0].team_id == "team-paid"
     assert result.data.members[0].team_name == "Paid Team"
     assert result.data.members[0].quota_remaining == 120
@@ -434,7 +344,7 @@ async def test_newapi_team_user_search_requires_manager() -> None:
             current_user=deps.CurrentUser(
                 user_id="newapi:42",
                 username="alice",
-                system_role="staff",
+                system_role="leader",
                 team_id="newapi:paid",
                 newapi_group="paid",
             ),
@@ -487,7 +397,7 @@ async def test_newapi_team_user_search_uses_current_users_group(
         current_user=deps.CurrentUser(
             user_id="newapi:42",
             username="alice",
-            system_role="leader",
+            system_role="admin",
             team_id="newapi:paid",
             newapi_group="paid",
         ),
@@ -559,6 +469,7 @@ async def test_newapi_admin_maps_to_talkwise_admin(monkeypatch: pytest.MonkeyPat
     current_user = await _resolve_user(authorization="Bearer manager-token")
 
     assert current_user.system_role == "admin"
+    assert current_user.is_admin is True
     assert current_user.team_id == deps.settings.NEWAPI_DEFAULT_TEAM_ID
 
 
@@ -626,11 +537,35 @@ async def test_talkwise_session_cookie_maps_to_current_user_when_newapi_auth_is_
 
     assert current_user.user_id == "newapi:42"
     assert current_user.username == "alice"
-    assert current_user.system_role == "leader"
+    assert current_user.system_role == "staff"
+    assert current_user.is_admin is False
     assert current_user.team_id == "newapi:paid"
     assert current_user.team_name == "paid"
     assert current_user.quota_remaining == 100
     assert current_user.quota_total == 150
+
+
+def test_training_scope_only_allows_product_admin_cross_user_access() -> None:
+    legacy_leader = deps.CurrentUser(
+        user_id="newapi:42",
+        username="alice",
+        system_role="leader",
+        team_id="newapi:paid",
+    )
+    admin = deps.CurrentUser(
+        user_id="newapi:7",
+        username="admin",
+        system_role="admin",
+        team_id="newapi:paid",
+    )
+
+    legacy_scope = deps.training_scope_for(legacy_leader, requested_user_id="newapi:99")
+    admin_scope = deps.training_scope_for(admin, requested_user_id="newapi:99")
+
+    assert legacy_scope.user_id == "newapi:42"
+    assert legacy_scope.team_id == "newapi:paid"
+    assert admin_scope.user_id == "newapi:99"
+    assert admin_scope.team_id == "newapi:paid"
 
 
 @pytest.mark.asyncio

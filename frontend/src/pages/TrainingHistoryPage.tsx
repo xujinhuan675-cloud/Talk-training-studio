@@ -51,7 +51,6 @@ import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Input, Select } from '../components/ui/form'
 import { SegmentedControl } from '../components/ui/segmented-control'
-import { Surface } from '../components/ui/surface'
 import './TrainingHistoryPage.css'
 
 type HistoryStatus = ScenarioTrainingStatus
@@ -582,7 +581,7 @@ export default function TrainingHistoryPage() {
         )}
       />
 
-      <Surface as="div" className="training-history-toolbar-surface" padding="md">
+      <section className="training-history-toolbar-surface">
         <section className="training-history-toolbar" aria-label={tr('训练记录筛选', 'Training history filters')}>
           <label className="training-history-search">
             <Search size={16} />
@@ -634,7 +633,7 @@ export default function TrainingHistoryPage() {
             </Button>
           )}
         </section>
-      </Surface>
+      </section>
 
       {(sessionError || progressError) && (
         <section className="training-history-alerts">
@@ -654,6 +653,10 @@ export default function TrainingHistoryPage() {
       )}
 
       <section className="training-history-list" aria-label={tr('训练记录列表', 'Training history records')}>
+        <div className="training-history-list-meta">
+          <strong>{tr('训练会话', 'Training sessions')}</strong>
+          <span>{filterCountText}</span>
+        </div>
         <div className="training-history-list-head">
           <span>{tr('练习时间', 'Practice time')}</span>
           <span>{tr('场景', 'Scenario')}</span>

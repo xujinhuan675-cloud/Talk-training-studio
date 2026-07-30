@@ -17,7 +17,6 @@ import { type TrainingFeedbackMode, type TrainingMode } from '../services/traini
 import { launchScenarioTraining } from '../services/scenarioTrainingLaunch'
 import { useAuthContext } from '../contexts/AuthContext'
 import { useI18n, type Locale, type Translate, type TranslateInline } from '../i18n'
-import { MANAGEMENT_SYSTEM_ROLES } from '../services/auth'
 import { PageHeader, PageShell } from '../components/ui/page'
 import {
   getScenarioTrainingProgress,
@@ -124,7 +123,7 @@ function matchesScenario(
 export default function ScenarioTrainingPage() {
   const navigate = useNavigate()
   const { locale, t, tr } = useI18n()
-  const { currentUser, hasAnySystemRole, requireAuthenticated } = useAuthContext()
+  const { currentUser, isAdmin, requireAuthenticated } = useAuthContext()
   const [mode, setMode] = useState<TrainingMode>('text')
   const [feedbackMode, setFeedbackMode] = useState<TrainingFeedbackMode>('simulation')
   const [query, setQuery] = useState('')
@@ -140,7 +139,7 @@ export default function ScenarioTrainingPage() {
   ))
   const [startingScenarioId, setStartingScenarioId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const canUseManagementActions = hasAnySystemRole(MANAGEMENT_SYSTEM_ROLES)
+  const canUseManagementActions = isAdmin
 
   useEffect(() => {
     setProgress(getScenarioTrainingProgress(progressScope))
