@@ -89,12 +89,14 @@ class FakeChatroomService:
     def __init__(self, runtime_state=None) -> None:
         self._runtime_state = runtime_state
         self.created_rooms: list[object] = []
+        self.create_scopes: list[object] = []
         self.details: dict[int, ChatRoomDetailDTO] = {}
         self.detail_calls: list[tuple[int, int]] = []
         self.detail_scopes: list[object] = []
 
-    async def create_room(self, dto):
+    async def create_room(self, dto, *, access_scope=None):
         self.created_rooms.append(dto)
+        self.create_scopes.append(access_scope)
         room = SimpleNamespace(
             id=701,
             name=dto.name,
@@ -1526,6 +1528,77 @@ async def test_training_session_list_supports_skip_and_limit(client: AsyncClient
     assert list_resp.status_code == 200
     data = list_resp.json()["data"]
     assert [item["session_id"] for item in data] == ["session-2"]
+    assert list_resp.headers["x-total-count"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_training_session_delete_respects_current_user_scope(client: AsyncClient) -> None:
+    sales_headers = {"X-Mock-User": "sales"}
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+        headers=sales_headers,
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+
+    forbidden_resp = await client.delete(
+        f"/api/v1/training-studio/sessions/{session_id}",
+        headers={"X-Mock-User": "customer_service"},
+    )
+    assert forbidden_resp.status_code == 403
+
+    deleted_resp = await client.delete(
+        f"/api/v1/training-studio/sessions/{session_id}",
+        headers=sales_headers,
+    )
+    assert deleted_resp.status_code == 200
+    assert deleted_resp.json()["data"] == {
+        "session_id": session_id,
+        "deleted": True,
+    }
+
+    missing_resp = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}",
+        headers=sales_headers,
+    )
+    assert missing_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_scenario_progress_pagination_exposes_total_and_summary(client: AsyncClient) -> None:
+    for scenario_template_id in ["renewal", "discovery"]:
+        create_resp = await client.post(
+            "/api/v1/training-studio/sessions",
+            json=session_payload(
+                "text",
+                scenario_template_id=scenario_template_id,
+            ),
+        )
+        assert create_resp.status_code == 201
+
+    progress_resp = await client.get(
+        "/api/v1/training-studio/scenario-progress",
+        params={"skip": 1, "limit": 1},
+    )
+    summary_resp = await client.get(
+        "/api/v1/training-studio/scenario-progress/summary"
+    )
+
+    assert progress_resp.status_code == 200
+    assert len(progress_resp.json()["data"]) == 1
+    assert progress_resp.headers["x-total-count"] == "2"
+    assert summary_resp.status_code == 200
+    assert summary_resp.json()["data"] == {
+        "tracked_scenarios": 2,
+        "completed_scenarios": 0,
+        "scored_scenarios": 0,
+        "average_score": None,
+        "completion_percentage": 0,
+    }
 
 
 @pytest.mark.asyncio

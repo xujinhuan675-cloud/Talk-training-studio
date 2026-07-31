@@ -15,9 +15,10 @@ from shared.codes import BusinessCode
 class StakeholderRoomAccessScope:
     """Caller visibility boundary for stakeholder rooms.
 
-    Rooms do not yet persist owner/team metadata, so scoped access is derived
-    from every persona currently attached to the room. Callers must pass this
-    explicitly; trusted internal/admin reads use ``unrestricted=True``.
+    New rooms persist owner/team metadata. Legacy rooms keep the prior
+    persona-derived fallback until their historical resource boundary can be
+    migrated. Callers must pass this explicitly; trusted internal/admin reads
+    use ``unrestricted=True``.
     """
 
     user_id: str | None = None
@@ -119,6 +120,16 @@ def stakeholder_room_matches_access_scope(
     scope = require_stakeholder_room_access_scope(access_scope, operation=operation)
     if scope.unrestricted:
         return True
+    owner_user_id = _normalized_scope_value(room.owner_user_id)
+    owner_team_id = _normalized_scope_value(room.owner_team_id)
+    if owner_user_id or owner_team_id:
+        if owner_user_id and owner_user_id == _normalized_scope_value(scope.user_id):
+            return True
+        return bool(
+            scope.include_team_scope
+            and owner_team_id
+            and owner_team_id == _normalized_scope_value(scope.team_id)
+        )
     if not room.persona_ids:
         return False
     return all(

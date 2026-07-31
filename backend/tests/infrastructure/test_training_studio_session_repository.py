@@ -191,6 +191,9 @@ async def test_training_session_repository_applies_access_scope_to_get_and_list(
         staff_sessions = await repo.list(access_scope=staff_scope)
         leader_sessions = await repo.list(access_scope=leader_scope)
         admin_sessions = await repo.list()
+        staff_total = await repo.count(access_scope=staff_scope)
+        leader_total = await repo.count(access_scope=leader_scope)
+        admin_total = await repo.count()
 
     assert [session.session_id for session in staff_sessions] == ["session-sales"]
     assert [session.session_id for session in leader_sessions] == [
@@ -202,6 +205,50 @@ async def test_training_session_repository_applies_access_scope_to_get_and_list(
         "session-peer",
         "session-service",
     ]
+    assert staff_total == 1
+    assert leader_total == 2
+    assert admin_total == 3
+
+
+@pytest.mark.asyncio
+async def test_training_session_repository_deletes_only_within_access_scope(
+    session_factory,
+) -> None:
+    sales = TrainingSession(
+        session_id="session-sales",
+        task_config=_task_config(),
+        mode="text",
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+    peer = TrainingSession(
+        session_id="session-peer",
+        task_config=_task_config(),
+        mode="text",
+        user_id="user-peer-001",
+        team_id="team-revenue",
+    )
+    scope = TrainingSessionAccessScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+
+    async with session_factory() as db_session:
+        repo = SQLAlchemyTrainingSessionRepository(db_session)
+        await repo.save(sales)
+        await repo.save(peer)
+        await db_session.commit()
+
+    async with session_factory() as db_session:
+        repo = SQLAlchemyTrainingSessionRepository(db_session)
+        assert await repo.delete("session-peer", access_scope=scope) is False
+        assert await repo.delete("session-sales", access_scope=scope) is True
+        await db_session.commit()
+
+    async with session_factory() as db_session:
+        repo = SQLAlchemyTrainingSessionRepository(db_session)
+        assert await repo.get("session-sales") is None
+        assert await repo.get("session-peer") is not None
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,10 @@ from application.services.stakeholder.room_access_policy import (
     require_stakeholder_room_access_scope,
     stakeholder_room_matches_access_scope,
 )
+from application.services.stakeholder.persona_access_policy import (
+    PersonaAccessScope,
+    can_read_persona,
+)
 from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import ChatRoom
@@ -40,18 +44,32 @@ class ChatRoomApplicationService:
         self._persona_loader = persona_loader
         self._domain_service = ChatRoomDomainService()
 
-    async def create_room(self, dto: CreateChatRoomDTO) -> ChatRoomDTO:
+    async def create_room(
+        self,
+        dto: CreateChatRoomDTO,
+        *,
+        access_scope: StakeholderRoomAccessScope | None = None,
+    ) -> ChatRoomDTO:
         # 1. Validate persona_ids count per room type (domain rule)
         self._domain_service.validate_room_creation(dto.type, dto.persona_ids)
 
         # 2. Validate all persona_ids exist
+        personas = []
         for pid in dto.persona_ids:
-            if self._persona_loader.get_persona(pid) is None:
+            persona = self._persona_loader.get_persona(pid)
+            if persona is None:
                 raise DomainValidationException(
                     f"Persona '{pid}' not found",
                     field="persona_ids",
                     details={"persona_id": pid},
                 )
+            if not self._persona_is_readable_for_room(persona, access_scope):
+                raise DomainValidationException(
+                    f"Persona '{pid}' is outside the current user scope",
+                    field="persona_ids",
+                    details={"persona_id": pid},
+                )
+            personas.append(persona)
 
         # 3. Create and persist
         room = ChatRoom(
@@ -60,10 +78,44 @@ class ChatRoomApplicationService:
             type=dto.type,
             persona_ids=dto.persona_ids,
             scenario_id=dto.scenario_id,
+            owner_user_id=(access_scope.user_id if access_scope and not access_scope.unrestricted else None),
+            owner_team_id=(access_scope.team_id if access_scope and not access_scope.unrestricted else None),
+            persona_snapshots={persona.id: self._persona_snapshot(persona) for persona in personas},
         )
         async with self._uow_factory() as uow:
             created = await uow.chat_room_repository.create(room)
             return ChatRoomDTO.model_validate(created)
+
+    @staticmethod
+    def _persona_is_readable_for_room(persona, access_scope: StakeholderRoomAccessScope | None) -> bool:
+        """Enforce persisted asset ownership while keeping legacy templates usable."""
+
+        if access_scope is None or access_scope.unrestricted:
+            return True
+        if not getattr(persona, "owner_user_id", None) and not getattr(persona, "owner_team_id", None):
+            return True
+        return can_read_persona(
+            persona,
+            PersonaAccessScope(
+                user_id=access_scope.user_id or "",
+                team_id=access_scope.team_id,
+                can_manage_team=access_scope.include_team_scope,
+            ),
+        )
+
+    @staticmethod
+    def _persona_snapshot(persona) -> dict:
+        snapshot = getattr(persona, "training_snapshot", None)
+        if callable(snapshot):
+            return snapshot()
+        # Compatibility for legacy collaborators and isolated test doubles.
+        return {
+            "persona_id": persona.id,
+            "version": getattr(persona, "version", 1),
+            "name": getattr(persona, "name", persona.id),
+            "role": getattr(persona, "role", ""),
+            "profile_summary": getattr(persona, "profile_summary", ""),
+        }
 
     def _room_matches_access_scope(
         self,

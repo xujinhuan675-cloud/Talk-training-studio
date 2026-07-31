@@ -12,14 +12,19 @@ from typing import Callable, Optional
 
 from application.ports.document_parser import DocumentParser
 from application.ports.llm import LLMMessage, LLMPort
+from application.services.defense_training_workspace_service import (
+    DefenseTrainingWorkspaceService,
+)
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.dto import CreateChatRoomDTO
 from application.services.stakeholder.persona_loader import PersonaLoader
 from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
     unrestricted_stakeholder_room_scope,
 )
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.defense_prep.entity import DefenseSession
+from domain.defense_prep.repository import DefenseSessionAccessScope
 from domain.defense_prep.scenario import ScenarioType, SCENARIO_CONFIGS
 from domain.defense_prep.value_objects import PlannedQuestion, QuestionStrategy
 
@@ -128,12 +133,14 @@ class DefensePrepService:
         document_parser: DocumentParser,
         chatroom_service: ChatRoomApplicationService,
         persona_loader: PersonaLoader,
+        training_workspace_service: DefenseTrainingWorkspaceService,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm = llm
         self._parser = document_parser
         self._chatroom_service = chatroom_service
         self._persona_loader = persona_loader
+        self._training_workspace_service = training_workspace_service
 
     async def create_session(
         self,
@@ -141,23 +148,44 @@ class DefensePrepService:
         filename: str,
         persona_ids: list[str],
         scenario_type: ScenarioType,
+        *,
+        owner_user_id: str,
+        owner_team_id: str | None,
+        access_scope: DefenseSessionAccessScope,
     ) -> DefenseSession:
         """Step 1: Parse document and create a defense session."""
+        for persona_id in persona_ids:
+            if self._persona_loader.get_persona(persona_id) is None:
+                raise ValueError("Selected persona is unavailable in the current user scope")
         summary = await self._parser.parse(file_content, filename)
         session = DefenseSession(
-            id=None, persona_ids=persona_ids, scenario_type=scenario_type, document_summary=summary
+            id=None,
+            persona_ids=persona_ids,
+            scenario_type=scenario_type,
+            document_summary=summary,
+            owner_user_id=owner_user_id,
+            owner_team_id=owner_team_id,
         )
         async with self._uow_factory() as uow:
             session = await uow.defense_session_repository.create(session)
             await uow.commit()
         return session
 
-    async def start_session(self, session_id: int) -> DefenseSession:
+    async def start_session(
+        self,
+        session_id: int,
+        *,
+        access_scope: DefenseSessionAccessScope,
+    ) -> DefenseSession:
         """Step 2: Generate question strategy, create room, start simulation."""
         async with self._uow_factory() as uow:
-            session = await uow.defense_session_repository.get_by_id(session_id)
+            session = await uow.defense_session_repository.get_by_id(
+                session_id, access_scope=access_scope
+            )
             if session is None:
                 raise ValueError(f"Defense session {session_id} not found")
+            if session.training_session_id and session.conversation_id:
+                return session
             strategy = await self._generate_strategy(session)
             session.question_strategy = strategy
 
@@ -190,21 +218,28 @@ class DefensePrepService:
             await uow.commit()
 
             persona_names = []
+            persona_snapshots = []
             for pid in session.persona_ids:
                 p = self._persona_loader.get_persona(pid)
                 persona_names.append(p.name if p else pid)
+                persona_snapshots.append(_persona_snapshot(pid, p))
             room = await self._chatroom_service.create_room(
                 CreateChatRoomDTO(
                     name=f"答辩: {', '.join(persona_names)}",
                     type="defense",
                     persona_ids=session.persona_ids,
                     scenario_id=scenario.id,
-                )
+                ),
+                access_scope=StakeholderRoomAccessScope(
+                    user_id=session.owner_user_id,
+                    team_id=session.owner_team_id,
+                    # The caller may be an administrator, but the room is a
+                    # child resource of this session and must remain owned by
+                    # the session creator. Do not inherit admin bypass here.
+                    include_team_scope=False,
+                    unrestricted=False,
+                ),
             )
-            session.start(room_id=room.id)
-            await uow.defense_session_repository.update(session)
-            await uow.commit()
-
         config = SCENARIO_CONFIGS[session.scenario_type]
         instruction = config.get("question_instruction", "")
         context_msg = (
@@ -240,6 +275,27 @@ class DefensePrepService:
                     content=first_q_text,
                 )
             )
+            await uow.commit()
+
+        workspace = await self._training_workspace_service.start_workspace(
+            defense_session_id=session_id,
+            owner_user_id=session.owner_user_id or "",
+            owner_team_id=session.owner_team_id,
+            document_title=session.document_summary.title,
+            document_text=session.document_summary.raw_text,
+            scenario_name=str(config["name"]),
+            dimensions=list(config["dimensions"]),
+            persona_ids=session.persona_ids,
+            persona_snapshots=persona_snapshots,
+            opening_question=first_q_text,
+        )
+        session.start(room_id=room.id)
+        session.bind_training_workspace(
+            training_session_id=workspace.training_session_id,
+            conversation_id=workspace.conversation_id,
+        )
+        async with self._uow_factory() as uow:
+            await uow.defense_session_repository.update(session)
             await uow.commit()
 
         return session
@@ -314,15 +370,31 @@ class DefensePrepService:
             result.extend(by_dim[dim])
         return result
 
-    async def get_session(self, session_id: int) -> Optional[DefenseSession]:
+    async def get_session(
+        self,
+        session_id: int,
+        *,
+        access_scope: DefenseSessionAccessScope,
+    ) -> Optional[DefenseSession]:
         async with self._uow_factory(readonly=True) as uow:
-            return await uow.defense_session_repository.get_by_id(session_id)
+            return await uow.defense_session_repository.get_by_id(
+                session_id, access_scope=access_scope
+            )
 
-    async def generate_report(self, session_id: int) -> dict:
+    async def generate_report(
+        self,
+        session_id: int,
+        *,
+        access_scope: DefenseSessionAccessScope,
+    ) -> dict:
         async with self._uow_factory(readonly=True) as uow:
-            session = await uow.defense_session_repository.get_by_id(session_id)
+            session = await uow.defense_session_repository.get_by_id(
+                session_id, access_scope=access_scope
+            )
             if session is None:
                 raise ValueError(f"Defense session {session_id} not found")
+        if session.conversation_id is not None:
+            return await self._generate_conversation_report(session, access_scope=access_scope)
         if session.room_id is None:
             raise ValueError("Session has no room — simulation not started")
         detail = await self._chatroom_service.get_room_detail(
@@ -360,9 +432,97 @@ class DefensePrepService:
             logger.error("LLM report generation failed: %s", exc)
             raise ValueError("评估报告生成失败，请重试") from exc
         async with self._uow_factory() as uow:
-            session_fresh = await uow.defense_session_repository.get_by_id(session_id)
+            session_fresh = await uow.defense_session_repository.get_by_id(
+                session_id, access_scope=access_scope
+            )
             if session_fresh:
                 session_fresh.complete()
                 await uow.defense_session_repository.update(session_fresh)
                 await uow.commit()
         return report
+
+    async def _generate_conversation_report(
+        self,
+        session: DefenseSession,
+        *,
+        access_scope: DefenseSessionAccessScope,
+    ) -> dict:
+        """Generate a report from the owner-scoped native message tree."""
+
+        owner_user_id = (session.owner_user_id or "").strip()
+        if (
+            not owner_user_id
+            or session.training_session_id is None
+            or session.conversation_id is None
+        ):
+            raise ValueError("Defense training conversation binding is incomplete")
+        turns = await self._training_workspace_service.recent_turns(
+            defense_session_id=session.id or 0,
+            training_session_id=session.training_session_id,
+            conversation_id=session.conversation_id,
+            owner_user_id=owner_user_id,
+            owner_team_id=session.owner_team_id,
+        )
+        lines = [
+            f"[{'用户' if str(turn.speaker) == 'user' else '答辩官'}]: {turn.text}"
+            for turn in turns
+            if str(turn.speaker) != "system"
+        ]
+        if not lines:
+            raise ValueError("Conversation transcript is empty")
+        config = SCENARIO_CONFIGS[session.scenario_type]
+        prompt = _REPORT_PROMPT.format(
+            dimensions=", ".join(config["dimensions"]), conversation="\n\n".join(lines)
+        )
+        try:
+            report = await self._llm.generate_structured(
+                [LLMMessage(role="user", content=prompt)],
+                schema=_REPORT_SCHEMA,
+                schema_name="defense_report",
+                schema_description="Defense evaluation report",
+                temperature=0.3,
+            )
+        except Exception as exc:
+            logger.error("LLM conversation report generation failed: %s", exc)
+            raise ValueError("Defense evaluation report generation failed") from exc
+        async with self._uow_factory() as uow:
+            fresh = await uow.defense_session_repository.get_by_id(
+                session.id or 0,
+                access_scope=access_scope,
+            )
+            if fresh is not None:
+                fresh.complete()
+                await uow.defense_session_repository.update(fresh)
+                await uow.commit()
+        return report
+
+    async def delete_session(
+        self,
+        session_id: int,
+        *,
+        access_scope: DefenseSessionAccessScope,
+    ) -> bool:
+        async with self._uow_factory() as uow:
+            deleted = await uow.defense_session_repository.delete(
+                session_id, access_scope=access_scope
+            )
+            if deleted:
+                await uow.commit()
+            return deleted
+
+
+def _persona_snapshot(persona_id: str, persona: object | None) -> dict[str, object]:
+    """Freeze the selected reviewer profile before opening the native workspace."""
+
+    snapshot_factory = getattr(persona, "training_snapshot", None)
+    if callable(snapshot_factory):
+        snapshot = snapshot_factory()
+        if isinstance(snapshot, dict):
+            return dict(snapshot)
+    return {
+        "persona_id": persona_id,
+        "version": getattr(persona, "version", None),
+        "name": getattr(persona, "name", persona_id),
+        "role": getattr(persona, "role", "reviewer"),
+        "profile_summary": getattr(persona, "profile_summary", ""),
+    }

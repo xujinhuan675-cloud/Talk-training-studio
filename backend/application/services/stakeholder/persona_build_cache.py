@@ -5,8 +5,8 @@
 """Redis-backed idempotency cache for persona build runs (Story 2.4 AC7).
 
 Key design points:
-- Key = SHA256 of (user_id || NUL || sorted(materials))  — order-insensitive
-  so duplicate requests with shuffled materials hit the same cache
+- Key = SHA256 of user, build target, and sorted materials. Material order is
+  ignored, while fresh builds for different detected speakers remain distinct.
 - Value = persona_id string
 - TTL = 900s (15 min)
 - Redis failures are swallowed (logged at WARNING) so the main build path is
@@ -27,8 +27,15 @@ _CACHE_PREFIX = "persona_build"
 _DEFAULT_TTL_S = 900  # 15 minutes
 
 
-def build_cache_key(user_id: str, materials: list[str], *, persona_id: str | None = None) -> str:
-    """Compute a deterministic, order-insensitive cache key for (user_id, materials).
+def build_cache_key(
+    user_id: str,
+    materials: list[str],
+    *,
+    persona_id: str | None = None,
+    name: str | None = None,
+    role: str | None = None,
+) -> str:
+    """Compute a deterministic, order-insensitive key for one build target.
 
     Sorting materials means two requests with the same set of texts (regardless
     of order) hit the same cache entry — desirable for UX (users tend to
@@ -36,13 +43,19 @@ def build_cache_key(user_id: str, materials: list[str], *, persona_id: str | Non
 
     When ``persona_id`` is provided (enhancement mode), it is included in the
     hash so that enhancing an existing persona produces a different cache key
-    from a fresh build with the same materials.
+    from a fresh build with the same materials. Fresh builds include the
+    optional name and role so multiple detected speakers from one transcript
+    cannot collapse into the first cached persona.
     """
     h = hashlib.sha256()
     h.update(user_id.encode("utf-8"))
     if persona_id is not None:
         h.update(b"\x00")
         h.update(persona_id.encode("utf-8"))
+    else:
+        for hint in (name, role):
+            h.update(b"\x00")
+            h.update((hint or "").strip().casefold().encode("utf-8"))
     for mat in sorted(materials):
         h.update(b"\x00")
         h.update(mat.encode("utf-8"))

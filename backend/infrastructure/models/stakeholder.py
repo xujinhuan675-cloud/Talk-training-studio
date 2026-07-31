@@ -28,6 +28,8 @@ class ChatRoomModel(Base):
     __tablename__ = "stakeholder_chat_rooms"
     __table_args__ = (
         Index("ix_stakeholder_chat_rooms_last_message_at", "last_message_at"),
+        Index("ix_stakeholder_chat_rooms_owner_user_id", "owner_user_id"),
+        Index("ix_stakeholder_chat_rooms_owner_team_id", "owner_team_id"),
         {"comment": "利益相关者聊天室"},
     )
 
@@ -50,6 +52,9 @@ class ChatRoomModel(Base):
     )
     context_summary = Column(Text, nullable=True, comment="历史消息压缩摘要")
     summary_up_to_message_id = Column(Integer, nullable=True, comment="摘要覆盖到的最新消息ID")
+    owner_user_id = Column(String(100), nullable=True, comment="Authenticated room creator user ID")
+    owner_team_id = Column(String(100), nullable=True, comment="Authenticated room creator team ID")
+    persona_snapshots = Column(JSON, nullable=True, comment="Persona version snapshots at room creation")
 
     def __repr__(self) -> str:
         return f"<ChatRoomModel(id={self.id}, name='{self.name}', type='{self.type}')>"

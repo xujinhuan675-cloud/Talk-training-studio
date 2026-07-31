@@ -298,7 +298,13 @@ class PersonaBuilderService:
             return BuildEvent(seq=seq, type=type_, ts=time.time(), data=data)
 
         # AC7: idempotent cache check (BEFORE any LLM call)
-        cache_key = build_cache_key(user_id, materials, persona_id=target_persona_id)
+        cache_key = build_cache_key(
+            user_id,
+            materials,
+            persona_id=target_persona_id,
+            name=name,
+            role=role,
+        )
         cached_pid = await self._cache.get(cache_key)
         if cached_pid:
             logger.info("persona_build_cache_hit", user_id=user_id, persona_id=cached_pid)

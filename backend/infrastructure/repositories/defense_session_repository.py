@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.defense_prep.entity import DefenseSession, DefenseSessionStatus
-from domain.defense_prep.repository import DefenseSessionRepository
+from domain.defense_prep.repository import (
+    DefenseSessionAccessScope,
+    DefenseSessionRepository,
+    defense_session_matches_access_scope,
+)
 from domain.defense_prep.scenario import ScenarioType
 from domain.defense_prep.value_objects import (
     DocumentSummary,
@@ -71,7 +75,11 @@ class SQLAlchemyDefenseSessionRepository(DefenseSessionRepository):
             document_summary=summary,
             question_strategy=strategy,
             room_id=model.room_id,
+            training_session_id=model.training_session_id,
+            conversation_id=model.conversation_id,
             status=model.status,
+            owner_user_id=model.owner_user_id,
+            owner_team_id=model.owner_team_id,
             created_at=model.created_at,
         )
 
@@ -114,7 +122,11 @@ class SQLAlchemyDefenseSessionRepository(DefenseSessionRepository):
                 else None
             ),
             room_id=session.room_id,
+            training_session_id=session.training_session_id,
+            conversation_id=session.conversation_id,
             status=session.status,
+            owner_user_id=session.owner_user_id,
+            owner_team_id=session.owner_team_id,
         )
         self.session.add(model)
         await self.session.flush()
@@ -122,12 +134,20 @@ class SQLAlchemyDefenseSessionRepository(DefenseSessionRepository):
         session.created_at = model.created_at
         return session
 
-    async def get_by_id(self, session_id: int) -> Optional[DefenseSession]:
+    async def get_by_id(
+        self,
+        session_id: int,
+        *,
+        access_scope: DefenseSessionAccessScope | None = None,
+    ) -> Optional[DefenseSession]:
         result = await self.session.execute(
             select(DefenseSessionModel).where(DefenseSessionModel.id == session_id)
         )
         model = result.scalar_one_or_none()
-        return self._to_entity(model) if model else None
+        entity = self._to_entity(model) if model else None
+        if entity is None or not defense_session_matches_access_scope(entity, access_scope):
+            return None
+        return entity
 
     async def update(self, session: DefenseSession) -> DefenseSession:
         result = await self.session.execute(
@@ -138,17 +158,45 @@ class SQLAlchemyDefenseSessionRepository(DefenseSessionRepository):
             raise ValueError(f"DefenseSession {session.id} not found")
         model.status = session.status
         model.room_id = session.room_id
+        model.training_session_id = session.training_session_id
+        model.conversation_id = session.conversation_id
         model.question_strategy = (
             self._strategy_to_dict(session.question_strategy) if session.question_strategy else None
         )
         await self.session.flush()
         return session
 
-    async def list_all(self, *, skip: int = 0, limit: int = 20) -> list[DefenseSession]:
+    async def list_all(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 20,
+        access_scope: DefenseSessionAccessScope | None = None,
+    ) -> list[DefenseSession]:
         result = await self.session.execute(
             select(DefenseSessionModel)
             .order_by(DefenseSessionModel.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
-        return [self._to_entity(m) for m in result.scalars().all()]
+        sessions = [self._to_entity(m) for m in result.scalars().all()]
+        return [
+            session
+            for session in sessions
+            if defense_session_matches_access_scope(session, access_scope)
+        ]
+
+    async def delete(
+        self,
+        session_id: int,
+        *,
+        access_scope: DefenseSessionAccessScope | None = None,
+    ) -> bool:
+        session = await self.get_by_id(session_id, access_scope=access_scope)
+        if session is None:
+            return False
+        result = await self.session.execute(
+            delete(DefenseSessionModel).where(DefenseSessionModel.id == session_id)
+        )
+        await self.session.flush()
+        return result.rowcount > 0

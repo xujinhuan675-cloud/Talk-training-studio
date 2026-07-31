@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
+from domain.stakeholder.competency_entity import COMPETENCY_DIMENSIONS
 from domain.training_studio.catalog import TrainingTaskConfig
 from domain.training_studio.session import (
     TrainingSession,
@@ -93,6 +94,25 @@ class ScenarioTrainingProgressDTO(BaseModel):
     score_id: str | None = None
 
 
+class ScenarioTrainingProgressSummaryDTO(BaseModel):
+    tracked_scenarios: int
+    completed_scenarios: int
+    scored_scenarios: int
+    average_score: int | None = None
+    completion_percentage: int
+
+
+class TrainingCompetencyRadarDimensionDTO(BaseModel):
+    dimension_id: str
+    score: int
+    sample_count: int
+
+
+class TrainingCompetencyRadarDTO(BaseModel):
+    sample_size: int
+    dimensions: list[TrainingCompetencyRadarDimensionDTO]
+
+
 RoomCreator = Callable[[TrainingSession], str]
 EvaluationLookup = Callable[[int], Awaitable[object | None]]
 
@@ -118,6 +138,18 @@ class InMemoryTrainingSessionRepository:
         ):
             return None
         return session
+
+    async def delete(
+        self,
+        session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> bool:
+        session = await self.get(session_id, access_scope=access_scope)
+        if session is None:
+            return False
+        del self._sessions[session_id]
+        return True
 
     async def list(
         self,
@@ -146,6 +178,24 @@ class InMemoryTrainingSessionRepository:
                 if session.scenario_template_id == scenario_template_id
             ]
         return sessions[skip : skip + limit]
+
+    async def count(
+        self,
+        *,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        scenario_template_id: str | None = None,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> int:
+        sessions = await self.list(
+            skip=0,
+            limit=len(self._sessions),
+            user_id=user_id,
+            team_id=team_id,
+            scenario_template_id=scenario_template_id,
+            access_scope=access_scope,
+        )
+        return len(sessions)
 
 
 class TrainingSessionService:
@@ -197,6 +247,25 @@ class TrainingSessionService:
         _merge_task_config_metadata(session, metadata)
         session.start(resolved_room_id)
         return await self._save(session)
+
+    async def delete_session(
+        self,
+        session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope,
+    ) -> None:
+        scope = _require_access_scope(access_scope)
+        await self._require_session(session_id, access_scope=scope)
+        if self._uow_factory is None:
+            deleted = await self._repository.delete(session_id, access_scope=scope)
+        else:
+            async with self._uow_factory() as uow:
+                deleted = await uow.training_session_repository.delete(
+                    session_id,
+                    access_scope=scope,
+                )
+        if not deleted:
+            raise ValueError(f"Training session not found: {session_id}")
 
     async def complete_session(
         self,
@@ -271,12 +340,32 @@ class TrainingSessionService:
         scenario_template_id: str | None = None,
         access_scope: TrainingSessionAccessScope,
     ) -> list[TrainingSession]:
+        sessions, _ = await self.list_sessions_page(
+            skip=skip,
+            limit=limit,
+            user_id=user_id,
+            team_id=team_id,
+            scenario_template_id=scenario_template_id,
+            access_scope=access_scope,
+        )
+        return sessions
+
+    async def list_sessions_page(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        scenario_template_id: str | None = None,
+        access_scope: TrainingSessionAccessScope,
+    ) -> tuple[list[TrainingSession], int]:
         scope = _require_access_scope(access_scope)
         user_id = self._normalize_optional_text(user_id)
         team_id = self._normalize_optional_text(team_id)
         scenario_template_id = self._normalize_optional_text(scenario_template_id)
         if self._uow_factory is None:
-            return await self._repository.list(
+            sessions = await self._repository.list(
                 skip=skip,
                 limit=limit,
                 user_id=user_id,
@@ -284,6 +373,13 @@ class TrainingSessionService:
                 scenario_template_id=scenario_template_id,
                 access_scope=scope,
             )
+            total = await self._repository.count(
+                user_id=user_id,
+                team_id=team_id,
+                scenario_template_id=scenario_template_id,
+                access_scope=scope,
+            )
+            return sessions, total
         async with self._uow_factory(readonly=True) as uow:
             sessions = await uow.training_session_repository.list(
                 skip=skip,
@@ -293,7 +389,13 @@ class TrainingSessionService:
                 scenario_template_id=scenario_template_id,
                 access_scope=scope,
             )
-        return sessions
+            total = await uow.training_session_repository.count(
+                user_id=user_id,
+                team_id=team_id,
+                scenario_template_id=scenario_template_id,
+                access_scope=scope,
+            )
+        return sessions, total
 
     async def list_scenario_progress(
         self,
@@ -304,13 +406,166 @@ class TrainingSessionService:
         team_id: str | None = None,
         access_scope: TrainingSessionAccessScope,
     ) -> list[ScenarioTrainingProgressDTO]:
+        progress, _ = await self.list_scenario_progress_page(
+            skip=skip,
+            limit=limit,
+            user_id=user_id,
+            team_id=team_id,
+            access_scope=access_scope,
+        )
+        return progress
+
+    async def list_scenario_progress_page(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        access_scope: TrainingSessionAccessScope,
+    ) -> tuple[list[ScenarioTrainingProgressDTO], int]:
+        progress = await self._load_scenario_progress(
+            user_id=user_id,
+            team_id=team_id,
+            access_scope=access_scope,
+        )
+        return progress[skip : skip + limit], len(progress)
+
+    async def get_scenario_progress_summary(
+        self,
+        *,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        access_scope: TrainingSessionAccessScope,
+    ) -> ScenarioTrainingProgressSummaryDTO:
+        progress = await self._load_scenario_progress(
+            user_id=user_id,
+            team_id=team_id,
+            access_scope=access_scope,
+        )
+        scored_progress = [
+            item
+            for item in progress
+            if item.score_status == "ready" and item.score is not None
+        ]
+        tracked_scenarios = len(progress)
+        completed_scenarios = sum(
+            item.status == "completed" for item in progress
+        )
+        scored_scenarios = len(scored_progress)
+        average_score = (
+            round(sum(item.score or 0 for item in scored_progress) / scored_scenarios)
+            if scored_scenarios
+            else None
+        )
+        return ScenarioTrainingProgressSummaryDTO(
+            tracked_scenarios=tracked_scenarios,
+            completed_scenarios=completed_scenarios,
+            scored_scenarios=scored_scenarios,
+            average_score=average_score,
+            completion_percentage=(
+                round((completed_scenarios / tracked_scenarios) * 100)
+                if tracked_scenarios
+                else 0
+            ),
+        )
+
+    async def get_competency_radar(
+        self,
+        *,
+        user_id: str | None,
+        team_id: str | None,
+        access_scope: TrainingSessionAccessScope,
+        recent_limit: int = 10,
+    ) -> TrainingCompetencyRadarDTO:
         scope = _require_access_scope(access_scope)
         user_id = self._normalize_optional_text(user_id)
         team_id = self._normalize_optional_text(team_id)
         if self._uow_factory is None:
+            return TrainingCompetencyRadarDTO(sample_size=0, dimensions=[])
+
+        async with self._uow_factory(readonly=True) as uow:
+            total = await uow.training_session_repository.count(
+                user_id=user_id,
+                team_id=team_id,
+                access_scope=scope,
+            )
+            sessions = await uow.training_session_repository.list(
+                skip=0,
+                limit=total,
+                user_id=user_id,
+                team_id=team_id,
+                access_scope=scope,
+            )
+            evaluation_lookup = uow.competency_evaluation_repository.get_by_report_id
+
+            totals = {dimension: 0.0 for dimension in COMPETENCY_DIMENSIONS}
+            counts = {dimension: 0 for dimension in COMPETENCY_DIMENSIONS}
+            sample_size = 0
+            for session in sorted(
+                sessions,
+                key=self._session_sort_time,
+                reverse=True,
+            ):
+                if (
+                    sample_size >= recent_limit
+                    or session.status != TrainingSessionStatus.COMPLETED
+                    or not session.report_id
+                ):
+                    continue
+                try:
+                    report_id = int(session.report_id)
+                except (TypeError, ValueError):
+                    continue
+                evaluation = await evaluation_lookup(report_id)
+                if evaluation is None:
+                    continue
+
+                sample_size += 1
+                scores = getattr(evaluation, "scores", {})
+                if not isinstance(scores, Mapping):
+                    continue
+                for dimension in COMPETENCY_DIMENSIONS:
+                    normalized = self._normalize_competency_score(
+                        scores.get(dimension)
+                    )
+                    if normalized is None:
+                        continue
+                    totals[dimension] += normalized
+                    counts[dimension] += 1
+
+        return TrainingCompetencyRadarDTO(
+            sample_size=sample_size,
+            dimensions=[
+                TrainingCompetencyRadarDimensionDTO(
+                    dimension_id=dimension,
+                    score=round(totals[dimension] / counts[dimension]),
+                    sample_count=counts[dimension],
+                )
+                for dimension in COMPETENCY_DIMENSIONS
+                if counts[dimension] > 0
+            ],
+        )
+
+    async def _load_scenario_progress(
+        self,
+        *,
+        user_id: str | None,
+        team_id: str | None,
+        access_scope: TrainingSessionAccessScope,
+    ) -> list[ScenarioTrainingProgressDTO]:
+        scope = _require_access_scope(access_scope)
+        user_id = self._normalize_optional_text(user_id)
+        team_id = self._normalize_optional_text(team_id)
+        if self._uow_factory is None:
+            total = await self._repository.count(
+                user_id=user_id,
+                team_id=team_id,
+                access_scope=scope,
+            )
             sessions = await self._repository.list(
-                skip=skip,
-                limit=limit,
+                skip=0,
+                limit=total,
                 user_id=user_id,
                 team_id=team_id,
                 access_scope=scope,
@@ -318,9 +573,14 @@ class TrainingSessionService:
             return await self._build_scenario_progress(sessions)
 
         async with self._uow_factory(readonly=True) as uow:
+            total = await uow.training_session_repository.count(
+                user_id=user_id,
+                team_id=team_id,
+                access_scope=scope,
+            )
             sessions = await uow.training_session_repository.list(
-                skip=skip,
-                limit=limit,
+                skip=0,
+                limit=total,
                 user_id=user_id,
                 team_id=team_id,
                 access_scope=scope,
@@ -521,6 +781,21 @@ class TrainingSessionService:
 
     def _overall_score_to_percent(self, overall_score: float) -> int:
         return max(0, min(100, round(overall_score * 20)))
+
+    def _normalize_competency_score(self, value: object) -> int | None:
+        if isinstance(value, Mapping):
+            value = value.get("score")
+        else:
+            value = getattr(value, "score", value)
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            return None
+        if 1 <= score <= 5:
+            return round(score * 20)
+        if 0 <= score <= 100:
+            return round(score)
+        return None
 
     def _is_later_session(self, candidate: TrainingSession, current: TrainingSession) -> bool:
         candidate_time = self._session_sort_time(candidate)

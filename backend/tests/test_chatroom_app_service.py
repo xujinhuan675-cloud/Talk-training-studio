@@ -134,6 +134,39 @@ async def test_create_private_room(session_factory):
     assert result.persona_ids == ["jianfeng"]
 
 
+@pytest.mark.asyncio
+async def test_new_room_uses_owner_scope_before_legacy_persona_scope(session_factory):
+    from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
+    from application.services.stakeholder.dto import CreateChatRoomDTO
+
+    loader = FakePersonaLoader({"jianfeng"})
+    svc = ChatRoomApplicationService(
+        uow_factory=_uow_factory(session_factory), persona_loader=loader
+    )
+    owner_scope = StakeholderRoomAccessScope(user_id="newapi:owner", team_id="team-a")
+    room = await svc.create_room(
+        CreateChatRoomDTO(name="Owned", type="private", persona_ids=["jianfeng"]),
+        access_scope=owner_scope,
+    )
+
+    owner_rooms = await svc.list_rooms(access_scope=owner_scope)
+    peer_rooms = await svc.list_rooms(
+        access_scope=StakeholderRoomAccessScope(user_id="newapi:peer", team_id="team-a")
+    )
+    admin_detail = await svc.get_room_detail(
+        room.id,
+        access_scope=unrestricted_stakeholder_room_scope(),
+    )
+    async with _uow_factory(session_factory)(readonly=True) as uow:
+        persisted = await uow.chat_room_repository.get_by_id(room.id)
+
+    assert [item.id for item in owner_rooms] == [room.id]
+    assert peer_rooms == []
+    assert admin_detail.room.id == room.id
+    assert persisted.owner_user_id == "newapi:owner"
+    assert persisted.persona_snapshots["jianfeng"]["version"] == 1
+
+
 # ---------------------------------------------------------------------------
 # AC2: Create group room
 # ---------------------------------------------------------------------------

@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
-from datetime import datetime, timezone
-from typing import Callable, Optional
+from dataclasses import dataclass
+from typing import Callable, Mapping
 
 from application.ports.llm import LLMMessage, LLMPort
 from application.services.stakeholder.dto import (
@@ -18,17 +17,167 @@ from application.services.stakeholder.dto import (
     CheatSheetDTO,
     ChatRoomDTO,
     CreateChatRoomDTO,
-    CreatePersonaDTO,
     StartBattleDTO,
     TacticItem,
 )
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
-from application.services.stakeholder.persona_editor_service import PersonaEditorService
 from application.services.stakeholder.persona_loader import PersonaLoader
-from application.services.stakeholder.room_access_policy import StakeholderRoomAccessScope
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    require_stakeholder_room_access_scope,
+)
+from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
+from application.services.training_studio.session_service import (
+    CreateTrainingSessionDTO,
+    TrainingSessionService,
+)
+from application.services.training_studio.training_core import (
+    ConversationRef,
+    StartedTrainingSession,
+    TrainingConversationAdapter,
+    TrainingCoreOrchestrator,
+)
 from domain.common.unit_of_work import AbstractUnitOfWork
+from domain.stakeholder.persona_entity import Persona
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BattleTrainingLaunch:
+    """The stable hand-off from a battle launch to the text conversation runtime."""
+
+    room: ChatRoomDTO
+    started: StartedTrainingSession
+    persona_snapshot: Mapping[str, object]
+
+    def to_dict(self) -> dict[str, object]:
+        conversation = self.started.conversation
+        session = self.started.session
+        conversation_payload = _conversation_ref_payload(conversation)
+        return {
+            "training_session": {
+                "session_id": session.session_id,
+                "mode": session.mode.value,
+                "status": session.status.value,
+                "room_id": session.room_id,
+                "conversation": conversation_payload,
+            },
+            "training_session_id": session.session_id,
+            "conversation_id": conversation.conversation_id,
+            "room_id": self.room.id,
+            "persona_snapshot": dict(self.persona_snapshot),
+            "conversation": conversation_payload,
+            "room": self.room.model_dump(mode="json"),
+        }
+
+
+class _BattleConversationMetadataAdapter:
+    """Attach the concrete conversation id to the session metadata without changing TrainingCore."""
+
+    def __init__(self, delegate: TrainingConversationAdapter) -> None:
+        self._delegate = delegate
+
+    async def create_conversation(self, session) -> ConversationRef:
+        conversation = await self._delegate.create_conversation(session)
+        return ConversationRef(
+            provider=conversation.provider,
+            conversation_id=conversation.conversation_id,
+            branch_tail_message_id=conversation.branch_tail_message_id,
+            legacy_room_id=conversation.legacy_room_id,
+            metadata={
+                **dict(conversation.metadata),
+                "conversationId": conversation.conversation_id,
+            },
+        )
+
+    async def append_turn(self, conversation: ConversationRef, turn):
+        return await self._delegate.append_turn(conversation, turn)
+
+    async def recent_turns(self, conversation: ConversationRef, *, limit: int):
+        return await self._delegate.recent_turns(conversation, limit=limit)
+
+
+def _conversation_ref_payload(conversation: ConversationRef) -> dict[str, object]:
+    return {
+        "provider": conversation.provider,
+        "conversationId": conversation.conversation_id,
+        "branchTailMessageId": conversation.branch_tail_message_id,
+        "legacyRoomId": conversation.legacy_room_id,
+        "metadata": dict(conversation.metadata),
+    }
+
+
+def _battle_training_session_payload(
+    *,
+    room: ChatRoomDTO,
+    persona: Persona,
+    persona_snapshot: Mapping[str, object],
+    user_id: str | None,
+    team_id: str | None,
+    scenario_context: str,
+    training_points: list[str],
+    difficulty: str,
+    source: str,
+) -> CreateTrainingSessionDTO:
+    normalized_points = [str(point).strip() for point in training_points if str(point).strip()]
+    normalized_context = str(scenario_context or "").strip()
+    if not normalized_context:
+        normalized_context = f"Practice a realistic conversation with {persona.name}."
+    normalized_difficulty = {
+        "easy": "easy",
+        "hard": "hard",
+    }.get(str(difficulty).strip().lower(), "medium")
+    system_prompt = (persona.user_context or persona.profile_summary or normalized_context).strip()
+    metadata: dict[str, object] = {
+        "runtime": "conversation_message_tree",
+        "training_source": source,
+        "persona_ids": [persona.id],
+        "persona_snapshot": dict(persona_snapshot),
+        "scenario_context": normalized_context,
+        "training_points": normalized_points,
+        "legacy_room_id": room.id,
+        "room_name": room.name,
+        "room_type": room.type,
+        "conversation_title": room.name,
+        "system_prompt": system_prompt,
+    }
+    return CreateTrainingSessionDTO(
+        task_config=TrainingTaskConfigDTO(
+            role=f"Conversation with {persona.role}",
+            level="practice",
+            tech_stack=["communication"],
+            question_type_ratios={"simulation": 1.0},
+            question_count=12,
+            framework="prep",
+            difficulty=normalized_difficulty,
+            category="negotiation",
+            metadata=metadata,
+        ),
+        mode="text",
+        user_id=(user_id or "").strip() or None,
+        team_id=(team_id or "").strip() or None,
+    )
+
+
+def _owned_battle_room_scope(
+    access_scope: StakeholderRoomAccessScope,
+    *,
+    operation: str,
+) -> StakeholderRoomAccessScope:
+    """Keep admin read authority from producing an ownerless battle resource."""
+
+    scope = require_stakeholder_room_access_scope(access_scope, operation=operation)
+    return StakeholderRoomAccessScope(
+        user_id=scope.user_id,
+        team_id=scope.team_id,
+        include_team_scope=scope.include_team_scope,
+        allowed_persona_ids=scope.allowed_persona_ids,
+        allowed_team_ids=scope.allowed_team_ids,
+        allowed_organization_ids=scope.allowed_organization_ids,
+        unrestricted=False,
+    )
 
 _GENERATE_PROMPT = """\
 你是一个职场沟通模拟助手。用户即将参加一个重要会议，请根据用户的描述，生成模拟对话所需的角色和场景。
@@ -184,33 +333,16 @@ class BattlePrepService:
         uow_factory: Callable[..., AbstractUnitOfWork],
         llm: LLMPort,
         chatroom_service: ChatRoomApplicationService,
-        persona_editor: PersonaEditorService,
+        persona_editor,
         persona_loader: PersonaLoader,
         persona_dir: str,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm = llm
         self._chatroom_service = chatroom_service
-        self._persona_editor = persona_editor
+        self._persona_editor = persona_editor  # Compatibility injection; battle assets use the DB.
         self._persona_loader = persona_loader
         self._persona_dir = persona_dir
-
-    def _cleanup_old_personas(self) -> None:
-        """Delete temporary bp-* persona files older than 24 hours."""
-        os.makedirs(self._persona_dir, exist_ok=True)
-        now = datetime.now(timezone.utc).timestamp()
-        cutoff = 24 * 60 * 60
-
-        for filename in os.listdir(self._persona_dir):
-            if filename.startswith("bp-") and filename.endswith(".md"):
-                filepath = os.path.join(self._persona_dir, filename)
-                try:
-                    age = now - os.path.getmtime(filepath)
-                    if age > cutoff:
-                        os.remove(filepath)
-                        logger.info("Cleaned up old battle prep persona: %s", filename)
-                except OSError:
-                    pass
 
     async def generate_prep(self, description: str) -> BattlePrepResultDTO:
         """Step 1->2: User description -> LLM generates persona + scenario + training points."""
@@ -241,9 +373,55 @@ class BattlePrepService:
             training_points=points[:5],
         )
 
-    async def start_battle(self, dto: StartBattleDTO) -> ChatRoomDTO:
-        """Step 3->Chat: Create temp persona + room -> return room."""
-        self._cleanup_old_personas()
+    async def start_battle(
+        self,
+        dto: StartBattleDTO,
+        *,
+        access_scope: StakeholderRoomAccessScope,
+    ) -> ChatRoomDTO:
+        """Create the owned compatibility room used by legacy battle callers."""
+        room, _ = await self._create_generated_battle_room(
+            dto,
+            access_scope=access_scope,
+        )
+        return room
+
+    async def launch_battle_training(
+        self,
+        dto: StartBattleDTO,
+        *,
+        access_scope: StakeholderRoomAccessScope,
+        training_session_service: TrainingSessionService,
+        conversation_adapter: TrainingConversationAdapter,
+    ) -> BattleTrainingLaunch:
+        """Start Battle in the message-tree runtime, retaining the scoped room as context."""
+        room, persona = await self._create_generated_battle_room(
+            dto,
+            access_scope=access_scope,
+        )
+        return await self._launch_persona_training(
+            room=room,
+            persona=persona,
+            access_scope=access_scope,
+            training_session_service=training_session_service,
+            conversation_adapter=conversation_adapter,
+            scenario_context=dto.scenario_context,
+            training_points=dto.selected_training_points,
+            difficulty=dto.difficulty,
+            source="battle_prep",
+        )
+
+    async def _create_generated_battle_room(
+        self,
+        dto: StartBattleDTO,
+        *,
+        access_scope: StakeholderRoomAccessScope,
+    ) -> tuple[ChatRoomDTO, Persona]:
+        """Persist a generated Persona asset, then create its owned compatibility room."""
+        scope = _owned_battle_room_scope(
+            access_scope,
+            operation="start_battle",
+        )
 
         persona_id = f"bp-{uuid.uuid4().hex[:8]}"
         difficulty_instruction = _DIFFICULTY_PROMPTS.get(
@@ -273,43 +451,165 @@ class BattlePrepService:
             "但如果用户还有明显未覆盖的训练重点，继续施压。"
         )
 
-        self._persona_editor.create_persona(
-            CreatePersonaDTO(
-                id=persona_id,
-                name=dto.persona_name,
-                role=dto.persona_role,
-                avatar_color="#6366f1",
-                content=persona_content,
-                temporary=True,
-            )
+        persona = Persona(
+            id=persona_id,
+            name=dto.persona_name,
+            role=dto.persona_role,
+            avatar_color="#6366f1",
+            profile_summary=persona_content,
+            user_context=persona_content,
+            owner_user_id=scope.user_id,
+            owner_team_id=scope.team_id,
+            visibility="private",
+            version=1,
         )
+        async with self._uow_factory() as uow:
+            persona = await uow.stakeholder_persona_repository.save_structured_persona(persona)
+            await uow.commit()
+
+        # This service and the room creator share a request-scoped loader. Make
+        # the just-persisted persona available before the next request refresh.
+        self._persona_loader._v2_by_id[persona.id] = persona
+        self._persona_loader.reload()
 
         room = await self._chatroom_service.create_room(
             CreateChatRoomDTO(
                 name=f"备战: {dto.persona_name}",
                 type="battle_prep",
                 persona_ids=[persona_id],
-            )
+            ),
+            access_scope=scope,
         )
 
-        return room
+        return room, persona
 
-    async def create_room_from_persona(self, persona_id: str) -> ChatRoomDTO:
+    async def create_room_from_persona(
+        self,
+        persona_id: str,
+        *,
+        access_scope: StakeholderRoomAccessScope,
+    ) -> ChatRoomDTO:
         """Story 2.8 (AC1): create a private chatroom using an existing persona.
 
         Unlike start_battle (which creates a brand new temp bp-* persona), this
         reuses an already-persisted persona (v1 markdown or v2 DB). Called from
         the Persona Editor page's "开始演练" button.
         """
+        room, _ = await self._create_room_from_persona(
+            persona_id,
+            access_scope=access_scope,
+        )
+        return room
+
+    async def launch_persona_training(
+        self,
+        persona_id: str,
+        *,
+        access_scope: StakeholderRoomAccessScope,
+        training_session_service: TrainingSessionService,
+        conversation_adapter: TrainingConversationAdapter,
+    ) -> BattleTrainingLaunch:
+        """Turn an owned Persona Builder asset into a scoped message-tree training session."""
+        room, persona = await self._create_room_from_persona(
+            persona_id,
+            access_scope=access_scope,
+        )
+        return await self._launch_persona_training(
+            room=room,
+            persona=persona,
+            access_scope=access_scope,
+            training_session_service=training_session_service,
+            conversation_adapter=conversation_adapter,
+            scenario_context=persona.profile_summary or persona.user_context,
+            training_points=[],
+            difficulty="normal",
+            source="persona_builder",
+        )
+
+    async def _create_room_from_persona(
+        self,
+        persona_id: str,
+        *,
+        access_scope: StakeholderRoomAccessScope,
+    ) -> tuple[ChatRoomDTO, Persona]:
+        scope = _owned_battle_room_scope(
+            access_scope,
+            operation="start_persona_training",
+        )
         persona = self._persona_loader.get_persona(persona_id)
         if persona is None:
             raise ValueError(f"Persona {persona_id} not found")
-        return await self._chatroom_service.create_room(
+        room = await self._chatroom_service.create_room(
             CreateChatRoomDTO(
                 name=f"演练: {persona.name}",
                 type="private",
                 persona_ids=[persona_id],
+            ),
+            access_scope=scope,
+        )
+        return room, persona
+
+    async def _launch_persona_training(
+        self,
+        *,
+        room: ChatRoomDTO,
+        persona: Persona,
+        access_scope: StakeholderRoomAccessScope,
+        training_session_service: TrainingSessionService,
+        conversation_adapter: TrainingConversationAdapter,
+        scenario_context: str,
+        training_points: list[str],
+        difficulty: str,
+        source: str,
+    ) -> BattleTrainingLaunch:
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="launch_battle_training",
+        )
+        snapshot = persona.training_snapshot()
+        session_scope = TrainingSessionAccessScope(
+            user_id=scope.user_id,
+            team_id=scope.team_id,
+            include_team_scope=False,
+        )
+        payload = _battle_training_session_payload(
+            room=room,
+            persona=persona,
+            persona_snapshot=snapshot,
+            user_id=scope.user_id,
+            team_id=scope.team_id,
+            scenario_context=scenario_context,
+            training_points=training_points,
+            difficulty=difficulty,
+            source=source,
+        )
+        session = await training_session_service.create_session(payload)
+        orchestrator = TrainingCoreOrchestrator(
+            session_service=training_session_service,
+            conversation_adapter=_BattleConversationMetadataAdapter(conversation_adapter),
+        )
+        try:
+            started = await orchestrator.start_existing_session(
+                session.session_id,
+                access_scope=session_scope,
             )
+        except Exception:
+            try:
+                await training_session_service.fail_session(
+                    session.session_id,
+                    "Unable to initialize the battle conversation runtime",
+                    access_scope=session_scope,
+                )
+            except Exception:
+                logger.exception(
+                    "battle_training_session_failure_cleanup_failed",
+                    extra={"training_session_id": session.session_id},
+                )
+            raise
+        return BattleTrainingLaunch(
+            room=room,
+            started=started,
+            persona_snapshot=snapshot,
         )
 
     async def generate_cheat_sheet(

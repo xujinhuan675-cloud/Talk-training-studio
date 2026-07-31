@@ -20,7 +20,12 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from api.dependencies import get_persona_builder_service
+from api.dependencies import (
+    CurrentUser,
+    get_current_user,
+    get_persona_asset_service,
+    get_persona_builder_service,
+)
 from api.routes.stakeholder import router
 from application.services.stakeholder.build_events import (
     BUILD_ADVERSARIALIZE_DONE,
@@ -32,6 +37,7 @@ from application.services.stakeholder.build_events import (
     BuildEvent,
 )
 from core.exceptions import register_exception_handlers
+from domain.stakeholder.persona_entity import Persona
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +92,22 @@ class _StubBuilder:
             self.on_complete()
 
 
+class _StubPersonaAssetService:
+    def __init__(self, persona: Persona | None = None) -> None:
+        self.persona = persona
+
+    async def get_visible(self, persona_id: str, *, access_scope) -> Persona:
+        if self.persona is not None:
+            return self.persona
+        return Persona(
+            id=persona_id,
+            name="Owned persona",
+            role="Counterpart",
+            owner_user_id=access_scope.user_id,
+            owner_team_id=access_scope.team_id,
+        )
+
+
 def _happy_path_events() -> list[BuildEvent]:
     return [
         BuildEvent(seq=1, type=BUILD_WORKSPACE_READY, ts=1.0, data={"workspace_path": "/tmp/x"}),
@@ -113,11 +135,20 @@ def _happy_path_events() -> list[BuildEvent]:
 def make_app():
     """Factory: build FastAPI app with overrideable persona builder service."""
 
-    def _make(stub: _StubBuilder) -> FastAPI:
+    def _make(
+        stub: _StubBuilder,
+        current_user: CurrentUser | None = None,
+        persona_asset_service: _StubPersonaAssetService | None = None,
+    ) -> FastAPI:
         app = FastAPI()
         register_exception_handlers(app)
         app.include_router(router, prefix="/api/v1")
         app.dependency_overrides[get_persona_builder_service] = lambda: stub
+        app.dependency_overrides[get_persona_asset_service] = lambda: (
+            persona_asset_service or _StubPersonaAssetService()
+        )
+        if current_user is not None:
+            app.dependency_overrides[get_current_user] = lambda: current_user
         return app
 
     return _make
@@ -176,6 +207,24 @@ async def test_happy_path_sse_response(make_app):
     assert len(set(seqs)) == len(seqs)
     for ev in events:
         assert {"seq", "type", "ts", "data"} == set(ev.keys())
+
+
+@pytest.mark.asyncio
+async def test_build_uses_authenticated_user_for_owner_and_cache_namespace(make_app):
+    stub = _StubBuilder()
+    app = make_app(
+        stub,
+        CurrentUser(
+            user_id="user-sales-001",
+            system_role="staff",
+            team_id="team-revenue",
+        ),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        status, _ = await _consume_sse(client, {"materials": ["hello"]})
+
+    assert status == 200
+    assert stub.calls[0]["user_id"] == "user-sales-001"
 
 
 # ---------------------------------------------------------------------------
@@ -339,4 +388,39 @@ async def test_request_body_forwarded(make_app):
     assert call["name"] == "Boss"
     assert call["role"] == "CEO"
     assert call["target_persona_id"] == "boss-1"
-    assert call["user_id"] == "anonymous"
+    assert call["user_id"] == "user-admin-001"
+
+
+@pytest.mark.asyncio
+async def test_enhancement_rejects_team_peer_without_manage_permission(make_app):
+    stub = _StubBuilder()
+    current_user = CurrentUser(
+        user_id="newapi:peer",
+        system_role="staff",
+        team_id="team-a",
+    )
+    shared_persona = Persona(
+        id="boss-1",
+        name="Boss",
+        role="CEO",
+        owner_user_id="newapi:owner",
+        owner_team_id="team-a",
+        visibility="team",
+    )
+    app = make_app(
+        stub,
+        current_user=current_user,
+        persona_asset_service=_StubPersonaAssetService(shared_persona),
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://t",
+    ) as client:
+        status, _ = await _consume_sse(
+            client,
+            {"materials": ["new evidence"], "target_persona_id": "boss-1"},
+        )
+
+    assert status == 403
+    assert stub.calls == []

@@ -53,6 +53,22 @@ class TestDefenseSession:
         assert session.status == DefenseSessionStatus.IN_PROGRESS
         assert session.room_id == 42
 
+    def test_binds_native_training_workspace_identifiers(self):
+        session = DefenseSession(
+            id=1,
+            persona_ids=["p1"],
+            scenario_type=ScenarioType.PROPOSAL_REVIEW,
+            document_summary=DocumentSummary(title="test", sections=[], key_data=[], raw_text="text"),
+        )
+
+        session.bind_training_workspace(
+            training_session_id="training-defense-1",
+            conversation_id=12,
+        )
+
+        assert session.training_session_id == "training-defense-1"
+        assert session.conversation_id == 12
+
     def test_transition_to_completed(self):
         summary = DocumentSummary(title="test", sections=[], key_data=[], raw_text="text")
         session = DefenseSession(

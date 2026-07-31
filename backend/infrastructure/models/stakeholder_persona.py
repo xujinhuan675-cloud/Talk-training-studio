@@ -42,6 +42,12 @@ class StakeholderPersonaModel(Base, TimestampMixin):
     )
     evidence_citations = Column(JSON, nullable=True, comment="v2 证据链 (list[Evidence])")
     source_materials = Column(JSON, nullable=True, comment="v2 原始素材 id/片段列表")
+    owner_user_id = Column(String(100), nullable=True, index=True, comment="Authenticated owner user id")
+    owner_team_id = Column(String(100), nullable=True, index=True, comment="Authenticated owner team id")
+    visibility = Column(
+        String(20), nullable=False, default="private", server_default="private", comment="private|team|system"
+    )
+    version = Column(Integer, nullable=False, default=1, server_default="1", comment="Monotonic persona version")
 
     def __repr__(self) -> str:
         return f"<StakeholderPersonaModel(id='{self.id}')>"

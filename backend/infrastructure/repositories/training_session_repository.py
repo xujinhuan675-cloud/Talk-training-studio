@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import false, or_, select
+from sqlalchemy import delete, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.training_studio.catalog import TrainingTaskConfig
@@ -116,6 +116,19 @@ class SQLAlchemyTrainingSessionRepository(TrainingSessionRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def delete(
+        self,
+        session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> bool:
+        query = delete(TrainingSessionModel).where(
+            TrainingSessionModel.session_id == session_id
+        )
+        query = self._apply_access_scope(query, access_scope)
+        result = await self.session.execute(query)
+        return bool(result.rowcount)
+
     async def list(
         self,
         *,
@@ -143,3 +156,24 @@ class SQLAlchemyTrainingSessionRepository(TrainingSessionRepository):
             .limit(limit)
         )
         return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def count(
+        self,
+        *,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        scenario_template_id: str | None = None,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> int:
+        query = select(func.count()).select_from(TrainingSessionModel)
+        query = self._apply_access_scope(query, access_scope)
+        if user_id:
+            query = query.where(TrainingSessionModel.user_id == user_id)
+        if team_id:
+            query = query.where(TrainingSessionModel.team_id == team_id)
+        if scenario_template_id:
+            query = query.where(
+                TrainingSessionModel.scenario_template_id == scenario_template_id
+            )
+        result = await self.session.execute(query)
+        return int(result.scalar_one())

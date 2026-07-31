@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -118,6 +119,10 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
             evidence_citations=_deserialize_evidences(model.evidence_citations),
             source_materials=list(model.source_materials or []),
             rejected_features=dict(rejected),
+            owner_user_id=model.owner_user_id,
+            owner_team_id=model.owner_team_id,
+            visibility=model.visibility or "private",
+            version=model.version or 1,
         )
 
     def _apply_to_model(self, model: StakeholderPersonaModel, persona: Persona) -> None:
@@ -135,6 +140,9 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
         model.source_materials = (
             list(persona.source_materials) if persona.source_materials else None
         )
+        model.owner_user_id = persona.owner_user_id
+        model.owner_team_id = persona.owner_team_id
+        model.visibility = persona.visibility
 
     async def save_structured_persona(self, persona: Persona) -> Persona:
         existing = await self.session.get(StakeholderPersonaModel, persona.id)
@@ -143,24 +151,32 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
             self._apply_to_model(model, persona)
             self.session.add(model)
         else:
+            persona.version = (existing.version or 1) + 1
             self._apply_to_model(existing, persona)
+            existing.version = persona.version
             model = existing
         await self.session.flush()
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def get_by_id(self, persona_id: str) -> Optional[Persona]:
+    async def get_by_id(self, persona_id: str, *, include_deleted: bool = False) -> Optional[Persona]:
         model = await self.session.get(StakeholderPersonaModel, persona_id)
+        if model is not None and model.deleted_at is not None and not include_deleted:
+            return None
         return self._to_entity(model) if model else None
 
-    async def get_with_evidence(self, persona_id: str) -> Optional[tuple[Persona, list[Evidence]]]:
-        persona = await self.get_by_id(persona_id)
+    async def get_with_evidence(
+        self, persona_id: str, *, include_deleted: bool = False
+    ) -> Optional[tuple[Persona, list[Evidence]]]:
+        persona = await self.get_by_id(persona_id, include_deleted=include_deleted)
         if persona is None:
             return None
         return persona, list(persona.evidence_citations)
 
-    async def list_all(self) -> list[Persona]:
+    async def list_all(self, *, include_deleted: bool = False) -> list[Persona]:
         query = select(StakeholderPersonaModel)
+        if not include_deleted:
+            query = query.where(StakeholderPersonaModel.deleted_at.is_(None))
         query = query.order_by(StakeholderPersonaModel.id.asc())
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
@@ -169,6 +185,6 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
         model = await self.session.get(StakeholderPersonaModel, persona_id)
         if model is None:
             return False
-        await self.session.delete(model)
+        model.deleted_at = datetime.now(UTC)
         await self.session.flush()
         return True

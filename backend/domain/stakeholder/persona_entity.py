@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 from domain.common.exceptions import DomainValidationException
@@ -120,3 +120,49 @@ class Persona:
     # Story 2.7 — 用户标 "不对" 的特征索引（按 layer 分组）。存到
     # structured_profile._metadata.rejected_features，不触发 DB schema 迁移。
     rejected_features: dict[str, list[int]] = field(default_factory=dict)
+
+    # Persisted v2 persona assets are server-owned. Markdown personas retain
+    # empty ownership fields and are exposed read-only as system templates.
+    owner_user_id: Optional[str] = None
+    owner_team_id: Optional[str] = None
+    visibility: str = "private"  # private | team | system
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        self.owner_user_id = _normalize_optional_text(self.owner_user_id)
+        self.owner_team_id = _normalize_optional_text(self.owner_team_id)
+        self.visibility = str(self.visibility or "private").strip().lower()
+        if self.visibility not in {"private", "team", "system"}:
+            raise DomainValidationException(
+                f"Invalid persona visibility: {self.visibility}",
+                field="visibility",
+            )
+        if self.version < 1:
+            raise DomainValidationException(
+                "Persona version must be at least 1",
+                field="version",
+            )
+
+    def training_snapshot(self) -> dict[str, object]:
+        """Capture the profile version that a training session actually used."""
+
+        return {
+            "persona_id": self.id,
+            "version": self.version,
+            "name": self.name,
+            "role": self.role,
+            "profile_summary": self.profile_summary,
+            "hard_rules": [asdict(rule) for rule in self.hard_rules],
+            "identity": asdict(self.identity) if self.identity else None,
+            "expression": asdict(self.expression) if self.expression else None,
+            "decision": asdict(self.decision) if self.decision else None,
+            "interpersonal": asdict(self.interpersonal) if self.interpersonal else None,
+            "user_context": self.user_context,
+        }
+
+
+def _normalize_optional_text(value: object | None) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

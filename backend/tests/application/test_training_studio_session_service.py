@@ -166,6 +166,51 @@ async def test_session_service_scenario_progress_handles_mixed_timezone_datetime
     assert [item.training_session_id for item in progress] == ["scenario-b", "scenario-a-new"]
 
 
+async def test_session_service_paginates_scenario_progress_after_latest_aggregation():
+    session_ids = iter(["scenario-a-old", "scenario-b", "scenario-a-new"])
+    service = TrainingSessionService(id_factory=lambda: next(session_ids))
+
+    old = await service.create_session(
+        {**make_payload(), "scenario_template_id": "scenario-a"}
+    )
+    other = await service.create_session(
+        {**make_payload(), "scenario_template_id": "scenario-b"}
+    )
+    latest = await service.create_session(
+        {**make_payload(), "scenario_template_id": "scenario-a"}
+    )
+    old.status = TrainingSessionStatus.COMPLETED
+    other.status = TrainingSessionStatus.COMPLETED
+    latest.status = TrainingSessionStatus.COMPLETED
+    old.completed_at = datetime(2026, 7, 22, 8, 0, 0, tzinfo=UTC)
+    other.completed_at = datetime(2026, 7, 22, 9, 0, 0, tzinfo=UTC)
+    latest.completed_at = datetime(2026, 7, 22, 10, 0, 0, tzinfo=UTC)
+
+    first_page, total = await service.list_scenario_progress_page(
+        skip=0,
+        limit=1,
+        access_scope=_scope(),
+    )
+    second_page, repeated_total = await service.list_scenario_progress_page(
+        skip=1,
+        limit=1,
+        access_scope=_scope(),
+    )
+    summary = await service.get_scenario_progress_summary(access_scope=_scope())
+
+    assert total == 2
+    assert repeated_total == 2
+    assert [item.training_session_id for item in first_page] == ["scenario-a-new"]
+    assert [item.training_session_id for item in second_page] == ["scenario-b"]
+    assert summary.model_dump() == {
+        "tracked_scenarios": 2,
+        "completed_scenarios": 2,
+        "scored_scenarios": 0,
+        "average_score": None,
+        "completion_percentage": 100,
+    }
+
+
 async def test_session_service_can_fail_session():
     service = TrainingSessionService(id_factory=lambda: "session-1")
 
@@ -501,6 +546,69 @@ async def test_session_service_progress_uses_competency_evaluation_scores():
     assert progress[0].evaluation_id == 12
 
 
+async def test_session_service_builds_scoped_competency_radar_from_real_scores():
+    session_ids = iter(["session-1", "session-2", "session-foreign"])
+    repository = InMemoryTrainingSessionRepository()
+    evaluations = FakeEvaluationRepository({
+        501: SimpleNamespace(
+            scores={
+                "persuasion": {"score": 4},
+                "active_listening": 3,
+            }
+        ),
+        502: SimpleNamespace(
+            scores={
+                "persuasion": 5,
+                "emotional_management": {"score": 4},
+            }
+        ),
+        503: SimpleNamespace(scores={"persuasion": 1}),
+    })
+    service = TrainingSessionService(
+        uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
+        id_factory=lambda: next(session_ids),
+    )
+
+    for report_id in ("501", "502"):
+        session = await service.create_session(make_payload())
+        await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+        await service.complete_session(
+            session.session_id,
+            report_id=report_id,
+            access_scope=_scope(),
+        )
+
+    foreign_scope = _scope(user_id="user-other", team_id="team-other")
+    foreign = await service.create_session({
+        **make_payload(),
+        "user_id": "user-other",
+        "team_id": "team-other",
+    })
+    await service.start_session(
+        foreign.session_id,
+        room_id="43",
+        access_scope=foreign_scope,
+    )
+    await service.complete_session(
+        foreign.session_id,
+        report_id="503",
+        access_scope=foreign_scope,
+    )
+
+    radar = await service.get_competency_radar(
+        access_scope=_scope(),
+        user_id=None,
+        team_id=None,
+    )
+
+    assert radar.sample_size == 2
+    assert {item.dimension_id: (item.score, item.sample_count) for item in radar.dimensions} == {
+        "persuasion": (90, 2),
+        "emotional_management": (80, 1),
+        "active_listening": (60, 1),
+    }
+
+
 async def test_session_service_progress_degrades_when_evaluation_lookup_fails():
     repository = InMemoryTrainingSessionRepository()
     service = TrainingSessionService(
@@ -596,6 +704,12 @@ async def test_session_service_requires_explicit_access_scope_for_reads_and_muta
     with pytest.raises(DomainValidationException):
         await service.list_scenario_progress(access_scope=None)
     with pytest.raises(DomainValidationException):
+        await service.get_competency_radar(
+            user_id=None,
+            team_id=None,
+            access_scope=None,
+        )
+    with pytest.raises(DomainValidationException):
         await service.start_session(session.session_id, room_id="42", access_scope=None)
     with pytest.raises(DomainValidationException):
         await service.complete_session(session.session_id, access_scope=None)
@@ -603,11 +717,35 @@ async def test_session_service_requires_explicit_access_scope_for_reads_and_muta
         await service.fail_session(session.session_id, "blocked", access_scope=None)
     with pytest.raises(DomainValidationException):
         await service.record_turns(session.session_id, access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.delete_session(session.session_id, access_scope=None)
 
     stored = await service.get_session(session.session_id, access_scope=_scope())
     assert stored.status == TrainingSessionStatus.CREATED
     assert stored.room_id is None
     assert stored.message_count == 0
+
+
+async def test_session_service_deletes_only_the_scoped_session():
+    session_ids = iter(["session-owner", "session-foreign"])
+    service = TrainingSessionService(id_factory=lambda: next(session_ids))
+    owner = await service.create_session(make_payload())
+    foreign = await service.create_session({
+        **make_payload(),
+        "user_id": "user-other",
+        "team_id": "team-other",
+    })
+
+    await service.delete_session(owner.session_id, access_scope=_scope())
+
+    with pytest.raises(ValueError, match="not found"):
+        await service.get_session(owner.session_id, access_scope=_scope())
+    with pytest.raises(PermissionError):
+        await service.delete_session(foreign.session_id, access_scope=_scope())
+    assert await service.get_session(
+        foreign.session_id,
+        access_scope=_scope(user_id="user-other", team_id="team-other"),
+    ) is not None
 
 
 async def test_session_service_rejects_unknown_session():

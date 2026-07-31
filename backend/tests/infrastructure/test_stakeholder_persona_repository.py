@@ -105,6 +105,10 @@ async def test_schema_columns_exist(engine) -> None:
         "structured_profile",
         "evidence_citations",
         "source_materials",
+        "owner_user_id",
+        "owner_team_id",
+        "visibility",
+        "version",
     ]:
         assert required in cols, f"missing column: {required}"
 
@@ -169,6 +173,30 @@ async def test_save_is_upsert(session_factory) -> None:
         loaded = await repo.get_by_id("boss")
         assert loaded is not None
         assert loaded.name == "Updated Name"
+        assert loaded.version == 2
+
+
+@pytest.mark.asyncio
+async def test_owner_visibility_and_soft_delete_round_trip(session_factory) -> None:
+    async with session_factory() as session:
+        repo = SQLAlchemyStakeholderPersonaRepository(session)
+        persona = _make_v2_persona("owned")
+        persona.owner_user_id = "newapi:42"
+        persona.owner_team_id = "newapi:team-a"
+        persona.visibility = "team"
+        saved = await repo.save_structured_persona(persona)
+        assert saved.owner_user_id == "newapi:42"
+        assert saved.owner_team_id == "newapi:team-a"
+        assert saved.visibility == "team"
+        assert saved.version == 1
+        assert await repo.delete("owned") is True
+        await session.commit()
+
+    async with session_factory() as session:
+        repo = SQLAlchemyStakeholderPersonaRepository(session)
+        assert await repo.get_by_id("owned") is None
+        deleted = await repo.get_by_id("owned", include_deleted=True)
+        assert deleted is not None
 
 
 @pytest.mark.asyncio

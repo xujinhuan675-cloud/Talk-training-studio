@@ -65,6 +65,9 @@ class SQLAlchemyChatRoomRepository(ChatRoomRepository):
             last_message_at=model.last_message_at,
             context_summary=model.context_summary,
             summary_up_to_message_id=model.summary_up_to_message_id,
+            owner_user_id=model.owner_user_id,
+            owner_team_id=model.owner_team_id,
+            persona_snapshots=dict(model.persona_snapshots or {}),
         )
 
     async def create(self, room: ChatRoom) -> ChatRoom:
@@ -75,6 +78,9 @@ class SQLAlchemyChatRoomRepository(ChatRoomRepository):
             scenario_id=room.scenario_id,
             created_at=room.created_at,
             last_message_at=room.last_message_at,
+            owner_user_id=room.owner_user_id,
+            owner_team_id=room.owner_team_id,
+            persona_snapshots=room.persona_snapshots or None,
         )
         self.session.add(model)
         await self.session.flush()

@@ -40,6 +40,44 @@ def test_cache_key_differs_by_content():
     assert k1 != k2
 
 
+def test_fresh_builds_for_different_detected_speakers_use_different_keys():
+    materials = ["Alex: approve it\nJordan: I need more evidence"]
+
+    alex = build_cache_key(
+        "user-1",
+        materials,
+        name="Alex",
+        role="VP Sales",
+    )
+    jordan = build_cache_key(
+        "user-1",
+        materials,
+        name="Jordan",
+        role="CFO",
+    )
+
+    assert alex != jordan
+
+
+def test_enhancement_cache_key_is_stable_across_display_hints():
+    materials = ["new evidence"]
+
+    first = build_cache_key(
+        "user-1",
+        materials,
+        persona_id="manager-1",
+        name="Manager",
+    )
+    renamed = build_cache_key(
+        "user-1",
+        materials,
+        persona_id="manager-1",
+        name="Senior manager",
+    )
+
+    assert first == renamed
+
+
 def test_cache_key_has_prefix():
     key = build_cache_key("u", ["x"])
     assert key.startswith("persona_build:")

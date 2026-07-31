@@ -457,6 +457,7 @@ def get_persona_loader() -> PersonaLoader:
 
 async def get_persona_loader_with_v2(
     loader: PersonaLoader = Depends(get_persona_loader),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> PersonaLoader:
     """Story 2.8: make v2 DB personas visible to chat / battle flows.
 
@@ -466,7 +467,15 @@ async def get_persona_loader_with_v2(
     """
     async with SQLAlchemyUnitOfWork() as uow:
         try:
-            await loader.refresh_from_db(uow.stakeholder_persona_repository)
+            from application.services.stakeholder.persona_access_policy import can_read_persona
+
+            scope = persona_access_scope_for(current_user)
+            persisted = await uow.stakeholder_persona_repository.list_all()
+            visible = [persona for persona in persisted if can_read_persona(persona, scope)]
+            await loader.refresh_from_db(
+                uow.stakeholder_persona_repository,
+                personas=visible,
+            )
         except Exception:
             # Best-effort: a broken DB shouldn't knock out the chat flow entirely.
             pass
@@ -633,22 +642,57 @@ async def get_speaker_detection_service(
 # ---------------------------------------------------------------------------
 
 
+def persona_access_scope_for(current_user: CurrentUser):
+    """Translate authenticated NewAPI identity into Persona asset scope."""
+    from application.services.stakeholder.persona_access_policy import PersonaAccessScope
+
+    return PersonaAccessScope(
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
+        can_manage_team=current_user.is_admin or current_user.is_leader,
+        unrestricted=current_user.is_admin,
+    )
+
+
 class _UoWBoundStakeholderPersonaRepo:
     """Adapter that gives PersonaBuilderService a save method that creates
     its own UoW per call (the build runs across many seconds, so binding to
     a single request-scoped session would be unsafe)."""
 
-    def __init__(self, uow_factory):
+    def __init__(self, uow_factory, *, access_scope):
         self._uow_factory = uow_factory
+        self._access_scope = access_scope
 
     async def save_structured_persona(self, persona):
+        from application.services.stakeholder.persona_access_policy import require_persona_manage
+
         async with self._uow_factory() as uow:
+            existing = await uow.stakeholder_persona_repository.get_by_id(persona.id)
+            if existing is None:
+                # Owner/team are always derived from the authenticated service
+                # context. The builder never accepts these fields from a request.
+                persona.owner_user_id = self._access_scope.user_id
+                persona.owner_team_id = self._access_scope.team_id
+                persona.visibility = "private"
+                persona.version = 1
+            else:
+                require_persona_manage(existing, self._access_scope)
+                # An LLM merge may return a newly constructed aggregate; keep
+                # the existing asset boundary intact before persisting it.
+                persona.owner_user_id = existing.owner_user_id
+                persona.owner_team_id = existing.owner_team_id
+                persona.visibility = existing.visibility
             await uow.stakeholder_persona_repository.save_structured_persona(persona)
             await uow.commit()
 
     async def get_by_id(self, persona_id: str):
+        from application.services.stakeholder.persona_access_policy import require_persona_read
+
         async with self._uow_factory() as uow:
-            return await uow.stakeholder_persona_repository.get_by_id(persona_id)
+            persona = await uow.stakeholder_persona_repository.get_by_id(persona_id)
+        if persona is not None:
+            require_persona_read(persona, self._access_scope)
+        return persona
 
 
 def _load_stakeholder_prompt(name: str) -> str:
@@ -662,6 +706,7 @@ def _load_stakeholder_prompt(name: str) -> str:
 
 async def get_persona_builder_service(
     llm: LLMPort = Depends(get_stakeholder_llm_port),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Construct a PersonaBuilderService for one request (Story 2.5).
 
@@ -679,7 +724,10 @@ async def get_persona_builder_service(
     )
 
     agent_client = get_agent_sdk_client()
-    repo = _UoWBoundStakeholderPersonaRepo(SQLAlchemyUnitOfWork)
+    repo = _UoWBoundStakeholderPersonaRepo(
+        SQLAlchemyUnitOfWork,
+        access_scope=persona_access_scope_for(current_user),
+    )
     cache = PersonaBuildCache(redis=_shared_redis)
     return PersonaBuilderService(
         agent_client=agent_client,
@@ -707,6 +755,13 @@ def get_persona_v2_service():
     return PersonaV2Service(uow_factory=SQLAlchemyUnitOfWork)
 
 
+def get_persona_asset_service():
+    """Persisted Persona asset lifecycle; markdown templates are excluded."""
+    from application.services.stakeholder.persona_asset_service import PersonaAssetService
+
+    return PersonaAssetService(uow_factory=SQLAlchemyUnitOfWork)
+
+
 # ---------------------------------------------------------------------------
 # Defense Prep dependencies
 # ---------------------------------------------------------------------------
@@ -718,7 +773,14 @@ async def get_defense_prep_service(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
 ):
     from application.services.defense_prep_service import DefensePrepService
+    from application.services.defense_training_workspace_service import (
+        DefenseTrainingWorkspaceService,
+    )
+    from application.services.training_studio.session_service import TrainingSessionService
     from infrastructure.external.document_parser.parser import FileDocumentParser
+    from infrastructure.adapters.training_conversation import (
+        ConversationTrainingConversationAdapter,
+    )
 
     return DefensePrepService(
         uow_factory=SQLAlchemyUnitOfWork,
@@ -726,4 +788,10 @@ async def get_defense_prep_service(
         document_parser=FileDocumentParser(),
         chatroom_service=chatroom_svc,
         persona_loader=loader,
+        training_workspace_service=DefenseTrainingWorkspaceService(
+            session_service=TrainingSessionService(uow_factory=SQLAlchemyUnitOfWork),
+            conversation_adapter=ConversationTrainingConversationAdapter(
+                SQLAlchemyUnitOfWork
+            ),
+        ),
     )

@@ -38,7 +38,13 @@ class DefenseSession:
     document_summary: DocumentSummary
     question_strategy: Optional[QuestionStrategy] = None
     room_id: Optional[int] = None
+    training_session_id: Optional[str] = None
+    conversation_id: Optional[int] = None
     status: str = DefenseSessionStatus.PREPARING
+    # Authenticated routes inject these values. Unowned legacy rows remain
+    # unavailable to normal users until an administrator classifies them.
+    owner_user_id: Optional[str] = None
+    owner_team_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
     def __post_init__(self) -> None:
@@ -64,6 +70,26 @@ class DefenseSession:
     def start(self, room_id: int) -> None:
         self.status = DefenseSessionStatus.IN_PROGRESS
         self.room_id = room_id
+
+    def bind_training_workspace(
+        self,
+        *,
+        training_session_id: str,
+        conversation_id: int,
+    ) -> None:
+        normalized_session_id = training_session_id.strip()
+        if not normalized_session_id:
+            raise DomainValidationException(
+                "training_session_id cannot be empty",
+                field="training_session_id",
+            )
+        if conversation_id < 1:
+            raise DomainValidationException(
+                "conversation_id must be positive",
+                field="conversation_id",
+            )
+        self.training_session_id = normalized_session_id
+        self.conversation_id = conversation_id
 
     def complete(self) -> None:
         self.status = DefenseSessionStatus.COMPLETED

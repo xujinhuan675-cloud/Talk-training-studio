@@ -6,7 +6,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, JSON, String
+from sqlalchemy import Column, DateTime, Index, Integer, JSON, String
 from sqlalchemy.sql import func
 
 from .base import Base
@@ -16,7 +16,13 @@ class DefenseSessionModel(Base):
     """ORM mapping for defense_sessions table."""
 
     __tablename__ = "defense_sessions"
-    __table_args__ = {"comment": "答辩准备会话"}
+    __table_args__ = (
+        Index("ix_defense_sessions_owner_user_id", "owner_user_id"),
+        Index("ix_defense_sessions_owner_team_id", "owner_team_id"),
+        Index("ix_defense_sessions_training_session_id", "training_session_id"),
+        Index("ix_defense_sessions_conversation_id", "conversation_id"),
+        {"comment": "答辩准备会话"},
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主键ID")
     persona_ids = Column(JSON, nullable=False, comment="答辩官 Persona ID 列表 (1-5)")
@@ -24,12 +30,20 @@ class DefenseSessionModel(Base):
     document_summary = Column(JSON, nullable=False, comment="文档摘要 (结构化)")
     question_strategy = Column(JSON, nullable=True, comment="提问策略 (LLM 生成)")
     room_id = Column(Integer, nullable=True, comment="关联聊天室 ID")
+    training_session_id = Column(
+        String(100), nullable=True, comment="Bound Training Studio session ID"
+    )
+    conversation_id = Column(
+        Integer, nullable=True, comment="Bound message-tree conversation ID"
+    )
     status = Column(
         String(20),
         nullable=False,
         default="preparing",
         comment="状态: preparing/in_progress/completed",
     )
+    owner_user_id = Column(String(100), nullable=True, comment="Authenticated creator user ID")
+    owner_team_id = Column(String(100), nullable=True, comment="Authenticated creator team ID")
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

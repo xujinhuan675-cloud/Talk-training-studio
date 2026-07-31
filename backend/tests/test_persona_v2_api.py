@@ -10,7 +10,12 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from api.dependencies import get_persona_v2_service
+from api.dependencies import (
+    CurrentUser,
+    get_current_user,
+    get_persona_asset_service,
+    get_persona_v2_service,
+)
 from api.routes.stakeholder import router
 from application.services.stakeholder.dto import (
     EvidenceDTO,
@@ -20,10 +25,22 @@ from application.services.stakeholder.dto import (
     PersonaPatchV2DTO,
     PersonaV2DTO,
 )
+from application.services.stakeholder.persona_asset_service import PersonaAssetNotFoundError
 from application.services.stakeholder.persona_v2_service import (
     PersonaNotFoundError,
 )
 from core.exceptions import register_exception_handlers
+from domain.stakeholder.persona_entity import Persona
+
+
+class _StubPersonaAssetService:
+    def __init__(self, persona: Persona) -> None:
+        self._persona = persona
+
+    async def get_visible(self, persona_id: str, *, access_scope) -> Persona:
+        if persona_id != self._persona.id:
+            raise PersonaAssetNotFoundError(persona_id)
+        return self._persona
 
 
 class _StubV2Service:
@@ -53,12 +70,12 @@ class _StubV2Service:
             ),
         }
 
-    async def get_v2(self, persona_id: str) -> PersonaV2DTO:
+    async def get_v2(self, persona_id: str, **_kwargs) -> PersonaV2DTO:
         if persona_id not in self._store:
             raise PersonaNotFoundError(persona_id)
         return self._store[persona_id]
 
-    async def patch_v2(self, persona_id: str, patch: PersonaPatchV2DTO) -> PersonaV2DTO:
+    async def patch_v2(self, persona_id: str, patch: PersonaPatchV2DTO, **_kwargs) -> PersonaV2DTO:
         if persona_id not in self._store:
             raise PersonaNotFoundError(persona_id)
         existing = self._store[persona_id]
@@ -82,17 +99,38 @@ class _StubV2Service:
         return updated
 
 
-@pytest.fixture
-def client():
+def _client_for(current_user: CurrentUser, persona: Persona):
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router, prefix="/api/v1")
 
     stub = _StubV2Service()
     app.dependency_overrides[get_persona_v2_service] = lambda: stub
+    app.dependency_overrides[get_persona_asset_service] = lambda: _StubPersonaAssetService(
+        persona
+    )
+    app.dependency_overrides[get_current_user] = lambda: current_user
 
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test"), stub
+
+
+@pytest.fixture
+def client():
+    return _client_for(
+        CurrentUser(
+            user_id="newapi:owner",
+            system_role="staff",
+            team_id="team-a",
+        ),
+        Persona(
+            id="cfo",
+            name="CFO",
+            role="Finance",
+            owner_user_id="newapi:owner",
+            owner_team_id="team-a",
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -105,6 +143,8 @@ async def test_get_v2_happy(client) -> None:
         assert body["data"]["id"] == "cfo"
         assert len(body["data"]["hard_rules"]) == 1
         assert len(body["data"]["evidence"]) == 1
+        assert body["data"]["can_manage"] is True
+        assert body["data"]["read_only"] is False
 
 
 @pytest.mark.asyncio
@@ -130,5 +170,33 @@ async def test_patch_v2_partial(client) -> None:
         body = resp.json()
         assert body["data"]["name"] == "CFO 2.0"
         assert body["data"]["rejected_features"] == {"hard_rules": [0]}
+        assert body["data"]["can_manage"] is True
+        assert body["data"]["read_only"] is False
         # role untouched
         assert body["data"]["role"] == "首席财务官"
+
+
+@pytest.mark.asyncio
+async def test_get_v2_projects_team_peer_as_read_only() -> None:
+    client, _ = _client_for(
+        CurrentUser(
+            user_id="newapi:peer",
+            system_role="staff",
+            team_id="team-a",
+        ),
+        Persona(
+            id="cfo",
+            name="CFO",
+            role="Finance",
+            owner_user_id="newapi:owner",
+            owner_team_id="team-a",
+            visibility="team",
+        ),
+    )
+
+    async with client as c:
+        resp = await c.get("/api/v1/stakeholder/personas/cfo/v2")
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["can_manage"] is False
+    assert resp.json()["data"]["read_only"] is True

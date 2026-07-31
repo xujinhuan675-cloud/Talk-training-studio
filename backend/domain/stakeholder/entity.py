@@ -41,6 +41,9 @@ class ChatRoom:
     last_message_at: Optional[datetime] = None
     context_summary: Optional[str] = None
     summary_up_to_message_id: Optional[int] = None
+    owner_user_id: Optional[str] = None
+    owner_team_id: Optional[str] = None
+    persona_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.type not in _ROOM_TYPES:
@@ -54,6 +57,8 @@ class ChatRoom:
         else:
             self.created_at = _ensure_utc(self.created_at)
         self.last_message_at = _ensure_utc(self.last_message_at)
+        if self.persona_snapshots is None:
+            self.persona_snapshots = {}
 
 
 @dataclass

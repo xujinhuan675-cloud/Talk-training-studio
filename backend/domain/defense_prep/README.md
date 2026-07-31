@@ -47,6 +47,15 @@ preparing → in_progress → completed
   (创建)      (开始模拟)    (生成报告)
 ```
 
+## Native workspace binding
+
+Newly started sessions persist `training_session_id` and `conversation_id`.
+`DefenseSession` owns these references and the owner/team boundary; the shared
+TrainingSession and message-tree runtime own messages, branch state, and the
+frozen reviewer snapshots used by the exercise. Reports read that bound
+message tree first. Legacy sessions without the binding keep the room-backed
+report path for compatibility.
+
 ## 依赖关系
 
 - 本层不依赖任何外部框架

@@ -48,6 +48,14 @@ class TrainingSessionRepository(ABC):
     ) -> Optional[TrainingSession]: ...
 
     @abstractmethod
+    async def delete(
+        self,
+        session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> bool: ...
+
+    @abstractmethod
     async def list(
         self,
         *,
@@ -58,3 +66,13 @@ class TrainingSessionRepository(ABC):
         scenario_template_id: str | None = None,
         access_scope: TrainingSessionAccessScope | None = None,
     ) -> list[TrainingSession]: ...
+
+    @abstractmethod
+    async def count(
+        self,
+        *,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        scenario_template_id: str | None = None,
+        access_scope: TrainingSessionAccessScope | None = None,
+    ) -> int: ...

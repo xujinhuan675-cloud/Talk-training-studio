@@ -48,14 +48,19 @@ class PersonaLoader:
         self._cached_by_name = None
         self._cache_time = 0.0
 
-    async def refresh_from_db(self, repository: StakeholderPersonaRepository) -> None:
+    async def refresh_from_db(
+        self,
+        repository: StakeholderPersonaRepository,
+        *,
+        personas: list[Persona] | None = None,
+    ) -> None:
         """Pull personas from DB into cache.
 
         Story 2.2 AC5/AC7:
         - DB personas 在后续 ``get_persona``/``list_personas`` 中优先于 v1 markdown
         - 调用方（API dependency）可在每个请求前刷新
         """
-        v2_list = await repository.list_all()
+        v2_list = personas if personas is not None else await repository.list_all()
         self._v2_by_id = {p.id: p for p in v2_list}
         # Invalidate derived caches so next list/get sees merged view
         self._cached_personas = None

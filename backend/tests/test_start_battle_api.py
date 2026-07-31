@@ -20,17 +20,59 @@ class _StubBattlePrepService:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def create_room_from_persona(self, persona_id: str) -> ChatRoomDTO:
+    async def launch_persona_training(
+        self,
+        persona_id: str,
+        *,
+        access_scope=None,
+        training_session_service=None,
+        conversation_adapter=None,
+    ):
         self.calls.append(persona_id)
+        self.access_scope = access_scope
         if persona_id == "missing":
             raise ValueError(f"Persona {persona_id} not found")
-        return ChatRoomDTO(
-            id=42,
-            name=f"演练: {persona_id}",
-            type="private",
-            persona_ids=[persona_id],
-            scenario_id=None,
-        )
+        return _StubBattleLaunch(persona_id=persona_id, room_id=42)
+
+    async def launch_battle_training(
+        self,
+        body,
+        *,
+        access_scope=None,
+        training_session_service=None,
+        conversation_adapter=None,
+    ):
+        self.calls.append(body.persona_name)
+        self.access_scope = access_scope
+        return _StubBattleLaunch(persona_id="generated-persona", room_id=77)
+
+
+class _StubBattleLaunch:
+    def __init__(self, *, persona_id: str, room_id: int) -> None:
+        self.persona_id = persona_id
+        self.room_id = room_id
+
+    def to_dict(self) -> dict[str, object]:
+        conversation = {
+            "provider": "talkwise-conversation",
+            "conversationId": "conversation-9",
+            "metadata": {"runtime": "conversation_message_tree"},
+        }
+        return {
+            "training_session": {
+                "session_id": "training-9",
+                "mode": "text",
+                "status": "active",
+                "room_id": "talkwise-conversation:conversation-9",
+                "conversation": conversation,
+            },
+            "training_session_id": "training-9",
+            "conversation_id": "conversation-9",
+            "room_id": self.room_id,
+            "persona_snapshot": {"persona_id": self.persona_id, "version": 1},
+            "conversation": conversation,
+            "room": {"id": self.room_id, "persona_ids": [self.persona_id]},
+        }
 
 
 @pytest.fixture
@@ -51,10 +93,12 @@ async def test_start_battle_happy(client) -> None:
         resp = await c.post("/api/v1/stakeholder/personas/cfo/start-battle")
         assert resp.status_code == 201
         body = resp.json()
-        assert body["data"]["id"] == 42
-        assert body["data"]["persona_ids"] == ["cfo"]
-        assert body["data"]["type"] == "private"
+        assert body["data"]["room_id"] == 42
+        assert body["data"]["training_session"]["session_id"] == "training-9"
+        assert body["data"]["training_session"]["conversation"]["conversationId"] == "conversation-9"
+        assert body["data"]["persona_snapshot"]["persona_id"] == "cfo"
     assert stub.calls == ["cfo"]
+    assert stub.access_scope.user_id == "user-admin-001"
 
 
 @pytest.mark.asyncio
@@ -63,3 +107,29 @@ async def test_start_battle_persona_not_found(client) -> None:
     async with ac as c:
         resp = await c.post("/api/v1/stakeholder/personas/missing/start-battle")
         assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_generated_battle_returns_newapi_conversation_launch_contract(client) -> None:
+    ac, stub = client
+    async with ac as c:
+        resp = await c.post(
+            "/api/v1/stakeholder/battle-prep/start",
+            json={
+                "persona_name": "Alex",
+                "persona_role": "VP Sales",
+                "persona_style": "Direct and skeptical.",
+                "scenario_context": "Budget review.",
+                "selected_training_points": ["Handle objections"],
+                "difficulty": "normal",
+            },
+        )
+
+    assert resp.status_code == 201
+    body = resp.json()["data"]
+    assert body["training_session_id"] == "training-9"
+    assert body["conversation_id"] == "conversation-9"
+    assert body["training_session"]["mode"] == "text"
+    assert body["conversation"]["metadata"]["runtime"] == "conversation_message_tree"
+    assert stub.calls == ["Alex"]
+    assert stub.access_scope.user_id == "user-admin-001"

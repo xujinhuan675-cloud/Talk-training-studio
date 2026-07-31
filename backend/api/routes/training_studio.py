@@ -27,6 +27,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -119,6 +120,7 @@ from application.services.training_studio.scenario_config_service import (
 )
 from application.services.training_studio.session_service import (
     CreateTrainingSessionDTO,
+    TrainingCompetencyRadarDTO,
     TrainingSessionDTO,
     TrainingSessionService,
 )
@@ -1376,6 +1378,23 @@ def _training_session_access_scope_for_current_user(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
         include_team_scope=current_user.is_admin or current_user.is_leader,
+    )
+
+
+def _stakeholder_room_scope_for_current_user(
+    current_user: CurrentUser,
+) -> StakeholderRoomAccessScope:
+    """Create owned training rooms from the authenticated user, not client input."""
+
+    team_id = (current_user.team_id or "").strip() or None
+    return StakeholderRoomAccessScope(
+        user_id=current_user.user_id,
+        team_id=team_id,
+        include_team_scope=current_user.is_admin or current_user.is_leader,
+        allowed_team_ids=frozenset([team_id]) if team_id else frozenset(),
+        # Administrative read access must not make a newly created room
+        # ownerless. The session remains owned by the authenticated creator.
+        unrestricted=False,
     )
 
 
@@ -3476,6 +3495,7 @@ async def create_training_session(
 
 @router.get("/sessions", summary="List Training Studio sessions")
 async def list_training_sessions(
+    response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     user_id: str | None = Query(default=None),
@@ -3491,7 +3511,7 @@ async def list_training_sessions(
         requested_user_id=user_id or x_user_id,
         requested_team_id=team_id or x_team_id,
     )
-    sessions = await svc.list_sessions(
+    sessions, total = await svc.list_sessions_page(
         skip=skip,
         limit=limit,
         user_id=scope.user_id,
@@ -3499,12 +3519,14 @@ async def list_training_sessions(
         scenario_template_id=scenario_template_id,
         access_scope=_training_session_access_scope_for_current_user(current_user),
     )
+    response.headers["X-Total-Count"] = str(total)
     return success_response(data=[_session_to_dict(session) for session in sessions])
 
 
 @router.get("/scenario-progress", summary="List scenario training progress")
 @router.get("/sessions/scenario-progress", include_in_schema=False)
 async def list_scenario_training_progress(
+    response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     user_id: str | None = Query(default=None),
@@ -3519,14 +3541,68 @@ async def list_scenario_training_progress(
         requested_user_id=user_id or x_user_id,
         requested_team_id=team_id or x_team_id,
     )
-    progress = await svc.list_scenario_progress(
+    progress, total = await svc.list_scenario_progress_page(
         skip=skip,
         limit=limit,
         user_id=scope.user_id,
         team_id=scope.team_id,
         access_scope=_training_session_access_scope_for_current_user(current_user),
     )
+    response.headers["X-Total-Count"] = str(total)
     return success_response(data=[item.model_dump(mode="json") for item in progress])
+
+
+@router.get(
+    "/scenario-progress/summary",
+    summary="Get scenario training progress summary",
+)
+async def get_scenario_training_progress_summary(
+    user_id: str | None = Query(default=None),
+    team_id: str | None = Query(default=None),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    x_team_id: str | None = Header(default=None, alias="X-Team-Id"),
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    scope = training_scope_for(
+        current_user,
+        requested_user_id=user_id or x_user_id,
+        requested_team_id=team_id or x_team_id,
+    )
+    summary = await svc.get_scenario_progress_summary(
+        user_id=scope.user_id,
+        team_id=scope.team_id,
+        access_scope=_training_session_access_scope_for_current_user(current_user),
+    )
+    return success_response(data=summary.model_dump(mode="json"))
+
+
+@router.get(
+    "/scenario-progress/competency-radar",
+    summary="Get scoped training competency radar",
+    response_model=None,
+)
+async def get_training_competency_radar(
+    user_id: str | None = Query(default=None),
+    team_id: str | None = Query(default=None),
+    sample_size: int = Query(default=10, ge=1, le=50),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    x_team_id: str | None = Header(default=None, alias="X-Team-Id"),
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    scope = training_scope_for(
+        current_user,
+        requested_user_id=user_id or x_user_id,
+        requested_team_id=team_id or x_team_id,
+    )
+    radar: TrainingCompetencyRadarDTO = await svc.get_competency_radar(
+        user_id=scope.user_id,
+        team_id=scope.team_id,
+        access_scope=_training_session_access_scope_for_current_user(current_user),
+        recent_limit=sample_size,
+    )
+    return success_response(data=radar.model_dump(mode="json"))
 
 
 @router.get("/sessions/{session_id}", summary="Get a Training Studio session")
@@ -3541,6 +3617,26 @@ async def get_training_session(
         current_user=current_user,
     )
     return success_response(data=_session_to_dict(session))
+
+
+@router.delete("/sessions/{session_id}", summary="Delete a Training Studio session")
+async def delete_training_session(
+    session_id: str,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        await svc.delete_session(
+            session_id,
+            access_scope=_training_session_access_scope_for_current_user(
+                current_user
+            ),
+        )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+    return success_response(data={"session_id": session_id, "deleted": True})
 
 
 @router.post("/sessions/{session_id}/start", summary="Start or bind a Training Studio session")
@@ -3626,7 +3722,8 @@ async def start_training_session(
                 type=body.room_type,
                 persona_ids=persona_ids,
                 scenario_id=body.scenario_id,
-            )
+            ),
+            access_scope=_stakeholder_room_scope_for_current_user(current_user),
         )
         room_id = str(room.id)
     elif not current_user.is_admin:

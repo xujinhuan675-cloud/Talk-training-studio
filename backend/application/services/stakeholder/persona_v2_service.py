@@ -24,6 +24,7 @@ from .dto import (
     PersonaPatchV2DTO,
     PersonaV2DTO,
 )
+from .persona_access_policy import PersonaAccessScope, require_persona_manage, require_persona_read
 
 
 class PersonaNotFoundError(Exception):
@@ -36,20 +37,32 @@ class PersonaV2Service:
     def __init__(self, uow_factory: Callable) -> None:
         self._uow_factory = uow_factory
 
-    async def get_v2(self, persona_id: str) -> PersonaV2DTO:
+    async def get_v2(
+        self, persona_id: str, *, access_scope: PersonaAccessScope | None = None
+    ) -> PersonaV2DTO:
         async with self._uow_factory() as uow:
             result = await uow.stakeholder_persona_repository.get_with_evidence(persona_id)
             if result is None:
                 raise PersonaNotFoundError(persona_id)
             persona, evidence = result
+            if access_scope is not None:
+                require_persona_read(persona, access_scope)
             return _to_dto(persona, evidence)
 
-    async def patch_v2(self, persona_id: str, patch: PersonaPatchV2DTO) -> PersonaV2DTO:
+    async def patch_v2(
+        self,
+        persona_id: str,
+        patch: PersonaPatchV2DTO,
+        *,
+        access_scope: PersonaAccessScope | None = None,
+    ) -> PersonaV2DTO:
         async with self._uow_factory() as uow:
             result = await uow.stakeholder_persona_repository.get_with_evidence(persona_id)
             if result is None:
                 raise PersonaNotFoundError(persona_id)
             persona, evidence = result
+            if access_scope is not None:
+                require_persona_manage(persona, access_scope)
             _apply_patch(persona, patch)
             saved = await uow.stakeholder_persona_repository.save_structured_persona(persona)
             await uow.commit()
@@ -102,6 +115,8 @@ def _to_dto(persona: Persona, evidence: list) -> PersonaV2DTO:
         name=persona.name,
         role=persona.role,
         avatar_color=persona.avatar_color,
+        visibility=persona.visibility,
+        version=persona.version,
         hard_rules=[asdict(r) for r in persona.hard_rules],
         identity=asdict(persona.identity) if persona.identity else None,
         expression=asdict(persona.expression) if persona.expression else None,
@@ -111,4 +126,5 @@ def _to_dto(persona: Persona, evidence: list) -> PersonaV2DTO:
         evidence=[EvidenceDTO(**asdict(e)) for e in evidence],
         rejected_features=dict(persona.rejected_features),
         source_materials=list(persona.source_materials),
+        training_snapshot=persona.training_snapshot(),
     )

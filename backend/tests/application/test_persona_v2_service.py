@@ -17,6 +17,10 @@ from application.services.stakeholder.persona_v2_service import (
     PersonaNotFoundError,
     PersonaV2Service,
 )
+from application.services.stakeholder.persona_access_policy import (
+    PersonaAccessDeniedError,
+    PersonaAccessScope,
+)
 from domain.stakeholder.persona_entity import (
     DecisionPattern,
     Evidence,
@@ -158,3 +162,22 @@ async def test_patch_v2_expression_replaced_wholesale() -> None:
     assert dto.expression.tone == "活泼"
     assert dto.expression.catchphrases == ["大家加油"]
     assert dto.expression.interruption_tendency == "high"
+
+
+@pytest.mark.asyncio
+async def test_v2_scope_does_not_expose_or_mutate_another_users_persona() -> None:
+    persona = _make_v2_persona()
+    persona.owner_user_id = "newapi:owner"
+    persona.owner_team_id = "team-a"
+    factory, _ = _uow_factory_for(persona)
+    svc = PersonaV2Service(factory)
+    peer_scope = PersonaAccessScope(user_id="newapi:peer", team_id="team-b")
+
+    with pytest.raises(PersonaAccessDeniedError):
+        await svc.get_v2("cfo", access_scope=peer_scope)
+    with pytest.raises(PersonaAccessDeniedError):
+        await svc.patch_v2(
+            "cfo",
+            PersonaPatchV2DTO(name="Forged"),
+            access_scope=peer_scope,
+        )

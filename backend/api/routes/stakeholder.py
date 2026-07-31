@@ -1,4 +1,4 @@
-# input: PersonaLoader, PersonaEditorService, ChatRoomApplicationService, StakeholderChatService, ScenarioApplicationService, AnalysisService, GrowthService, PersonaBuilderService (via dependencies)
+# input: PersonaLoader, PersonaAssetService, ChatRoomApplicationService, StakeholderChatService, ScenarioApplicationService, AnalysisService, GrowthService, PersonaBuilderService (via dependencies)
 # output: stakeholder API 路由 (personas CRUD + rooms + messages + scenarios CRUD + analysis reports + growth dashboard + Story 2.5 SSE persona/build + Story 2.7 v2 GET/PATCH)
 # owner: wanhua.gu
 # pos: 表示层 - 利益相关者聊天 API 路由（角色 + 聊天室 + 消息 + 场景 + persona 构建 SSE）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
@@ -32,7 +32,7 @@ from api.dependencies import (
     get_growth_service,
     get_organization_service,
     get_persona_builder_service,
-    get_persona_editor_service,
+    get_persona_asset_service,
     get_persona_loader,
     get_persona_loader_with_v2,
     get_persona_v2_service,
@@ -40,6 +40,7 @@ from api.dependencies import (
     get_speaker_detection_service,
     get_stakeholder_chat_service,
     get_current_user,
+    persona_access_scope_for,
 )
 from application.services.stakeholder.chatroom_service import (
     ChatRoomApplicationService,
@@ -69,7 +70,15 @@ from application.services.stakeholder.dto import (
     UpdateTeamDTO,
 )
 from application.services.stakeholder.organization_service import OrganizationService
-from application.services.stakeholder.persona_editor_service import PersonaEditorService
+from application.services.stakeholder.persona_asset_service import (
+    PersonaAssetNotFoundError,
+    PersonaAssetService,
+)
+from application.services.stakeholder.persona_access_policy import (
+    PersonaAccessDeniedError,
+    PersonaAccessScope,
+    can_manage_persona,
+)
 from application.services.stakeholder.persona_loader import PersonaLoader
 from application.services.stakeholder.scenario_service import ScenarioApplicationService
 from application.services.stakeholder.sse import format_sse, room_event_bus
@@ -77,6 +86,7 @@ from application.services.stakeholder.analysis_service import AnalysisService, A
 from application.services.stakeholder.coaching_service import CoachingService
 from application.services.stakeholder.stakeholder_chat_service import StakeholderChatService
 from core.response import success_response
+from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
 router = APIRouter(prefix="/stakeholder", tags=["Stakeholder Chat"])
@@ -254,25 +264,60 @@ def _persona_supports_v2_profile(p) -> bool:
     return bool(p.hard_rules or p.identity or p.expression or p.decision or p.interpersonal)
 
 
+def _is_markdown_persona_template(loader: PersonaLoader, persona_id: str) -> bool:
+    persona_dir = getattr(loader, "_persona_dir", None)
+    return bool(persona_dir and (persona_dir / f"{persona_id}.md").exists())
+
+
+def _persona_permission_projection(
+    persona,
+    access_scope: PersonaAccessScope,
+    *,
+    is_system_template: bool = False,
+) -> dict[str, bool]:
+    can_manage = False if is_system_template else can_manage_persona(persona, access_scope)
+    return {"can_manage": can_manage, "read_only": not can_manage}
+
+
 @router.get("/personas", summary="获取所有角色列表")
 async def list_personas(
     loader: PersonaLoader = Depends(get_persona_loader_with_v2),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    access_scope = persona_access_scope_for(current_user)
+    persisted = await asset_svc.list_visible(access_scope=access_scope)
+    persisted_by_id = {persona.id: persona for persona in persisted}
     personas = loader.list_personas()
-    return success_response(
-        data=[
+    result = []
+    for persona in personas:
+        is_markdown_template = _is_markdown_persona_template(loader, persona.id)
+        if not is_markdown_template and persona.id not in persisted_by_id:
+            continue
+        visible = persisted_by_id.get(persona.id, persona)
+        permissions = _persona_permission_projection(
+            visible,
+            access_scope,
+            is_system_template=is_markdown_template,
+        )
+        result.append(
             {
-                "id": p.id,
-                "name": p.name,
-                "role": p.role,
-                "avatar_color": p.avatar_color,
-                "organization_id": p.organization_id,
-                "team_id": p.team_id,
-                "parse_status": p.parse_status,
-                "supports_v2": _persona_supports_v2_profile(p),
+                "id": visible.id,
+                "name": visible.name,
+                "role": visible.role,
+                "avatar_color": visible.avatar_color,
+                "organization_id": visible.organization_id,
+                "team_id": visible.team_id,
+                "parse_status": visible.parse_status,
+                "supports_v2": _persona_supports_v2_profile(visible),
+                "source": "system_template" if is_markdown_template else "persona_asset",
+                **permissions,
+                "visibility": "system" if is_markdown_template else visible.visibility,
+                "version": 1 if is_markdown_template else visible.version,
             }
-            for p in personas
-        ]
+        )
+    return success_response(
+        data=result
     )
 
 
@@ -280,20 +325,40 @@ async def list_personas(
 async def get_persona(
     persona_id: str,
     loader: PersonaLoader = Depends(get_persona_loader_with_v2),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    persona = loader.get_persona(persona_id)
+    access_scope = persona_access_scope_for(current_user)
+    persona_dir = getattr(loader, "_persona_dir", None)
+    md_file = persona_dir / f"{persona_id}.md" if persona_dir else None
+    is_markdown_template = bool(md_file and md_file.exists())
+    if is_markdown_template:
+        persona = loader.get_persona(persona_id)
+    else:
+        try:
+            persona = await asset_svc.get_visible(
+                persona_id,
+                access_scope=access_scope,
+            )
+        except PersonaAssetNotFoundError:
+            raise HTTPException(status_code=404, detail="Persona not found")
+        except PersonaAccessDeniedError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
     if persona is None:
         raise HTTPException(status_code=404, detail="Persona not found")
 
     # Build content: v1 reads from markdown file, v2 generates from structured profile
     content = ""
-    persona_dir = loader._persona_dir
-    md_file = persona_dir / f"{persona_id}.md"
-    if md_file.exists():
+    if md_file and md_file.exists():
         raw = md_file.read_text(encoding="utf-8")
         content = loader._strip_frontmatter(raw)
     elif persona.hard_rules or persona.identity:
         content = _persona_to_markdown(persona)
+    permissions = _persona_permission_projection(
+        persona,
+        access_scope,
+        is_system_template=is_markdown_template,
+    )
 
     return success_response(
         data={
@@ -306,6 +371,10 @@ async def get_persona(
             "profile_summary": persona.profile_summary,
             "parse_status": persona.parse_status,
             "content": content,
+            "source": "system_template" if is_markdown_template else "persona_asset",
+            **permissions,
+            "visibility": "system" if is_markdown_template else persona.visibility,
+            "version": 1 if is_markdown_template else persona.version,
         }
     )
 
@@ -318,59 +387,60 @@ async def get_persona(
 @router.post("/personas", summary="创建角色", status_code=201)
 async def create_persona(
     body: CreatePersonaDTO,
-    editor: PersonaEditorService = Depends(get_persona_editor_service),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
-        editor.create_persona(body)
+        created = await asset_svc.create(
+            body,
+            access_scope=persona_access_scope_for(current_user),
+        )
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    return success_response(data={"id": body.id})
+    return success_response(data={"id": created.id, "version": created.version})
 
 
 @router.put("/personas/{persona_id}", summary="更新角色")
 async def update_persona(
     persona_id: str,
     body: UpdatePersonaDTO,
-    editor: PersonaEditorService = Depends(get_persona_editor_service),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    loader: PersonaLoader = Depends(get_persona_loader),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    if _is_markdown_persona_template(loader, persona_id):
+        raise HTTPException(status_code=403, detail="System persona templates are read-only")
     try:
-        editor.update_persona(persona_id, body)
-    except FileNotFoundError:
-        # v2 DB persona — no markdown file, update directly in DB
-        async with SQLAlchemyUnitOfWork() as uow:
-            existing = await uow.stakeholder_persona_repository.get_by_id(persona_id)
-            if existing is None:
-                raise HTTPException(status_code=404, detail=f"Persona '{persona_id}' not found")
-            if body.name is not None:
-                existing.name = body.name
-            if body.role is not None:
-                existing.role = body.role
-            if body.avatar_color is not None:
-                existing.avatar_color = body.avatar_color
-            if body.organization_id is not None:
-                existing.organization_id = body.organization_id
-            if body.team_id is not None:
-                existing.team_id = body.team_id
-            await uow.stakeholder_persona_repository.save_structured_persona(existing)
-            await uow.commit()
-    return success_response(data={"id": persona_id})
+        updated = await asset_svc.update(
+            persona_id,
+            body,
+            access_scope=persona_access_scope_for(current_user),
+        )
+    except PersonaAssetNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Persona '{persona_id}' not found")
+    except PersonaAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return success_response(data={"id": persona_id, "version": updated.version})
 
 
 @router.delete("/personas/{persona_id}", summary="删除角色")
 async def delete_persona_endpoint(
     persona_id: str,
-    editor: PersonaEditorService = Depends(get_persona_editor_service),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    loader: PersonaLoader = Depends(get_persona_loader),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    if _is_markdown_persona_template(loader, persona_id):
+        raise HTTPException(status_code=403, detail="System persona templates are read-only")
     try:
-        editor.delete_persona(persona_id)
-    except FileNotFoundError:
-        # v2 DB persona — no markdown file, delete from DB
-        async with SQLAlchemyUnitOfWork() as uow:
-            existing = await uow.stakeholder_persona_repository.get_by_id(persona_id)
-            if existing is None:
-                raise HTTPException(status_code=404, detail=f"Persona '{persona_id}' not found")
-            await uow.stakeholder_persona_repository.delete(persona_id)
-            await uow.commit()
+        await asset_svc.delete(
+            persona_id,
+            access_scope=persona_access_scope_for(current_user),
+        )
+    except PersonaAssetNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Persona '{persona_id}' not found")
+    except PersonaAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return success_response(data={"id": persona_id})
 
 
@@ -383,15 +453,25 @@ async def delete_persona_endpoint(
 async def get_persona_v2_endpoint(
     persona_id: str,
     svc=Depends(get_persona_v2_service),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     from application.services.stakeholder.persona_v2_service import (
         PersonaNotFoundError,
     )
 
+    access_scope = persona_access_scope_for(current_user)
     try:
-        dto = await svc.get_v2(persona_id)
-    except PersonaNotFoundError:
+        persona = await asset_svc.get_visible(persona_id, access_scope=access_scope)
+        dto = await svc.get_v2(
+            persona_id,
+            access_scope=access_scope,
+        )
+    except (PersonaNotFoundError, PersonaAssetNotFoundError):
         raise HTTPException(status_code=404, detail="Persona not found")
+    except PersonaAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    dto = dto.model_copy(update=_persona_permission_projection(persona, access_scope))
     return success_response(data=dto.model_dump(mode="json"))
 
 
@@ -400,13 +480,24 @@ async def patch_persona_v2_endpoint(
     persona_id: str,
     body: PersonaPatchV2DTO,
     svc=Depends(get_persona_v2_service),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     from application.services.stakeholder.persona_v2_service import PersonaNotFoundError
 
+    access_scope = persona_access_scope_for(current_user)
     try:
-        dto = await svc.patch_v2(persona_id, body)
-    except PersonaNotFoundError:
+        persona = await asset_svc.get_visible(persona_id, access_scope=access_scope)
+        dto = await svc.patch_v2(
+            persona_id,
+            body,
+            access_scope=access_scope,
+        )
+    except (PersonaNotFoundError, PersonaAssetNotFoundError):
         raise HTTPException(status_code=404, detail="Persona not found")
+    except PersonaAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    dto = dto.model_copy(update=_persona_permission_projection(persona, access_scope))
     return success_response(data=dto.model_dump(mode="json"))
 
 
@@ -418,12 +509,25 @@ async def patch_persona_v2_endpoint(
 async def start_battle_from_persona(
     persona_id: str,
     svc=Depends(get_battle_prep_service),
+    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
-        room = await svc.create_room_from_persona(persona_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Persona not found")
-    return success_response(data=room.model_dump(mode="json"))
+        launch = await svc.launch_persona_training(
+            persona_id,
+            access_scope=_stakeholder_room_scope_for_current_user(current_user),
+            training_session_service=training_session_svc,
+            conversation_adapter=ConversationTrainingConversationAdapter(
+                SQLAlchemyUnitOfWork
+            ),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        if "not found" in str(exc).lower():
+            raise HTTPException(status_code=404, detail="Persona not found") from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return success_response(data=launch.to_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -435,8 +539,12 @@ async def start_battle_from_persona(
 async def create_room(
     body: CreateChatRoomDTO,
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    room = await svc.create_room(body)
+    room = await svc.create_room(
+        body,
+        access_scope=_stakeholder_room_scope_for_current_user(current_user),
+    )
     return success_response(data=room.model_dump())
 
 
@@ -1451,6 +1559,7 @@ async def delete_relationship(
 async def generate_battle_prep(
     body: BattlePrepGenerateDTO,
     svc=Depends(get_battle_prep_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
         result = await svc.generate_prep(body.description)
@@ -1463,9 +1572,21 @@ async def generate_battle_prep(
 async def start_battle(
     body: StartBattleDTO,
     svc=Depends(get_battle_prep_service),
+    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    room = await svc.start_battle(body)
-    return success_response(data=room.model_dump())
+    try:
+        launch = await svc.launch_battle_training(
+            body,
+            access_scope=_stakeholder_room_scope_for_current_user(current_user),
+            training_session_service=training_session_svc,
+            conversation_adapter=ConversationTrainingConversationAdapter(SQLAlchemyUnitOfWork),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return success_response(data=launch.to_dict())
 
 
 @router.post("/rooms/{room_id}/cheatsheet", summary="生成话术纸条")
@@ -1578,6 +1699,8 @@ def _persona_build_sse_payload(*, seq: int, type_: str, ts: float, data: dict) -
 async def build_persona_stream(
     body: PersonaBuildRequestDTO,
     svc=Depends(get_persona_builder_service),
+    asset_svc: PersonaAssetService = Depends(get_persona_asset_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """SSE: 流式返回 PersonaBuilderService.build() 事件。
 
@@ -1612,8 +1735,27 @@ async def build_persona_stream(
             },
         )
 
+    if body.target_persona_id:
+        access_scope = persona_access_scope_for(current_user)
+        try:
+            target_persona = await asset_svc.get_visible(
+                body.target_persona_id,
+                access_scope=access_scope,
+            )
+        except PersonaAssetNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Persona not found") from exc
+        except PersonaAccessDeniedError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if not can_manage_persona(target_persona, access_scope):
+            raise HTTPException(
+                status_code=403,
+                detail="Persona cannot be modified by the current user",
+            )
+
     # 临时使用匿名 user_id（项目尚无 get_current_user 认证依赖）
-    user_id = "anonymous"
+    # Ownership and builder cache identity come from the authenticated session,
+    # never from client-provided request data.
+    user_id = current_user.user_id
 
     # Decoupled producer/consumer so client disconnect does NOT abort the
     # underlying build (AC9). Producer runs in its own task and pushes to a

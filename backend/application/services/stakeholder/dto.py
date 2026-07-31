@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -77,6 +77,7 @@ class CreatePersonaDTO(BaseModel):
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
     temporary: bool = False
+    visibility: Literal["private", "team"] = "private"
 
 
 class UpdatePersonaDTO(BaseModel):
@@ -88,6 +89,7 @@ class UpdatePersonaDTO(BaseModel):
     content: Optional[str] = None
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
+    visibility: Optional[Literal["private", "team"]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -684,6 +686,10 @@ class PersonaV2DTO(BaseModel):
     name: str
     role: str
     avatar_color: Optional[str] = None
+    visibility: str = "private"
+    version: int = 1
+    can_manage: bool = False
+    read_only: bool = True
     hard_rules: list[HardRuleDTO] = Field(default_factory=list)
     identity: Optional[IdentityDTO] = None
     expression: Optional[ExpressionDTO] = None
@@ -693,6 +699,7 @@ class PersonaV2DTO(BaseModel):
     evidence: list[EvidenceDTO] = Field(default_factory=list)
     rejected_features: dict[str, list[int]] = Field(default_factory=dict)
     source_materials: list[str] = Field(default_factory=list)
+    training_snapshot: dict[str, Any] = Field(default_factory=dict)
 
 
 class PersonaPatchV2DTO(BaseModel):
