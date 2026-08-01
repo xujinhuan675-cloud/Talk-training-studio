@@ -117,8 +117,8 @@ class TeamTrainingAnalyticsService:
         self._assign_scenario_ranks(resolved_rankings)
         resolved_rankings.sort(
             key=lambda item: (
-                item.scenario_id,
                 item.rank,
+                item.scenario_id,
                 item.member_id,
             )
         )
@@ -270,20 +270,24 @@ class TeamTrainingAnalyticsService:
 
     @staticmethod
     def _assign_scenario_ranks(rankings: list[TeamScenarioRankingDTO]) -> None:
-        by_scenario: dict[str, list[TeamScenarioRankingDTO]] = defaultdict(list)
-        for ranking in rankings:
-            by_scenario[ranking.scenario_id].append(ranking)
-        for scenario_rankings in by_scenario.values():
-            scenario_rankings.sort(
-                key=lambda item: (
-                    -(item.average_score if item.average_score is not None else -1),
-                    -item.completed_sessions,
-                    -TeamTrainingAnalyticsService._as_utc(item.last_practiced_at).timestamp(),
-                    item.member_id,
-                )
+        """Assign one deterministic rank across all scenario/member rows.
+
+        The endpoint returns a single leaderboard of scenario/member
+        combinations. Ranking separately inside each scenario made a page
+        with one member per scenario display multiple ``#1`` rows, which was
+        misleading and provided no useful ordering.
+        """
+        rankings.sort(
+            key=lambda item: (
+                -(item.average_score if item.average_score is not None else -1),
+                -item.completed_sessions,
+                -TeamTrainingAnalyticsService._as_utc(item.last_practiced_at).timestamp(),
+                item.scenario_id,
+                item.member_id,
             )
-            for rank, ranking in enumerate(scenario_rankings, start=1):
-                ranking.rank = rank
+        )
+        for rank, ranking in enumerate(rankings, start=1):
+            ranking.rank = rank
 
     async def _load_evaluation(self, session: TrainingSession, evaluation_lookup):
         if not session.report_id:

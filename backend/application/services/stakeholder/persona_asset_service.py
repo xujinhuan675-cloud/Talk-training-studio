@@ -55,7 +55,6 @@ class PersonaAssetService:
                 id=dto.id,
                 name=dto.name,
                 role=dto.role,
-                avatar_color=dto.avatar_color,
                 organization_id=dto.organization_id,
                 team_id=dto.team_id,
                 profile_summary=dto.content[:500],
@@ -85,8 +84,6 @@ class PersonaAssetService:
                 persona.name = dto.name
             if dto.role is not None:
                 persona.role = dto.role
-            if dto.avatar_color is not None:
-                persona.avatar_color = dto.avatar_color
             if dto.organization_id is not None:
                 persona.organization_id = dto.organization_id
             if dto.team_id is not None:

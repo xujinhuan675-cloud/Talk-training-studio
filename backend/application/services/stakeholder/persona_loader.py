@@ -138,7 +138,6 @@ class PersonaLoader:
 
         name = frontmatter.get("name", "")
         role = frontmatter.get("role", "")
-        avatar_color = frontmatter.get("avatar_color")
         parse_status = "ok"
 
         organization_id = self._parse_optional_int(frontmatter.get("organization_id"))
@@ -164,7 +163,6 @@ class PersonaLoader:
             id=persona_id,
             name=name,
             role=role,
-            avatar_color=avatar_color,
             organization_id=organization_id,
             team_id=team_id,
             profile_summary=profile_summary,

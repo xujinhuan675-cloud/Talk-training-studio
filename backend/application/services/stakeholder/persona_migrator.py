@@ -187,7 +187,6 @@ def build_persona_v2(v1: Persona, llm_data: dict) -> Persona:
         id=v1.id,
         name=v1.name,
         role=v1.role,
-        avatar_color=v1.avatar_color,
         organization_id=v1.organization_id,
         team_id=v1.team_id,
         profile_summary=v1.profile_summary,

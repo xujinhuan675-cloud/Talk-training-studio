@@ -33,7 +33,6 @@ class PersonaEditorService:
     def _build_markdown(
         name: str,
         role: str,
-        avatar_color: str,
         content: str,
         *,
         organization_id: int | None = None,
@@ -45,7 +44,6 @@ class PersonaEditorService:
             "---",
             f"name: {name}",
             f"role: {role}",
-            f'avatar_color: "{avatar_color}"',
         ]
         if organization_id is not None:
             lines.append(f"organization_id: {organization_id}")
@@ -54,7 +52,7 @@ class PersonaEditorService:
         # Preserve any extra frontmatter keys (e.g. last_updated, confidence)
         if extra_frontmatter:
             for key, value in extra_frontmatter.items():
-                if key not in ("name", "role", "avatar_color", "organization_id", "team_id"):
+                if key not in ("name", "role", "organization_id", "team_id"):
                     lines.append(f"{key}: {value}")
         lines.extend(["---", "", content])
         return "\n".join(lines)
@@ -69,7 +67,6 @@ class PersonaEditorService:
         md = self._build_markdown(
             dto.name,
             dto.role,
-            dto.avatar_color,
             dto.content,
             organization_id=dto.organization_id,
             team_id=dto.team_id,
@@ -93,11 +90,6 @@ class PersonaEditorService:
         # Merge changes
         name = dto.name if dto.name is not None else frontmatter.get("name", persona_id)
         role = dto.role if dto.role is not None else frontmatter.get("role", "")
-        avatar_color = (
-            dto.avatar_color
-            if dto.avatar_color is not None
-            else frontmatter.get("avatar_color", "#888888")
-        )
         content = dto.content if dto.content is not None else body
 
         # Merge org/team: use DTO value if provided, else keep existing
@@ -113,13 +105,12 @@ class PersonaEditorService:
         )
 
         # Collect extra frontmatter keys to preserve (e.g. last_updated, confidence)
-        managed_keys = {"name", "role", "avatar_color", "organization_id", "team_id"}
+        managed_keys = {"name", "role", "organization_id", "team_id"}
         extra_fm = {k: v for k, v in frontmatter.items() if k not in managed_keys}
 
         md = self._build_markdown(
             name,
             role,
-            avatar_color,
             content,
             organization_id=org_id,
             team_id=t_id,

@@ -455,7 +455,6 @@ class BattlePrepService:
             id=persona_id,
             name=dto.persona_name,
             role=dto.persona_role,
-            avatar_color="#6366f1",
             profile_summary=persona_content,
             user_context=persona_content,
             owner_user_id=scope.user_id,

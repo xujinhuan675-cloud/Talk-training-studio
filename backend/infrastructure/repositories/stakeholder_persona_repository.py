@@ -101,7 +101,6 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
             id=model.id,
             name=model.name,
             role=model.role,
-            avatar_color=model.avatar_color,
             organization_id=model.organization_id,
             team_id=model.team_id,
             profile_summary=model.profile_summary or "",
@@ -128,7 +127,6 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
     def _apply_to_model(self, model: StakeholderPersonaModel, persona: Persona) -> None:
         model.name = persona.name
         model.role = persona.role
-        model.avatar_color = persona.avatar_color
         model.organization_id = persona.organization_id
         model.team_id = persona.team_id
         model.profile_summary = persona.profile_summary or ""

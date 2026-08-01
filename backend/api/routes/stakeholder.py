@@ -279,6 +279,26 @@ def _persona_permission_projection(
     return {"can_manage": can_manage, "read_only": not can_manage}
 
 
+def _dedupe_persona_projections(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one display row per normalized name/role combination.
+
+    A structured persona is preferred over a Markdown-only template because it
+    carries the editable five-layer profile. Input order remains the tie-breaker.
+    """
+    visible_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in items:
+        key = (
+            str(item.get("name") or "").strip().casefold(),
+            str(item.get("role") or "").strip().casefold(),
+        )
+        current = visible_by_key.get(key)
+        if current is None or (
+            not bool(current.get("supports_v2")) and bool(item.get("supports_v2"))
+        ):
+            visible_by_key[key] = item
+    return list(visible_by_key.values())
+
+
 @router.get("/personas", summary="获取所有角色列表")
 async def list_personas(
     loader: PersonaLoader = Depends(get_persona_loader_with_v2),
@@ -305,7 +325,6 @@ async def list_personas(
                 "id": visible.id,
                 "name": visible.name,
                 "role": visible.role,
-                "avatar_color": visible.avatar_color,
                 "organization_id": visible.organization_id,
                 "team_id": visible.team_id,
                 "parse_status": visible.parse_status,
@@ -316,9 +335,7 @@ async def list_personas(
                 "version": 1 if is_markdown_template else visible.version,
             }
         )
-    return success_response(
-        data=result
-    )
+    return success_response(data=_dedupe_persona_projections(result))
 
 
 @router.get("/personas/{persona_id}", summary="获取角色详情")
@@ -365,7 +382,6 @@ async def get_persona(
             "id": persona.id,
             "name": persona.name,
             "role": persona.role,
-            "avatar_color": persona.avatar_color,
             "organization_id": persona.organization_id,
             "team_id": persona.team_id,
             "profile_summary": persona.profile_summary,
@@ -695,7 +711,7 @@ async def export_room_html(
         p = loader.get_persona(pid)
         persona_names.append(p.name if p else pid)
         if p:
-            persona_colors[pid] = p.avatar_color or "#999"
+            persona_colors[pid] = "#64748b"
 
     mention_re = re.compile(r"(@[\w\u4e00-\u9fff]+)")
     bold_re = re.compile(r"\*\*(.+?)\*\*")

@@ -127,7 +127,6 @@ def _build_codex_persona(persona_id: str):
         id=persona_id,
         name="Codex",
         role="AI coding assistant and conversation continuation partner",
-        avatar_color="#2563EB",
         profile_summary=(
             "A Codex-style AI assistant that can continue an imported session, distinguish "
             "the user's real goal from proposed implementations, and work inside this project."

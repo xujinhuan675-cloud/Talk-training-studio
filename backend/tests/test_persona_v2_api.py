@@ -50,7 +50,6 @@ class _StubV2Service:
                 id="cfo",
                 name="CFO",
                 role="首席财务官",
-                avatar_color="#123",
                 hard_rules=[HardRuleDTO(statement="预算超支必报", severity="critical")],
                 identity=IdentityDTO(background="会计师", core_values=["成本"]),
                 expression=ExpressionDTO(tone="严谨", catchphrases=["数字会说话"]),
@@ -174,6 +173,18 @@ async def test_patch_v2_partial(client) -> None:
         assert body["data"]["read_only"] is False
         # role untouched
         assert body["data"]["role"] == "首席财务官"
+
+
+@pytest.mark.asyncio
+async def test_patch_v2_rejects_removed_avatar_color(client) -> None:
+    ac, _ = client
+    async with ac as c:
+        resp = await c.patch(
+            "/api/v1/stakeholder/personas/cfo/v2",
+            json={"avatar_color": "#0f766e"},
+        )
+
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

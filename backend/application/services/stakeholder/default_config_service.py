@@ -24,7 +24,6 @@ class DefaultPersonaPreset:
     id: str
     name: str
     role: str
-    avatar_color: str
     content: str
     organization_name: str | None = None
     team_name: str | None = None
@@ -124,7 +123,6 @@ DEFAULT_PERSONA_PRESETS: tuple[DefaultPersonaPreset, ...] = (
         id="tw-cfo-li-na",
         name="李娜",
         role="CFO / 预算守门人",
-        avatar_color="#0F766E",
         organization_name="星瀚科技",
         team_name="管理层",
         content=(
@@ -145,7 +143,6 @@ DEFAULT_PERSONA_PRESETS: tuple[DefaultPersonaPreset, ...] = (
         id="tw-cto-zhang-wei",
         name="张伟",
         role="CTO / 技术可行性把关人",
-        avatar_color="#2563EB",
         organization_name="星瀚科技",
         team_name="产品与研发",
         content=(
@@ -166,7 +163,6 @@ DEFAULT_PERSONA_PRESETS: tuple[DefaultPersonaPreset, ...] = (
         id="tw-sales-vp-chen-yu",
         name="陈宇",
         role="销售副总裁 / 收入目标负责人",
-        avatar_color="#DC2626",
         organization_name="星瀚科技",
         team_name="销售增长",
         content=(
@@ -187,7 +183,6 @@ DEFAULT_PERSONA_PRESETS: tuple[DefaultPersonaPreset, ...] = (
         id="tw-cs-director-wang-min",
         name="王敏",
         role="客户成功负责人 / 投诉升级处理人",
-        avatar_color="#7C3AED",
         organization_name="澜舟零售",
         team_name="客户服务",
         content=(
@@ -207,7 +202,6 @@ DEFAULT_PERSONA_PRESETS: tuple[DefaultPersonaPreset, ...] = (
         id="tw-hr-interviewer-lin-qiao",
         name="林乔",
         role="HR 面试官 / 动机与匹配度评估者",
-        avatar_color="#DB2777",
         organization_name="云杉企业服务",
         team_name="业务部门",
         content=(
@@ -228,7 +222,6 @@ DEFAULT_PERSONA_PRESETS: tuple[DefaultPersonaPreset, ...] = (
         id="tw-product-lead-zhao-rui",
         name="赵睿",
         role="产品负责人 / 路线图取舍决策者",
-        avatar_color="#EA580C",
         organization_name="星瀚科技",
         team_name="产品与研发",
         content=(
@@ -350,7 +343,6 @@ def _persona_markdown(
         "---",
         f"name: {_yaml_value(preset.name)}",
         f"role: {_yaml_value(preset.role)}",
-        f"avatar_color: {_yaml_value(preset.avatar_color)}",
     ]
     if organization_id is not None:
         lines.append(f"organization_id: {organization_id}")

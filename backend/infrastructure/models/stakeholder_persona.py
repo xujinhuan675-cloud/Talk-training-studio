@@ -22,7 +22,6 @@ class StakeholderPersonaModel(Base, TimestampMixin):
     id = Column(String(50), primary_key=True, comment="画像ID (与 markdown 文件名一致)")
     name = Column(String(255), nullable=False, comment="角色名")
     role = Column(String(255), nullable=False, comment="职位/角色")
-    avatar_color = Column(String(20), nullable=True, comment="头像颜色")
     organization_id = Column(Integer, nullable=True, comment="所属组织ID")
     team_id = Column(Integer, nullable=True, comment="所属团队ID")
     profile_summary = Column(

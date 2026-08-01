@@ -100,7 +100,6 @@ class Persona:
     id: str
     name: str
     role: str
-    avatar_color: Optional[str] = None
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
     profile_summary: str = ""

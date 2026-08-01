@@ -50,7 +50,6 @@ def _make_v2_persona(persona_id: str = "cfo") -> Persona:
         id=persona_id,
         name="CFO",
         role="首席财务官",
-        avatar_color="#123456",
         profile_summary="数字至上",
         hard_rules=[HardRule(statement="预算超支必报", severity="critical")],
         identity=IdentityProfile(background="会计师", core_values=["成本"], hidden_agenda="裁员"),

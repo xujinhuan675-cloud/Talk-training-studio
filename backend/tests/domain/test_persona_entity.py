@@ -167,15 +167,13 @@ def test_persona_v2_has_all_fields() -> None:
 
 
 def test_persona_optional_fields() -> None:
-    """Optional fields (avatar_color, voice_*) still work."""
+    """Optional voice fields still work."""
     p = Persona(
         id="pm",
         name="PM",
         role="产品经理",
-        avatar_color="#FF0000",
         voice_id="v1",
         voice_speed=1.2,
     )
-    assert p.avatar_color == "#FF0000"
     assert p.voice_id == "v1"
     assert p.voice_speed == 1.2

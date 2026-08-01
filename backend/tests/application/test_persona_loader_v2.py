@@ -81,7 +81,6 @@ def v1_markdown_dir(tmp_path: Path) -> Path:
         """---
 name: 老板
 role: CEO
-avatar_color: "#FF0000"
 ---
 
 # 老板

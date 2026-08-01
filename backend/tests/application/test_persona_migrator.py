@@ -78,7 +78,6 @@ def _canonical_v1_persona(persona_id: str = "boss") -> Persona:
         id=persona_id,
         name="剑锋",
         role="直属上级 / Lu Jianfeng",
-        avatar_color="#cc3300",
         profile_summary="销售导向",
         voice_id="male-qn-qingse",
         voice_speed=1.0,
@@ -153,7 +152,6 @@ def test_build_persona_v2_preserves_v1_fields():
     assert v2.id == v1.id
     assert v2.name == v1.name
     assert v2.role == v1.role
-    assert v2.avatar_color == v1.avatar_color
     assert v2.voice_id == v1.voice_id
     assert v2.voice_speed == v1.voice_speed
     assert v2.voice_style == v1.voice_style

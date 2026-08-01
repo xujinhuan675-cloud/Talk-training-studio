@@ -86,8 +86,6 @@ def _apply_patch(persona: Persona, patch: PersonaPatchV2DTO) -> None:
         persona.name = patch.name
     if patch.role is not None:
         persona.role = patch.role
-    if patch.avatar_color is not None:
-        persona.avatar_color = patch.avatar_color
     if patch.hard_rules is not None:
         persona.hard_rules = [HardRule(**r.model_dump()) for r in patch.hard_rules]
     if patch.identity is not None:
@@ -114,7 +112,6 @@ def _to_dto(persona: Persona, evidence: list) -> PersonaV2DTO:
         id=persona.id,
         name=persona.name,
         role=persona.role,
-        avatar_color=persona.avatar_color,
         visibility=persona.visibility,
         version=persona.version,
         hard_rules=[asdict(r) for r in persona.hard_rules],

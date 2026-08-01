@@ -1,7 +1,6 @@
 ---
 name: TalkWise Guide
 role: Default conversation partner
-avatar_color: "#0F766E"
 temporary: true
 ---
 

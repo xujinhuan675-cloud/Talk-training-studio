@@ -1326,7 +1326,6 @@ def _create_training_runtime_persona(
                     id=persona_id,
                     name=name,
                     role=role,
-                    avatar_color="#2563eb",
                     content=content,
                     temporary=True,
                 )

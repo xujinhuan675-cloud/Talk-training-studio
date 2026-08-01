@@ -58,7 +58,6 @@ def _personas() -> list[Persona]:
             id="system-template",
             name="System template",
             role="Markdown persona",
-            avatar_color="#0F766E",
         ),
         Persona(
             id="owned",
@@ -79,8 +78,12 @@ def _personas() -> list[Persona]:
     ]
 
 
-def _app_for(tmp_path: Path, current_user: CurrentUser) -> FastAPI:
-    personas = _personas()
+def _app_for(
+    tmp_path: Path,
+    current_user: CurrentUser,
+    personas: list[Persona] | None = None,
+) -> FastAPI:
+    personas = personas or _personas()
     (tmp_path / "system-template.md").write_text("System persona", encoding="utf-8")
     loader = _StubPersonaLoader(tmp_path, personas)
     asset_service = _StubPersonaAssetService(personas[1:])
@@ -107,6 +110,7 @@ async def test_list_personas_projects_owner_peer_and_system_permissions(tmp_path
     assert resp.status_code == 200
     data = {item["id"]: item for item in resp.json()["data"]}
     assert data["system-template"]["supports_v2"] is False
+    assert "avatar_color" not in data["system-template"]
     assert data["system-template"]["can_manage"] is False
     assert data["system-template"]["read_only"] is True
     assert data["owned"]["supports_v2"] is True
@@ -114,6 +118,63 @@ async def test_list_personas_projects_owner_peer_and_system_permissions(tmp_path
     assert data["owned"]["read_only"] is False
     assert data["team-shared"]["can_manage"] is False
     assert data["team-shared"]["read_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_personas_collapses_duplicate_template_and_structured_asset(
+    tmp_path: Path,
+) -> None:
+    personas = _personas()
+    personas.append(
+        Persona(
+            id="structured-system-template",
+            name="System template",
+            role="Markdown persona",
+            owner_user_id="newapi:owner",
+            owner_team_id="team-a",
+            hard_rules=[HardRule(statement="Prefer structured persona", severity="high")],
+        )
+    )
+    app = _app_for(
+        tmp_path,
+        _current_user(user_id="newapi:owner"),
+        personas,
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get("/api/v1/stakeholder/personas")
+
+    assert resp.status_code == 200
+    matching = [
+        item
+        for item in resp.json()["data"]
+        if item["name"] == "System template" and item["role"] == "Markdown persona"
+    ]
+    assert [item["id"] for item in matching] == ["structured-system-template"]
+
+
+@pytest.mark.asyncio
+async def test_create_persona_rejects_removed_avatar_color(tmp_path: Path) -> None:
+    app = _app_for(tmp_path, _current_user(user_id="newapi:owner"))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.post(
+            "/api/v1/stakeholder/personas",
+            json={
+                "id": "legacy-color",
+                "name": "Legacy color",
+                "role": "Removed field contract",
+                "avatar_color": "#0f766e",
+            },
+        )
+
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

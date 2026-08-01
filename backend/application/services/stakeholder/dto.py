@@ -69,10 +69,11 @@ class SendMessageDTO(BaseModel):
 class CreatePersonaDTO(BaseModel):
     """Input DTO for creating a persona."""
 
+    model_config = {"extra": "forbid"}
+
     id: str = Field(..., pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$", min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=100)
     role: str = Field(..., min_length=1, max_length=200)
-    avatar_color: str = Field(default="#888888", pattern=r"^#[0-9a-fA-F]{6}$")
     content: str = Field(default="")
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
@@ -83,9 +84,10 @@ class CreatePersonaDTO(BaseModel):
 class UpdatePersonaDTO(BaseModel):
     """Input DTO for updating a persona."""
 
+    model_config = {"extra": "forbid"}
+
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     role: Optional[str] = Field(None, min_length=1, max_length=200)
-    avatar_color: Optional[str] = Field(None, pattern=r"^#[0-9a-fA-F]{6}$")
     content: Optional[str] = None
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
@@ -690,7 +692,6 @@ class PersonaV2DTO(BaseModel):
     id: str
     name: str
     role: str
-    avatar_color: Optional[str] = None
     visibility: str = "private"
     version: int = 1
     can_manage: bool = False
@@ -714,9 +715,10 @@ class PersonaPatchV2DTO(BaseModel):
     evidence_citations are intentionally not editable (preserve traceability).
     """
 
+    model_config = {"extra": "forbid"}
+
     name: Optional[str] = None
     role: Optional[str] = None
-    avatar_color: Optional[str] = None
     hard_rules: Optional[list[HardRuleDTO]] = None
     identity: Optional[IdentityDTO] = None
     expression: Optional[ExpressionDTO] = None

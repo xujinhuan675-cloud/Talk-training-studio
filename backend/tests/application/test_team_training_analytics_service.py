@@ -202,6 +202,44 @@ async def test_team_analytics_groups_real_evaluations_by_member_and_scenario() -
     assert all(item.member_id != "user-service" for item in scenarios)
 
 
+async def test_scenario_rankings_are_global_across_scenarios() -> None:
+    sessions = [
+        make_session(
+            "lower-score",
+            user_id="user-sales",
+            team_id="team-revenue",
+            scenario_id="new-customer",
+            report_id="1",
+            completed_at=datetime(2026, 7, 27, tzinfo=UTC),
+        ),
+        make_session(
+            "higher-score",
+            user_id="user-sales",
+            team_id="team-revenue",
+            scenario_id="vip-upgrade",
+            report_id="2",
+            completed_at=datetime(2026, 7, 28, tzinfo=UTC),
+        ),
+    ]
+    service = analytics_service(
+        sessions,
+        {
+            1: SimpleNamespace(overall_score=42, scores={}),
+            2: SimpleNamespace(overall_score=60, scores={}),
+        },
+    )
+
+    scenarios, total = await service.list_scenario_rankings(
+        skip=0,
+        limit=50,
+        access_scope=team_scope(),
+    )
+
+    assert total == 2
+    assert [item.scenario_id for item in scenarios] == ["vip-upgrade", "new-customer"]
+    assert [item.rank for item in scenarios] == [1, 2]
+
+
 async def test_team_analytics_requires_authorized_team_scope() -> None:
     service = analytics_service([], {})
 
