@@ -4764,6 +4764,7 @@ async def get_scenario_templates(
     scenario_config_svc: TrainingScenarioConfigService = Depends(
         get_training_scenario_config_service
     ),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
     config = scenario_config_svc.get_config()
     templates = _scenario_templates_from_config(config)

@@ -1,6 +1,8 @@
-# Stakeholder Chat Frontend
+# Legacy Stakeholder Chat Frontend (Migration Reference)
 
-React + TypeScript + Vite 前端项目。
+React + TypeScript + Vite frontend retained only as a migration reference and rollback source.
+The default local host is `outside-project/new-api-main/web` (Rsbuild); run
+`start-dev.cmd -LegacyViteFrontend` only when validating the legacy fallback.
 
 ## 开发
 

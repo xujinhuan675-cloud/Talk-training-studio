@@ -9,6 +9,7 @@ param(
     [switch]$NoBrowser,
     [switch]$SkipHealthCheck,
     [switch]$SkipGateway,
+    [switch]$LegacyViteFrontend,
     [switch]$AutoPort,
     [int]$GatewayPort = 0,
     [int]$BackendPort = 0,
@@ -47,6 +48,7 @@ foreach ($pathToAdd in $CandidatePathAdds) {
 $BackendDir = Join-Path $RepoRoot "backend"
 $FrontendDir = Join-Path $RepoRoot "frontend"
 $NewApiDir = Join-Path $RepoRoot "outside-project\new-api-main"
+$NewApiWebDir = Join-Path $NewApiDir "web"
 $NewApiExePath = Join-Path $NewApiDir "new-api-talkwise.exe"
 $NewApiDbPath = Join-Path $NewApiDir "one-api.db"
 $LogDir = Join-Path $RepoRoot "logs"
@@ -609,7 +611,7 @@ function Stop-ExistingDevProcesses {
             $_.ProcessId -ne $PID -and
             $commandText -and
             $commandText -match $escapedRoot -and
-            $commandText -match "vite|npm|uv\.exe|uv run|uvicorn|main\.py|\.venv-backend|backend\\\.venv|Start-Transcript|new-api|newapi"
+            $commandText -match "vite|rsbuild|bun run|npm|uv\.exe|uv run|uvicorn|main\.py|\.venv-backend|backend\\\.venv|Start-Transcript|new-api|newapi"
         })
 
     $stoppedProcessIds = @()
@@ -909,6 +911,34 @@ $runVite
 "@
 }
 
+function New-NewApiWebCommand {
+    param(
+        [int]$Port,
+        [string]$ServerUrl
+    )
+
+    if (-not (Test-CommandExists "bun")) {
+        throw "bun was not found. Install Bun before starting the NewAPI web host."
+    }
+
+    $packagePath = Join-Path $NewApiWebDir "package.json"
+    $runRsbuild = @"
+if (-not (Test-Path -LiteralPath "$packagePath")) { throw "NewAPI web package was not found at $packagePath." }
+`$env:VITE_REACT_APP_SERVER_URL = "$ServerUrl"
+bun run dev -- --port $Port --strict-port
+"@
+
+    if ($SkipInstall) {
+        return $runRsbuild
+    }
+
+    return @"
+bun install --frozen-lockfile
+if (`$LASTEXITCODE -ne 0) { throw "bun install failed." }
+$runRsbuild
+"@
+}
+
 Write-Step "Preparing local env files"
 Write-Ok "Project root: $RepoRoot"
 if (-not (Test-Path -LiteralPath $LogDir)) {
@@ -993,8 +1023,9 @@ $frontendUrl = "http://127.0.0.1:$frontendPort"
 $backendUrl = "http://127.0.0.1:$backendPort"
 $newApiUrl = if ($SkipGateway) { Get-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc" } else { "http://127.0.0.1:$resolvedGatewayPort" }
 $newApiGatewayUrl = if ($SkipGateway) { Get-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "$newApiUrl/v1" } else { "$newApiUrl/v1" }
-$newApiRedirectUri = "$frontendUrl/login"
-$newApiRedirectUris = "$newApiRedirectUri,http://localhost:$frontendPort/login"
+$legacyFrontendRedirectUri = "$frontendUrl/login"
+$newApiRedirectUri = if ($LegacyViteFrontend) { $legacyFrontendRedirectUri } else { "$frontendUrl/training" }
+$newApiRedirectUris = "$newApiRedirectUri,$legacyFrontendRedirectUri,http://localhost:$frontendPort/login"
 $backendLogPath = Join-Path $LogDir "backend-dev.log"
 $frontendLogPath = Join-Path $LogDir "frontend-dev.log"
 $newApiLogPath = Join-Path $LogDir "newapi-dev.log"
@@ -1118,13 +1149,23 @@ Start-DevWindow `
     -LogPath $backendLogPath `
     -ShowWindow:$ShowServiceWindows
 
-Write-Step "Starting frontend locally with Vite on port $frontendPort"
-Start-DevWindow `
-    -Title "Talk Training Studio - Frontend" `
-    -WorkingDirectory $FrontendDir `
-    -Command (New-FrontendCommand -Port $frontendPort) `
-    -LogPath $frontendLogPath `
-    -ShowWindow:$ShowServiceWindows
+if ($LegacyViteFrontend) {
+    Write-Step "Starting legacy Vite frontend on port $frontendPort"
+    Start-DevWindow `
+        -Title "Talk Training Studio - Legacy Frontend" `
+        -WorkingDirectory $FrontendDir `
+        -Command (New-FrontendCommand -Port $frontendPort) `
+        -LogPath $frontendLogPath `
+        -ShowWindow:$ShowServiceWindows
+} else {
+    Write-Step "Starting NewAPI web host with Rsbuild on port $frontendPort"
+    Start-DevWindow `
+        -Title "Talk Training Studio - NewAPI Web" `
+        -WorkingDirectory $NewApiWebDir `
+        -Command (New-NewApiWebCommand -Port $frontendPort -ServerUrl $newApiUrl) `
+        -LogPath $frontendLogPath `
+        -ShowWindow:$ShowServiceWindows
+}
 
 if (-not $SkipHealthCheck) {
     if (-not $SkipGateway) {
@@ -1149,12 +1190,21 @@ if (-not $SkipHealthCheck) {
         -LogPath $frontendLogPath `
         -TimeoutSeconds $ServiceTimeoutSeconds
 
-    Wait-HttpEndpoint `
-        -Name "frontend API proxy" `
-        -Url "$frontendUrl/health/live" `
-        -LogPath $frontendLogPath `
-        -TimeoutSeconds $ServiceTimeoutSeconds `
-        -ExpectedContentPattern "alive"
+    if ($LegacyViteFrontend) {
+        Wait-HttpEndpoint `
+            -Name "legacy frontend API proxy" `
+            -Url "$frontendUrl/health/live" `
+            -LogPath $frontendLogPath `
+            -TimeoutSeconds $ServiceTimeoutSeconds `
+            -ExpectedContentPattern "alive"
+    } else {
+        Wait-HttpEndpoint `
+            -Name "NewAPI web same-origin proxy" `
+            -Url "$frontendUrl/api/status" `
+            -LogPath $frontendLogPath `
+            -TimeoutSeconds $ServiceTimeoutSeconds `
+            -ExpectedContentPattern '"success":true'
+    }
 }
 
 if (-not $NoBrowser) {
@@ -1166,7 +1216,11 @@ Write-Ok "Dev startup finished."
 Write-Host "Frontend: $frontendUrl"
 Write-Host "Backend docs: $backendUrl/docs"
 Write-Host "Backend health: $backendUrl/health/live"
-Write-Host "Frontend API proxy health: $frontendUrl/health/live"
+if ($LegacyViteFrontend) {
+    Write-Host "Legacy frontend API proxy health: $frontendUrl/health/live"
+} else {
+    Write-Host "NewAPI web same-origin proxy health: $frontendUrl/api/status"
+}
 if (-not $SkipGateway) {
     Write-Host "NewAPI status: $newApiUrl/api/status"
     Write-Host "NewAPI login: $newApiUrl/sign-in"

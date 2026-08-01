@@ -76,3 +76,12 @@ Persona 列表、详情和 V2 响应由 TalkWise 后端计算 `can_manage` / `re
 - 结果详情读取现有受保护 room messages，过滤 live-guidance 复制消息；情绪图只使用 `sender_type=persona` 且范围为 -5..5 的持久化分数。视频回放只接受同源、session/room 绑定的 canonical 或旧版内部路径，并重写到 `/api/talkwise/training/video-answers/*`。
 - 认证视频回放响应设置 `Cache-Control: private, no-store`，防止带相同 session/room URL 的敏感媒体被共享缓存复用。
 - 旧 Growth LLM 风格标签/导出卡片、客户端 XP/解锁、旧 room-scenario 与 persona relationship/context prompt 尚未迁移；它们需要新的窄代理/持久化契约或产品退场决定，不能用前端推导补齐。
+
+## 6. 第 5 轮宿主切换与待迁移边界
+
+- 本地默认可见前端已从独立 Vite 切换为 NewAPI web 的 Rsbuild 宿主；Rsbuild 的同源 `/api` 代理指向本地 NewAPI Go，Go 继续只代理 TalkWise 的受限命名空间。`start-dev.cmd -LegacyViteFrontend` 是明确的临时回滚入口，不是新的可见 UI 开发路径。
+- NewAPI Rsbuild 启动固定使用 `--strict-port`。端口被占用时脚本会明确失败，而不会让 Rsbuild 漂移到未被后续健康检查和浏览器地址使用的端口。
+- `/scenario-templates` 现在在 TalkWise FastAPI 直连路径也要求已认证的训练角色；NewAPI Training Settings 的分类契约已补齐 `product_management`，不会再把后端该分类静默归一成 `sales`。
+- `PersonaEditorPage.tsx` 的个体 `user_context` 已由 NewAPI Persona Editor 的 V2 API 承接，不需要重复迁移。
+- 旧 room-scenario CRUD 不等同于全局 training scenario config：它会绑定既有 ChatRoom 并在运行时注入 `context_prompt`。旧组织 `context_prompt` 和 directed persona relationship 也属于独立的训练运行时语义。它们应在后端补齐 owner/team scope 和 focused tests 后，作为候选 `/training/team/context` 模块迁移；不得混入平台设置、Persona Editor 或宽泛 conversations 代理。
+- 多分支评分对比仍待补齐：当前后端只为服务端选定路径生成一个评分/报告，没有可比较的多分支评分契约。现有 NewAPI 复盘继续展示真实 selected-path、报告、评分和回放，不伪造其他分支的分数。

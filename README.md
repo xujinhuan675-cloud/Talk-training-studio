@@ -171,6 +171,10 @@ git clone <repo-url> && cd TalkWise
 .\start-dev.cmd
 ```
 
+> Local default: `start-dev.cmd` starts the NewAPI web host (Rsbuild) and proxies
+> its same-origin `/api` requests to NewAPI Go. The old Vite frontend is available
+> only as an explicit rollback path: `start-dev.cmd -LegacyViteFrontend`.
+
 ```text
 # 默认地址
 前端: http://127.0.0.1:5177

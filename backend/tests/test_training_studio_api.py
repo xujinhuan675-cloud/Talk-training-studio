@@ -279,7 +279,10 @@ async def test_catalog_exposes_training_dimensions(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_scenario_templates_expose_business_training_cards(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/training-studio/scenario-templates")
+    resp = await client.get(
+        "/api/v1/training-studio/scenario-templates",
+        headers={"X-Mock-User": "sales"},
+    )
 
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -362,6 +365,19 @@ async def test_default_rubric_requires_authenticated_identity(
 
 
 @pytest.mark.asyncio
+async def test_scenario_templates_require_authenticated_identity(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", True)
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", False)
+
+    response = await client.get("/api/v1/training-studio/scenario-templates")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_scenario_config_only_admin_can_save(client: AsyncClient) -> None:
     payload = await read_scenario_config_state(client)
     payload["scenarios"][0]["dimensionWeights"] = scenario_dimension_weights()
@@ -435,7 +451,10 @@ async def test_scenario_templates_use_saved_scenario_config(client: AsyncClient)
     )
     assert save_resp.status_code == 200
 
-    resp = await client.get("/api/v1/training-studio/scenario-templates")
+    resp = await client.get(
+        "/api/v1/training-studio/scenario-templates",
+        headers={"X-Mock-User": "sales"},
+    )
 
     assert resp.status_code == 200
     data = resp.json()["data"]

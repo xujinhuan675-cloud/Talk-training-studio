@@ -3,6 +3,7 @@
 param(
     [string]$FrontendUrl = "",
     [string]$BackendUrl = "",
+    [switch]$LegacyViteFrontend,
     [int]$TimeoutSeconds = 5
 )
 
@@ -102,10 +103,16 @@ if ([string]::IsNullOrWhiteSpace($FrontendUrl)) {
 $BackendUrl = $BackendUrl.TrimEnd("/")
 $FrontendUrl = $FrontendUrl.TrimEnd("/")
 
+$frontendProxyCheck = if ($LegacyViteFrontend) {
+    Get-EndpointStatus -Name "legacy frontend API proxy" -Url "$FrontendUrl/health/live" -ExpectedContentPattern "alive"
+} else {
+    Get-EndpointStatus -Name "NewAPI web same-origin proxy" -Url "$FrontendUrl/api/status" -ExpectedContentPattern '"success":true'
+}
+
 $checks = @(
     (Get-EndpointStatus -Name "backend health" -Url "$BackendUrl/health/live" -ExpectedContentPattern "alive"),
     (Get-EndpointStatus -Name "frontend shell" -Url $FrontendUrl),
-    (Get-EndpointStatus -Name "frontend API proxy" -Url "$FrontendUrl/health/live" -ExpectedContentPattern "alive")
+    $frontendProxyCheck
 )
 
 $checks | Format-Table -AutoSize
