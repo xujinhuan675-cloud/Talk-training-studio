@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import { Maximize2, PanelRightClose } from 'lucide-react'
 import type { Message, PersonaSummary } from '../services/api'
+import { seriesColor } from '../utils/seriesColor'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
 import '../styles/panelControls.css'
@@ -188,9 +189,9 @@ export function LiveEmotionPanel({ messages, personaMap, onClose, onExpand, clas
                     key={pid}
                     type="monotone"
                     dataKey={pid}
-                    stroke={personaMap[pid]?.avatar_color || '#888'}
+                    stroke={seriesColor(pid)}
                     strokeWidth={2}
-                    dot={{ r: 3, fill: personaMap[pid]?.avatar_color || '#888' }}
+                    dot={{ r: 3, fill: seriesColor(pid) }}
                     activeDot={{ r: 5 }}
                     connectNulls
                     isAnimationActive={false}
@@ -216,7 +217,7 @@ export function LiveEmotionPanel({ messages, personaMap, onClose, onExpand, clas
                 <div key={pid} className="es-status-item">
                   <span
                     className="es-status-dot"
-                    style={{ background: persona?.avatar_color || '#888' }}
+                    style={{ background: seriesColor(pid) }}
                   />
                   <span className="es-status-name">{persona?.name || pid}</span>
                   <span className="es-status-score">

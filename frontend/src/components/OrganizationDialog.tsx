@@ -332,7 +332,7 @@ export default function OrganizationDialog({ open, onClose, onOrgChanged, person
                           {members.length > 0 ? (
                             members.map((p) => (
                               <span key={p.id} className="team-member-chip">
-                                <span className="team-member-dot" style={{ background: p.avatar_color || '#999' }} />
+                                <span className="team-member-dot" style={{ background: '#94a3b8' }} />
                                 {p.name}
                                 <Button
                                   className="team-member-remove"

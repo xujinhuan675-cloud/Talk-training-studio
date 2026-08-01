@@ -201,7 +201,7 @@ export default function CreateRoomDialog({ open, onClose, onCreated }: CreateRoo
               >
                 <span
                   className="persona-color"
-                  style={{ backgroundColor: p.avatar_color || '#999' }}
+                  style={{ backgroundColor: '#94a3b8' }}
                 />
                 <span className="persona-select-name">{p.name}</span>
                 <span className="persona-select-role">{p.role}</span>

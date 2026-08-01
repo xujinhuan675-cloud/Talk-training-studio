@@ -24,14 +24,11 @@ export default function PersonaHero({
 }: Props) {
   const { tr } = useI18n()
   const pct = Math.round(strength * 100)
-  const innerStyle: React.CSSProperties = persona.avatar_color
-    ? { background: persona.avatar_color }
-    : {}
   return (
     <div className="persona-hero">
       <div className="avatar-big">
         <div className="ring" />
-        <div className="inner" style={innerStyle}>
+        <div className="inner">
           {getInitial(persona.name)}
         </div>
         <div className="pulse" />

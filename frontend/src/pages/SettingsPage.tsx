@@ -507,7 +507,7 @@ function PersonasTab() {
             onClick={() => openPersona(p)}
           >
             <div className="settings-item-avatar">
-              <Avatar name={p.name} color={p.avatar_color || '#0F766E'} size={40} />
+              <Avatar name={p.name} size={40} />
             </div>
             <div className="settings-item-info">
               <div className="settings-item-name">{p.name}</div>
@@ -881,7 +881,7 @@ function ScenariosTab() {
                   />
                   <span
                     className="settings-checkbox-color"
-                    style={{ backgroundColor: p.avatar_color || '#999' }}
+                    style={{ backgroundColor: '#94a3b8' }}
                   />
                   <span>{p.name}</span>
                 </label>
@@ -1524,7 +1524,7 @@ function OrganizationsTab() {
                           {members.length > 0 ? (
                             members.map((p) => (
                               <span key={p.id} className="team-member-chip">
-                                <span className="team-member-dot" style={{ background: p.avatar_color || '#999' }} />
+                                <span className="team-member-dot" style={{ background: '#94a3b8' }} />
                                 {p.name}
                                 <Button
                                   variant="ghost"

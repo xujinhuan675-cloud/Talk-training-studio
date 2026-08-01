@@ -1228,7 +1228,6 @@ function ChatArea() {
         id: primaryPersonaId,
         name: scenarioPersonaName,
         role: scenarioPersonaRole || tr('对方', 'Counterpart'),
-        avatar_color: '#0F766E',
         organization_id: null,
         team_id: null,
         parse_status: 'ready',
@@ -2585,10 +2584,7 @@ function ChatArea() {
             </div>
             <div className="video-workspace-body">
               <div className="video-workspace-context">
-                <div
-                  className="video-workspace-avatar"
-                  style={{ background: primaryPersona?.avatar_color || '#0F766E' }}
-                >
+                <div className="video-workspace-avatar">
                   {displayInitial(counterpartName)}
                 </div>
                 <div>

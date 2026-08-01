@@ -15,7 +15,7 @@ function getInitial(name: string): string {
   return ch
 }
 
-export default function Avatar({ name, color = '#0F766E', size = 36 }: AvatarProps) {
+export default function Avatar({ name, color, size = 36 }: AvatarProps) {
   return (
     <div
       className="sc-avatar"
@@ -23,7 +23,7 @@ export default function Avatar({ name, color = '#0F766E', size = 36 }: AvatarPro
         width: size,
         height: size,
         fontSize: size * 0.44,
-        background: color,
+        ...(color ? { background: color } : {}),
       }}
       title={name}
     >

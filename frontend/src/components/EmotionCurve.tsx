@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { Message, PersonaSummary } from '../services/api'
+import { seriesColor } from '../utils/seriesColor'
 import { useI18n } from '../i18n'
 import { Button } from './ui/button'
 import {
@@ -257,7 +258,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
         </g>
       )
     }
-    const color = personaMap[pid]?.avatar_color || '#888'
+    const color = seriesColor(pid)
     return <circle key={`dot-${pid}-${seq}`} cx={cx} cy={cy} r={4} fill={color} stroke="#fff" strokeWidth={1} />
   }
 
@@ -344,7 +345,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
                       key={pid}
                       type="monotone"
                       dataKey={pid}
-                      stroke={personaMap[pid]?.avatar_color || '#888'}
+                      stroke={seriesColor(pid)}
                       strokeWidth={2}
                       dot={renderDot(pid)}
                       activeDot={{ r: 6 }}
@@ -362,7 +363,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
                           type="linear"
                           dataKey={`${pid}_trend`}
                           data={trendData}
-                          stroke={personaMap[pid]?.avatar_color || '#888'}
+                          stroke={seriesColor(pid)}
                           strokeWidth={1.5}
                           strokeDasharray="6 4"
                           dot={false}
@@ -393,7 +394,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
             <div className="emotion-legend">
               {personaIds.map((pid) => (
                 <div key={pid} className="emotion-legend-item">
-                  <span className="emotion-legend-dot" style={{ background: personaMap[pid]?.avatar_color || '#888' }} />
+                  <span className="emotion-legend-dot" style={{ background: seriesColor(pid) }} />
                   {personaMap[pid]?.name || pid}
                 </div>
               ))}
@@ -415,7 +416,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
             {/* Data rows */}
             {heatmapRows.map((row) => (
               <div key={row.personaId} className="heatmap-row">
-                <div className="heatmap-label" style={{ color: personaMap[row.personaId]?.avatar_color || '#888' }}>
+                <div className="heatmap-label" style={{ color: seriesColor(row.personaId) }}>
                   {personaMap[row.personaId]?.name || row.personaId}
                 </div>
                 {row.cells.map((cell) => (
@@ -434,7 +435,7 @@ export default function EmotionCurve({ open, onClose, messages, personaMap }: Pr
             {/* Hover tooltip */}
             {hoverCell && hoverCell.score != null && (
               <div className="heatmap-tooltip">
-                <strong style={{ color: personaMap[hoverCell.personaId]?.avatar_color || undefined }}>
+                <strong style={{ color: seriesColor(hoverCell.personaId) }}>
                   {personaMap[hoverCell.personaId]?.name || hoverCell.personaId}
                 </strong>
                 {' '}#{hoverCell.index}: {hoverCell.score > 0 ? '+' : ''}{hoverCell.score}

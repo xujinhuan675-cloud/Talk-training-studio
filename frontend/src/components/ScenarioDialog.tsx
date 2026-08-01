@@ -215,7 +215,7 @@ export default function ScenarioDialog({ open, onClose }: ScenarioDialogProps) {
                     />
                     <span
                       className="persona-color"
-                      style={{ backgroundColor: p.avatar_color || '#999' }}
+                      style={{ backgroundColor: '#94a3b8' }}
                     />
                     <span>{p.name}</span>
                   </label>

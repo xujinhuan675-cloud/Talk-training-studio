@@ -53,7 +53,6 @@ export interface PersonaV2 {
   id: string
   name: string
   role: string
-  avatar_color: string | null
   schema_version: number
   hard_rules: HardRule[]
   identity: Identity | null
@@ -69,7 +68,6 @@ export interface PersonaV2 {
 export interface PersonaPatchV2 {
   name?: string
   role?: string
-  avatar_color?: string
   hard_rules?: HardRule[]
   identity?: Identity
   expression?: Expression

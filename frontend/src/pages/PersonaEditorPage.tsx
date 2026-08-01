@@ -396,7 +396,6 @@ export default function PersonaEditorPage() {
       const body: PersonaPatchV2 = {
         name: draft.name,
         role: draft.role,
-        avatar_color: draft.avatar_color || undefined,
         hard_rules: draft.hard_rules,
         identity: draft.identity || undefined,
         expression: draft.expression || undefined,

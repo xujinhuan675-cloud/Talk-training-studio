@@ -1298,12 +1298,10 @@ export default function MessageList({
       ) : (
         <>
           {messages.map((msg) => {
-            const persona = msg.sender_type === 'persona' ? personaMap[msg.sender_id] : null
             const personaName = msg.sender_type === 'persona' ? getPersonaName(msg.sender_id) : ''
             const displayContent = cleanDisplayMessageContent(msg.content, {
               stripCounterpartCoachNotes: trainingFeedbackMode === 'drill' && msg.sender_type === 'persona',
             })
-            const borderColor = persona?.avatar_color || undefined
             const videoAttachment = findVideoAttachment(msg)
             const messageTreeActionContext = getMessageTreeActionContext(msg)
             const isInSelectedTreePath = messageTreeActionContext
@@ -1322,9 +1320,9 @@ export default function MessageList({
               >
                 {msg.sender_type === 'persona' && (
                   <div className="message-row">
-                    <Avatar name={personaName} color={borderColor || '#0F766E'} size={28} />
+                    <Avatar name={personaName} size={28} />
                     <div className="message-content">
-                      <div className="sender-name" style={borderColor ? { color: borderColor } : undefined}>
+                      <div className="sender-name">
                         {personaName}
                         {msg.emotion_label && (
                           <span className={`emotion-tag ${(msg.emotion_score ?? 0) > 0 ? 'positive' : (msg.emotion_score ?? 0) < 0 ? 'negative' : 'neutral'}`}>
@@ -1332,10 +1330,7 @@ export default function MessageList({
                           </span>
                         )}
                       </div>
-                      <div
-                        className="message-bubble"
-                        style={borderColor ? { borderLeft: `2px solid ${borderColor}` } : undefined}
-                      >
+                      <div className="message-bubble">
                         {renderContent(displayContent)}
                         {renderVideoAttachment(videoAttachment)}
                       </div>
@@ -1399,24 +1394,19 @@ export default function MessageList({
 
           {/* Streaming messages -- in-progress persona replies */}
           {streamingEntries.map(([personaId, text]) => {
-            const persona = personaMap[personaId]
             const personaName = getPersonaName(personaId)
             const displayContent = cleanDisplayMessageContent(text, {
               stripCounterpartCoachNotes: trainingFeedbackMode === 'drill',
             })
-            const borderColor = persona?.avatar_color || undefined
             return (
               <div key={`streaming-${personaId}`} className="message persona streaming" data-sender="persona">
                 <div className="message-row">
-                  <Avatar name={personaName} color={borderColor || '#0F766E'} size={28} />
+                  <Avatar name={personaName} size={28} />
                   <div className="message-content">
-                    <div className="sender-name" style={borderColor ? { color: borderColor } : undefined}>
+                    <div className="sender-name">
                       {personaName}
                     </div>
-                    <div
-                      className="message-bubble"
-                      style={borderColor ? { borderLeft: `2px solid ${borderColor}` } : undefined}
-                    >
+                    <div className="message-bubble">
                       {renderContent(displayContent)}
                       <span className="streaming-cursor" />
                     </div>
@@ -1456,9 +1446,7 @@ export default function MessageList({
                   <ul className="dispatch-responders">
                     {phase.responders.map((r) => (
                       <li key={r.persona_id}>
-                        <strong style={{ color: personaMap[r.persona_id]?.avatar_color || undefined }}>
-                          {getPersonaName(r.persona_id)}
-                        </strong>
+                        <strong>{getPersonaName(r.persona_id)}</strong>
                         {' — '}
                         {r.reason || tr('参与讨论', 'Joined the discussion')}
                       </li>

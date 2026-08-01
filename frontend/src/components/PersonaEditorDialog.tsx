@@ -41,7 +41,6 @@ export default function PersonaEditorDialog({
   const [id, setId] = useState('')
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
-  const [avatarColor, setAvatarColor] = useState('#888888')
   const [content, setContent] = useState('')
   const [teamId, setTeamId] = useState<number | null>(null)
   const [teams, setTeams] = useState<Team[]>([])
@@ -65,7 +64,6 @@ export default function PersonaEditorDialog({
       setId(editingPersona.id)
       setName(editingPersona.name)
       setRole(editingPersona.role)
-      setAvatarColor(editingPersona.avatar_color || '#888888')
       setTeamId(editingPersona.team_id)
       setContent('')
       setLoading(true)
@@ -81,7 +79,6 @@ export default function PersonaEditorDialog({
       setId('')
       setName('')
       setRole('')
-      setAvatarColor('#888888')
       setTeamId(null)
       setContent('')
       setLoading(false)
@@ -100,7 +97,6 @@ export default function PersonaEditorDialog({
         await updatePersona(editingPersona!.id, {
           name,
           role,
-          avatar_color: avatarColor,
           content,
           ...orgFields,
         })
@@ -114,7 +110,6 @@ export default function PersonaEditorDialog({
           id: id.trim(),
           name,
           role,
-          avatar_color: avatarColor,
           content,
           ...orgFields,
         })
@@ -156,7 +151,7 @@ export default function PersonaEditorDialog({
         </DialogTitle>
         <div className="dialog-body">
           <div className="persona-avatar-preview">
-            <Avatar name={name || '?'} color={avatarColor} size={48} />
+            <Avatar name={name || '?'} size={48} />
           </div>
 
           <Field className="field-label" label="ID">
@@ -186,18 +181,6 @@ export default function PersonaEditorDialog({
               onChange={(e) => setRole(e.target.value)}
               placeholder={tr('如：CEO、产品经理', 'Example: CEO, Product Manager')}
             />
-          </Field>
-
-          <Field className="field-label" label={tr('头像颜色', 'Avatar Color')}>
-            <div className="color-field">
-              <Input
-                className="persona-color-input"
-                type="color"
-                value={avatarColor}
-                onChange={(e) => setAvatarColor(e.target.value)}
-              />
-              <span className="color-value">{avatarColor}</span>
-            </div>
           </Field>
 
           {teams.length > 0 && (

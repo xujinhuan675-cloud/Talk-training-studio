@@ -63,7 +63,7 @@ export default function ContextPanel({
             return (
               <div key={p.id} className="ctx-profile-card">
                 <div className="ctx-profile-header">
-                  <Avatar name={p.name} color={p.avatar_color || '#0F766E'} size={32} />
+                  <Avatar name={p.name} size={32} />
                   <span className="ctx-profile-name">{p.name}</span>
                 </div>
                 <div className="ctx-profile-tags">

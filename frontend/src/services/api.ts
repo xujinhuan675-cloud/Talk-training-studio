@@ -11,7 +11,6 @@ export interface PersonaSummary {
   id: string
   name: string
   role: string
-  avatar_color: string | null
   organization_id: number | null
   team_id: number | null
   parse_status: string
@@ -254,7 +253,6 @@ export async function createPersona(data: {
   id: string
   name: string
   role: string
-  avatar_color: string
   content: string
   organization_id?: number | null
   team_id?: number | null
@@ -273,7 +271,7 @@ export async function createPersona(data: {
 
 export async function updatePersona(
   id: string,
-  data: { name?: string; role?: string; avatar_color?: string; content?: string; organization_id?: number | null; team_id?: number | null },
+  data: { name?: string; role?: string; content?: string; organization_id?: number | null; team_id?: number | null },
 ): Promise<void> {
   const resp = await fetch(`${API_BASE}/personas/${id}`, {
     method: 'PUT',
