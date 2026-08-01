@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from itertools import count
 from types import SimpleNamespace
 
@@ -223,11 +224,13 @@ def app(tmp_path):
     chatroom_service = FakeChatroomService(runtime_state)
     persona_editor = FakePersonaEditor()
     guidance_service = TrainingLiveGuidanceService(monologue_word_threshold=20)
-    test_app.dependency_overrides[get_training_runtime_uow_factory] = (
-        lambda: (lambda **kwargs: FakeTrainingRuntimeUnitOfWork(runtime_state, **kwargs))
+    test_app.dependency_overrides[get_training_runtime_uow_factory] = lambda: (
+        lambda **kwargs: FakeTrainingRuntimeUnitOfWork(runtime_state, **kwargs)
     )
     test_app.dependency_overrides[get_storybank_service] = lambda: storybank
-    test_app.dependency_overrides[get_training_scenario_config_service] = lambda: scenario_config_service
+    test_app.dependency_overrides[get_training_scenario_config_service] = (
+        lambda: scenario_config_service
+    )
     test_app.dependency_overrides[get_training_session_service] = lambda: session_service
     test_app.dependency_overrides[get_live_guidance_service] = lambda: guidance_service
     test_app.dependency_overrides[get_analysis_service] = lambda: analysis_service
@@ -337,7 +340,25 @@ async def test_scenario_config_reads_default_state(client: AsyncClient) -> None:
     by_id = {item["id"]: item for item in data["scenarios"]}
     assert "new-customer-discount" in by_id
     assert by_id["new-customer-discount"]["sourceScenarioId"] == "new-customer-discount"
-    assert sum(item["weight"] for item in by_id["new-customer-discount"]["dimensionWeights"]) == pytest.approx(100)
+    assert sum(
+        item["weight"] for item in by_id["new-customer-discount"]["dimensionWeights"]
+    ) == pytest.approx(100)
+
+
+@pytest.mark.asyncio
+async def test_default_rubric_requires_authenticated_identity(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", True)
+    monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", False)
+
+    response = await client.get(
+        "/api/v1/training-studio/rubrics/default",
+        params={"category": "sales"},
+    )
+
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -352,7 +373,10 @@ async def test_scenario_config_only_admin_can_save(client: AsyncClient) -> None:
     )
 
     assert admin_response.status_code == 200
-    assert admin_response.json()["data"]["scenarios"][0]["dimensionWeights"] == scenario_dimension_weights()
+    assert (
+        admin_response.json()["data"]["scenarios"][0]["dimensionWeights"]
+        == scenario_dimension_weights()
+    )
 
     leader_response = await client.put(
         "/api/v1/training-studio/scenario-config",
@@ -1125,13 +1149,11 @@ def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection
     monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "your-volcengine-voice")
     session_id = asyncio.run(create_bound_session())
     app.state.training_runtime_state.rooms[42] = SimpleNamespace(id=42, name="Realtime Room")
-    app.dependency_overrides[get_training_realtime_uow_factory] = (
-        app.dependency_overrides[get_training_runtime_uow_factory]
-    )
-    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda provider: adapter
-        if provider == "volcengine.doubao_realtime"
-        else None
+    app.dependency_overrides[get_training_realtime_uow_factory] = app.dependency_overrides[
+        get_training_runtime_uow_factory
+    ]
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = lambda: lambda provider: (
+        adapter if provider == "volcengine.doubao_realtime" else None
     )
     client = TestClient(app)
 
@@ -1157,9 +1179,7 @@ def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection
     assert adapter.started_config.provider == "volcengine.doubao_realtime"
     assert adapter.started_config.runtime == "volcengine.doubao_realtime"
     assert adapter.started_config.voice == "zh_female_vv_uranus_bigtts"
-    assert adapter.started_config.metadata["realtimeLlm"]["voice"] == (
-        "zh_female_vv_uranus_bigtts"
-    )
+    assert adapter.started_config.metadata["realtimeLlm"]["voice"] == ("zh_female_vv_uranus_bigtts")
     assert adapter.closed is True
 
 
@@ -1478,7 +1498,9 @@ async def test_scenario_training_progress_aggregates_sessions(
 
 
 @pytest.mark.asyncio
-async def test_scenario_training_progress_reports_failed_session_reason(client: AsyncClient) -> None:
+async def test_scenario_training_progress_reports_failed_session_reason(
+    client: AsyncClient,
+) -> None:
     revenue_admin = admin_team_headers("team-revenue")
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
@@ -1520,7 +1542,9 @@ async def test_scenario_training_progress_reports_failed_session_reason(client: 
 @pytest.mark.asyncio
 async def test_training_session_list_supports_skip_and_limit(client: AsyncClient) -> None:
     for mode in ["text", "voice", "video"]:
-        create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload(mode))
+        create_resp = await client.post(
+            "/api/v1/training-studio/sessions", json=session_payload(mode)
+        )
         assert create_resp.status_code == 201
 
     list_resp = await client.get("/api/v1/training-studio/sessions", params={"skip": 1, "limit": 1})
@@ -1529,6 +1553,69 @@ async def test_training_session_list_supports_skip_and_limit(client: AsyncClient
     data = list_resp.json()["data"]
     assert [item["session_id"] for item in data] == ["session-2"]
     assert list_resp.headers["x-total-count"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_training_session_list_supports_server_side_history_filters(
+    client: AsyncClient,
+) -> None:
+    for mode, title in [
+        ("voice", "Enterprise renewal objection"),
+        ("voice", "Renewal risk discovery"),
+        ("text", "Enterprise renewal objection"),
+    ]:
+        create_resp = await client.post(
+            "/api/v1/training-studio/sessions",
+            json=session_payload(
+                mode,
+                metadata={
+                    "source": "scenario_training",
+                    "scenario_training": {"title": title},
+                },
+            ),
+        )
+        assert create_resp.status_code == 201
+
+    now = datetime.now(UTC).replace(microsecond=0)
+    list_resp = await client.get(
+        "/api/v1/training-studio/sessions",
+        params={
+            "skip": 1,
+            "limit": 1,
+            "query": "renewal",
+            "activity_from": (now - timedelta(minutes=1)).isoformat(),
+            "activity_to": (now + timedelta(minutes=1)).isoformat(),
+            "mode": "voice",
+            "source": "scenario_training",
+        },
+    )
+
+    assert list_resp.status_code == 200
+    assert [item["session_id"] for item in list_resp.json()["data"]] == ["session-1"]
+    assert list_resp.headers["x-total-count"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_training_session_list_rejects_invalid_history_filters(client: AsyncClient) -> None:
+    invalid_mode = await client.get(
+        "/api/v1/training-studio/sessions",
+        params={"mode": "immersive"},
+    )
+    naive_time = await client.get(
+        "/api/v1/training-studio/sessions",
+        params={"activity_from": "2026-07-01T00:00:00"},
+    )
+    inverted_range = await client.get(
+        "/api/v1/training-studio/sessions",
+        params={
+            "activity_from": "2026-07-02T00:00:00Z",
+            "activity_to": "2026-07-01T00:00:00Z",
+        },
+    )
+
+    assert invalid_mode.status_code == 422
+    assert naive_time.status_code == 422
+    assert inverted_range.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -1584,9 +1671,7 @@ async def test_scenario_progress_pagination_exposes_total_and_summary(client: As
         "/api/v1/training-studio/scenario-progress",
         params={"skip": 1, "limit": 1},
     )
-    summary_resp = await client.get(
-        "/api/v1/training-studio/scenario-progress/summary"
-    )
+    summary_resp = await client.get("/api/v1/training-studio/scenario-progress/summary")
 
     assert progress_resp.status_code == 200
     assert len(progress_resp.json()["data"]) == 1
@@ -1839,7 +1924,9 @@ async def test_leader_cannot_read_other_team_training_session(client: AsyncClien
 
 @pytest.mark.asyncio
 async def test_training_session_start_with_explicit_room_id(client: AsyncClient) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
 
     start_resp = await client.post(
@@ -1861,7 +1948,9 @@ async def test_training_session_start_with_explicit_room_id(client: AsyncClient)
 
 @pytest.mark.asyncio
 async def test_training_session_start_can_create_room(client: AsyncClient) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("video"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("video")
+    )
     session_id = create_resp.json()["data"]["session_id"]
 
     start_resp = await client.post(
@@ -1882,7 +1971,9 @@ async def test_training_session_start_can_create_runtime_persona(
 ) -> None:
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
-        json=session_payload("voice", scenario_template_id="ai-web3-agent-pm-comprehensive-interview"),
+        json=session_payload(
+            "voice", scenario_template_id="ai-web3-agent-pm-comprehensive-interview"
+        ),
     )
     session_id = create_resp.json()["data"]["session_id"]
 
@@ -2037,7 +2128,9 @@ async def test_training_session_start_can_bind_message_tree_runtime(
 async def test_training_session_start_rejects_room_id_for_message_tree_runtime(
     client: AsyncClient,
 ) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
 
     start_resp = await client.post(
@@ -2053,7 +2146,9 @@ async def test_training_session_start_rejects_room_id_for_message_tree_runtime(
 
 @pytest.mark.asyncio
 async def test_training_session_fail_endpoint(client: AsyncClient) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
 
     fail_resp = await client.post(
@@ -2427,7 +2522,9 @@ async def test_training_session_guidance_reads_bound_room_messages(
 
 @pytest.mark.asyncio
 async def test_training_session_guidance_accepts_request_turns(client: AsyncClient) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
@@ -2505,7 +2602,9 @@ async def test_training_session_guidance_parses_video_answer_marker(
             return []
 
     app.dependency_overrides[get_live_guidance_service] = lambda: CapturingGuidanceService()
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("video"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("video")
+    )
     session_id = create_resp.json()["data"]["session_id"]
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
@@ -2532,7 +2631,8 @@ async def test_training_session_guidance_parses_video_answer_marker(
                 room_id=42,
                 sender_type="user",
                 sender_id="me",
-                content="Here is my product demo answer.\n\n[video-answer]" + json.dumps(video_attachment),
+                content="Here is my product demo answer.\n\n[video-answer]"
+                + json.dumps(video_attachment),
             ),
         ],
     )
@@ -2595,7 +2695,9 @@ async def test_training_session_guidance_stream_emits_initial_guidance(
     client: AsyncClient,
     app: FastAPI,
 ) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
@@ -2648,7 +2750,9 @@ async def test_training_session_guidance_stream_follows_room_message_events(
 ) -> None:
     from application.services.stakeholder.sse import room_event_bus
 
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
@@ -2804,7 +2908,9 @@ async def test_training_guidance_stream_refresh_preserves_current_user_scope(
 
 @pytest.mark.asyncio
 async def test_training_session_guidance_requires_active_session(client: AsyncClient) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
 
     resp = await client.post(
@@ -2821,7 +2927,9 @@ async def test_training_session_guidance_requires_numeric_room_id(
     client: AsyncClient,
     app: FastAPI,
 ) -> None:
-    create_resp = await client.post("/api/v1/training-studio/sessions", json=session_payload("text"))
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions", json=session_payload("text")
+    )
     session_id = create_resp.json()["data"]["session_id"]
     await client.post(
         f"/api/v1/training-studio/sessions/{session_id}/start",
@@ -2836,7 +2944,9 @@ async def test_training_session_guidance_requires_numeric_room_id(
 
 
 @pytest.mark.asyncio
-async def test_training_session_guidance_returns_404_for_missing_session(client: AsyncClient) -> None:
+async def test_training_session_guidance_returns_404_for_missing_session(
+    client: AsyncClient,
+) -> None:
     resp = await client.get("/api/v1/training-studio/sessions/missing/guidance")
 
     assert resp.status_code == 404

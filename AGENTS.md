@@ -149,6 +149,8 @@ NewAPI UI 复用遵循“原实现优先”，不是只做风格模仿：
 2. 运行或查看 `git status --short`，确认已有改动。
 3. 不要 revert、覆盖或清理别人/其他 agent 的改动。
 4. 先用 code-review-graph 理解影响面：
+   - `code-review-graph` 是本仓库唯一代码图谱工具；Graphify 只用于跨文档知识关系，不能替代代码 changed files、impact radius、affected flows 或 review context 分析。
+   - TalkWise 根仓库与嵌套 NewAPI 仓库分别建图，只有图谱 HEAD 与当前仓库 HEAD 匹配时才视为有效快照。
    - 增量更新图谱。
    - 检测 changed files、impact radius、affected flows 或 review context。
    - 对大范围改动先确认高风险文件和测试缺口。

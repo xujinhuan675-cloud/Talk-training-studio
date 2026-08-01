@@ -98,6 +98,8 @@ def _require_mutation_metadata_scope(
 
 _ACL_METADATA_KEYS = {
     "authScope",
+    "userId",
+    "user_id",
     "ownerUserId",
     "owner_user_id",
     "createdByUserId",
@@ -575,8 +577,7 @@ def _message_action_metadata(
     inherited = _sanitize_message_tree_action_metadata(source.metadata)
     incoming = _sanitize_message_tree_action_metadata(metadata)
     merged = {
-        **inherited,
-        **incoming,
+        **_merge_metadata_preserving_acl(inherited, incoming),
         action_key: source.public_id,
     }
     if source.provider is not None and not _clean_optional_text(merged.get("provider")):

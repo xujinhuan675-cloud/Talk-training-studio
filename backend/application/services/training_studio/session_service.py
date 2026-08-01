@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -22,12 +23,53 @@ from domain.training_studio.session import (
 )
 from domain.training_studio.session_repository import (
     TrainingSessionAccessScope,
+    TrainingSessionHistoryFilter,
     TrainingSessionRepository,
+    training_session_activity_at,
+    training_session_matches_history_filter,
     training_session_matches_access_scope,
 )
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
 
 logger = logging.getLogger(__name__)
+
+_FORK_RESET_TASK_METADATA_TOKENS = {
+    "authscope",
+    "branchid",
+    "branchpolicy",
+    "branchstate",
+    "completed",
+    "completedat",
+    "completion",
+    "completionreport",
+    "completionstatus",
+    "conversationruntimecontract",
+    "createdbyuserid",
+    "currentbranchtail",
+    "failurereason",
+    "iscomplete",
+    "liveguidancehistory",
+    "liveguidancepersistence",
+    "messagebody",
+    "messagetreeselection",
+    "overallscore",
+    "ownerteamid",
+    "owneruserid",
+    "reportid",
+    "runtime",
+    "score",
+    "scoreid",
+    "scorestatus",
+    "selectedpath",
+    "sourcepath",
+    "teamid",
+    "trainingcompleted",
+    "trainingcompletedat",
+    "trainingcompletion",
+    "trainingcompletionstatus",
+    "trainingsessionid",
+    "userid",
+}
 
 
 class TrainingSessionDTO(BaseModel):
@@ -120,8 +162,10 @@ EvaluationLookup = Callable[[int], Awaitable[object | None]]
 class InMemoryTrainingSessionRepository:
     def __init__(self) -> None:
         self._sessions: dict[str, TrainingSession] = {}
+        self._created_at: dict[str, datetime] = {}
 
     async def save(self, session: TrainingSession) -> TrainingSession:
+        self._created_at.setdefault(session.session_id, datetime.now(UTC))
         self._sessions[session.session_id] = session
         return session
 
@@ -149,6 +193,7 @@ class InMemoryTrainingSessionRepository:
         if session is None:
             return False
         del self._sessions[session_id]
+        self._created_at.pop(session_id, None)
         return True
 
     async def list(
@@ -159,6 +204,7 @@ class InMemoryTrainingSessionRepository:
         user_id: str | None = None,
         team_id: str | None = None,
         scenario_template_id: str | None = None,
+        history_filter: TrainingSessionHistoryFilter | None = None,
         access_scope: TrainingSessionAccessScope | None = None,
     ) -> list[TrainingSession]:
         sessions = list(self._sessions.values())
@@ -174,9 +220,31 @@ class InMemoryTrainingSessionRepository:
             sessions = [session for session in sessions if session.team_id == team_id]
         if scenario_template_id:
             sessions = [
-                session for session in sessions
+                session
+                for session in sessions
                 if session.scenario_template_id == scenario_template_id
             ]
+        if history_filter is not None:
+            sessions = [
+                session
+                for session in sessions
+                if training_session_matches_history_filter(
+                    session,
+                    history_filter,
+                    created_at=self._created_at.get(session.session_id),
+                )
+            ]
+        sessions.sort(
+            key=lambda session: (
+                training_session_activity_at(
+                    session,
+                    created_at=self._created_at.get(session.session_id),
+                )
+                or datetime.min.replace(tzinfo=UTC),
+                session.session_id,
+            ),
+            reverse=True,
+        )
         return sessions[skip : skip + limit]
 
     async def count(
@@ -185,6 +253,7 @@ class InMemoryTrainingSessionRepository:
         user_id: str | None = None,
         team_id: str | None = None,
         scenario_template_id: str | None = None,
+        history_filter: TrainingSessionHistoryFilter | None = None,
         access_scope: TrainingSessionAccessScope | None = None,
     ) -> int:
         sessions = await self.list(
@@ -193,6 +262,7 @@ class InMemoryTrainingSessionRepository:
             user_id=user_id,
             team_id=team_id,
             scenario_template_id=scenario_template_id,
+            history_filter=history_filter,
             access_scope=access_scope,
         )
         return len(sessions)
@@ -219,7 +289,9 @@ class TrainingSessionService:
         payload: CreateTrainingSessionDTO | TrainingTaskConfigDTO | TrainingTaskConfig | dict,
         mode: TrainingSessionMode | str = TrainingSessionMode.TEXT,
     ) -> TrainingSession:
-        task_config, session_mode, scenario_template_id, user_id, team_id = self._resolve_create_payload(payload, mode)
+        task_config, session_mode, scenario_template_id, user_id, team_id = (
+            self._resolve_create_payload(payload, mode)
+        )
         session = TrainingSession(
             session_id=self._id_factory(),
             task_config=task_config,
@@ -229,6 +301,37 @@ class TrainingSessionService:
             team_id=team_id,
         )
         return await self._save(session)
+
+    async def fork_session(
+        self,
+        source_session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope,
+    ) -> TrainingSession:
+        """Clone training inputs into a fresh lifecycle owned by the source scope."""
+
+        source = await self._require_session(
+            source_session_id,
+            access_scope=access_scope,
+        )
+        task_config = TrainingTaskConfigDTO.from_domain(source.task_config)
+        task_config = task_config.model_copy(
+            update={
+                "metadata": {
+                    **_fork_task_config_metadata(source.task_config.metadata),
+                    "forkedFromTrainingSessionId": source.session_id,
+                }
+            }
+        )
+        return await self.create_session(
+            CreateTrainingSessionDTO(
+                task_config=task_config,
+                mode=source.mode.value,
+                scenario_template_id=source.scenario_template_id,
+                user_id=source.user_id,
+                team_id=source.team_id,
+            )
+        )
 
     async def start_session(
         self,
@@ -300,6 +403,19 @@ class TrainingSessionService:
             session.score_id = score_id.strip() if score_id and score_id.strip() else None
         return await self._save(session)
 
+    async def record_session_metadata(
+        self,
+        session_id: str,
+        *,
+        metadata: Mapping[str, object],
+        access_scope: TrainingSessionAccessScope,
+    ) -> TrainingSession:
+        """Persist trusted lifecycle diagnostics without changing session status."""
+
+        session = await self._require_session(session_id, access_scope=access_scope)
+        _merge_task_config_metadata(session, metadata)
+        return await self._save(session)
+
     async def fail_session(
         self,
         session_id: str,
@@ -338,6 +454,11 @@ class TrainingSessionService:
         user_id: str | None = None,
         team_id: str | None = None,
         scenario_template_id: str | None = None,
+        query: str | None = None,
+        activity_from: datetime | None = None,
+        activity_to: datetime | None = None,
+        mode: TrainingSessionMode | str | None = None,
+        source: str | None = None,
         access_scope: TrainingSessionAccessScope,
     ) -> list[TrainingSession]:
         sessions, _ = await self.list_sessions_page(
@@ -346,6 +467,11 @@ class TrainingSessionService:
             user_id=user_id,
             team_id=team_id,
             scenario_template_id=scenario_template_id,
+            query=query,
+            activity_from=activity_from,
+            activity_to=activity_to,
+            mode=mode,
+            source=source,
             access_scope=access_scope,
         )
         return sessions
@@ -358,12 +484,24 @@ class TrainingSessionService:
         user_id: str | None = None,
         team_id: str | None = None,
         scenario_template_id: str | None = None,
+        query: str | None = None,
+        activity_from: datetime | None = None,
+        activity_to: datetime | None = None,
+        mode: TrainingSessionMode | str | None = None,
+        source: str | None = None,
         access_scope: TrainingSessionAccessScope,
     ) -> tuple[list[TrainingSession], int]:
         scope = _require_access_scope(access_scope)
         user_id = self._normalize_optional_text(user_id)
         team_id = self._normalize_optional_text(team_id)
         scenario_template_id = self._normalize_optional_text(scenario_template_id)
+        history_filter = self._normalize_history_filter(
+            query=query,
+            activity_from=activity_from,
+            activity_to=activity_to,
+            mode=mode,
+            source=source,
+        )
         if self._uow_factory is None:
             sessions = await self._repository.list(
                 skip=skip,
@@ -371,12 +509,14 @@ class TrainingSessionService:
                 user_id=user_id,
                 team_id=team_id,
                 scenario_template_id=scenario_template_id,
+                history_filter=history_filter,
                 access_scope=scope,
             )
             total = await self._repository.count(
                 user_id=user_id,
                 team_id=team_id,
                 scenario_template_id=scenario_template_id,
+                history_filter=history_filter,
                 access_scope=scope,
             )
             return sessions, total
@@ -387,15 +527,57 @@ class TrainingSessionService:
                 user_id=user_id,
                 team_id=team_id,
                 scenario_template_id=scenario_template_id,
+                history_filter=history_filter,
                 access_scope=scope,
             )
             total = await uow.training_session_repository.count(
                 user_id=user_id,
                 team_id=team_id,
                 scenario_template_id=scenario_template_id,
+                history_filter=history_filter,
                 access_scope=scope,
             )
         return sessions, total
+
+    def _normalize_history_filter(
+        self,
+        *,
+        query: str | None,
+        activity_from: datetime | None,
+        activity_to: datetime | None,
+        mode: TrainingSessionMode | str | None,
+        source: str | None,
+    ) -> TrainingSessionHistoryFilter | None:
+        normalized_query = self._normalize_optional_text(query)
+        if normalized_query and len(normalized_query) > 200:
+            raise ValueError("query cannot exceed 200 characters")
+        normalized_source = self._normalize_optional_text(source)
+        if normalized_source:
+            if len(normalized_source) > 80:
+                raise ValueError("source cannot exceed 80 characters")
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", normalized_source) is None:
+                raise ValueError("source must be a training source identifier")
+        normalized_mode: str | None = None
+        if mode is not None:
+            try:
+                normalized_mode = TrainingSessionMode(str(mode).strip().lower()).value
+            except ValueError as exc:
+                raise ValueError(f"Invalid mode: {mode}") from exc
+        normalized_from = _normalize_history_datetime(activity_from, "activity_from")
+        normalized_to = _normalize_history_datetime(activity_to, "activity_to")
+        if normalized_from and normalized_to and normalized_from > normalized_to:
+            raise ValueError("activity_from cannot be after activity_to")
+        if not any(
+            (normalized_query, normalized_from, normalized_to, normalized_mode, normalized_source)
+        ):
+            return None
+        return TrainingSessionHistoryFilter(
+            query=normalized_query,
+            activity_from=normalized_from,
+            activity_to=normalized_to,
+            mode=normalized_mode,
+            source=normalized_source,
+        )
 
     async def list_scenario_progress(
         self,
@@ -444,14 +626,10 @@ class TrainingSessionService:
             access_scope=access_scope,
         )
         scored_progress = [
-            item
-            for item in progress
-            if item.score_status == "ready" and item.score is not None
+            item for item in progress if item.score_status == "ready" and item.score is not None
         ]
         tracked_scenarios = len(progress)
-        completed_scenarios = sum(
-            item.status == "completed" for item in progress
-        )
+        completed_scenarios = sum(item.status == "completed" for item in progress)
         scored_scenarios = len(scored_progress)
         average_score = (
             round(sum(item.score or 0 for item in scored_progress) / scored_scenarios)
@@ -464,9 +642,7 @@ class TrainingSessionService:
             scored_scenarios=scored_scenarios,
             average_score=average_score,
             completion_percentage=(
-                round((completed_scenarios / tracked_scenarios) * 100)
-                if tracked_scenarios
-                else 0
+                round((completed_scenarios / tracked_scenarios) * 100) if tracked_scenarios else 0
             ),
         )
 
@@ -526,9 +702,7 @@ class TrainingSessionService:
                 if not isinstance(scores, Mapping):
                     continue
                 for dimension in COMPETENCY_DIMENSIONS:
-                    normalized = self._normalize_competency_score(
-                        scores.get(dimension)
-                    )
+                    normalized = self._normalize_competency_score(scores.get(dimension))
                     if normalized is None:
                         continue
                     totals[dimension] += normalized
@@ -666,10 +840,18 @@ class TrainingSessionService:
             )
         flat_payload = dict(payload)
         session_mode = flat_payload.pop("mode", mode)
-        scenario_template_id = self._normalize_optional_text(flat_payload.pop("scenario_template_id", None))
+        scenario_template_id = self._normalize_optional_text(
+            flat_payload.pop("scenario_template_id", None)
+        )
         user_id = self._normalize_optional_text(flat_payload.pop("user_id", None))
         team_id = self._normalize_optional_text(flat_payload.pop("team_id", None))
-        return TrainingTaskConfigDTO(**flat_payload).to_domain(), session_mode, scenario_template_id, user_id, team_id
+        return (
+            TrainingTaskConfigDTO(**flat_payload).to_domain(),
+            session_mode,
+            scenario_template_id,
+            user_id,
+            team_id,
+        )
 
     async def _save(self, session: TrainingSession) -> TrainingSession:
         if self._uow_factory is None:
@@ -845,3 +1027,23 @@ def _merge_task_config_metadata(
         if text_key:
             merged[text_key] = deepcopy(value)
     session.task_config.metadata = merged
+
+
+def _normalize_history_datetime(value: datetime | None, field_name: str) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must include a timezone offset")
+    return value.astimezone(UTC)
+
+
+def _fork_task_config_metadata(
+    metadata: Mapping[str, object] | None,
+) -> dict[str, object]:
+    clean: dict[str, object] = {}
+    for key, value in dict(metadata or {}).items():
+        text_key = str(key).strip()
+        token = text_key.replace("-", "").replace("_", "").replace(" ", "").lower()
+        if text_key and token not in _FORK_RESET_TASK_METADATA_TOKENS:
+            clean[text_key] = deepcopy(value)
+    return clean

@@ -101,6 +101,13 @@ def _state():
                 sender_type="user",
                 sender_id="user",
                 content="We can reduce risk with a phased rollout.",
+                metadata={
+                    "sourceConversationId": 7,
+                    "sourceMessageId": "msg-user",
+                    "sourceParentMessageId": None,
+                    "sourceBranchId": "main",
+                    "trainingSessionId": "session-source",
+                },
             ),
             Message(
                 id=102,
@@ -207,6 +214,11 @@ async def test_generate_report_adds_anchors_and_enhanced_sections():
     assert report.content.communication_suggestions[0].priority == "medium"
     assert report.content.evidence_reviews[0].message_ids == [102]
     assert report.content.rewrite_demos[0].message_anchors[0].speaker == "user"
+    assert report.content.rewrite_demos[0].message_anchors[0].source_conversation_id == 7
+    assert report.content.rewrite_demos[0].message_anchors[0].source_message_id == "msg-user"
+    assert (
+        report.content.rewrite_demos[0].message_anchors[0].training_session_id == "session-source"
+    )
     assert report.content.micro_drills[0].message_anchors[0].speaker == "CFO"
     assert report.content.high_signal_moments[0].message_ids == [102]
     assert report.content.content_delivery is not None

@@ -939,6 +939,9 @@ async def stream_room(
 # Voice WebSocket endpoint (Story 2.4)
 # ---------------------------------------------------------------------------
 
+_VOICE_MAX_AUDIO_BYTES = 25 * 1024 * 1024
+_VOICE_AUDIO_FORMATS = frozenset({"m4a", "mp3", "mp4", "ogg", "wav", "webm"})
+
 
 @router.websocket("/rooms/{room_id}/voice")
 async def voice_ws(
@@ -972,6 +975,12 @@ async def voice_ws(
         training_session_id=training_session_id,
         training_session_svc=training_session_svc,
         operation="voice_stakeholder_room",
+    )
+    await _require_stakeholder_room_access(
+        room_id,
+        chatroom_svc=chatroom_svc,
+        current_user=current_user,
+        access_scope=access_scope,
     )
     await websocket.accept()
 
@@ -1019,13 +1028,56 @@ async def voice_ws(
     try:
         while True:
             raw = await websocket.receive_json()
+            if not isinstance(raw, dict):
+                if not await send_voice_json(
+                    {
+                        "type": "error",
+                        "code": "invalid_event",
+                        "message": "Voice events must be JSON objects",
+                    }
+                ):
+                    break
+                continue
             msg_type = raw.get("type")
 
             if msg_type == "audio_chunk":
-                # Accumulate audio data
-                audio_b64 = raw.get("data", "")
-                if audio_b64:
-                    audio_buffer.extend(base64.b64decode(audio_b64))
+                audio_b64 = raw.get("data")
+                if not isinstance(audio_b64, str) or not audio_b64:
+                    audio_buffer.clear()
+                    if not await send_voice_json(
+                        {
+                            "type": "error",
+                            "code": "invalid_audio_chunk",
+                            "message": "Audio chunks must contain base64 data",
+                        }
+                    ):
+                        break
+                    continue
+                try:
+                    audio_chunk = base64.b64decode(audio_b64, validate=True)
+                except (ValueError, TypeError):
+                    audio_buffer.clear()
+                    if not await send_voice_json(
+                        {
+                            "type": "error",
+                            "code": "invalid_audio_chunk",
+                            "message": "Audio chunk data is not valid base64",
+                        }
+                    ):
+                        break
+                    continue
+                if len(audio_buffer) + len(audio_chunk) > _VOICE_MAX_AUDIO_BYTES:
+                    audio_buffer.clear()
+                    await send_voice_json(
+                        {
+                            "type": "error",
+                            "code": "audio_too_large",
+                            "message": "Voice recording exceeds the supported size",
+                        }
+                    )
+                    await websocket.close(code=1009)
+                    return
+                audio_buffer.extend(audio_chunk)
 
             elif msg_type == "speech_end":
                 if not audio_buffer:
@@ -1049,7 +1101,17 @@ async def voice_ws(
 
                 # Transcribe accumulated audio
                 try:
-                    audio_format = raw.get("format", "webm")
+                    audio_format = str(raw.get("format") or "webm").strip().lower()
+                    if audio_format not in _VOICE_AUDIO_FORMATS:
+                        if not await send_voice_json(
+                            {
+                                "type": "error",
+                                "code": "unsupported_audio_format",
+                                "message": "Voice recording format is not supported",
+                            }
+                        ):
+                            break
+                        continue
                     result = await stt.transcribe(
                         bytes(audio_buffer),
                         language="zh",
@@ -1114,6 +1176,16 @@ async def voice_ws(
                         break
                 finally:
                     audio_buffer.clear()
+
+            else:
+                if not await send_voice_json(
+                    {
+                        "type": "error",
+                        "code": "unsupported_event",
+                        "message": "Unsupported voice event type",
+                    }
+                ):
+                    break
 
     except WebSocketDisconnect:
         pass
@@ -1617,24 +1689,33 @@ async def generate_cheat_sheet(
 @router.get("/growth/dashboard", summary="获取成长轨迹 Dashboard 数据")
 async def get_growth_dashboard(
     svc=Depends(get_growth_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    dashboard = await svc.get_dashboard()
+    dashboard = await svc.get_dashboard(
+        access_scope=_stakeholder_room_scope_for_current_user(current_user)
+    )
     return success_response(data=dashboard.model_dump())
 
 
 @router.post("/growth/insight", summary="生成跨 session 成长洞察")
 async def generate_growth_insight(
     svc=Depends(get_growth_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    insight = await svc.generate_insight()
+    insight = await svc.generate_insight(
+        access_scope=_stakeholder_room_scope_for_current_user(current_user)
+    )
     return success_response(data=insight.model_dump())
 
 
 @router.post("/growth/card", summary="生成沟通力名片")
 async def generate_profile_card(
     svc=Depends(get_growth_service),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    result = await svc.generate_profile_card()
+    result = await svc.generate_profile_card(
+        access_scope=_stakeholder_room_scope_for_current_user(current_user)
+    )
     if result is None:
         raise HTTPException(status_code=502, detail="名片生成失败，请重试")
     return success_response(data=result.model_dump())

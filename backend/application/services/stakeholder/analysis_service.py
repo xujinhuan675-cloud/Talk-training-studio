@@ -354,6 +354,7 @@ def _build_message_anchors(history: list[dict], persona_loader) -> dict[int, dic
             p = persona_loader.get_persona(sender_id) if persona_loader else None
             speaker = p.name if p else sender_id
         quote, _ = _format_video_answer_for_analysis(msg.get("content", ""))
+        metadata = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
         anchors[seq] = {
             "message_index": seq,
             "message_id": msg.get("id"),
@@ -363,6 +364,11 @@ def _build_message_anchors(history: list[dict], persona_loader) -> dict[int, dic
             "quote": quote,
             "emotion_score": msg.get("emotion_score"),
             "emotion_label": msg.get("emotion_label"),
+            "source_conversation_id": metadata.get("sourceConversationId"),
+            "source_message_id": metadata.get("sourceMessageId"),
+            "source_parent_message_id": metadata.get("sourceParentMessageId"),
+            "source_branch_id": metadata.get("sourceBranchId"),
+            "training_session_id": metadata.get("trainingSessionId"),
         }
     return anchors
 
@@ -536,6 +542,7 @@ class AnalysisService:
                 "content": m.content,
                 "emotion_score": m.emotion_score,
                 "emotion_label": m.emotion_label,
+                "metadata": dict(m.metadata or {}),
             }
             for m in messages
         ]

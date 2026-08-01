@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -13,7 +15,10 @@ from domain.training_studio.session import (
     TrainingSessionMode,
     TrainingSessionStatus,
 )
-from domain.training_studio.session_repository import TrainingSessionAccessScope
+from domain.training_studio.session_repository import (
+    TrainingSessionAccessScope,
+    TrainingSessionHistoryFilter,
+)
 from infrastructure.models import Base
 from infrastructure.repositories.training_session_repository import (
     SQLAlchemyTrainingSessionRepository,
@@ -197,17 +202,133 @@ async def test_training_session_repository_applies_access_scope_to_get_and_list(
 
     assert [session.session_id for session in staff_sessions] == ["session-sales"]
     assert [session.session_id for session in leader_sessions] == [
-        "session-sales",
         "session-peer",
+        "session-sales",
     ]
     assert [session.session_id for session in admin_sessions] == [
-        "session-sales",
-        "session-peer",
         "session-service",
+        "session-peer",
+        "session-sales",
     ]
     assert staff_total == 1
     assert leader_total == 2
     assert admin_total == 3
+
+
+@pytest.mark.asyncio
+async def test_training_session_repository_filters_before_pagination_and_count(
+    session_factory,
+) -> None:
+    sessions = [
+        TrainingSession(
+            session_id="session-match-1",
+            task_config=TrainingTaskConfig(
+                role="Account Executive",
+                level="Senior",
+                tech_stack=["Renewal planning", "Risk discovery"],
+                question_type_ratios={"behavioral": 1},
+                question_count=4,
+                category="sales",
+                metadata={
+                    "source": "scenario_training",
+                    "scenario_training": {"title": "Enterprise renewal objection"},
+                },
+            ),
+            mode="voice",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+        TrainingSession(
+            session_id="session-match-2",
+            task_config=TrainingTaskConfig(
+                role="Account Executive",
+                level="Senior",
+                tech_stack=["Renewal planning"],
+                question_type_ratios={"behavioral": 1},
+                question_count=4,
+                category="sales",
+                metadata={
+                    "training_source": "scenario_training",
+                    "scenario_training": {"description": "Enterprise renewal practice"},
+                },
+            ),
+            mode="voice",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+        TrainingSession(
+            session_id="session-foreign",
+            task_config=TrainingTaskConfig(
+                role="Account Executive",
+                level="Senior",
+                tech_stack=["Renewal planning"],
+                question_type_ratios={"behavioral": 1},
+                question_count=4,
+                category="sales",
+                metadata={
+                    "source": "scenario_training",
+                    "title": "Enterprise renewal objection",
+                },
+            ),
+            mode="voice",
+            user_id="user-other",
+            team_id="team-other",
+        ),
+        TrainingSession(
+            session_id="session-secret-only",
+            task_config=TrainingTaskConfig(
+                role="Support Specialist",
+                level="Senior",
+                tech_stack=["Escalation"],
+                question_type_ratios={"behavioral": 1},
+                question_count=4,
+                category="sales",
+                metadata={
+                    "source": "scenario_training",
+                    "title": "Escalation practice",
+                    "api_key_hint": "renewal-must-not-be-searchable",
+                },
+            ),
+            mode="voice",
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+    ]
+    for index, session in enumerate(sessions, start=1):
+        session.started_at = datetime(2026, 7, 10 + index, tzinfo=UTC)
+
+    scope = TrainingSessionAccessScope(
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+    history_filter = TrainingSessionHistoryFilter(
+        query="renewal",
+        activity_from=datetime(2026, 7, 1, tzinfo=UTC),
+        activity_to=datetime(2026, 7, 31, 23, 59, tzinfo=UTC),
+        mode="voice",
+        source="scenario_training",
+    )
+    async with session_factory() as db_session:
+        repo = SQLAlchemyTrainingSessionRepository(db_session)
+        for session in sessions:
+            await repo.save(session)
+        await db_session.commit()
+
+    async with session_factory() as db_session:
+        repo = SQLAlchemyTrainingSessionRepository(db_session)
+        page = await repo.list(
+            skip=1,
+            limit=1,
+            history_filter=history_filter,
+            access_scope=scope,
+        )
+        total = await repo.count(
+            history_filter=history_filter,
+            access_scope=scope,
+        )
+
+    assert [session.session_id for session in page] == ["session-match-1"]
+    assert total == 2
 
 
 @pytest.mark.asyncio

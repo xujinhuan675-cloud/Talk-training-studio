@@ -144,6 +144,11 @@ class MessageAnchorDTO(BaseModel):
     quote: str = ""
     emotion_score: Optional[int] = None
     emotion_label: Optional[str] = None
+    source_conversation_id: Optional[int] = None
+    source_message_id: Optional[str] = None
+    source_parent_message_id: Optional[str] = None
+    source_branch_id: Optional[str] = None
+    training_session_id: Optional[str] = None
 
 
 class ResistanceItem(BaseModel):

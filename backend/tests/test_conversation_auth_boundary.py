@@ -790,6 +790,52 @@ def test_conversation_child_routes_pass_metadata_scope_to_service_calls() -> Non
 
 
 @pytest.mark.parametrize(
+    ("path", "body", "service_attr"),
+    [
+        pytest.param(
+            "/api/v1/conversations/7/messages/msg_answer/fork",
+            {},
+            "fork_conversation_call",
+            id="direct-fork",
+        ),
+        pytest.param(
+            "/api/v1/conversations/7/messages/msg_answer/actions",
+            {"action": "fork"},
+            "action_call",
+            id="action-fork",
+        ),
+    ],
+)
+def test_generic_fork_routes_reject_training_bound_conversations(
+    path: str,
+    body: dict,
+    service_attr: str,
+) -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                    "trainingSessionId": "session-source",
+                },
+            )
+        }
+    )
+
+    response = _client(conversation_service).post(
+        path,
+        headers={"X-Mock-User": "sales"},
+        json=body,
+    )
+
+    assert response.status_code == 409
+    assert "training session fork endpoint" in response.json()["detail"]
+    assert getattr(conversation_service, service_attr) is None
+
+
+@pytest.mark.parametrize(
     ("method", "path", "request_kwargs", "service_attr"),
     [
         pytest.param(

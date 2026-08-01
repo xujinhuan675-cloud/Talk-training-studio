@@ -6,10 +6,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import api.dependencies as dependency_module
 from api.routes import training_studio
 from api.routes.training_studio import get_training_session_service, router
 from application.services.training_studio.session_service import TrainingSessionService
 from core.exceptions import register_exception_handlers
+from infrastructure.external.newapi_auth import NewAPIIdentity
 
 
 def _session_payload() -> dict:
@@ -91,12 +93,15 @@ def test_video_answer_upload_and_replay_with_session_binding(client: TestClient)
     assert data["size"] == len(b"webm-bytes")
     assert "training_session_id=session-1" in data["url"]
     assert "room_id=42" in data["url"]
-    assert "auth_user_id=user-sales-001" in data["url"]
+    assert "auth_user_id" not in data["url"]
+    assert "auth_role" not in data["url"]
+    assert "auth_team_id" not in data["url"]
 
-    replay_resp = client.get(data["url"])
+    replay_resp = client.get(data["url"], headers=headers)
     assert replay_resp.status_code == 200
     assert replay_resp.content == b"webm-bytes"
     assert replay_resp.headers["content-type"].startswith("video/webm")
+    assert replay_resp.headers["cache-control"] == "private, no-store"
 
 
 def test_video_answer_upload_rejects_non_video(client: TestClient) -> None:
@@ -167,6 +172,108 @@ def test_video_answer_replay_rejects_binding_mismatch(client: TestClient) -> Non
     resp = client.get(data["url"].replace("room_id=42", "room_id=99"))
 
     assert resp.status_code == 404
+
+
+def test_video_answer_replay_rejects_forged_query_identity(client: TestClient) -> None:
+    headers = {"X-Mock-User": "sales"}
+    session_id = _start_bound_session(client)
+    upload_resp = client.post(
+        f"/api/v1/training-studio/video-answers?training_session_id={session_id}&room_id=42",
+        content=b"webm-bytes",
+        headers={**headers, "content-type": "video/webm"},
+    )
+    url = upload_resp.json()["data"]["url"]
+
+    resp = client.get(
+        f"{url}&auth_user_id=user-sales-001&auth_role=admin&auth_team_id=team-revenue",
+        headers={"X-Mock-User": "customer_service"},
+    )
+
+    assert resp.status_code == 403
+
+
+def test_video_answer_replay_uses_newapi_bearer_identity(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identities = {
+        "admin-token": NewAPIIdentity(
+            id=1,
+            username="admin",
+            display_name="Admin",
+            role=10,
+            team_id="team-ops",
+        ),
+        "owner-token": NewAPIIdentity(
+            id=7,
+            username="owner",
+            display_name="Owner",
+            role=1,
+            team_id="team-revenue",
+        ),
+        "other-token": NewAPIIdentity(
+            id=8,
+            username="other",
+            display_name="Other",
+            role=1,
+            team_id="team-service",
+        ),
+    }
+
+    async def fake_fetch_identity(
+        access_token: str,
+        *,
+        base_url: str,
+        timeout_seconds: float,
+    ) -> NewAPIIdentity:
+        return identities[access_token]
+
+    monkeypatch.setattr(dependency_module.settings, "NEWAPI_AUTH_ENABLED", True)
+    monkeypatch.setattr(dependency_module.settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", False)
+    monkeypatch.setattr(dependency_module, "fetch_newapi_identity", fake_fetch_identity)
+
+    admin_headers = {"Authorization": "Bearer admin-token"}
+    create_resp = client.post(
+        "/api/v1/training-studio/sessions",
+        json={
+            **_session_payload(),
+            "user_id": "newapi:7",
+            "team_id": "team-revenue",
+        },
+        headers=admin_headers,
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["data"]["session_id"]
+    start_resp = client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+        headers=admin_headers,
+    )
+    assert start_resp.status_code == 200
+
+    upload_resp = client.post(
+        f"/api/v1/training-studio/video-answers?training_session_id={session_id}&room_id=42",
+        content=b"bearer-protected-video",
+        headers={
+            "Authorization": "Bearer owner-token",
+            "content-type": "video/webm",
+        },
+    )
+    assert upload_resp.status_code == 201
+    replay_url = upload_resp.json()["data"]["url"]
+
+    owner_replay = client.get(
+        replay_url,
+        headers={"Authorization": "Bearer owner-token"},
+    )
+    forged_replay = client.get(
+        f"{replay_url}&auth_user_id=newapi%3A7&auth_role=admin&auth_team_id=team-revenue",
+        headers={"Authorization": "Bearer other-token"},
+    )
+
+    assert owner_replay.status_code == 200
+    assert owner_replay.content == b"bearer-protected-video"
+    assert forged_replay.status_code == 403
 
 
 def test_video_answer_replay_rejects_path_traversal(client: TestClient) -> None:

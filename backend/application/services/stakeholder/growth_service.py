@@ -1,5 +1,5 @@
 # input: AbstractUnitOfWork, LLMPort, PersonaLoader
-# output: GrowthService 能力评估 + Dashboard 聚合 + 成长洞察服务 + 沟通力画像生成
+# output: GrowthService 能力评估 + 身份范围内 Dashboard 聚合 + 成长洞察服务 + 沟通力画像生成
 # owner: wanhua.gu
 # pos: 应用层服务 - LLM-as-Judge 多维能力评估、Dashboard 数据聚合、跨 session 成长洞察；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Growth tracking service: competency evaluation, dashboard, and insights."""
@@ -18,8 +18,14 @@ from application.services.stakeholder.dto import (
     GrowthInsightDTO,
     GrowthOverviewDTO,
 )
+from application.services.stakeholder.room_access_policy import (
+    StakeholderRoomAccessScope,
+    require_stakeholder_room_access_scope,
+    stakeholder_room_matches_access_scope,
+)
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.competency_entity import COMPETENCY_DIMENSIONS, CompetencyEvaluation
+from domain.stakeholder.entity import ChatRoom
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +233,38 @@ class GrowthService:
     def has_llm(self) -> bool:
         return self._llm is not None
 
+    async def _load_scoped_growth_data(
+        self,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> tuple[list[ChatRoom], list[CompetencyEvaluation]]:
+        """Load only rooms and evaluations visible to the authenticated caller."""
+        scope = require_stakeholder_room_access_scope(
+            access_scope,
+            operation="read_growth_data",
+        )
+        async with self._uow_factory(readonly=True) as uow:
+            rooms = await uow.chat_room_repository.list_rooms(limit=500)
+            evaluations = await uow.competency_evaluation_repository.list_all(limit=500)
+
+        visible_rooms = [
+            room
+            for room in rooms
+            if stakeholder_room_matches_access_scope(
+                room,
+                scope,
+                self._persona_loader,
+                operation="read_growth_data",
+            )
+        ]
+        visible_room_ids = {room.id for room in visible_rooms if room.id is not None}
+        visible_evaluations = [
+            evaluation
+            for evaluation in evaluations
+            if evaluation.room_id in visible_room_ids
+        ]
+        return visible_rooms, visible_evaluations
+
     # ------------------------------------------------------------------
     # 1. Competency Evaluation (LLM-as-Judge)
     # ------------------------------------------------------------------
@@ -347,11 +385,13 @@ class GrowthService:
     # 2. Dashboard Aggregation
     # ------------------------------------------------------------------
 
-    async def get_dashboard(self) -> GrowthDashboardDTO:
-        """Aggregate all competency evaluations into dashboard data."""
-        async with self._uow_factory(readonly=True) as uow:
-            rooms = await uow.chat_room_repository.list_rooms(limit=200)
-            evaluations = await uow.competency_evaluation_repository.list_all(limit=500)
+    async def get_dashboard(
+        self,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> GrowthDashboardDTO:
+        """Aggregate competency evaluations visible to the caller."""
+        rooms, evaluations = await self._load_scoped_growth_data(access_scope=access_scope)
 
         room_map = {r.id: r.name for r in rooms}
 
@@ -414,11 +454,13 @@ class GrowthService:
     # 3. Growth Insight (cross-session LLM analysis)
     # ------------------------------------------------------------------
 
-    async def generate_insight(self) -> GrowthInsightDTO:
+    async def generate_insight(
+        self,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ) -> GrowthInsightDTO:
         """Generate LLM-powered cross-session growth insight."""
-        async with self._uow_factory(readonly=True) as uow:
-            evaluations = await uow.competency_evaluation_repository.list_all(limit=500)
-            rooms = await uow.chat_room_repository.list_rooms(limit=200)
+        rooms, evaluations = await self._load_scoped_growth_data(access_scope=access_scope)
 
         if len(evaluations) < 2:
             return GrowthInsightDTO(
@@ -476,12 +518,15 @@ class GrowthService:
     # 4. Profile Card Generation
     # ------------------------------------------------------------------
 
-    async def generate_profile_card(self):
+    async def generate_profile_card(
+        self,
+        *,
+        access_scope: StakeholderRoomAccessScope | None,
+    ):
         """Generate a profile card from historical competency data."""
         from application.services.stakeholder.dto import ProfileCardDTO, ProfileTag
 
-        async with self._uow_factory(readonly=True) as uow:
-            evaluations = await uow.competency_evaluation_repository.list_all(limit=500)
+        _, evaluations = await self._load_scoped_growth_data(access_scope=access_scope)
 
         if len(evaluations) < 2:
             return ProfileCardDTO(

@@ -32,7 +32,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies import (
     CurrentUser,
@@ -50,6 +50,7 @@ from api.dependencies import (
     training_scope_for,
 )
 from api.conversation_scope import owned_metadata_scope_for_current_user
+from application.dto import ForkConversationDTO, MessageDTO_Agent
 from application.ports.capabilities import build_text_runtime_capability_registry
 from application.ports.llm import (
     LLMEndpointMetadata,
@@ -99,6 +100,11 @@ from application.services.training_studio.live_guidance_service import (
     TranscriptSpeaker,
     TranscriptTurn,
 )
+from application.services.training_studio.guidance_persistence_service import (
+    append_selected_path_guidance,
+    guidance_persistence_failure,
+    read_selected_path_guidance_history,
+)
 from application.services.training_studio.realtime_pipeline import (
     FINAL_TRANSCRIPT_EVENT_TYPES,
     RealtimeTranscriptPersistenceSink,
@@ -133,6 +139,13 @@ from application.services.training_studio.material_review_service import (
     TrainingMaterialReviewService,
     normalize_material_review_ids,
 )
+from application.services.training_studio.message_tree_completion_service import (
+    MessageTreeCompletionConflict,
+    MessageTreeReportGenerationError,
+    MessageTreeTrainingCompletionService,
+    message_tree_analysis_room_id,
+    message_tree_completion_report_metadata,
+)
 from application.services.training_studio.training_material_tool_service import (
     TrainingMaterialToolConsumerService,
 )
@@ -145,12 +158,16 @@ from application.services.training_studio.training_core import (
 from application.services.file_asset_service import FileAssetApplicationService
 from core.config import LLMSettings, VoiceSettings, settings
 from core.response import success_response
-from domain.common.exceptions import BusinessException, DomainValidationException, FileAssetNotFoundException
+from domain.common.exceptions import (
+    BusinessException,
+    DomainValidationException,
+    FileAssetNotFoundException,
+)
 from domain.conversation.repository import OwnedMetadataScope
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
 from domain.training_studio.catalog import ScenarioCategory
-from domain.training_studio.session import TrainingSessionStatus
+from domain.training_studio.session import TrainingSessionMode, TrainingSessionStatus
 from domain.training_studio.session_repository import (
     TrainingSessionAccessScope,
     training_session_matches_access_scope,
@@ -352,6 +369,7 @@ _VIDEO_EXTENSIONS = {
     "video/x-matroska": ".mkv",
 }
 _TRAINING_GUIDANCE_MESSAGE_SOURCE = "training_live_guidance"
+_TRAINING_GUIDANCE_SELECTED_PATH_LIMIT = 200
 _REALTIME_CONTEXT_RECENT_TURN_LIMIT = 8
 _TRAINING_GUIDANCE_SENDER_ID = "training_coach"
 _REALTIME_LIFECYCLE_CONTRACT_EVENTS = (
@@ -724,7 +742,10 @@ def _voice_config_response() -> VoicePreferenceConfigDTO:
     )
     if explicit_realtime_key or selected_realtime_key:
         realtime_key_source = "realtime"
-    elif selected_realtime_provider in {"openai", "openai.realtime", "openai_realtime"} and settings.llm.api_key:
+    elif (
+        selected_realtime_provider in {"openai", "openai.realtime", "openai_realtime"}
+        and settings.llm.api_key
+    ):
         realtime_key_source = "llm"
     else:
         realtime_key_source = "missing"
@@ -1147,6 +1168,7 @@ class CompleteTrainingSessionDTO(BaseModel):
     score_id: int | str | None = None
     generate_report: bool = True
     report_generation: str = Field(default="sync", pattern=r"^(sync|background)$")
+    selected_tail_message_id: str | None = Field(default=None, min_length=1, max_length=160)
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
@@ -1162,10 +1184,13 @@ class TrainingGuidanceTurnDTO(BaseModel):
 
 
 class TrainingGuidanceRequestDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     task_goal: str | None = None
     rubric: dict[str, object] = Field(default_factory=dict)
     recent_turns: list[TrainingGuidanceTurnDTO] = Field(default_factory=list)
     message_limit: int = Field(default=50, ge=1, le=200)
+    selected_tail_message_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class TrainingGuidanceEventDTO(BaseModel):
@@ -1192,9 +1217,7 @@ class ClientRealtimeEventDTO(BaseModel):
     event_type: str = Field(..., alias="eventType", min_length=1, max_length=120)
     event_category: str | None = Field(default=None, alias="eventCategory", max_length=80)
     severity: str = Field(default="info", min_length=1, max_length=20)
-    training_session_id: str | None = Field(
-        default=None, alias="trainingSessionId", max_length=120
-    )
+    training_session_id: str | None = Field(default=None, alias="trainingSessionId", max_length=120)
     room_id: int | str | None = Field(default=None, alias="roomId")
     provider: str | None = Field(default="pipecat", max_length=80)
     realtime_profile: str | None = Field(default=None, alias="realtimeProfile", max_length=80)
@@ -1230,6 +1253,15 @@ def _conversation_ref_to_dict(conversation: ConversationRef) -> dict[str, object
         "branchTailMessageId": conversation.branch_tail_message_id,
         "legacyRoomId": conversation.legacy_room_id,
         "metadata": dict(conversation.metadata),
+    }
+
+
+def _forked_training_conversation_to_dict(session, forked) -> dict[str, object]:
+    return {
+        "training_session": _session_to_dict(session),
+        "conversation": forked.conversation.model_dump(mode="json"),
+        "messages": [message.model_dump(mode="json") for message in forked.messages],
+        "source_to_forked_id": dict(forked.source_to_forked_id),
     }
 
 
@@ -1379,6 +1411,89 @@ def _training_session_access_scope_for_current_user(
         team_id=current_user.team_id,
         include_team_scope=current_user.is_admin or current_user.is_leader,
     )
+
+
+def _message_tree_conversation_id_for_session(session) -> int:
+    room_id = str(getattr(session, "room_id", None) or "").strip()
+    prefix = f"{ConversationTrainingConversationAdapter.provider}:"
+    if not room_id.startswith(prefix):
+        raise HTTPException(
+            status_code=409,
+            detail="Training session is not bound to the message-tree conversation runtime",
+        )
+    try:
+        return int(room_id.removeprefix(prefix))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Training session has an invalid message-tree conversation binding",
+        ) from exc
+
+
+def _guidance_runtime_contract(session) -> tuple[str, dict[str, bool]]:
+    room_id = str(getattr(session, "room_id", None) or "").strip()
+    if room_id.startswith(f"{ConversationTrainingConversationAdapter.provider}:"):
+        return (
+            "message_tree",
+            {
+                "refresh": True,
+                "stream": False,
+                "persistence": True,
+                "history": True,
+                "server_selected_path": True,
+            },
+        )
+    if room_id:
+        try:
+            int(room_id)
+        except ValueError:
+            return (
+                "unknown",
+                {
+                    "refresh": True,
+                    "stream": False,
+                    "persistence": False,
+                    "history": False,
+                    "server_selected_path": False,
+                },
+            )
+        return (
+            "legacy_room",
+            {
+                "refresh": True,
+                "stream": True,
+                "persistence": True,
+                "history": False,
+                "server_selected_path": False,
+            },
+        )
+    return (
+        "request",
+        {
+            "refresh": True,
+            "stream": False,
+            "persistence": False,
+            "history": False,
+            "server_selected_path": False,
+        },
+    )
+
+
+def _training_fork_metadata(
+    metadata: Mapping[str, object] | None,
+    *,
+    source_session_id: str,
+    forked_session_id: str,
+) -> dict[str, object]:
+    source = dict(metadata or {})
+    clean = {key: source[key] for key in ("fork_reason", "message_tree_status") if key in source}
+    clean.update(
+        {
+            "trainingSessionId": forked_session_id,
+            "forkedFromTrainingSessionId": source_session_id,
+        }
+    )
+    return clean
 
 
 def _stakeholder_room_scope_for_current_user(
@@ -1839,6 +1954,11 @@ async def _require_guidance_persistence_room_id(
         raise HTTPException(
             status_code=400, detail="Training session must be started before saving guidance"
         )
+    if str(session.room_id).startswith(f"{ConversationTrainingConversationAdapter.provider}:"):
+        raise HTTPException(
+            status_code=409,
+            detail="Guidance persistence is not supported for message-tree training sessions",
+        )
     try:
         return int(session.room_id)
     except ValueError as exc:
@@ -1865,6 +1985,11 @@ async def _require_active_guidance_room_id(
         raise HTTPException(
             status_code=400, detail="Training session must be started before requesting guidance"
         )
+    if str(session.room_id).startswith(f"{ConversationTrainingConversationAdapter.provider}:"):
+        raise HTTPException(
+            status_code=409,
+            detail="Guidance streaming is not supported for message-tree training sessions; use refresh guidance",
+        )
     try:
         return int(session.room_id)
     except ValueError as exc:
@@ -1873,12 +1998,86 @@ async def _require_active_guidance_room_id(
         ) from exc
 
 
+def _conversation_message_to_guidance_turn(message: MessageDTO_Agent) -> TranscriptTurn:
+    role = str(message.role or "").strip().lower()
+    speaker = {
+        "user": TranscriptSpeaker.USER,
+        "assistant": TranscriptSpeaker.COUNTERPART,
+        "system": TranscriptSpeaker.SYSTEM,
+        "tool": TranscriptSpeaker.SYSTEM,
+    }.get(role, TranscriptSpeaker.COUNTERPART)
+    metadata: dict[str, object] = dict(message.metadata or {})
+    metadata.update(
+        {
+            "message_id": message.public_id or str(message.id),
+            "conversation_id": message.conversation_id,
+            "role": message.role,
+            "branch_id": message.branch_id,
+            "parent_message_id": message.parent_message_id,
+        }
+    )
+    return TranscriptTurn(
+        speaker=speaker,
+        text=message.content.strip(),
+        turn_id=message.public_id or str(message.id),
+        created_at=message.created_at,
+        metadata=metadata,
+    )
+
+
+async def _message_tree_guidance_turns(
+    session_id: str,
+    session,
+    body: TrainingGuidanceRequestDTO,
+    *,
+    conversation_svc: ConversationApplicationService,
+    current_user: CurrentUser,
+) -> tuple[list[TranscriptTurn], str]:
+    conversation_id = _message_tree_conversation_id_for_session(session)
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
+    conversation = await conversation_svc.get_conversation(
+        conversation_id,
+        metadata_scope=metadata_scope,
+    )
+    bound_session_id = str(
+        conversation.metadata.get("trainingSessionId")
+        or conversation.metadata.get("training_session_id")
+        or ""
+    ).strip()
+    if bound_session_id != session_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Conversation is not bound to the requested training session",
+        )
+    selected_tail_message_id = _coerce_optional_text(body.selected_tail_message_id)
+    if not selected_tail_message_id:
+        raise HTTPException(
+            status_code=409,
+            detail="selected_tail_message_id is required for message-tree guidance",
+        )
+    path = await conversation_svc.get_message_path(
+        conversation_id,
+        selected_tail_message_id,
+        limit=_TRAINING_GUIDANCE_SELECTED_PATH_LIMIT,
+        statuses=["active"],
+        metadata_scope=metadata_scope,
+    )
+    turns = [
+        _conversation_message_to_guidance_turn(message)
+        for message in path
+        if message.content.strip()
+        and (message.metadata or {}).get("source") != _TRAINING_GUIDANCE_MESSAGE_SOURCE
+    ]
+    return turns, selected_tail_message_id
+
+
 async def _generate_training_guidance(
     session_id: str,
     body: TrainingGuidanceRequestDTO,
     *,
     svc: TrainingSessionService,
     chatroom_svc: ChatRoomApplicationService,
+    conversation_svc: ConversationApplicationService,
     guidance_svc: TrainingLiveGuidanceService,
     current_user: CurrentUser,
 ) -> dict[str, object]:
@@ -1893,7 +2092,23 @@ async def _generate_training_guidance(
             status_code=400, detail="Training session must be active before requesting guidance"
         )
 
-    if body.recent_turns:
+    runtime, capabilities = _guidance_runtime_contract(session)
+    selected_tail_message_id: str | None = None
+    if runtime == "message_tree" and not body.selected_tail_message_id and not body.recent_turns:
+        raise HTTPException(
+            status_code=409,
+            detail="selected_tail_message_id is required for message-tree guidance",
+        )
+    if runtime == "message_tree" and body.selected_tail_message_id:
+        recent_turns, selected_tail_message_id = await _message_tree_guidance_turns(
+            session_id,
+            session,
+            body,
+            conversation_svc=conversation_svc,
+            current_user=current_user,
+        )
+        source = "message_tree"
+    elif body.recent_turns:
         recent_turns = [
             _request_turn_to_guidance_turn(turn) for turn in body.recent_turns if turn.text.strip()
         ]
@@ -1917,10 +2132,19 @@ async def _generate_training_guidance(
         ]
         source = "room"
 
+    # A selected message-tree path is the source of truth for text training.
+    # Ignore client-supplied task/rubric overrides here so a caller cannot
+    # manufacture a different coaching context for the persisted snapshot.
+    task_goal = _task_goal_for_guidance(session)
+    rubric = _rubric_for_guidance(session)
+    if runtime != "message_tree":
+        task_goal = body.task_goal or task_goal
+        rubric = body.rubric or rubric
+
     state = guidance_svc.build_state(
         training_session_id=session_id,
-        task_goal=body.task_goal or _task_goal_for_guidance(session),
-        rubric=body.rubric or _rubric_for_guidance(session),
+        task_goal=task_goal,
+        rubric=rubric,
         recent_turns=recent_turns,
     )
     events = await guidance_svc.generate_guidance_async(
@@ -1936,7 +2160,77 @@ async def _generate_training_guidance(
         "source": source,
         "window_size": state.window_size,
         "total_turn_count": state.total_turn_count,
+        "context_runtime": runtime,
+        "context_selection": (
+            "selected_path"
+            if source == "message_tree"
+            else "client_recent_turns" if source == "request" else "room_messages"
+        ),
+        "selected_tail_message_id": selected_tail_message_id,
+        "capabilities": capabilities,
+        "persistence": {
+            "status": "not_requested",
+            "retryable": False,
+            "persisted": False,
+        },
     }
+
+
+async def _persist_generated_message_tree_guidance(
+    session_id: str,
+    data: dict[str, object],
+    *,
+    svc: TrainingSessionService,
+    current_user: CurrentUser,
+) -> dict[str, object]:
+    """Persist only guidance produced from a server-validated selected path."""
+
+    if data.get("context_runtime") != "message_tree" or data.get("source") != "message_tree":
+        return {
+            "status": "not_supported",
+            "retryable": False,
+            "persisted": False,
+        }
+    selected_tail_message_id = _coerce_optional_text(data.get("selected_tail_message_id"))
+    if not selected_tail_message_id:
+        return {
+            "status": "failed",
+            "retryable": False,
+            "persisted": False,
+            "code": "selected_path_missing",
+        }
+
+    session = await _require_accessible_training_session(
+        session_id,
+        svc=svc,
+        current_user=current_user,
+    )
+    patch, persistence = append_selected_path_guidance(
+        session.task_config.metadata,
+        session_id=session_id,
+        selected_tail_message_id=selected_tail_message_id,
+        events=data.get("events"),
+        source=str(data.get("source") or "message_tree"),
+        context_runtime=str(data.get("context_runtime") or "message_tree"),
+        context_selection=str(data.get("context_selection") or "selected_path"),
+        window_size=int(data.get("window_size") or 0),
+        total_turn_count=int(data.get("total_turn_count") or 0),
+    )
+    try:
+        await svc.record_session_metadata(
+            session_id,
+            metadata=patch,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist selected-path training guidance",
+            extra={"training_session_id": session_id},
+        )
+        return guidance_persistence_failure(
+            selected_tail_message_id=selected_tail_message_id,
+        )
+    return persistence
 
 
 def _format_sse(event: str, data: object) -> str:
@@ -2823,8 +3117,7 @@ def _uses_pipecat_realtime(provider: str) -> bool:
 
 def _uses_volcengine_doubao_realtime(provider: str) -> bool:
     return (
-        _normalized_realtime_llm_provider(provider)
-        in _VOLCENGINE_DOUBAO_REALTIME_PROVIDER_ALIASES
+        _normalized_realtime_llm_provider(provider) in _VOLCENGINE_DOUBAO_REALTIME_PROVIDER_ALIASES
     )
 
 
@@ -3302,18 +3595,13 @@ def _write_video_answer_record(
 def _build_video_answer_url(
     filename: str,
     *,
-    current_user: CurrentUser,
     training_session_id: str,
     room_id: int,
 ) -> str:
     params: dict[str, str] = {
         "training_session_id": training_session_id,
         "room_id": str(room_id),
-        "auth_user_id": current_user.user_id,
-        "auth_role": current_user.system_role,
     }
-    if current_user.team_id:
-        params["auth_team_id"] = current_user.team_id
     return f"/api/v1/training-studio/video-answers/{filename}?{urlencode(params)}"
 
 
@@ -3501,6 +3789,16 @@ async def list_training_sessions(
     user_id: str | None = Query(default=None),
     team_id: str | None = Query(default=None),
     scenario_template_id: str | None = Query(default=None),
+    query: str | None = Query(default=None, max_length=200),
+    activity_from: datetime | None = Query(default=None),
+    activity_to: datetime | None = Query(default=None),
+    mode: TrainingSessionMode | None = Query(default=None),
+    source: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    ),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_team_id: str | None = Header(default=None, alias="X-Team-Id"),
     svc: TrainingSessionService = Depends(get_training_session_service),
@@ -3511,14 +3809,22 @@ async def list_training_sessions(
         requested_user_id=user_id or x_user_id,
         requested_team_id=team_id or x_team_id,
     )
-    sessions, total = await svc.list_sessions_page(
-        skip=skip,
-        limit=limit,
-        user_id=scope.user_id,
-        team_id=scope.team_id,
-        scenario_template_id=scenario_template_id,
-        access_scope=_training_session_access_scope_for_current_user(current_user),
-    )
+    try:
+        sessions, total = await svc.list_sessions_page(
+            skip=skip,
+            limit=limit,
+            user_id=scope.user_id,
+            team_id=scope.team_id,
+            scenario_template_id=scenario_template_id,
+            query=query,
+            activity_from=activity_from,
+            activity_to=activity_to,
+            mode=mode,
+            source=source,
+            access_scope=_training_session_access_scope_for_current_user(current_user),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     response.headers["X-Total-Count"] = str(total)
     return success_response(data=[_session_to_dict(session) for session in sessions])
 
@@ -3619,6 +3925,105 @@ async def get_training_session(
     return success_response(data=_session_to_dict(session))
 
 
+@router.post(
+    "/sessions/{session_id}/conversation/messages/{message_public_id}/fork",
+    summary="Fork a message-tree training session",
+)
+async def fork_training_conversation(
+    session_id: str,
+    message_public_id: str,
+    body: ForkConversationDTO,
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    session_scope = _training_session_access_scope_for_current_user(current_user)
+    source_session = await _require_accessible_training_session(
+        session_id,
+        svc=svc,
+        current_user=current_user,
+    )
+    conversation_id = _message_tree_conversation_id_for_session(source_session)
+    conversation_scope = owned_metadata_scope_for_current_user(current_user)
+    source_conversation = await conversation_svc.get_conversation(
+        conversation_id,
+        metadata_scope=conversation_scope,
+    )
+    source_training_session_id = str(
+        source_conversation.metadata.get("trainingSessionId")
+        or source_conversation.metadata.get("training_session_id")
+        or ""
+    ).strip()
+    if source_training_session_id != session_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Conversation is not bound to the requested training session",
+        )
+
+    try:
+        forked_session = await svc.fork_session(
+            session_id,
+            access_scope=session_scope,
+        )
+    except PermissionError as exc:
+        raise _session_access_denied(exc) from exc
+    except ValueError as exc:
+        raise _not_found_if_missing(exc) from exc
+
+    fork_body = body.model_copy(
+        update={
+            "metadata": _training_fork_metadata(
+                body.metadata,
+                source_session_id=session_id,
+                forked_session_id=forked_session.session_id,
+            )
+        }
+    )
+    try:
+        forked = await conversation_svc.fork_conversation(
+            conversation_id,
+            message_public_id,
+            fork_body,
+            metadata_scope=conversation_scope,
+        )
+    except Exception:
+        with suppress(Exception):
+            await svc.delete_session(
+                forked_session.session_id,
+                access_scope=session_scope,
+            )
+        raise
+
+    forked_room_id = f"{ConversationTrainingConversationAdapter.provider}:{forked.conversation.id}"
+    try:
+        started_session = await svc.start_session(
+            forked_session.session_id,
+            room_id=forked_room_id,
+            metadata=forked.conversation.metadata,
+            access_scope=session_scope,
+        )
+        if forked.messages:
+            started_session = await svc.record_turns(
+                forked_session.session_id,
+                count=len(forked.messages),
+                access_scope=session_scope,
+            )
+    except Exception:
+        with suppress(Exception):
+            await conversation_svc.delete_conversation(
+                forked.conversation.id,
+                metadata_scope=conversation_scope,
+            )
+        with suppress(Exception):
+            await svc.delete_session(
+                forked_session.session_id,
+                access_scope=session_scope,
+            )
+        raise
+
+    return success_response(data=_forked_training_conversation_to_dict(started_session, forked))
+
+
 @router.delete("/sessions/{session_id}", summary="Delete a Training Studio session")
 async def delete_training_session(
     session_id: str,
@@ -3628,9 +4033,7 @@ async def delete_training_session(
     try:
         await svc.delete_session(
             session_id,
-            access_scope=_training_session_access_scope_for_current_user(
-                current_user
-            ),
+            access_scope=_training_session_access_scope_for_current_user(current_user),
         )
     except PermissionError as exc:
         raise _session_access_denied(exc) from exc
@@ -3760,6 +4163,8 @@ async def complete_training_session(
     analysis_svc: AnalysisService = Depends(get_analysis_service),
     reader_svc: AnalysisReaderService = Depends(get_analysis_reader_service),
     growth_svc=Depends(get_growth_service),
+    conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
+    uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_runtime_uow_factory),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     session = await _require_accessible_training_session(
@@ -3769,6 +4174,84 @@ async def complete_training_session(
     )
     session_access_scope = _training_session_access_scope_for_current_user(current_user)
     completion_metadata: dict[str, object] = dict(body.metadata or {})
+
+    if str(session.room_id or "").startswith(
+        f"{ConversationTrainingConversationAdapter.provider}:"
+    ):
+        if not body.selected_tail_message_id:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "message_tree_selected_tail_required",
+                    "status": "blocked",
+                    "phase": "validate_selected_path",
+                    "message": "selected_tail_message_id is required for message-tree completion",
+                    "retryable": True,
+                },
+            )
+        if body.report_id is not None or body.score_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="Message-tree completion does not accept client report_id or score_id",
+            )
+        if not body.generate_report:
+            raise HTTPException(
+                status_code=422,
+                detail="Message-tree completion requires server-generated evaluation and report",
+            )
+        if body.report_generation != "sync":
+            raise HTTPException(
+                status_code=422,
+                detail="Message-tree completion currently supports synchronous report generation only",
+            )
+        if body.metadata:
+            raise HTTPException(
+                status_code=422,
+                detail="Message-tree completion metadata is derived from the server-selected path",
+            )
+        completion_svc = MessageTreeTrainingCompletionService(
+            uow_factory=uow_factory,
+            session_service=svc,
+            conversation_service=conversation_svc,
+            analysis_service=analysis_svc,
+            growth_service=growth_svc,
+        )
+        try:
+            outcome = await completion_svc.complete(
+                session_id,
+                selected_tail_message_id=body.selected_tail_message_id,
+                session_access_scope=session_access_scope,
+                conversation_metadata_scope=owned_metadata_scope_for_current_user(current_user),
+            )
+        except PermissionError as exc:
+            raise _session_access_denied(exc) from exc
+        except MessageTreeCompletionConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "message_tree_completion_conflict",
+                    "status": "blocked",
+                    "phase": "validate_selected_path",
+                    "message": str(exc),
+                    "retryable": True,
+                },
+            ) from exc
+        except MessageTreeReportGenerationError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "message_tree_report_generation_failed",
+                    "status": "failed",
+                    "completionReport": exc.metadata,
+                },
+            ) from exc
+        return success_response(data=_session_to_dict(outcome.session))
+
+    if body.selected_tail_message_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="selected_tail_message_id is only available for message-tree sessions",
+        )
 
     report_id = str(body.report_id).strip() if body.report_id is not None else ""
     report_generation = body.report_generation.strip().lower()
@@ -3902,25 +4385,49 @@ async def get_training_session_report(
     )
 
     if not session.report_id:
+        completion_report = message_tree_completion_report_metadata(session)
+        if completion_report:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "training_session_report_not_ready",
+                    "status": completion_report.get("status", "pending"),
+                    "completionReport": completion_report,
+                },
+            )
         raise HTTPException(status_code=404, detail="Training session report not found")
 
     try:
         report_lookup_id = int(session.report_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Training session report not found") from exc
-    try:
-        room_lookup_id = _stakeholder_room_id_for_training_session(session)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Training session report not found") from exc
-    report = await reader_svc.get_report(
-        report_lookup_id,
-        room_id=room_lookup_id,
-        access_scope=_legacy_room_scope_for_accessible_training_session(
+    room_lookup_id = message_tree_analysis_room_id(session)
+    if room_lookup_id is not None:
+        completion_report = message_tree_completion_report_metadata(session)
+        if str(completion_report.get("reportId") or "") != str(session.report_id):
+            raise HTTPException(status_code=404, detail="Training session report not found")
+        report_scope = legacy_training_session_room_scope(
+            training_session_id=session.session_id,
+            room_id=room_lookup_id,
+            operation="message_tree_session_report",
+        )
+    else:
+        try:
+            room_lookup_id = _stakeholder_room_id_for_training_session(session)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404, detail="Training session report not found"
+            ) from exc
+        report_scope = _legacy_room_scope_for_accessible_training_session(
             session,
             current_user,
             room_id=room_lookup_id,
             operation="session_report",
-        ),
+        )
+    report = await reader_svc.get_report(
+        report_lookup_id,
+        room_id=room_lookup_id,
+        access_scope=report_scope,
     )
     if report is None or str(report.room_id) != str(room_lookup_id):
         raise HTTPException(status_code=404, detail="Training session report not found")
@@ -4004,17 +4511,23 @@ async def record_training_client_event(
 async def get_training_guidance(
     session_id: str,
     message_limit: int = Query(50, ge=1, le=200),
+    selected_tail_message_id: str | None = Query(default=None, min_length=1, max_length=160),
     _rate_limit: None = Depends(enforce_ai_rate_limit),
     svc: TrainingSessionService = Depends(get_training_session_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
     guidance_svc: TrainingLiveGuidanceService = Depends(get_live_guidance_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     data = await _generate_training_guidance(
         session_id,
-        TrainingGuidanceRequestDTO(message_limit=message_limit),
+        TrainingGuidanceRequestDTO(
+            message_limit=message_limit,
+            selected_tail_message_id=selected_tail_message_id,
+        ),
         svc=svc,
         chatroom_svc=chatroom_svc,
+        conversation_svc=conversation_svc,
         guidance_svc=guidance_svc,
         current_user=current_user,
     )
@@ -4028,6 +4541,7 @@ async def request_training_guidance(
     _rate_limit: None = Depends(enforce_ai_rate_limit),
     svc: TrainingSessionService = Depends(get_training_session_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
     guidance_svc: TrainingLiveGuidanceService = Depends(get_live_guidance_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -4036,10 +4550,50 @@ async def request_training_guidance(
         body,
         svc=svc,
         chatroom_svc=chatroom_svc,
+        conversation_svc=conversation_svc,
         guidance_svc=guidance_svc,
         current_user=current_user,
     )
+    data["persistence"] = await _persist_generated_message_tree_guidance(
+        session_id,
+        data,
+        svc=svc,
+        current_user=current_user,
+    )
     return success_response(data=data)
+
+
+@router.get(
+    "/sessions/{session_id}/guidance-history",
+    summary="Get persisted selected-path Training Studio guidance",
+)
+async def get_training_guidance_history(
+    session_id: str,
+    selected_tail_message_id: str = Query(..., min_length=1, max_length=160),
+    svc: TrainingSessionService = Depends(get_training_session_service),
+    conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    session = await _require_accessible_training_session(
+        session_id,
+        svc=svc,
+        current_user=current_user,
+    )
+    await _message_tree_guidance_turns(
+        session_id,
+        session,
+        TrainingGuidanceRequestDTO(
+            selected_tail_message_id=selected_tail_message_id,
+        ),
+        conversation_svc=conversation_svc,
+        current_user=current_user,
+    )
+    return success_response(
+        data=read_selected_path_guidance_history(
+            session.task_config.metadata,
+            selected_tail_message_id=selected_tail_message_id,
+        )
+    )
 
 
 @router.post(
@@ -4113,6 +4667,7 @@ async def stream_training_guidance(
     _rate_limit: None = Depends(enforce_ai_rate_limit),
     svc: TrainingSessionService = Depends(get_training_session_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
+    conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
     guidance_svc: TrainingLiveGuidanceService = Depends(get_live_guidance_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -4123,6 +4678,7 @@ async def stream_training_guidance(
         body,
         svc=svc,
         chatroom_svc=chatroom_svc,
+        conversation_svc=conversation_svc,
         guidance_svc=guidance_svc,
         current_user=current_user,
     )
@@ -4157,6 +4713,7 @@ async def stream_training_guidance(
                         body,
                         svc=svc,
                         chatroom_svc=chatroom_svc,
+                        conversation_svc=conversation_svc,
                         guidance_svc=guidance_svc,
                         current_user=current_user,
                     )
@@ -4529,9 +5086,13 @@ async def save_voice_config(
         stt_base_url=stt_base_url,
         stt_model=stt_model,
     )
-    if not settings.voice.stt_api_key and _voice_stt_provider_can_use_shared_key(settings.voice.stt_provider):
+    if not settings.voice.stt_api_key and _voice_stt_provider_can_use_shared_key(
+        settings.voice.stt_provider
+    ):
         settings.voice.stt_api_key = settings.voice.tts_api_key or settings.llm.api_key
-    if not settings.voice.stt_base_url and _voice_stt_provider_can_use_shared_key(settings.voice.stt_provider):
+    if not settings.voice.stt_base_url and _voice_stt_provider_can_use_shared_key(
+        settings.voice.stt_provider
+    ):
         settings.voice.stt_base_url = settings.llm.base_url
     settings.REALTIME_PROVIDER = realtime_provider
     settings.REALTIME_BASE_URL = realtime_base_url
@@ -4578,6 +5139,7 @@ async def save_scenario_config(
 async def get_default_rubric(
     category: str = Query(ScenarioCategory.INTERVIEW.value),
     svc: TrainingCatalogService = Depends(get_training_catalog_service),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
 ):
     try:
         rubric = svc.get_default_rubric_weights(category)
@@ -4696,7 +5258,6 @@ async def upload_video_answer(
             "filename": filename,
             "url": _build_video_answer_url(
                 filename,
-                current_user=current_user,
                 training_session_id=training_session_id,
                 room_id=room_id,
             ),
@@ -4732,7 +5293,11 @@ async def read_video_answer(
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Video answer not found")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=media_type)
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.websocket("/realtime")
@@ -5028,7 +5593,9 @@ async def realtime_training_session(
                 await _send_event(websocket, session.listen())
             elif event_type == "response.cancel":
                 if pipeline_runner is not None:
-                    await pipeline_runner.cancel_response(_coerce_optional_text(payload.get("reason")))
+                    await pipeline_runner.cancel_response(
+                        _coerce_optional_text(payload.get("reason"))
+                    )
                     pipeline_runner.raise_if_failed()
                 await _send_event(websocket, session.listen())
             elif event_type == "session.close":

@@ -556,6 +556,10 @@ async def test_message_edit_retry_metadata_is_replay_only_not_scoring_state() ->
             metadata={
                 "score": 100,
                 "growth_report": {"id": "incoming-leak"},
+                "ownerUserId": "forged-user",
+                "user_id": "forged-user",
+                "teamId": "forged-team",
+                "authScope": {"userId": "forged-user", "teamId": "forged-team"},
                 "selectedPath": {
                     "branchId": "edited",
                     "messageIds": ["msg-user-1"],
@@ -573,6 +577,8 @@ async def test_message_edit_retry_metadata_is_replay_only_not_scoring_state() ->
             content="Retry answer",
             metadata={
                 "completed_at": "2026-07-20T02:00:00Z",
+                "owner_user_id": "forged-user",
+                "owner_team_id": "forged-team",
                 "currentBranchTail": {
                     "branchId": "retry",
                     "messageId": "msg-user-1",
@@ -593,6 +599,12 @@ async def test_message_edit_retry_metadata_is_replay_only_not_scoring_state() ->
         assert "completed_at" not in metadata
         assert "completedAt" not in metadata
         assert "growth_report" not in metadata
+        assert "ownerUserId" not in metadata
+        assert "owner_user_id" not in metadata
+        assert "user_id" not in metadata
+        assert "teamId" not in metadata
+        assert "owner_team_id" not in metadata
+        assert "authScope" not in metadata
         assert metadata["selectedPath"]["purpose"] == "training_replay_context"
         assert metadata["selectedPath"]["replayContextOnly"] is True
         assert metadata["selectedPath"]["affectsScoring"] is False

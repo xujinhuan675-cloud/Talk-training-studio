@@ -795,6 +795,7 @@ function Start-LocalNewApiGateway {
     param(
         [int]$Port,
         [string]$GatewayBaseUrl,
+        [string]$TrainingUpstreamUrl,
         [string]$RedirectUri,
         [string]$LogPath,
         [string]$ErrLogPath
@@ -823,6 +824,7 @@ function Start-LocalNewApiGateway {
         TALKWISE_CLIENT_SECRET = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" "talkwise-local-handoff-dev-secret"
         TALKWISE_REDIRECT_URIS = $redirectUris
         TALKWISE_GATEWAY_BASE_URL = $GatewayBaseUrl
+        TALKWISE_TRAINING_UPSTREAM_URL = $TrainingUpstreamUrl
         TZ = "Asia/Shanghai"
         NODE_NAME = "talkwise-newapi-local"
         SQL_DSN = ""
@@ -1102,6 +1104,7 @@ if (-not $SkipGateway) {
     Start-LocalNewApiGateway `
         -Port $resolvedGatewayPort `
         -GatewayBaseUrl $newApiGatewayUrl `
+        -TrainingUpstreamUrl $backendUrl `
         -RedirectUri $newApiRedirectUri `
         -LogPath $newApiLogPath `
         -ErrLogPath $newApiErrLogPath

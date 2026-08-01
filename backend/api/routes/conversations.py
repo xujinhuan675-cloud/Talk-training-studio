@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.conversation_scope import (
     conversation_create_payload_for_user,
@@ -56,6 +56,20 @@ def _conversation_mutation_scope(current_user: CurrentUser):
     return owned_metadata_scope_for_current_user(
         current_user,
     )
+
+
+def _reject_generic_fork_for_training_conversation(conversation: ConversationDTO) -> None:
+    metadata = dict(conversation.metadata or {})
+    training_session_id = str(
+        metadata.get("trainingSessionId") or metadata.get("training_session_id") or ""
+    ).strip()
+    if training_session_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Training conversations must be forked through the training session fork endpoint"
+            ),
+        )
 
 
 async def _get_accessible_conversation(
@@ -280,7 +294,12 @@ async def apply_message_action(
         if payload.action == "branch"
         else _conversation_mutation_scope(current_user)
     )
-    await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
+    conversation = await service.get_conversation(
+        conversation_id,
+        metadata_scope=metadata_scope,
+    )
+    if payload.action == "fork":
+        _reject_generic_fork_for_training_conversation(conversation)
     item = await service.apply_message_action(
         conversation_id,
         message_public_id,
@@ -381,6 +400,7 @@ async def fork_conversation(
 ):
     metadata_scope = _conversation_mutation_scope(current_user)
     source = await service.get_conversation(conversation_id, metadata_scope=metadata_scope)
+    _reject_generic_fork_for_training_conversation(source)
     payload = payload.model_copy(
         update={
             "metadata": conversation_metadata_for_current_user(

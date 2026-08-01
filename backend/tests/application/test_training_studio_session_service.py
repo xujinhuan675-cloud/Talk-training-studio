@@ -69,6 +69,72 @@ async def test_session_service_create_start_complete_with_room_creator():
     assert await service.list_sessions(access_scope=_scope()) == [completed]
 
 
+async def test_session_service_fork_resets_lifecycle_and_runtime_owned_metadata():
+    session_ids = iter(["session-source", "session-fork"])
+    service = TrainingSessionService(id_factory=lambda: next(session_ids))
+    source = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "renewal-objection",
+            "metadata": {
+                "persona_ids": ["persona-1"],
+                "evaluation": {"rubric_id": "sales-v1"},
+                "live_guidance": {"enabled": True},
+                "ownerUserId": "forged-owner",
+                "trainingSessionId": "stale-session",
+                "selectedPath": {"tailMessageId": "msg-old"},
+                "liveGuidanceHistory": [{"snapshotId": "guidance-old"}],
+                "liveGuidancePersistence": {"status": "ready"},
+            },
+        }
+    )
+    await service.start_session(
+        source.session_id,
+        room_id="talkwise-conversation:7",
+        metadata={"messageTreeSelection": {"selectedMessageId": "msg-old"}},
+        access_scope=_scope(),
+    )
+    await service.complete_session(
+        source.session_id,
+        report_id="report-1",
+        score_id="score-1",
+        metadata={
+            "completionReport": {"status": "ready"},
+            "score": 99,
+        },
+        access_scope=_scope(),
+    )
+
+    forked = await service.fork_session(source.session_id, access_scope=_scope())
+
+    assert forked.session_id == "session-fork"
+    assert forked.status == TrainingSessionStatus.CREATED
+    assert forked.room_id is None
+    assert forked.started_at is None
+    assert forked.completed_at is None
+    assert forked.report_id is None
+    assert forked.score_id is None
+    assert forked.message_count == 0
+    assert forked.user_id == "user-sales-001"
+    assert forked.team_id == "team-revenue"
+    assert forked.scenario_template_id == "renewal-objection"
+    assert forked.task_config.metadata["persona_ids"] == ["persona-1"]
+    assert forked.task_config.metadata["evaluation"] == {"rubric_id": "sales-v1"}
+    assert forked.task_config.metadata["live_guidance"] == {"enabled": True}
+    assert forked.task_config.metadata["forkedFromTrainingSessionId"] == "session-source"
+    for reset_key in (
+        "ownerUserId",
+        "trainingSessionId",
+        "selectedPath",
+        "messageTreeSelection",
+        "completionReport",
+        "score",
+        "liveGuidanceHistory",
+        "liveGuidancePersistence",
+    ):
+        assert reset_key not in forked.task_config.metadata
+
+
 async def test_session_service_tracks_scenario_progress():
     service = TrainingSessionService(id_factory=lambda: "session-1")
 
@@ -131,6 +197,31 @@ async def test_session_service_records_report_after_completion():
     }
 
 
+async def test_session_service_records_completion_attempt_without_changing_status():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(make_payload())
+    await service.start_session(
+        session.session_id, room_id="talkwise-conversation:7", access_scope=_scope()
+    )
+
+    updated = await service.record_session_metadata(
+        session.session_id,
+        metadata={
+            "completionReport": {
+                "status": "failed",
+                "runtime": "message_tree",
+                "retryable": True,
+            }
+        },
+        access_scope=_scope(),
+    )
+
+    assert updated.status == TrainingSessionStatus.ACTIVE
+    assert updated.report_id is None
+    assert updated.completed_at is None
+    assert updated.task_config.metadata["completionReport"]["status"] == "failed"
+
+
 async def test_session_service_scenario_progress_handles_mixed_timezone_datetimes():
     session_ids = iter(["scenario-a-old", "scenario-a-new", "scenario-b"])
     service = TrainingSessionService(id_factory=lambda: next(session_ids))
@@ -170,15 +261,9 @@ async def test_session_service_paginates_scenario_progress_after_latest_aggregat
     session_ids = iter(["scenario-a-old", "scenario-b", "scenario-a-new"])
     service = TrainingSessionService(id_factory=lambda: next(session_ids))
 
-    old = await service.create_session(
-        {**make_payload(), "scenario_template_id": "scenario-a"}
-    )
-    other = await service.create_session(
-        {**make_payload(), "scenario_template_id": "scenario-b"}
-    )
-    latest = await service.create_session(
-        {**make_payload(), "scenario_template_id": "scenario-a"}
-    )
+    old = await service.create_session({**make_payload(), "scenario_template_id": "scenario-a"})
+    other = await service.create_session({**make_payload(), "scenario_template_id": "scenario-b"})
+    latest = await service.create_session({**make_payload(), "scenario_template_id": "scenario-a"})
     old.status = TrainingSessionStatus.COMPLETED
     other.status = TrainingSessionStatus.COMPLETED
     latest.status = TrainingSessionStatus.COMPLETED
@@ -322,7 +407,9 @@ async def test_session_service_applies_access_scope_to_get_list_and_mutations():
     with pytest.raises(PermissionError, match="outside current user scope"):
         await service.get_session(service_session.session_id, access_scope=staff_scope)
     with pytest.raises(PermissionError, match="outside current user scope"):
-        await service.start_session(service_session.session_id, room_id="42", access_scope=staff_scope)
+        await service.start_session(
+            service_session.session_id, room_id="42", access_scope=staff_scope
+        )
 
     staff_sessions = await service.list_sessions(access_scope=staff_scope)
     leader_sessions = await service.list_sessions(access_scope=leader_scope)
@@ -332,6 +419,103 @@ async def test_session_service_applies_access_scope_to_get_list_and_mutations():
         sales.session_id,
         peer.session_id,
     ]
+
+
+async def test_session_history_filters_before_pagination_and_keep_acl_scope():
+    session_ids = iter(
+        [
+            "session-match-1",
+            "session-match-2",
+            "session-old",
+            "session-foreign",
+            "session-secret-only",
+        ]
+    )
+    repository = InMemoryTrainingSessionRepository()
+    service = TrainingSessionService(
+        repository=repository,
+        id_factory=lambda: next(session_ids),
+    )
+    activity_times = [
+        datetime(2026, 7, 20, 9, tzinfo=UTC),
+        datetime(2026, 7, 21, 9, tzinfo=UTC),
+        datetime(2026, 6, 1, 9, tzinfo=UTC),
+        datetime(2026, 7, 22, 9, tzinfo=UTC),
+    ]
+    owners = [
+        ("user-sales-001", "team-revenue"),
+        ("user-sales-001", "team-revenue"),
+        ("user-sales-001", "team-revenue"),
+        ("user-other", "team-other"),
+    ]
+    for activity_at, (user_id, team_id) in zip(activity_times, owners, strict=True):
+        session = await service.create_session(
+            {
+                **make_payload(),
+                "mode": "voice",
+                "user_id": user_id,
+                "team_id": team_id,
+                "metadata": {
+                    "source": "scenario_training",
+                    "scenario_training": {
+                        "title": "Enterprise renewal objection",
+                        "description": "Practice a risk-sensitive renewal conversation",
+                    },
+                },
+            }
+        )
+        session.started_at = activity_at
+        await repository.save(session)
+    secret_only = await service.create_session(
+        {
+            **make_payload(),
+            "mode": "voice",
+            "metadata": {
+                "source": "scenario_training",
+                "title": "Escalation practice",
+                "api_key_hint": "renewal-must-not-be-searchable",
+            },
+        }
+    )
+    secret_only.started_at = datetime(2026, 7, 23, 9, tzinfo=UTC)
+    await repository.save(secret_only)
+
+    sessions, total = await service.list_sessions_page(
+        skip=1,
+        limit=1,
+        query="renewal",
+        activity_from=datetime(2026, 7, 1, tzinfo=UTC),
+        activity_to=datetime(2026, 7, 31, 23, 59, tzinfo=UTC),
+        mode="voice",
+        source="scenario_training",
+        access_scope=_scope(),
+    )
+
+    assert [session.session_id for session in sessions] == ["session-match-1"]
+    assert total == 2
+
+
+@pytest.mark.parametrize(
+    ("filters", "message"),
+    [
+        ({"query": "x" * 201}, "query cannot exceed"),
+        ({"mode": "immersive"}, "Invalid mode"),
+        ({"source": "not a source"}, "source must be"),
+        ({"activity_from": datetime(2026, 7, 1)}, "timezone offset"),
+        (
+            {
+                "activity_from": datetime(2026, 7, 2, tzinfo=UTC),
+                "activity_to": datetime(2026, 7, 1, tzinfo=UTC),
+            },
+            "cannot be after",
+        ),
+    ],
+)
+async def test_session_history_filter_validation(filters, message):
+    service = TrainingSessionService()
+
+    with pytest.raises(ValueError, match=message):
+        await service.list_sessions_page(access_scope=_scope(), **filters)
 
 
 async def test_session_service_progress_preserves_failed_status_and_reason():
@@ -459,9 +643,7 @@ async def test_session_service_complete_merges_branch_metadata_into_task_config(
     completion_metadata["messageTreeSelection"]["path"][0]["publicId"] = "mutated"
 
     assert completed.task_config.metadata["source"] == "scenario_training"
-    assert completed.task_config.metadata["scenario_training"] == {
-        "id": "new-customer-discount"
-    }
+    assert completed.task_config.metadata["scenario_training"] == {"id": "new-customer-discount"}
     assert completed.task_config.metadata["messageTreeSelection"]["selectedMessageId"] == (
         "msg-tail"
     )
@@ -506,29 +688,35 @@ class FailingEvaluationRepository:
 async def test_session_service_progress_uses_competency_evaluation_scores():
     session_ids = iter(["session-1", "session-2"])
     repository = InMemoryTrainingSessionRepository()
-    evaluations = FakeEvaluationRepository({
-        501: SimpleNamespace(id=12, overall_score=4.25),
-    })
+    evaluations = FakeEvaluationRepository(
+        {
+            501: SimpleNamespace(id=12, overall_score=4.25),
+        }
+    )
     service = TrainingSessionService(
         uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
         id_factory=lambda: next(session_ids),
     )
 
-    first = await service.create_session({
-        **make_payload(),
-        "scenario_template_id": "new-customer-discount",
-        "user_id": "user-sales-001",
-        "team_id": "team-revenue",
-    })
+    first = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+            "user_id": "user-sales-001",
+            "team_id": "team-revenue",
+        }
+    )
     await service.start_session(first.session_id, room_id="42", access_scope=_scope())
     await service.complete_session(first.session_id, report_id="501", access_scope=_scope())
 
-    second = await service.create_session({
-        **make_payload(),
-        "scenario_template_id": "new-customer-discount",
-        "user_id": "admin",
-        "team_id": "team-ops",
-    })
+    second = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+            "user_id": "admin",
+            "team_id": "team-ops",
+        }
+    )
     admin_scope = _scope(user_id="admin", team_id="team-ops")
     await service.start_session(second.session_id, room_id="43", access_scope=admin_scope)
     await service.complete_session(second.session_id, report_id="502", access_scope=admin_scope)
@@ -549,21 +737,23 @@ async def test_session_service_progress_uses_competency_evaluation_scores():
 async def test_session_service_builds_scoped_competency_radar_from_real_scores():
     session_ids = iter(["session-1", "session-2", "session-foreign"])
     repository = InMemoryTrainingSessionRepository()
-    evaluations = FakeEvaluationRepository({
-        501: SimpleNamespace(
-            scores={
-                "persuasion": {"score": 4},
-                "active_listening": 3,
-            }
-        ),
-        502: SimpleNamespace(
-            scores={
-                "persuasion": 5,
-                "emotional_management": {"score": 4},
-            }
-        ),
-        503: SimpleNamespace(scores={"persuasion": 1}),
-    })
+    evaluations = FakeEvaluationRepository(
+        {
+            501: SimpleNamespace(
+                scores={
+                    "persuasion": {"score": 4},
+                    "active_listening": 3,
+                }
+            ),
+            502: SimpleNamespace(
+                scores={
+                    "persuasion": 5,
+                    "emotional_management": {"score": 4},
+                }
+            ),
+            503: SimpleNamespace(scores={"persuasion": 1}),
+        }
+    )
     service = TrainingSessionService(
         uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
         id_factory=lambda: next(session_ids),
@@ -579,11 +769,13 @@ async def test_session_service_builds_scoped_competency_radar_from_real_scores()
         )
 
     foreign_scope = _scope(user_id="user-other", team_id="team-other")
-    foreign = await service.create_session({
-        **make_payload(),
-        "user_id": "user-other",
-        "team_id": "team-other",
-    })
+    foreign = await service.create_session(
+        {
+            **make_payload(),
+            "user_id": "user-other",
+            "team_id": "team-other",
+        }
+    )
     await service.start_session(
         foreign.session_id,
         room_id="43",
@@ -616,12 +808,14 @@ async def test_session_service_progress_degrades_when_evaluation_lookup_fails():
         id_factory=lambda: "session-1",
     )
 
-    session = await service.create_session({
-        **make_payload(),
-        "scenario_template_id": "new-customer-discount",
-        "user_id": "user-sales-001",
-        "team_id": "team-revenue",
-    })
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+            "user_id": "user-sales-001",
+            "team_id": "team-revenue",
+        }
+    )
     await service.start_session(session.session_id, room_id="42", access_scope=_scope())
     await service.complete_session(session.session_id, report_id="501", access_scope=_scope())
 
@@ -641,20 +835,24 @@ async def test_session_service_progress_degrades_when_evaluation_lookup_fails():
 
 async def test_session_service_progress_degrades_when_evaluation_score_is_invalid():
     repository = InMemoryTrainingSessionRepository()
-    evaluations = FakeEvaluationRepository({
-        501: SimpleNamespace(id=12, overall_score="not-a-number"),
-    })
+    evaluations = FakeEvaluationRepository(
+        {
+            501: SimpleNamespace(id=12, overall_score="not-a-number"),
+        }
+    )
     service = TrainingSessionService(
         uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
         id_factory=lambda: "session-1",
     )
 
-    session = await service.create_session({
-        **make_payload(),
-        "scenario_template_id": "new-customer-discount",
-        "user_id": "user-sales-001",
-        "team_id": "team-revenue",
-    })
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+            "user_id": "user-sales-001",
+            "team_id": "team-revenue",
+        }
+    )
     await service.start_session(session.session_id, room_id="42", access_scope=_scope())
     await service.complete_session(session.session_id, report_id="501", access_scope=_scope())
 
@@ -730,11 +928,13 @@ async def test_session_service_deletes_only_the_scoped_session():
     session_ids = iter(["session-owner", "session-foreign"])
     service = TrainingSessionService(id_factory=lambda: next(session_ids))
     owner = await service.create_session(make_payload())
-    foreign = await service.create_session({
-        **make_payload(),
-        "user_id": "user-other",
-        "team_id": "team-other",
-    })
+    foreign = await service.create_session(
+        {
+            **make_payload(),
+            "user_id": "user-other",
+            "team_id": "team-other",
+        }
+    )
 
     await service.delete_session(owner.session_id, access_scope=_scope())
 
@@ -742,10 +942,13 @@ async def test_session_service_deletes_only_the_scoped_session():
         await service.get_session(owner.session_id, access_scope=_scope())
     with pytest.raises(PermissionError):
         await service.delete_session(foreign.session_id, access_scope=_scope())
-    assert await service.get_session(
-        foreign.session_id,
-        access_scope=_scope(user_id="user-other", team_id="team-other"),
-    ) is not None
+    assert (
+        await service.get_session(
+            foreign.session_id,
+            access_scope=_scope(user_id="user-other", team_id="team-other"),
+        )
+        is not None
+    )
 
 
 async def test_session_service_rejects_unknown_session():
