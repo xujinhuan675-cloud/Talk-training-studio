@@ -221,6 +221,8 @@ async def test_launch_battle_training_binds_owned_session_to_message_tree(tmp_pa
             scenario_context="Budget review for a training program.",
             selected_training_points=["Handle budget objections"],
             difficulty="hard",
+            focus_scope="custom",
+            length_profile="quick",
         ),
         access_scope=StakeholderRoomAccessScope(
             user_id="newapi:42",
@@ -242,6 +244,9 @@ async def test_launch_battle_training_binds_owned_session_to_message_tree(tmp_pa
     assert payload.task_config.metadata["runtime"] == "conversation_message_tree"
     assert payload.task_config.metadata["legacy_room_id"] == launch.room.id
     assert payload.task_config.metadata["persona_snapshot"]["persona_id"] == launch.room.persona_ids[0]
+    assert payload.task_config.question_count == 6
+    assert payload.task_config.metadata["trainingPlan"]["focus"]["scope"] == "custom"
+    assert payload.task_config.metadata["trainingPlan"]["length"]["turnBudget"] == 6
     assert session.room_id == "talkwise-conversation:conversation-1"
     assert session.task_config.metadata["runtime"] == "conversation_message_tree"
     assert session.task_config.metadata["conversationId"] == "conversation-1"

@@ -38,7 +38,21 @@ class FakeDefenseService:
         self.deleted_scopes.append(access_scope)
         return False
 
-    async def start_session(self, session_id: int, *, access_scope):
+    async def start_session(
+        self,
+        session_id: int,
+        *,
+        access_scope,
+        selected_question_indexes=None,
+        focus_scope="all",
+    ):
+        self.get_scopes.append(access_scope)
+        self.start_selection = (selected_question_indexes, focus_scope)
+        if self.started_session is not None:
+            return self.started_session
+        raise ValueError(f"Defense session {session_id} not found")
+
+    async def prepare_questions(self, session_id: int, *, access_scope):
         self.get_scopes.append(access_scope)
         if self.started_session is not None:
             return self.started_session
@@ -133,3 +147,71 @@ def test_defense_start_returns_native_training_workspace_identifiers():
     data = response.json()["data"]
     assert data["training_session_id"] == "training-defense-8"
     assert data["conversation_id"] == 55
+
+
+def test_defense_start_accepts_confirmed_question_scope():
+    app, service = make_app(
+        CurrentUser(
+            user_id="user-sales-001", system_role="staff", team_id="team-revenue"
+        )
+    )
+    service.started_session = type(
+        "Session",
+        (),
+        {
+            "id": 8,
+            "room_id": 21,
+            "training_session_id": "training-defense-8",
+            "conversation_id": 55,
+            "status": "in_progress",
+            "question_strategy": None,
+        },
+    )()
+
+    response = TestClient(app).post(
+        "/api/v1/defense-prep/sessions/8/start",
+        json={"selected_question_indexes": [0, 2], "focus_scope": "custom"},
+    )
+
+    assert response.status_code == 200
+    assert service.start_selection == ([0, 2], "custom")
+
+
+def test_defense_question_preparation_returns_reviewable_strategy():
+    app, service = make_app(
+        CurrentUser(
+            user_id="user-sales-001", system_role="staff", team_id="team-revenue"
+        )
+    )
+    question = type(
+        "Question",
+        (),
+        {
+            "question": "Which evidence supports the forecast?",
+            "dimension": "evidence",
+            "difficulty": "hard",
+            "asked_by": "finance-reviewer",
+        },
+    )()
+    service.started_session = type(
+        "Session",
+        (),
+        {
+            "id": 8,
+            "document_summary": type("Summary", (), {"title": "Q3 plan"})(),
+            "status": "preparing",
+            "question_strategy": type("Strategy", (), {"questions": [question]})(),
+        },
+    )()
+
+    response = TestClient(app).post("/api/v1/defense-prep/sessions/8/questions")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["question_strategy"]["questions"] == [
+        {
+            "question": "Which evidence supports the forecast?",
+            "dimension": "evidence",
+            "difficulty": "hard",
+            "asked_by": "finance-reviewer",
+        }
+    ]

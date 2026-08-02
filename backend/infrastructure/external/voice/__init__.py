@@ -13,6 +13,11 @@ from application.ports.stt import STTPort
 from application.ports.tts import TTSPort
 from core.config import settings
 from core.logging_config import get_logger
+from infrastructure.external.newapi_user_gateway import (
+    runtime_api_key,
+    user_billing_enabled,
+    user_relay_base_url,
+)
 
 logger = get_logger(__name__)
 
@@ -69,6 +74,8 @@ def _llm_settings_are_openrouter() -> bool:
 
 def _effective_tts_api_key() -> str | None:
     voice_cfg = settings.voice
+    if user_billing_enabled():
+        return runtime_api_key()
     if voice_cfg.tts_api_key:
         return voice_cfg.tts_api_key
     if (
@@ -81,6 +88,8 @@ def _effective_tts_api_key() -> str | None:
 
 def _effective_tts_base_url() -> str | None:
     voice_cfg = settings.voice
+    if user_billing_enabled():
+        return user_relay_base_url()
     if voice_cfg.tts_base_url:
         return voice_cfg.tts_base_url
     if (
@@ -105,6 +114,8 @@ def _effective_volcengine_stt_model(value: str | None) -> str:
 
 def _effective_stt_api_key() -> str | None:
     voice_cfg = settings.voice
+    if user_billing_enabled():
+        return runtime_api_key()
     if voice_cfg.stt_api_key:
         return voice_cfg.stt_api_key
     if _normalized_provider(voice_cfg.stt_provider) in _SHARED_KEY_STT_PROVIDER_ALIASES:
@@ -138,7 +149,15 @@ async def init_tts_client() -> None:
 
     try:
         tts_provider = _normalized_provider(voice_cfg.tts_provider)
-        if tts_provider == "minimax":
+        if user_billing_enabled():
+            from .openrouter_tts import OpenRouterTTSProvider
+
+            _tts_client = OpenRouterTTSProvider(
+                api_key=tts_api_key,
+                model=voice_cfg.tts_model,
+                base_url=tts_base_url or user_relay_base_url(),
+            )
+        elif tts_provider == "minimax":
             from .minimax_tts import MinimaxTTSProvider
 
             _tts_client = MinimaxTTSProvider(
@@ -236,7 +255,15 @@ async def init_stt_client() -> None:
 
     try:
         stt_provider = _normalized_provider(voice_cfg.stt_provider)
-        if stt_provider in ("minimax", "openai", "whisper"):
+        if user_billing_enabled():
+            from .minimax_stt import MinimaxSTTProvider
+
+            _stt_client = MinimaxSTTProvider(
+                api_key=stt_api_key,
+                base_url=user_relay_base_url(),
+                model=voice_cfg.stt_model,
+            )
+        elif stt_provider in ("minimax", "openai", "whisper"):
             from .minimax_stt import MinimaxSTTProvider
 
             _stt_client = MinimaxSTTProvider(

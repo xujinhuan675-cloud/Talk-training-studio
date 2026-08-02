@@ -575,6 +575,12 @@ class StartBattleDTO(BaseModel):
     scenario_context: str = Field(..., min_length=1, max_length=5000)
     selected_training_points: list[str] = Field(..., min_length=1, max_length=5)
     difficulty: str = Field(default="normal", pattern=r"^(easy|normal|hard)$")
+    focus_scope: str = Field(
+        default="recommended", pattern=r"^(recommended|all|custom)$"
+    )
+    length_profile: str = Field(
+        default="standard", pattern=r"^(quick|standard|complete)$"
+    )
     reply_language: str = Field(
         default="zh-CN",
         min_length=2,

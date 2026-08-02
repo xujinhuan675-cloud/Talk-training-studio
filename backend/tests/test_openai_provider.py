@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from application.ports.llm import LLMMessage
+from core.config import settings
 from infrastructure.external.llm.openai_provider import OpenAIProvider
+from infrastructure.external.newapi_user_gateway import bind_user_access_token
 
 
 @pytest.mark.asyncio
@@ -106,3 +108,32 @@ def test_openai_provider_uses_project_user_agent() -> None:
     provider = OpenAIProvider(api_key="test-key", user_agent="TestApp/1.0")
 
     assert provider._client.default_headers["User-Agent"] == "TestApp/1.0"
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_overrides_static_key_with_current_newapi_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", True)
+    bind_user_access_token("dashboard-user-token")
+    provider = OpenAIProvider(api_key="newapi-user-session", default_model="gpt-test")
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="hello"),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+        model="gpt-test",
+    )
+    create = AsyncMock(return_value=response)
+    provider._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+
+    await provider.generate([LLMMessage(role="user", content="hello")])
+
+    assert create.call_args.kwargs["extra_headers"] == {
+        "Authorization": "Bearer dashboard-user-token"
+    }

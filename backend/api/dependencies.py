@@ -26,6 +26,7 @@ from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 from infrastructure.external.storage import get_storage
 from infrastructure.external.llm import get_llm_client, get_anthropic_client
 from infrastructure.external.voice import get_tts_client, get_stt_client
+from infrastructure.external.newapi_user_gateway import bind_user_access_token
 from infrastructure.adapters.storage_port import StorageProviderPortAdapter
 from infrastructure.adapters.idempotency_store import RedisIdempotencyStore
 from infrastructure.external.newapi_auth import (
@@ -179,6 +180,7 @@ async def get_current_user_from_newapi_token(access_token: str) -> CurrentUser:
         ) from exc
     except NewAPIAuthError as exc:
         raise HTTPException(status_code=401, detail="Invalid access token") from exc
+    bind_user_access_token(access_token)
     return _current_user_from_newapi_identity(identity)
 
 
@@ -224,6 +226,7 @@ async def get_current_user(
     q_system_role: str | None = Query(default=None, alias="auth_role"),
     q_team_id: str | None = Query(default=None, alias="auth_team_id"),
 ) -> CurrentUser:
+    bind_user_access_token(None)
     bearer_token = extract_bearer_token(authorization)
     if bearer_token:
         try:

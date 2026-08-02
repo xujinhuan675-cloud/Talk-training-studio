@@ -15,13 +15,14 @@ from unittest.mock import patch
 
 import pytest
 
-from core.config import AgentSDKSettings
+from core.config import AgentSDKSettings, settings as app_settings
 from infrastructure.external.agent_sdk.client import AgentSkillClient
 from infrastructure.external.agent_sdk.exceptions import (
     AgentRunError,
     AgentTimeoutError,
 )
 from infrastructure.external.agent_sdk.workspace import WorkspaceManager
+from infrastructure.external.newapi_user_gateway import bind_user_access_token
 
 
 @dataclass
@@ -124,6 +125,31 @@ def test_build_prompt_tells_agent_to_reuse_existing_output_dir(
     assert "The `output/` directory already exists" in prompt
     assert "Do NOT create or overwrite the `output/` directory itself" in prompt
     assert "write exactly one file: `output/persona.md`" in prompt
+
+
+def test_gateway_billed_agent_uses_user_auth_token_and_restores_environment(
+    client: AgentSkillClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_settings, "NEWAPI_USER_BILLING_ENABLED", True)
+    monkeypatch.setattr(
+        app_settings,
+        "NEWAPI_USER_RELAY_BASE_URL",
+        "https://gateway.example.com/pg",
+    )
+    bind_user_access_token("dashboard-user-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "old-api-key")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "old-auth-token")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://old.example.com")
+
+    with client._patched_env():
+        assert "ANTHROPIC_API_KEY" not in os.environ
+        assert os.environ["ANTHROPIC_AUTH_TOKEN"] == "dashboard-user-token"
+        assert os.environ["ANTHROPIC_BASE_URL"] == "https://gateway.example.com/pg"
+
+    assert os.environ["ANTHROPIC_API_KEY"] == "old-api-key"
+    assert os.environ["ANTHROPIC_AUTH_TOKEN"] == "old-auth-token"
+    assert os.environ["ANTHROPIC_BASE_URL"] == "https://old.example.com"
 
 
 @pytest.mark.asyncio

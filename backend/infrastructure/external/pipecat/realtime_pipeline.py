@@ -37,6 +37,14 @@ from application.ports.realtime import (
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
 )
+from infrastructure.external.newapi_user_gateway import (
+    current_user_access_token,
+    require_user_access_token,
+    runtime_api_key,
+    user_billing_enabled,
+    user_relay_base_url,
+    user_relay_realtime_url,
+)
 from infrastructure.external.pipecat.provider_catalog import (
     pipecat_integrated_provider_modules,
     pipecat_provider_catalog,
@@ -2180,8 +2188,12 @@ def build_pipecat_voice_processors(
         processors.append(
             runtime.OpenAIRealtimeSTTService(
                 api_key=api_key,
-                base_url=_metadata_text(stt_config, "baseUrl", "base_url")
-                or "wss://api.openai.com/v1/realtime",
+                base_url=(
+                    user_relay_realtime_url()
+                    if user_billing_enabled()
+                    else _metadata_text(stt_config, "baseUrl", "base_url")
+                    or "wss://api.openai.com/v1/realtime"
+                ),
                 turn_detection=_turn_detection_config(metadata),
                 should_interrupt=_metadata_bool(
                     stt_config,
@@ -2265,7 +2277,11 @@ def build_pipecat_voice_processors(
         processors.append(
             runtime.OpenAITTSService(
                 api_key=api_key,
-                base_url=_metadata_text(tts_config, "baseUrl", "base_url"),
+                base_url=(
+                    user_relay_base_url()
+                    if user_billing_enabled()
+                    else _metadata_text(tts_config, "baseUrl", "base_url")
+                ),
                 sample_rate=_metadata_int(tts_config, "sampleRate", "sample_rate")
                 or _metadata_int(metadata, "outputSampleRate", "output_sample_rate"),
                 settings=_service_settings(
@@ -2338,9 +2354,13 @@ def build_pipecat_speech_to_speech_processors(
 
     service_kwargs: dict[str, Any] = {
         "api_key": api_key,
-        "base_url": _metadata_text(realtime_config, "baseUrl", "base_url")
-        or _metadata_text(metadata, "realtimeBaseUrl", "realtime_base_url")
-        or "wss://api.openai.com/v1/realtime",
+        "base_url": (
+            user_relay_realtime_url()
+            if user_billing_enabled()
+            else _metadata_text(realtime_config, "baseUrl", "base_url")
+            or _metadata_text(metadata, "realtimeBaseUrl", "realtime_base_url")
+            or "wss://api.openai.com/v1/realtime"
+        ),
         "settings": _service_settings(
             runtime.OpenAIRealtimeLLMService,
             _entrypoint(
@@ -3921,6 +3941,8 @@ def _realtime_llm_user_aggregator_params(
 
 
 def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
+    if user_billing_enabled():
+        return require_user_access_token()
     return (
         _metadata_text(metadata, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
         or _settings_openai_api_key()
@@ -3930,6 +3952,8 @@ def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
 
 
 def _openrouter_api_key(metadata: Mapping[str, Any]) -> str | None:
+    if user_billing_enabled():
+        return require_user_access_token()
     llm_config = _feature_config(metadata, "llm")
     openrouter_config = _feature_config(metadata, "openrouter", "open_router")
     return (
@@ -3982,6 +4006,8 @@ def _llm_base_url(
     llm_config: Mapping[str, Any],
     provider: str,
 ) -> str | None:
+    if user_billing_enabled():
+        return user_relay_base_url()
     configured = _metadata_text(llm_config, "baseUrl", "base_url") or _metadata_text(
         metadata,
         "llmBaseUrl",
@@ -4103,6 +4129,8 @@ def _settings_openai_api_key() -> str | None:
         llm_api_key = None
     else:
         llm_api_key = getattr(llm_settings, "api_key", None) if llm_settings is not None else None
+    if user_billing_enabled():
+        return current_user_access_token() or runtime_api_key()
     return (
         app_settings.REALTIME_OPENAI_API_KEY
         or llm_api_key
@@ -4111,6 +4139,8 @@ def _settings_openai_api_key() -> str | None:
 
 
 def _settings_openrouter_api_key() -> str | None:
+    if user_billing_enabled():
+        return current_user_access_token() or runtime_api_key()
     return _settings_llm_value_for_provider(OPENROUTER_LLM_PROVIDER, "api_key")
 
 

@@ -113,6 +113,11 @@ async def test_defense_workspace_binds_owner_scoped_session_and_frozen_snapshots
         persona_ids=["reviewer-1"],
         persona_snapshots=snapshots,
         opening_question="What evidence supports the retention claim?",
+        planned_questions=[
+            "What evidence supports the retention claim?",
+            "What trade-off did the team accept?",
+        ],
+        focus_scope="recommended",
     )
     snapshots[0]["version"] = 99
 
@@ -124,6 +129,8 @@ async def test_defense_workspace_binds_owner_scoped_session_and_frozen_snapshots
     assert sessions.created_payload.task_config.metadata["training_source"] == "defense_prep"
     assert sessions.created_payload.task_config.metadata["defense_session_id"] == 8
     assert sessions.created_payload.task_config.metadata["persona_snapshots"][0]["version"] == 3
+    assert sessions.created_payload.task_config.question_count == 2
+    assert sessions.created_payload.task_config.metadata["trainingPlan"]["focus"]["scope"] == "recommended"
     assert conversations.appended_turn.text == "What evidence supports the retention claim?"
     assert sessions.start_kwargs["access_scope"].user_id == "user-owner-001"
 

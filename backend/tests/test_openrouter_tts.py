@@ -6,6 +6,7 @@ import pytest
 from application.ports.tts import TTSConfig
 from core.config import LLMSettings, VoiceSettings, settings
 import infrastructure.external.voice as voice_lifecycle
+from infrastructure.external.newapi_user_gateway import bind_user_access_token
 from infrastructure.external.voice.openrouter_tts import OpenRouterTTSProvider
 
 
@@ -148,6 +149,31 @@ async def test_openrouter_tts_falls_back_from_openai_voice_names(
 
     assert chunks == [b"mp3-audio-bytes"]
     assert fake_client.captured["json"]["voice"] == "en_paul_neutral"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_tts_uses_current_newapi_user_token(monkeypatch) -> None:
+    fake_client = _FakeOpenRouterAsyncClient()
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: fake_client)
+    monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", True)
+    bind_user_access_token("dashboard-user-token")
+    provider = OpenRouterTTSProvider(
+        api_key="newapi-user-session",
+        model="speech-model",
+        base_url="https://gateway.example.com/pg",
+    )
+
+    chunks = [
+        chunk
+        async for chunk in provider.synthesize_stream(
+            "Hello.",
+            TTSConfig(voice_id="voice-1"),
+        )
+    ]
+
+    assert chunks == [b"mp3-audio-bytes"]
+    assert fake_client.captured["url"] == "https://gateway.example.com/pg/audio/speech"
+    assert fake_client.captured["headers"]["Authorization"] == "Bearer dashboard-user-token"
 
 
 @pytest.mark.asyncio

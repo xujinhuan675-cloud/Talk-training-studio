@@ -11,6 +11,11 @@ from typing import Optional
 from core.config import settings
 from core.logging_config import get_logger
 from application.ports.llm import LLMPort
+from infrastructure.external.newapi_user_gateway import (
+    runtime_api_key,
+    user_billing_enabled,
+    user_relay_base_url,
+)
 
 logger = get_logger(__name__)
 
@@ -27,7 +32,8 @@ async def init_llm_client() -> None:
         return
 
     llm_cfg = settings.llm
-    if not llm_cfg.api_key:
+    api_key = runtime_api_key(llm_cfg.api_key)
+    if not api_key:
         logger.warning(
             "llm_client_skipped",
             reason="LLM__API_KEY not configured; LLM features will be unavailable",
@@ -38,8 +44,8 @@ async def init_llm_client() -> None:
         from .openai_provider import OpenAIProvider
 
         _llm_client = OpenAIProvider(
-            api_key=llm_cfg.api_key,
-            base_url=llm_cfg.base_url,
+            api_key=api_key,
+            base_url=user_relay_base_url() if user_billing_enabled() else llm_cfg.base_url,
             wire_api=llm_cfg.wire_api,
             provider_name=llm_cfg.provider,
             default_model=llm_cfg.default_model,
@@ -89,6 +95,13 @@ async def init_anthropic_client() -> None:
 
     if _anthropic_client is not None:
         logger.warning("Anthropic client already initialized")
+        return
+
+    if user_billing_enabled():
+        logger.info(
+            "anthropic_client_skipped",
+            reason="NewAPI per-user billing routes stakeholder LLM calls through the shared OpenAI-compatible client",
+        )
         return
 
     stakeholder_cfg = settings.stakeholder

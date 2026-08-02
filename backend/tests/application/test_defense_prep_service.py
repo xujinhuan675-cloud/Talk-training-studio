@@ -76,6 +76,58 @@ class TestDefensePrepService:
         assert session.owner_team_id == "team-revenue"
 
     @pytest.mark.asyncio
+    async def test_prepare_questions_persists_strategy_before_start(self, mock_deps):
+        uow, llm, parser, chatroom_svc, persona_loader = mock_deps
+        session = DefenseSession(
+            id=7,
+            persona_ids=["persona-001"],
+            scenario_type=ScenarioType.GENERAL,
+            document_summary=DocumentSummary(title="Plan", raw_text="content"),
+            owner_user_id="user-owner-001",
+        )
+        uow.defense_session_repository.get_by_id.return_value = session
+        service = DefensePrepService(
+            uow_factory=lambda *args, **kwargs: uow,
+            llm=llm,
+            document_parser=parser,
+            chatroom_service=chatroom_svc,
+            persona_loader=persona_loader,
+            training_workspace_service=_workspace_service(),
+        )
+        service._generate_strategy = AsyncMock(
+            return_value=QuestionStrategy(
+                questions=[PlannedQuestion(question="Q1", dimension="evidence")]
+            )
+        )
+
+        prepared = await service.prepare_questions(
+            7,
+            access_scope=DefenseSessionAccessScope(user_id="user-owner-001"),
+        )
+
+        assert prepared.question_strategy.questions[0].question == "Q1"
+        uow.defense_session_repository.update.assert_awaited_once_with(session)
+
+    def test_selected_strategy_preserves_confirmed_order_and_rejects_invalid_indexes(self):
+        strategy = QuestionStrategy(
+            questions=[
+                PlannedQuestion(question="Q1", dimension="a"),
+                PlannedQuestion(question="Q2", dimension="b"),
+                PlannedQuestion(question="Q3", dimension="c"),
+            ]
+        )
+
+        selected = DefensePrepService._selected_strategy(
+            strategy, selected_question_indexes=[2, 0, 2]
+        )
+
+        assert [question.question for question in selected.questions] == ["Q3", "Q1"]
+        with pytest.raises(ValueError, match="does not belong"):
+            DefensePrepService._selected_strategy(
+                strategy, selected_question_indexes=[3]
+            )
+
+    @pytest.mark.asyncio
     async def test_start_session_keeps_room_owned_by_session_creator(self, mock_deps):
         uow, llm, parser, chatroom_svc, persona_loader = mock_deps
         session = DefenseSession(

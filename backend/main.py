@@ -45,6 +45,7 @@ from infrastructure.external.llm import (
     init_anthropic_client,
     shutdown_anthropic_client,
 )
+from infrastructure.external.newapi_user_gateway import NewAPIUserGatewayContextMiddleware
 from infrastructure.external.voice import (
     init_tts_client,
     shutdown_tts_client,
@@ -195,6 +196,7 @@ app = FastAPI(
 
 # 添加中间件（注意顺序：从下往上执行）
 # 1. Request ID中间件（最先执行，为后续中间件提供request_id）
+app.add_middleware(NewAPIUserGatewayContextMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 # 2. 日志中间件（依赖request_id）

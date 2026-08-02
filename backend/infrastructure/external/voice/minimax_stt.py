@@ -17,6 +17,7 @@ from urllib.parse import urlparse, urlunparse
 import httpx
 
 from application.ports.stt import TranscriptionResult
+from infrastructure.external.newapi_user_gateway import authorization_headers
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,8 @@ def normalize_transcriptions_url(base_url: str | None = None) -> str:
     elif lower_path.endswith("/chat/completions"):
         normalized_path = f"{path[: -len('/chat/completions')]}{_TRANSCRIPTIONS_PATH}"
     elif lower_path.endswith("/v1"):
+        normalized_path = f"{path}{_TRANSCRIPTIONS_PATH}"
+    elif lower_path.endswith("/pg"):
         normalized_path = f"{path}{_TRANSCRIPTIONS_PATH}"
     else:
         normalized_path = f"{path}/v1{_TRANSCRIPTIONS_PATH}" if path else f"/v1{_TRANSCRIPTIONS_PATH}"
@@ -97,9 +100,7 @@ class MinimaxSTTProvider:
             "language": language,
             "response_format": "json",
         }
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-        }
+        headers = authorization_headers(self._api_key)
 
         response = await self._client.post(
             self._transcriptions_url,

@@ -120,6 +120,8 @@ def _battle_training_session_payload(
     training_points: list[str],
     difficulty: str,
     source: str,
+    focus_scope: str = "recommended",
+    length_profile: str = "standard",
 ) -> CreateTrainingSessionDTO:
     normalized_points = [str(point).strip() for point in training_points if str(point).strip()]
     normalized_context = str(scenario_context or "").strip()
@@ -130,6 +132,26 @@ def _battle_training_session_payload(
         "hard": "hard",
     }.get(str(difficulty).strip().lower(), "medium")
     system_prompt = (persona.user_context or persona.profile_summary or normalized_context).strip()
+    turn_budget = {"quick": 6, "complete": 12}.get(length_profile, 9)
+    minimum_turns = {"quick": 3, "complete": 6}.get(length_profile, 5)
+    training_plan = {
+        "version": 1,
+        "kind": "conversation",
+        "focus": {
+            "scope": focus_scope,
+            "selected": normalized_points,
+        },
+        "pressure": normalized_difficulty,
+        "length": {
+            "profile": length_profile,
+            "turnBudget": turn_budget,
+        },
+        "completion": {
+            "strategy": "adaptive",
+            "minimumTurns": minimum_turns,
+            "explicitFinish": True,
+        },
+    }
     metadata: dict[str, object] = {
         "runtime": "conversation_message_tree",
         "training_source": source,
@@ -142,6 +164,7 @@ def _battle_training_session_payload(
         "room_type": room.type,
         "conversation_title": room.name,
         "system_prompt": system_prompt,
+        "trainingPlan": training_plan,
     }
     return CreateTrainingSessionDTO(
         task_config=TrainingTaskConfigDTO(
@@ -149,7 +172,7 @@ def _battle_training_session_payload(
             level="practice",
             tech_stack=["communication"],
             question_type_ratios={"simulation": 1.0},
-            question_count=12,
+            question_count=turn_budget,
             framework="prep",
             difficulty=normalized_difficulty,
             category="negotiation",
@@ -409,6 +432,8 @@ class BattlePrepService:
             training_points=dto.selected_training_points,
             difficulty=dto.difficulty,
             source="battle_prep",
+            focus_scope=dto.focus_scope,
+            length_profile=dto.length_profile,
         )
 
     async def _create_generated_battle_room(
@@ -443,10 +468,12 @@ class BattlePrepService:
 
         persona_content += f"\n{_REALISTIC_COUNTERPART_RULES}\n"
 
+        turn_budget = {"quick": 6, "complete": 12}.get(dto.length_profile, 9)
+        minimum_turns = {"quick": 3, "complete": 6}.get(dto.length_profile, 5)
         persona_content += (
             "\n## 备战模式特殊指令\n\n"
-            "这是一场限时备战练习（最多12轮）。"
-            "当你认为所有训练重点都已经充分讨论过（通常在第6轮之后），"
+            f"这是一场限时备战练习（最多{turn_budget}轮）。"
+            f"当你认为所有训练重点都已经充分讨论过（通常在第{minimum_turns}轮之后），"
             "你可以自然地结束对话（如'我觉得这个方案基本可以，我们就这么定了'）。"
             "但如果用户还有明显未覆盖的训练重点，继续施压。"
         )
@@ -560,6 +587,8 @@ class BattlePrepService:
         training_points: list[str],
         difficulty: str,
         source: str,
+        focus_scope: str = "recommended",
+        length_profile: str = "standard",
     ) -> BattleTrainingLaunch:
         scope = require_stakeholder_room_access_scope(
             access_scope,
@@ -581,6 +610,8 @@ class BattlePrepService:
             training_points=training_points,
             difficulty=difficulty,
             source=source,
+            focus_scope=focus_scope,
+            length_profile=length_profile,
         )
         session = await training_session_service.create_session(payload)
         orchestrator = TrainingCoreOrchestrator(

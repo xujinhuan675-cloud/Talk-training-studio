@@ -264,6 +264,18 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("NEWAPI_GATEWAY_BASE_URL"),
     )
+    NEWAPI_USER_BILLING_ENABLED: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("NEWAPI_USER_BILLING_ENABLED"),
+    )
+    NEWAPI_USER_RELAY_BASE_URL: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("NEWAPI_USER_RELAY_BASE_URL"),
+    )
+    NEWAPI_USER_RELAY_REALTIME_URL: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("NEWAPI_USER_RELAY_REALTIME_URL"),
+    )
     NEWAPI_AUTH_ENABLED: bool = Field(
         default=False,
         validation_alias=AliasChoices("NEWAPI_AUTH_ENABLED"),

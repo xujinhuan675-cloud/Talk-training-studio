@@ -16,6 +16,7 @@ from infrastructure.external.newapi_auth import (
     NewAPITeamMembersResult,
     NewAPITeamUserSearchResult,
 )
+from infrastructure.external.newapi_user_gateway import current_user_access_token
 
 
 async def _resolve_user(**overrides):
@@ -85,6 +86,7 @@ async def test_newapi_bearer_token_maps_to_talkwise_user(monkeypatch: pytest.Mon
     assert current_user.subscription_plan == "pro"
     assert current_user.subscription_status == "active"
     assert current_user.newapi_gateway_base_url == "https://gateway.example/v1"
+    assert current_user_access_token() == "live-token"
 
 
 @pytest.mark.asyncio

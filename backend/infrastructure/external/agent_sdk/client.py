@@ -42,6 +42,11 @@ from infrastructure.external.agent_sdk.exceptions import (
     AgentTimeoutError,
 )
 from infrastructure.external.agent_sdk.workspace import Workspace, WorkspaceManager
+from infrastructure.external.newapi_user_gateway import (
+    require_user_access_token,
+    user_billing_enabled,
+    user_relay_base_url,
+)
 
 logger = get_logger(__name__)
 
@@ -57,7 +62,11 @@ class AgentSkillClient:
     ) -> None:
         self._settings = settings
         self._workspace_mgr = workspace_mgr
-        self._semaphore = asyncio.Semaphore(settings.max_concurrent_builds)
+        # Claude Agent SDK currently receives credentials through process-level
+        # environment variables. Serialize gateway-billed runs so two users can
+        # never observe each other's short-lived dashboard credential.
+        max_concurrency = 1 if user_billing_enabled() else settings.max_concurrent_builds
+        self._semaphore = asyncio.Semaphore(max_concurrency)
 
     @contextmanager
     def _patched_env(self) -> Iterator[None]:
@@ -68,19 +77,26 @@ class AgentSkillClient:
         """
         keys_to_restore: dict[str, Optional[str]] = {}
 
-        def _set(env_key: str, value: Optional[str]) -> None:
+        def _replace(env_key: str, value: Optional[str]) -> None:
+            if env_key not in keys_to_restore:
+                keys_to_restore[env_key] = os.environ.get(env_key)
             if value is None:
-                return
-            keys_to_restore[env_key] = os.environ.get(env_key)
-            os.environ[env_key] = value
+                os.environ.pop(env_key, None)
+            else:
+                os.environ[env_key] = value
 
-        api_key = (
-            self._settings.anthropic_api_key.get_secret_value()
-            if self._settings.anthropic_api_key
-            else None
-        )
-        _set("ANTHROPIC_API_KEY", api_key)
-        _set("ANTHROPIC_BASE_URL", self._settings.anthropic_base_url)
+        if user_billing_enabled():
+            _replace("ANTHROPIC_API_KEY", None)
+            _replace("ANTHROPIC_AUTH_TOKEN", require_user_access_token())
+            _replace("ANTHROPIC_BASE_URL", user_relay_base_url())
+        else:
+            api_key = (
+                self._settings.anthropic_api_key.get_secret_value()
+                if self._settings.anthropic_api_key
+                else None
+            )
+            _replace("ANTHROPIC_API_KEY", api_key)
+            _replace("ANTHROPIC_BASE_URL", self._settings.anthropic_base_url)
 
         try:
             yield

@@ -23,6 +23,7 @@ from application.ports.llm import (
     LLMResponse,
 )
 from core.logging_config import get_logger
+from infrastructure.external.newapi_user_gateway import authorization_headers
 
 logger = get_logger(__name__)
 
@@ -56,6 +57,7 @@ class OpenAIProvider:
             max_retries=max_retries,
             default_headers={"User-Agent": user_agent},
         )
+        self._api_key = api_key
         self.provider = (provider_name or "openai").strip() or "openai"
         self._default_model = default_model
         self._default_temperature = default_temperature
@@ -201,6 +203,7 @@ class OpenAIProvider:
                 input=self._build_responses_input(messages),
                 temperature=temperature if temperature is not None else self._default_temperature,
                 max_output_tokens=max_tokens or self._default_max_tokens,
+                extra_headers=authorization_headers(self._api_key),
             )
             prompt_tokens, completion_tokens, total_tokens = self._response_usage(response)
             return LLMResponse(
@@ -218,6 +221,7 @@ class OpenAIProvider:
             temperature=temperature if temperature is not None else self._default_temperature,
             max_tokens=max_tokens or self._default_max_tokens,
             stream=False,
+            extra_headers=authorization_headers(self._api_key),
         )
         choice = response.choices[0]
         usage = response.usage
@@ -258,6 +262,7 @@ class OpenAIProvider:
                         "strict": False,
                     }
                 },
+                extra_headers=authorization_headers(self._api_key),
             )
             text = self._extract_response_text(response).strip()
             if not text:
@@ -281,6 +286,7 @@ class OpenAIProvider:
             tools=[tool_def],
             tool_choice={"type": "function", "function": {"name": schema_name}},
             stream=False,
+            extra_headers=authorization_headers(self._api_key),
         )
 
         choice = response.choices[0]
@@ -304,6 +310,7 @@ class OpenAIProvider:
                 temperature=temperature if temperature is not None else self._default_temperature,
                 max_output_tokens=max_tokens or self._default_max_tokens,
                 stream=True,
+                extra_headers=authorization_headers(self._api_key),
             )
             async for event in stream:
                 event_type = getattr(event, "type", "")
@@ -329,6 +336,7 @@ class OpenAIProvider:
             max_tokens=max_tokens or self._default_max_tokens,
             stream=True,
             stream_options={"include_usage": True},
+            extra_headers=authorization_headers(self._api_key),
         )
         async for chunk in response:
             if not chunk.choices and chunk.usage:

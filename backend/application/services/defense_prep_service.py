@@ -1,7 +1,7 @@
 # input: AbstractUnitOfWork, LLMPort, DocumentParser, ChatRoomApplicationService, PersonaLoader
-# output: DefensePrepService 答辩准备编排服务
+# output: DefensePrepService 答辩准备编排服务（先生成题库，再按范围开始）
 # owner: wanhua.gu
-# pos: 应用层服务 - 答辩准备（文档解析→策略生成→模拟→评估）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+# pos: 应用层服务 - 答辩准备（文档解析→题库确认→模拟→评估）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Defense Prep service: document-based Q&A simulation workflow."""
 
 from __future__ import annotations
@@ -176,8 +176,10 @@ class DefensePrepService:
         session_id: int,
         *,
         access_scope: DefenseSessionAccessScope,
+        selected_question_indexes: list[int] | None = None,
+        focus_scope: str = "all",
     ) -> DefenseSession:
-        """Step 2: Generate question strategy, create room, start simulation."""
+        """Step 3: Apply the confirmed question scope and start the simulation."""
         async with self._uow_factory() as uow:
             session = await uow.defense_session_repository.get_by_id(
                 session_id, access_scope=access_scope
@@ -186,8 +188,11 @@ class DefensePrepService:
                 raise ValueError(f"Defense session {session_id} not found")
             if session.training_session_id and session.conversation_id:
                 return session
-            strategy = await self._generate_strategy(session)
-            session.question_strategy = strategy
+            strategy = session.question_strategy or await self._generate_strategy(session)
+            session.question_strategy = self._selected_strategy(
+                strategy,
+                selected_question_indexes=selected_question_indexes,
+            )
 
             # Create a Scenario entity so the constraint is injected into
             # every persona system prompt during the ongoing conversation.
@@ -250,6 +255,7 @@ class DefensePrepService:
         if instruction:
             context_msg += f"\n## 场景行为约束（必须遵守）\n{instruction}\n"
         context_msg += f"\n文档摘要:\n{session.document_summary.raw_text[:3000]}"
+        strategy = session.question_strategy or QuestionStrategy()
         first_q = strategy.questions[0] if strategy.questions else None
         first_q_text = first_q.question if first_q else "请介绍一下这份文档的核心内容。"
         first_q_sender = first_q.asked_by if first_q else session.persona_ids[0]
@@ -288,6 +294,8 @@ class DefensePrepService:
             persona_ids=session.persona_ids,
             persona_snapshots=persona_snapshots,
             opening_question=first_q_text,
+            planned_questions=[question.question for question in strategy.questions],
+            focus_scope=focus_scope,
         )
         session.start(room_id=room.id)
         session.bind_training_workspace(
@@ -299,6 +307,42 @@ class DefensePrepService:
             await uow.commit()
 
         return session
+
+    async def prepare_questions(
+        self,
+        session_id: int,
+        *,
+        access_scope: DefenseSessionAccessScope,
+    ) -> DefenseSession:
+        """Step 2: Generate and persist a reviewable question strategy."""
+        async with self._uow_factory() as uow:
+            session = await uow.defense_session_repository.get_by_id(
+                session_id, access_scope=access_scope
+            )
+            if session is None:
+                raise ValueError(f"Defense session {session_id} not found")
+            if session.question_strategy is None:
+                session.question_strategy = await self._generate_strategy(session)
+                await uow.defense_session_repository.update(session)
+                await uow.commit()
+            return session
+
+    @staticmethod
+    def _selected_strategy(
+        strategy: QuestionStrategy,
+        *,
+        selected_question_indexes: list[int] | None,
+    ) -> QuestionStrategy:
+        if selected_question_indexes is None:
+            return strategy
+        unique_indexes = list(dict.fromkeys(selected_question_indexes))
+        if not unique_indexes:
+            raise ValueError("Select at least one prepared question")
+        if any(index < 0 or index >= len(strategy.questions) for index in unique_indexes):
+            raise ValueError("Selected question does not belong to this preparation")
+        return QuestionStrategy(
+            questions=[strategy.questions[index] for index in unique_indexes]
+        )
 
     async def _generate_strategy(self, session: DefenseSession) -> QuestionStrategy:
         config = SCENARIO_CONFIGS[session.scenario_type]

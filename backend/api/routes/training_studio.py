@@ -160,6 +160,12 @@ from application.services.training_studio.training_core import (
 )
 from application.services.file_asset_service import FileAssetApplicationService
 from core.config import LLMSettings, VoiceSettings, settings
+from infrastructure.external.newapi_user_gateway import (
+    runtime_api_key,
+    user_billing_enabled,
+    user_relay_base_url,
+    user_relay_realtime_url,
+)
 from core.response import success_response
 from domain.common.exceptions import (
     BusinessException,
@@ -540,6 +546,8 @@ class VoicePreferenceUpdateDTO(BaseModel):
 
 
 def _openai_realtime_api_key() -> str | None:
+    if user_billing_enabled():
+        return runtime_api_key()
     realtime_provider = _normalized_realtime_llm_provider(
         getattr(settings, "REALTIME_PROVIDER", None)
     )
@@ -2319,6 +2327,8 @@ def _is_openrouter_base_url(value: object | None) -> bool:
 
 
 def _pipecat_realtime_llm_provider() -> str:
+    if user_billing_enabled():
+        return "openai"
     llm_settings = settings.llm
     provider = _normalized_realtime_llm_provider(getattr(llm_settings, "provider", None))
     if provider in _OPENROUTER_LLM_PROVIDER_ALIASES or _is_openrouter_base_url(
@@ -2359,13 +2369,17 @@ def _pipecat_cascade_pipeline_metadata(
         "provider": "openai",
         "turnDetection": "disabled",
     }
+    if user_billing_enabled():
+        stt["baseUrl"] = user_relay_realtime_url()
     if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
         stt["model"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
     llm: dict[str, object] = {
         "provider": _pipecat_realtime_llm_provider(),
         "model": settings.llm.default_model,
     }
-    if settings.llm.base_url:
+    if user_billing_enabled():
+        llm["baseUrl"] = user_relay_base_url()
+    elif settings.llm.base_url:
         llm["baseUrl"] = settings.llm.base_url
 
     return {
@@ -2390,7 +2404,10 @@ def _pipecat_cascade_pipeline_metadata(
         "stt": stt,
         "llm": llm,
         "context": {"provider": "pipecat", "realtimeServiceMode": False},
-        "tts": {"provider": "openai"},
+        "tts": {
+            "provider": "openai",
+            **({"baseUrl": user_relay_base_url()} if user_billing_enabled() else {}),
+        },
         "vad": {"provider": "silero", "source": "pipecat", "sampleRate": 16000},
         "turnDetection": {"provider": "pipecat", "source": "pipecat"},
         "talkwise": {
@@ -2427,6 +2444,8 @@ def _pipecat_speech_to_speech_pipeline_metadata(
         "noiseReduction": "near_field",
         "outputModalities": ["audio"],
     }
+    if user_billing_enabled():
+        realtime_llm["baseUrl"] = user_relay_realtime_url()
     if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
         realtime_llm["transcriptionModel"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
 
@@ -3025,6 +3044,8 @@ def _query_binding(websocket: WebSocket) -> tuple[str | None, int | None]:
 
 
 def _query_realtime_provider(websocket: WebSocket) -> str:
+    if user_billing_enabled():
+        return "pipecat"
     provider = _coerce_optional_text(websocket.query_params.get("provider"))
     if provider is None:
         return "pipecat"
@@ -3128,6 +3149,8 @@ def _uses_volcengine_doubao_realtime(provider: str) -> bool:
 
 
 def _uses_supported_realtime_provider(provider: str) -> bool:
+    if user_billing_enabled():
+        return _uses_pipecat_realtime(provider)
     return _uses_pipecat_realtime(provider) or _uses_volcengine_doubao_realtime(provider)
 
 

@@ -12,6 +12,7 @@ from typing import AsyncIterator
 import httpx
 
 from application.ports.tts import TTSConfig
+from infrastructure.external.newapi_user_gateway import authorization_headers
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class OpenRouterTTSProvider:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout, connect=10.0),
+            follow_redirects=True,
         )
 
     async def synthesize_stream(
@@ -60,7 +62,7 @@ class OpenRouterTTSProvider:
             payload["instructions"] = config.style_instruction
 
         headers = {
-            "Authorization": f"Bearer {self._api_key}",
+            **authorization_headers(self._api_key),
             "Content-Type": "application/json",
             "Accept": "audio/mpeg",
         }

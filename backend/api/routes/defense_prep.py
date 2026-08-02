@@ -1,10 +1,11 @@
 # input: DefensePrepService (via dependencies)
-# output: defense-prep API 路由 (sessions CRUD + start + report)
+# output: defense-prep API 路由 (sessions CRUD + questions + scoped start + report)
 # owner: wanhua.gu
 # pos: 表示层 - 答辩准备 API 路由；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Defense prep API routes."""
 from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from api.dependencies import CurrentUser, get_current_user, get_defense_prep_service
 from application.services.defense_prep_service import DefensePrepService
 from core.response import success_response
@@ -15,6 +16,27 @@ router = APIRouter(prefix="/defense-prep", tags=["Defense Prep"])
 
 _MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 _ALLOWED_EXTENSIONS = {".pptx", ".pdf", ".docx", ".txt", ".md"}
+
+
+class StartDefenseSessionRequest(BaseModel):
+    selected_question_indexes: list[int] | None = Field(default=None, max_length=20)
+    focus_scope: str = Field(default="all", pattern=r"^(recommended|all|custom)$")
+
+
+def _question_strategy_payload(session) -> dict:
+    return {
+        "questions": [
+            {
+                "question": question.question,
+                "dimension": question.dimension,
+                "difficulty": question.difficulty,
+                "asked_by": question.asked_by,
+            }
+            for question in (
+                session.question_strategy.questions if session.question_strategy else []
+            )
+        ]
+    }
 
 
 def _access_scope_for_current_user(current_user: CurrentUser) -> DefenseSessionAccessScope:
@@ -131,12 +153,16 @@ async def get_session(
 @router.post("/sessions/{session_id}/start")
 async def start_session(
     session_id: int,
+    body: StartDefenseSessionRequest | None = None,
     service: DefensePrepService = Depends(get_defense_prep_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
         session = await service.start_session(
-            session_id, access_scope=_access_scope_for_current_user(current_user)
+            session_id,
+            access_scope=_access_scope_for_current_user(current_user),
+            selected_question_indexes=(body.selected_question_indexes if body else None),
+            focus_scope=(body.focus_scope if body else "all"),
         )
     except ValueError as exc:
         raise _defense_session_error(exc) from exc
@@ -147,19 +173,29 @@ async def start_session(
             "training_session_id": session.training_session_id,
             "conversation_id": session.conversation_id,
             "status": session.status,
-            "question_strategy": {
-                "questions": [
-                    {
-                        "question": q.question,
-                        "dimension": q.dimension,
-                        "difficulty": q.difficulty,
-                        "asked_by": q.asked_by,
-                    }
-                    for q in (
-                        session.question_strategy.questions if session.question_strategy else []
-                    )
-                ]
-            },
+            "question_strategy": _question_strategy_payload(session),
+        }
+    )
+
+
+@router.post("/sessions/{session_id}/questions")
+async def prepare_questions(
+    session_id: int,
+    service: DefensePrepService = Depends(get_defense_prep_service),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        session = await service.prepare_questions(
+            session_id, access_scope=_access_scope_for_current_user(current_user)
+        )
+    except ValueError as exc:
+        raise _defense_session_error(exc) from exc
+    return success_response(
+        {
+            "id": session.id,
+            "document_title": session.document_summary.title,
+            "status": session.status,
+            "question_strategy": _question_strategy_payload(session),
         }
     )
 
