@@ -598,8 +598,24 @@ def test_registry_integration_sources_do_not_port_librechat_mongo_or_express() -
         / "services"
         / "training_studio"
         / "training_core.py",
-        repo_root / "frontend" / "src" / "services" / "llmRegistry.ts",
-        repo_root / "frontend" / "src" / "services" / "trainingConversation.ts",
+        repo_root
+        / "outside-project"
+        / "new-api-main"
+        / "web"
+        / "src"
+        / "features"
+        / "training"
+        / "studio"
+        / "api.ts",
+        repo_root
+        / "outside-project"
+        / "new-api-main"
+        / "web"
+        / "src"
+        / "features"
+        / "training"
+        / "conversations"
+        / "api.ts",
     ]
 
     for path in source_paths:

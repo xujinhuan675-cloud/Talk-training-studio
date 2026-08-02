@@ -502,7 +502,7 @@ def test_cross_user_conversation_mutations_are_blocked_by_scoped_service_call() 
     assert conversation_service.delete_call is None
 
 
-def test_legacy_leader_single_resource_routes_are_limited_to_own_metadata_scope() -> None:
+def test_staff_single_resource_routes_are_limited_to_own_metadata_scope() -> None:
     team_metadata = {
         "ownerUserId": "user-peer-001",
         "teamId": "team-revenue",
@@ -512,7 +512,7 @@ def test_legacy_leader_single_resource_routes_are_limited_to_own_metadata_scope(
         agent_configs={8: _agent_config(8, metadata=team_metadata)},
     )
     client = _client(conversation_service)
-    headers = {"X-Mock-User": "leader"}
+    headers = {"X-Mock-User": "sales"}
 
     responses = [
         client.get("/api/v1/conversations/7", headers=headers),

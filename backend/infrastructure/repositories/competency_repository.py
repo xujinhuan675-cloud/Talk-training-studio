@@ -28,7 +28,7 @@ class SQLAlchemyCompetencyEvaluationRepository(CompetencyEvaluationRepository):
             report_id=model.report_id,
             room_id=model.room_id,
             scores=model.scores or {},
-            overall_score=model.overall_score,
+            outcome_rating=model.outcome_rating,
             created_at=model.created_at,
         )
 
@@ -37,7 +37,7 @@ class SQLAlchemyCompetencyEvaluationRepository(CompetencyEvaluationRepository):
             report_id=evaluation.report_id,
             room_id=evaluation.room_id,
             scores=evaluation.scores,
-            overall_score=evaluation.overall_score,
+            outcome_rating=evaluation.outcome_rating,
             created_at=evaluation.created_at,
         )
         self.session.add(model)

@@ -1,291 +1,97 @@
-<div align="center">
+# TalkWise
 
-<a name="readme-top"></a>
+TalkWise 是运行在 NewAPI web 内的多模态 AI 沟通训练模块。NewAPI 提供账号、平台 Shell、导航、主题、用量、计费和管理控制面；独立 TalkWise FastAPI 保留训练场景、Persona、TrainingSession、对话树、评分、复盘、成长和实时训练语义。
 
-<h1>TalkWise</h1>
+## 当前架构
 
-<p><strong>关键对话的 AI 对练室 —— 用 AI 角色模拟真实互动，把重要表达变成可重复的练习。</strong></p>
+```text
+Browser
+  -> NewAPI 原生 React web（唯一前端宿主）
+  -> NewAPI 同源受认证代理 /api/talkwise/*
+  -> 独立 TalkWise FastAPI
+  -> TalkWise 自己的数据库与 Alembic 迁移
+```
 
-<p>
-喂入聊天记录、会议纪要或场景描述，AI 帮你还原真实的对话对象。<br/>
-重要开口前先练一遍，反复过招，直到找到更清楚、更得体、更有力量的表达。
-</p>
+关键边界：
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React_19-61DAFB?style=flat&logo=react)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript)](https://www.typescriptlang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
+- NewAPI Go 只保存平台侧训练团队 membership 并代理受限训练 API，不承载 TalkWise 训练业务表、评分或复盘逻辑。
+- 训练团队独立于 NewAPI `User.Group`；成员增删不修改模型访问、额度、余额或计费。
+- FastAPI 只信任 NewAPI 验证后的身份桥，并对训练资源做最终授权。
+- 旧 `frontend/` Vite 应用已经退役并从当前源码移除；历史实现仍可从 Git 历史和 `docs/archive` 追溯。
 
----
+## 训练路由
 
-[功能特性](#-核心功能) · [快速开始](#-30秒启动) · [页面导览](#-页面导览) · [技术架构](#-技术架构) · [路线图](#-roadmap)
+- 概览与练习：`/training`、`/training/scenarios`、`/training/studio`、`/training/live-coach`
+- Persona：`/training/personas`、`/training/personas/new`、`/training/personas/:personaId`
+- 对话与复盘：`/training/conversations`、`/training/sessions`、`/training/sessions/:sessionId`
+- 成长：`/training/growth`、`/training/growth/profile`
+- 团队：`/training/team/competencies`、`/training/team/scenarios`、`/training/team/members`
+- 准备与设置：`/training/prep/battle`、`/training/prep/defense`、`/training/settings`
 
----
+`/training/team/members` 仅对平台管理员开放。完整旧页面映射和退场判断见 [前端迁移矩阵](docs/frontend-migration-matrix.md)。
 
-<img src="docs/assets/homepage.png" alt="TalkWise 首页仪表盘" width="720"/>
+## 本地开发
 
-</div>
-
----
-
-## 背景问题
-
-> 你精心准备了方案，走进会议室。
-> CTO第二页就打断：「这和Q3路线图冲突。」
-> 接下来30分钟，你在被动救火。
-> 会后邮件：「方案暂缓，下季度再议。」
-
-**这不是技术问题，是沟通问题。**
-
-项目失败的头号原因不是技术——是沟通。PMI 研究显示，**56% 的项目风险源于沟通不畅**。一个关键会议的失误，可能意味着几个月的工作付诸东流。
-
-**TalkWise** 用 AI 创造了一个「安全但真实」的练习场——角色会打断你、质疑你、带着隐藏议程和情绪跟你博弈。你可以反复练习同一个场景，直到找到更好的回应策略，然后带着准备好的表达走进真实对话。
-
----
-
-## 核心功能
-
-### 首页仪表盘
-
-登录即看，一目了然：每日挑战、快捷入口、最近对话、技能成长路径。按 `Cmd+K` 全局搜索，秒速直达任何功能。
-
-<div align="center">
-  <img src="docs/assets/homepage.png" alt="首页仪表盘" width="80%"/>
-</div>
-
-### 从素材一键生成对手 (Persona Builder)
-
-粘贴一段真实聊天记录 / 邮件 / 会议纪要，AI 在 3 分钟内分析出一个有压迫感、可追溯证据的 5 层对手画像，直接进入演练——零手动填表。
-
-1. **粘贴素材** — 最多 5 段，支持标记类型（聊天 / 邮件 / 纪要 / 其他）
-2. **AI 流式分析** — Claude Code 风格实时进度，看 Agent 逐步读素材、提炼特征
-3. **5-layer 结构化画像** — Hard Rules / Identity / Expression / Decision / Interpersonal，每条特征可溯源
-4. **证据链** — 每条规则都能点开查看原文引用 + 置信度仪表盘
-5. **一键开练** — 点击"开始演练"直接进入聊天室，AI 立刻以该对手身份回复
-
-<div align="center">
-  <img src="docs/assets/persona-builder.png" alt="素材分析入口" width="80%"/>
-</div>
-
-<div align="center">
-  <img src="docs/assets/persona-editor.png" alt="5-layer 结构化画像编辑器" width="80%"/>
-</div>
-
-<div align="center">
-  <img src="docs/assets/persona-evidence.png" alt="证据链 Popover" width="80%"/>
-</div>
-
-### 沉浸式对话演练
-
-三栏布局：左侧房间列表，中间实时对话，右侧智能上下文面板（对手画像、情绪走势、实时评分）。AI 角色会根据角色设定做出真实反应——质疑、施压、带着隐藏议程博弈。
-
-<div align="center">
-  <img src="docs/assets/chat-conversation.png" alt="沉浸式对话界面" width="80%"/>
-</div>
-
-### 紧急备战模式
-
-重要会议前 30 分钟，三步快速演练：
-
-1. **描述会议** — 输入你要谈什么、对方是谁、难度选择
-2. **AI 生成对手** — 自动创建高度还原的对方角色，支持微调
-3. **限时对练** — 12 轮模拟对话，AI 围绕训练重点施压
-4. **话术纸条** — 自动生成实战话术，一键复制或下载为图片
-
-<div align="center">
-  <img src="docs/assets/battle-prep.png" alt="紧急备战向导" width="80%"/>
-</div>
-
-### LLM-as-Judge 六维评估
-
-每次对话后，AI 从六个维度评估你的表现：
-
-| 维度 | 评估内容 |
-|:---|:---|
-| **说服力** | 论点的逻辑性和说服力 |
-| **情绪管理** | 压力下的情绪调控能力 |
-| **倾听回应** | 理解并回应对方关切的能力 |
-| **结构化表达** | 表达的逻辑清晰度 |
-| **冲突处理** | 化解分歧、达成共识的能力 |
-| **利益对齐** | 识别并整合多方利益的能力 |
-
-### 成长追踪中心
-
-六维雷达图、等级经验值系统、技能成长路径、历史评价卡片，全方位追踪沟通能力进步。完成评估后可生成「沟通力名片」分享。
-
-<div align="center">
-  <img src="docs/assets/growth-dashboard.png" alt="成长追踪中心" width="80%"/>
-</div>
-
-### Cmd+K 命令面板
-
-按 `Cmd+K`（或 `Ctrl+K`）全局呼出命令面板，搜索对话、快速跳转、一键新建。支持键盘导航，老用户效率神器。
-
-<div align="center">
-  <img src="docs/assets/command-palette.png" alt="Cmd+K 命令面板" width="60%"/>
-</div>
-
-### 角色与组织管理
-
-在设置页统一管理 AI 对手角色、场景模板、组织架构与人物关系。角色不是孤立的个体——他们之间有权力关系、联盟和历史恩怨，AI 会据此做出反应。
-
-<div align="center">
-  <img src="docs/assets/settings.png" alt="角色与组织管理" width="80%"/>
-</div>
-
-### 语音对话
-
-像打电话一样练习沟通——点击录音说话，AI 角色用独立音色语音回复。
-
-| 能力 | 说明 |
-|:---|:---|
-| **语音输入** | 点击录音 / VAD 自动检测语音起止 |
-| **语音输出** | 每个角色独立音色，逐句流式播放 |
-| **多厂商支持** | TTS: MiniMax / ElevenLabs；STT: OpenAI Whisper 兼容 |
-
----
-
-## 页面导览
-
-| 路由 | 页面 | 说明 |
-|:---|:---|:---|
-| `/` | 首页仪表盘 | 每日挑战、快捷入口、最近对话、技能路径 |
-| `/persona/new` | 素材生成对手 | 粘贴素材 → AI 流式分析 → 生成 5-layer 画像 |
-| `/persona/:id/edit` | 画像编辑器 | 5 层结构化编辑 + 证据链 + 一键开练 |
-| `/chat/:roomId` | 沉浸式对话 | 三栏布局：房间列表 + 对话 + 上下文面板 |
-| `/battle-prep` | 紧急备战 | 三步向导：描述会议 → 生成对手 → 实战演练 |
-| `/growth` | 成长中心 | 雷达图、等级经验、技能路径、评价历史、名片 |
-| `/settings` | 设置 | 角色管理、场景管理、组织架构、偏好 |
-
-全局功能：`Cmd+K` 命令面板、顶栏等级/XP/连续天数、响应式移动端适配。
-
----
-
-## 30秒启动
+Windows 默认入口会启动 NewAPI Go、NewAPI Rsbuild web 和 TalkWise FastAPI，并把当前 FastAPI 地址注入 `TALKWISE_TRAINING_UPSTREAM_URL`：
 
 ```powershell
-git clone <repo-url> && cd TalkWise
-
-# Windows 本地开发入口：自动同步 backend/.env 与 frontend/.env，并检查前端代理到后端是否可用
 .\start-dev.cmd
 ```
 
-> Local default: `start-dev.cmd` starts the NewAPI web host (Rsbuild) and proxies
-> its same-origin `/api` requests to NewAPI Go. The old Vite frontend is available
-> only as an explicit rollback path: `start-dev.cmd -LegacyViteFrontend`.
+默认地址：
 
 ```text
-# 默认地址
-前端: http://127.0.0.1:5177
-后端: http://127.0.0.1:8012
-后端文档: http://127.0.0.1:8012/docs
+NewAPI web / TalkWise 模块: http://127.0.0.1:5177/training
+TalkWise FastAPI:          http://127.0.0.1:8012
+FastAPI docs:              http://127.0.0.1:8012/docs
+NewAPI Go:                 http://127.0.0.1:18080
 ```
 
+只检查现有环境：
+
 ```powershell
-# 只检查当前 dev 环境，不启动服务
 .\scripts\check-dev.ps1
 ```
 
-本地调试完成并准备发布到服务器时，按 [服务器部署操作手册](docs/development/server-deployment-runbook.md) 执行本地验证、打包上传、服务切换、健康检查和回滚。
+若 `/api/talkwise/*` 返回 `TalkWise training proxy is not configured`，检查 NewAPI 进程或容器是否设置了 `TALKWISE_TRAINING_UPSTREAM_URL`。该值应是 FastAPI 根地址，不包含训练 API 子路径。
 
-本地开发不要手动分别启动 `uvicorn` 和 `npm run dev` 作为默认路径；统一使用 `start-dev.cmd`，避免前端 Vite 代理仍指向旧端口导致“后端加载不上”。默认端口来自根目录 `.env` 的 `BACKEND_PORT` / `FRONTEND_PORT`，缺省为 `8012` / `5177`；端口被占用时脚本会报出占用进程，确实需要临时换端口时再使用 `.\start-dev.cmd -AutoPort`。
+## 验证
 
-多智能体或多人并行开发时，先按 [Multi-Agent Core Development Loop](docs/development/multi-agent-core-loop.md) 拆分切片；涉及跨前后端/外部服务/持久化的纵切功能时，按 [Agentic Vertical Slice Development Loop](docs/development/agentic-vertical-slice-loop.md) 执行 code graph、子智能体、最小验收和风险收口，再用 `.\scripts\core-loop.ps1 -Slice voice` 这类快速检查先跑通核心路径。
+```powershell
+# TalkWise FastAPI
+Push-Location backend
+..\.venv-backend\Scripts\python.exe -m pytest tests
+Pop-Location
 
----
+# 唯一前端宿主
+Push-Location outside-project\new-api-main\web
+bun test src\features\training
+bun run typecheck
+bun run build
+Pop-Location
 
-## 技术架构
+# NewAPI Go
+wsl -d Ubuntu-22.04 -- bash -lc 'cd /mnt/f/AnchorOS/6-项目仓库/Talk-training-studio/outside-project/new-api-main && go test ./controller ./router'
 
-<div align="center">
-  <img src="docs/assets/architecture-overview.png" alt="TalkWise 模块协作架构" width="50%"/>
-  <p><em>6 个模块各司其职：练习 → 诊断 → 反思 → 成长 的完整闭环</em></p>
-</div>
-
-| 层 | 技术 |
-|:---|:---|
-| **前端** | React 19 + TypeScript + Vite + React Router v6 |
-| **样式** | 薄荷绿设计系统 (CSS Custom Properties) + Lucide Icons |
-| **图表** | Recharts (六维雷达图) |
-| **实时通信** | Server-Sent Events (SSE) |
-| **后端** | FastAPI + SQLAlchemy + Alembic |
-| **AI** | Claude (Anthropic SDK) + Claude Agent SDK (Persona Builder) |
-| **语音** | MiniMax/ElevenLabs TTS + OpenAI Whisper STT |
-
-### 前端架构
-
-```
-frontend/src/
-├── pages/           # 7 个路由页面 (Home, Chat, BattlePrep, Growth, Settings, PersonaNew, PersonaEditor)
-├── components/
-│   ├── layout/      # TopBar, NavRail, BottomTabBar, CommandPalette, ConfirmDialog
-│   ├── chat/        # MessageList, ChatInput, ContextPanel, CoachingPanel, AnalysisPanel
-│   └── persona-editor/  # LayerCard, FeatureRow, EvidencePopover, HeroCard
-├── hooks/           # useChat, useVoice, useCoaching, useAnalysis, useGrowth, useRooms
-├── contexts/        # AppContext (全局状态), ChatContext (对话状态)
-├── services/        # API 客户端, 音频播放
-└── styles/          # 设计令牌 (薄荷绿主题)
+git diff --check
+git -C outside-project\new-api-main diff --check
 ```
 
----
+## 关键能力
 
-## 为什么选择 TalkWise？
+- Persona 列表、材料构建、五层画像编辑、证据与训练启动。
+- 场景训练、Battle Prep、Defense Prep 和统一 TrainingSession/conversation tree。
+- 文本分支、编辑、重试、fork、selected path 指导、结束训练和复盘证据。
+- 回合制语音、低成本 near-realtime、Pipecat 风格 true realtime、视频回答和认证媒体回放。
+- 真实评分、能力雷达、训练历史、持久化 Training Points/等级和沟通名片。
+- 沟通名片可选附带 NewAPI 原生账号邀请链接与二维码；默认关闭，不公开训练资源。
+- 独立训练团队、管理员成员搜索/增删和团队训练分析。
 
-| | TalkWise | 其他方案 |
-|:---|:---|:---|
-| **真实性** | AI有情绪、有隐藏议程、有组织关系 | 静态脚本，过于理想化 |
-| **一键建模** | 粘贴素材 → AI 自动生成 5 层对手画像 + 证据链 | 手动填表或无角色定制 |
-| **即时反馈** | 对话中可求助教练，实时获得建议 | 只有事后总结 |
-| **科学评估** | LLM-as-Judge六维度评估 | 无评估或主观打分 |
-| **成长追踪** | 等级经验值 + 技能路径 + 雷达图趋势 | 无历史追踪 |
-| **组织政治** | 角色间有权力关系和联盟博弈 | 角色相互独立 |
-| **效率工具** | Cmd+K 命令面板，键盘快捷键 | 纯鼠标操作 |
+## 工程事实源
 
----
+- 开发与架构规则：[AGENTS.md](AGENTS.md)
+- 代码图谱入口：[项目目录结构索引](docs/项目目录结构索引.md)
+- 页面迁移事实：[前端迁移矩阵](docs/frontend-migration-matrix.md)
+- 当前部署流程：[服务器部署操作手册](docs/development/server-deployment-runbook.md)
 
-## Roadmap
-
-- [x] 多页面路由架构 (React Router)
-- [x] 薄荷绿设计系统 + 响应式布局
-- [x] 首页仪表盘 + 游戏化 (等级/XP/连续天数/技能路径)
-- [x] Cmd+K 全局命令面板
-- [x] 紧急备战模式（会前快速模拟 + 话术纸条）
-- [x] 沟通力名片（6维评分社交分享卡片）
-- [x] 语音对话支持（MiniMax / ElevenLabs TTS + OpenAI Whisper STT）
-- [x] 移动端底部导航栏适配
-- [x] **Persona Builder** — 粘贴素材一键生成 5 层结构化对手画像（Claude Agent SDK + SSE 流式 + 证据链）
-- [x] **5-layer 画像编辑器** — Hard Rules / Identity / Expression / Decision / Interpersonal + 证据 Popover
-- [x] **对抗化后处理** — AI 自动注入隐藏议程、打断倾向、情绪状态机，让对手更真实
-- [ ] 更多评估维度（跨文化沟通、谈判技巧等）
-- [ ] 角色市场（预设的经典角色包）
-- [ ] 团队协作模式（多人实时演练）
-- [ ] 深色模式切换
-
----
-
-## 参与贡献
-
-欢迎贡献！
-
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'feat: add amazing feature'`)
-4. 推送并创建 Pull Request
-
----
-
-## 许可证
-
-[MIT](LICENSE) © 2024
-
----
-
-<div align="center">
-
-**如果这个项目对你有帮助，请给一个 Star**
-
-你的支持是我持续更新的动力
-
-**[回到顶部](#readme-top)**
-
-</div>
+本仓库的代码影响分析使用 code-review-graph；Graphify 只用于 AnchorOS / OpenEvolve 跨文档知识关系。

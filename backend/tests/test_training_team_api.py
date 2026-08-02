@@ -35,14 +35,14 @@ class FakeTeamAnalyticsService:
             [
                 TeamCompetencyRankingDTO(
                     member_id="user-sales",
-                    rank=1,
-                    average_score=80,
                     sample_count=2,
                     dimensions=[
                         TeamCompetencyDimensionDTO(
-                            dimension_id="persuasion",
+                            dimension_id="attentiveness",
                             score=80,
                             sample_count=2,
+                            scenario_count=2,
+                            state="exploring",
                         )
                     ],
                 )
@@ -127,8 +127,28 @@ def test_team_scenarios_and_permission_guard() -> None:
     assert denied_service.competency_calls == []
 
 
+def test_team_analytics_requires_an_explicit_training_team_assignment() -> None:
+    app, service = make_app(
+        CurrentUser(
+            user_id="newapi:1",
+            system_role="admin",
+        )
+    )
+
+    response = TestClient(app).get("/api/v1/training-studio/team/scenarios")
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["message"] == "Team analytics is unavailable without a team assignment"
+    assert body["error"]["details"]["detail"] == {
+        "code": "TRAINING_TEAM_ASSIGNMENT_REQUIRED",
+        "message": "Team analytics is unavailable without a team assignment",
+    }
+    assert service.scenario_calls == []
+
+
 @pytest.mark.asyncio
-async def test_team_member_names_use_only_the_authenticated_users_group(
+async def test_team_member_names_use_only_the_authenticated_training_team(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
@@ -157,9 +177,9 @@ async def test_team_member_names_use_only_the_authenticated_users_group(
             user_id="newapi:1",
             system_role="admin",
             team_id="newapi:revenue",
-            newapi_group="revenue",
         )
     )
 
-    assert calls[0]["group"] == "revenue"
+    assert calls[0]["group"] is None
+    assert calls[0]["team_id"] == "newapi:revenue"
     assert names == {"newapi:7": "Sales lead"}

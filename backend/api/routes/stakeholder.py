@@ -105,7 +105,7 @@ def _stakeholder_room_scope_for_current_user(
     return StakeholderRoomAccessScope(
         user_id=current_user.user_id,
         team_id=team_id,
-        include_team_scope=current_user.is_admin or current_user.is_leader,
+        include_team_scope=current_user.can_manage_team,
         allowed_team_ids=frozenset([team_id]) if team_id else frozenset(),
         unrestricted=current_user.is_admin,
     )
@@ -117,7 +117,7 @@ def _training_session_access_scope_for_current_user(current_user: CurrentUser):
     return TrainingSessionAccessScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        include_team_scope=current_user.is_admin or current_user.is_leader,
+        include_team_scope=current_user.can_manage_team,
     )
 
 

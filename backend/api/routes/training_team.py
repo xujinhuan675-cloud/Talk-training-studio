@@ -32,16 +32,19 @@ def get_team_training_analytics_service() -> TeamTrainingAnalyticsService:
 def team_analytics_scope_for_current_user(
     current_user: CurrentUser,
 ) -> TrainingSessionAccessScope:
-    if not (current_user.is_admin or current_user.is_leader):
+    if not current_user.can_manage_team:
         raise HTTPException(
             status_code=403,
-            detail="Team analytics requires a team administrator or leader role",
+            detail="Team analytics requires a team owner or administrator role",
         )
     team_id = (current_user.team_id or "").strip()
     if not team_id:
         raise HTTPException(
             status_code=422,
-            detail="Team analytics is unavailable without a team assignment",
+            detail={
+                "code": "TRAINING_TEAM_ASSIGNMENT_REQUIRED",
+                "message": "Team analytics is unavailable without a team assignment",
+            },
         )
     return TrainingSessionAccessScope(
         user_id=current_user.user_id,
@@ -53,14 +56,16 @@ def team_analytics_scope_for_current_user(
 async def team_member_names_for_current_user(
     current_user: CurrentUser,
 ) -> dict[str, str]:
-    """Resolve names only from the authenticated user's NewAPI group."""
+    """Resolve names only from the authenticated user's training team."""
 
-    group = (current_user.newapi_group or "").strip()
-    if not group:
+    team_id = (current_user.team_id or "").strip()
+    if not team_id:
         return {}
+    group = (current_user.newapi_group or "").strip()
     try:
         result = await fetch_newapi_team_members(
-            group=group,
+            group=group or None,
+            team_id=team_id,
             base_url=settings.NEWAPI_BASE_URL,
             client_id=settings.NEWAPI_TALKWISE_CLIENT_ID,
             client_secret=settings.NEWAPI_TALKWISE_CLIENT_SECRET,
@@ -83,8 +88,8 @@ def with_member_names(items, member_names: dict[str, str]):
     ]
 
 
-@router.get("/competencies", summary="List scoped team competency rankings")
-async def list_team_competency_rankings(
+@router.get("/competencies", summary="List scoped team competency observations")
+async def list_team_competency_observations(
     response: Response,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),

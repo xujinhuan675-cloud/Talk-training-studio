@@ -26,6 +26,7 @@ class NewAPIIdentity:
     group: str | None = None
     team_id: str | None = None
     team_name: str | None = None
+    team_role: str | None = None
     quota: int | None = None
     used_quota: int | None = None
     request_count: int | None = None
@@ -174,6 +175,13 @@ def _identity_from_payload(payload: Mapping[str, Any]) -> NewAPIIdentity:
                 data.get("team_name"),
                 user_data.get("team_name"),
                 team_data.get("name") if team_data else None,
+            )
+        ),
+        team_role=_coerce_optional_text(
+            _first_present(
+                data.get("team_role"),
+                user_data.get("team_role"),
+                team_data.get("role") if team_data else None,
             )
         ),
         quota=_coerce_int(
@@ -393,7 +401,8 @@ async def fetch_newapi_identity(
 
 async def fetch_newapi_team_members(
     *,
-    group: str,
+    group: str | None,
+    team_id: str | None = None,
     base_url: str,
     client_id: str,
     client_secret: str | None,
@@ -401,8 +410,9 @@ async def fetch_newapi_team_members(
     limit: int | None = 100,
 ) -> NewAPITeamMembersResult:
     team_group = _coerce_optional_text(group)
-    if not team_group:
-        raise NewAPIAuthError("NewAPI team group is required")
+    training_team_id = _coerce_optional_text(team_id)
+    if not team_group and not training_team_id:
+        raise NewAPIAuthError("NewAPI training team id or legacy group is required")
 
     data = await _post_talkwise_control(
         base_url=base_url,
@@ -412,10 +422,14 @@ async def fetch_newapi_team_members(
         timeout_seconds=timeout_seconds,
         payload={
             "group": team_group,
+            "team_id": training_team_id,
             "limit": _normalize_limit(limit, default=100, maximum=200),
         },
     )
-    team = _team_from_payload(data.get("team"), fallback_group=team_group)
+    team = _team_from_payload(
+        data.get("team"),
+        fallback_group=team_group or training_team_id or "training",
+    )
     members_raw = data.get("members")
     members = [
         _team_member_from_payload(member, team=team)

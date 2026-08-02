@@ -180,7 +180,7 @@ def test_text_runtime_capability_registry_projects_descriptor_only_agent_tool_an
     assert agent_capability["configured"] is True
     assert agent_capability["ready"] is False
     assert agent_capability["status"] == "warning"
-    assert agent_capability["required_roles"] == ["admin", "leader", "staff"]
+    assert agent_capability["required_roles"] == ["admin", "staff"]
     assert agent_capability["metadata"]["descriptor_only"] is True
     assert agent_capability["metadata"]["runtime_started"] is False
     assert agent_capability["metadata"]["dispatcher_boundary"] == "no_generic_agent_dispatcher"

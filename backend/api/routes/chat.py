@@ -28,7 +28,7 @@ from core.response import Response as ApiResponse, success_response
 router = APIRouter(tags=["聊天"])
 
 
-_chat_user = require_system_roles("admin", "leader", "staff")
+_chat_user = require_system_roles("admin", "staff")
 
 
 @router.post(

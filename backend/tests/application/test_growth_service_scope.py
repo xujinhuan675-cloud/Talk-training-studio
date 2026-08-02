@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -85,13 +87,35 @@ def _evaluation(
         report_id=100 + evaluation_id,
         room_id=room_id,
         scores={
-            "persuasion": {
-                "score": score,
-                "evidence": f"evidence-{evaluation_id}",
-                "suggestion": f"suggestion-{evaluation_id}",
-            }
+            "rubric_version": "communication-core-v1",
+            "judge_version": "evidence-anchored-v1",
+            "judge_model": "openai:gpt-test",
+            "status": "ready",
+            "effectiveness": {
+                "rating": round(score),
+                "evidence": [{"message_id": evaluation_id, "quote": "evidence"}],
+                "reason": "observed",
+            },
+            "appropriateness": {
+                "rating": round(score),
+                "evidence": [{"message_id": evaluation_id, "quote": "evidence"}],
+                "reason": "observed",
+            },
+            "competencies": {
+                "attentiveness": {
+                    "opportunity_present": True,
+                    "rating": round(score),
+                    "evidence": [
+                        {
+                            "message_id": f"message-{evaluation_id}",
+                            "quote": f"evidence-{evaluation_id}",
+                        }
+                    ],
+                    "suggestion": f"suggestion-{evaluation_id}",
+                }
+            },
         },
-        overall_score=score,
+        outcome_rating=score,
         created_at=datetime(2026, 8, evaluation_id, tzinfo=UTC),
     )
 
@@ -121,7 +145,7 @@ async def test_dashboard_excludes_foreign_room_evaluations() -> None:
 
     assert dashboard.overview.total_sessions == 1
     assert dashboard.overview.total_evaluations == 1
-    assert dashboard.overview.avg_overall_score == 4.0
+    assert dashboard.overview.avg_outcome_rating == 4.0
     assert [evaluation.room_id for evaluation in dashboard.evaluations] == [1]
 
 
@@ -162,6 +186,68 @@ async def test_profile_card_threshold_uses_only_visible_evaluations() -> None:
         )
     )
 
-    assert card.style_label == ""
     assert card.scores == {}
     assert "至少完成 2 次" in card.summary
+
+
+@pytest.mark.asyncio
+async def test_profile_card_does_not_call_llm_for_two_unobserved_evaluations() -> None:
+    room = _room(1, owner_user_id="newapi:7", owner_team_id="team-a")
+    evaluations = [
+        CompetencyEvaluation(
+            id=index,
+            report_id=100 + index,
+            room_id=1,
+            scores={
+                "rubric_version": "communication-core-v1",
+                "status": "insufficient_evidence",
+                "competencies": {},
+            },
+        )
+        for index in (1, 2)
+    ]
+    llm = SimpleNamespace(generate_structured=AsyncMock())
+    service = GrowthService(
+        uow_factory=_UnitOfWorkFactory([room], evaluations),
+        llm=llm,
+        persona_loader=None,
+    )
+
+    card = await service.generate_profile_card(
+        access_scope=StakeholderRoomAccessScope(
+            user_id="newapi:7",
+            team_id="team-a",
+        )
+    )
+
+    assert card.scores == {}
+    llm.generate_structured.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_profile_card_uses_latest_five_valid_observations_median() -> None:
+    rooms = [_room(1, owner_user_id="newapi:7", owner_team_id="team-a")]
+    ratings = [1, 2, 3, 4, 5, 5]
+    evaluations = [
+        _evaluation(index, room_id=1, score=float(rating))
+        for index, rating in enumerate(ratings, start=1)
+    ]
+    llm = SimpleNamespace(
+        generate_structured=AsyncMock(return_value={"summary": "evidence-backed"})
+    )
+    service = GrowthService(
+        uow_factory=_UnitOfWorkFactory(rooms, evaluations),
+        llm=llm,
+        persona_loader=None,
+    )
+
+    card = await service.generate_profile_card(
+        access_scope=StakeholderRoomAccessScope(
+            user_id="newapi:7",
+            team_id="team-a",
+        )
+    )
+
+    assert card.scores["attentiveness"] == 4.0
+    prompt = llm.generate_structured.call_args.args[0][0].content
+    assert "最近有效观察中位数 4.0/5，共 5 个观察" in prompt

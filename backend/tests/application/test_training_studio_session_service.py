@@ -415,10 +415,10 @@ async def test_session_service_applies_access_scope_to_get_list_and_mutations():
     leader_sessions = await service.list_sessions(access_scope=leader_scope)
 
     assert [session.session_id for session in staff_sessions] == [sales.session_id]
-    assert [session.session_id for session in leader_sessions] == [
+    assert {session.session_id for session in leader_sessions} == {
         sales.session_id,
         peer.session_id,
-    ]
+    }
 
 
 async def test_session_history_filters_before_pagination_and_keep_acl_scope():
@@ -565,7 +565,7 @@ async def test_session_service_selected_branch_metadata_is_not_scoring_completio
                     "branchId": "branch-review",
                     "messageId": "msg-tail",
                 },
-                "evaluation": {"status": "completed", "overall_score": 5},
+                "evaluation": {"status": "completed", "outcome_rating": 5},
                 "growth_report": {"status": "completed", "report_id": "shadow-report"},
             },
         }
@@ -690,7 +690,22 @@ async def test_session_service_progress_uses_competency_evaluation_scores():
     repository = InMemoryTrainingSessionRepository()
     evaluations = FakeEvaluationRepository(
         {
-            501: SimpleNamespace(id=12, overall_score=4.25),
+            501: SimpleNamespace(
+                id=12,
+                outcome_rating=5.0,
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "effectiveness": {"rating": 4},
+                    "appropriateness": {"rating": 5},
+                    "competencies": {
+                        "attentiveness": {
+                            "opportunity_present": True,
+                            "rating": 4,
+                        }
+                    },
+                },
+            ),
         }
     )
     service = TrainingSessionService(
@@ -729,29 +744,107 @@ async def test_session_service_progress_uses_competency_evaluation_scores():
     assert len(progress) == 1
     assert progress[0].training_session_id == "session-1"
     assert progress[0].score_status == "ready"
-    assert progress[0].score == 85
-    assert progress[0].overall_score == 4.25
+    assert progress[0].score == 88
+    assert progress[0].outcome_rating == 4.5
     assert progress[0].evaluation_id == 12
 
 
 async def test_session_service_builds_scoped_competency_radar_from_real_scores():
-    session_ids = iter(["session-1", "session-2", "session-foreign"])
+    session_ids = iter(
+        [
+            "session-1",
+            "session-2",
+            "session-3",
+            "session-4",
+            "session-5",
+            "session-6",
+            "session-foreign",
+        ]
+    )
     repository = InMemoryTrainingSessionRepository()
     evaluations = FakeEvaluationRepository(
         {
             501: SimpleNamespace(
                 scores={
-                    "persuasion": {"score": 4},
-                    "active_listening": 3,
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "competencies": {
+                        "attentiveness": {"opportunity_present": True, "rating": 1},
+                        "expression": {"opportunity_present": True, "rating": 2},
+                        "coordination": {"opportunity_present": False, "rating": None},
+                        "composure": {"opportunity_present": False, "rating": 3},
+                    },
                 }
             ),
             502: SimpleNamespace(
                 scores={
-                    "persuasion": 5,
-                    "emotional_management": {"score": 4},
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "competencies": {
+                        "attentiveness": {"opportunity_present": True, "rating": 5},
+                        "expression": {"opportunity_present": True, "rating": 3},
+                        "coordination": {"opportunity_present": True, "rating": 2},
+                        "composure": {"opportunity_present": True, "rating": 4},
+                    },
                 }
             ),
-            503: SimpleNamespace(scores={"persuasion": 1}),
+            503: SimpleNamespace(
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "competencies": {
+                        "attentiveness": {"opportunity_present": True, "rating": 3},
+                        "expression": {"opportunity_present": True, "rating": 4},
+                        "coordination": {"opportunity_present": True, "rating": 3},
+                        "composure": {"opportunity_present": False, "rating": None},
+                    },
+                }
+            ),
+            504: SimpleNamespace(
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "competencies": {
+                        "attentiveness": {"opportunity_present": True, "rating": 4},
+                        "expression": {"opportunity_present": True, "rating": 4},
+                        "coordination": {"opportunity_present": True, "rating": 4},
+                        "composure": {"opportunity_present": True, "rating": 5},
+                    },
+                }
+            ),
+            505: SimpleNamespace(
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "competencies": {
+                        "attentiveness": {"opportunity_present": True, "rating": 2},
+                        "expression": {"opportunity_present": True, "rating": 5},
+                        "coordination": {"opportunity_present": True, "rating": 5},
+                        "composure": {"opportunity_present": False, "rating": None},
+                    },
+                }
+            ),
+            506: SimpleNamespace(
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "competencies": {
+                        "attentiveness": {"opportunity_present": True, "rating": 5},
+                        "expression": {"opportunity_present": True, "rating": 5},
+                        "coordination": {"opportunity_present": True, "rating": 5},
+                        "composure": {"opportunity_present": True, "rating": 3},
+                    },
+                }
+            ),
+            507: SimpleNamespace(
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "competencies": {
+                        "attentiveness": {"opportunity_present": True, "rating": 5},
+                    },
+                }
+            ),
         }
     )
     service = TrainingSessionService(
@@ -759,14 +852,21 @@ async def test_session_service_builds_scoped_competency_radar_from_real_scores()
         id_factory=lambda: next(session_ids),
     )
 
-    for report_id in ("501", "502"):
-        session = await service.create_session(make_payload())
+    for index, report_id in enumerate(("501", "502", "503", "504", "505", "506")):
+        session = await service.create_session(
+            {
+                **make_payload(),
+                "scenario_template_id": "scenario-a" if index < 2 else "scenario-b",
+            }
+        )
         await service.start_session(session.session_id, room_id="42", access_scope=_scope())
         await service.complete_session(
             session.session_id,
             report_id=report_id,
             access_scope=_scope(),
         )
+        session.completed_at = datetime(2026, 8, 1, index, tzinfo=UTC)
+        await repository.save(session)
 
     foreign_scope = _scope(user_id="user-other", team_id="team-other")
     foreign = await service.create_session(
@@ -783,7 +883,7 @@ async def test_session_service_builds_scoped_competency_radar_from_real_scores()
     )
     await service.complete_session(
         foreign.session_id,
-        report_id="503",
+        report_id="507",
         access_scope=foreign_scope,
     )
 
@@ -793,11 +893,20 @@ async def test_session_service_builds_scoped_competency_radar_from_real_scores()
         team_id=None,
     )
 
-    assert radar.sample_size == 2
-    assert {item.dimension_id: (item.score, item.sample_count) for item in radar.dimensions} == {
-        "persuasion": (90, 2),
-        "emotional_management": (80, 1),
-        "active_listening": (60, 1),
+    assert radar.sample_size == 5
+    assert {
+        item.dimension_id: (
+            item.score,
+            item.sample_count,
+            item.scenario_count,
+            item.state,
+        )
+        for item in radar.dimensions
+    } == {
+        "attentiveness": (75, 5, 2, "stable"),
+        "expression": (75, 5, 2, "stable"),
+        "coordination": (75, 5, 2, "stable"),
+        "composure": (75, 3, 2, "stable"),
     }
 
 
@@ -829,7 +938,7 @@ async def test_session_service_progress_degrades_when_evaluation_lookup_fails():
     assert progress[0].report_id == "501"
     assert progress[0].score_status == "pending"
     assert progress[0].score is None
-    assert progress[0].overall_score is None
+    assert progress[0].outcome_rating is None
     assert progress[0].evaluation_id is None
 
 
@@ -837,7 +946,7 @@ async def test_session_service_progress_degrades_when_evaluation_score_is_invali
     repository = InMemoryTrainingSessionRepository()
     evaluations = FakeEvaluationRepository(
         {
-            501: SimpleNamespace(id=12, overall_score="not-a-number"),
+            501: SimpleNamespace(id=12, outcome_rating="not-a-number"),
         }
     )
     service = TrainingSessionService(
@@ -865,8 +974,145 @@ async def test_session_service_progress_degrades_when_evaluation_score_is_invali
     assert progress[0].status == "completed"
     assert progress[0].score_status == "pending"
     assert progress[0].score is None
-    assert progress[0].overall_score is None
+    assert progress[0].outcome_rating is None
     assert progress[0].evaluation_id is None
+
+
+async def test_session_service_progress_marks_unscorable_outcomes_unavailable():
+    repository = InMemoryTrainingSessionRepository()
+    evaluations = FakeEvaluationRepository(
+        {
+            501: SimpleNamespace(
+                id=12,
+                outcome_rating=5.0,
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "effectiveness": {"rating": None},
+                    "appropriateness": {"rating": None},
+                    "competencies": {
+                        "attentiveness": {
+                            "opportunity_present": False,
+                            "rating": None,
+                        }
+                    },
+                },
+            ),
+        }
+    )
+    service = TrainingSessionService(
+        uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
+        id_factory=lambda: "session-1",
+    )
+
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+        }
+    )
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.complete_session(session.session_id, report_id="501", access_scope=_scope())
+
+    progress = await service.list_scenario_progress(access_scope=_scope())
+
+    assert len(progress) == 1
+    assert progress[0].score_status == "unavailable"
+    assert progress[0].score is None
+    assert progress[0].outcome_rating is None
+    assert progress[0].evaluation_id == 12
+
+
+async def test_session_service_progress_requires_both_observed_outcomes():
+    repository = InMemoryTrainingSessionRepository()
+    evaluations = FakeEvaluationRepository(
+        {
+            501: SimpleNamespace(
+                id=12,
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "ready",
+                    "effectiveness": {"rating": 2},
+                    "appropriateness": {"rating": None},
+                    "competencies": {
+                        "attentiveness": {
+                            "opportunity_present": True,
+                            "rating": 2,
+                        }
+                    },
+                },
+            ),
+        }
+    )
+    service = TrainingSessionService(
+        uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
+        id_factory=lambda: "session-1",
+    )
+
+    session = await service.create_session(
+        {
+            **make_payload(),
+            "scenario_template_id": "new-customer-discount",
+        }
+    )
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.complete_session(session.session_id, report_id="501", access_scope=_scope())
+
+    progress = await service.list_scenario_progress(access_scope=_scope())
+
+    assert progress[0].score_status == "unavailable"
+    assert progress[0].score is None
+    assert progress[0].outcome_rating is None
+    assert progress[0].evaluation_id == 12
+
+
+async def test_session_service_ignores_non_ready_or_legacy_radar_evaluations():
+    session_ids = iter(["session-legacy", "session-insufficient"])
+    repository = InMemoryTrainingSessionRepository()
+    evaluations = FakeEvaluationRepository(
+        {
+            501: SimpleNamespace(
+                scores={
+                    "attentiveness": {"score": 5},
+                    "overall_score": 5,
+                }
+            ),
+            502: SimpleNamespace(
+                scores={
+                    "rubric_version": "communication-core-v1",
+                    "status": "insufficient_evidence",
+                    "competencies": {
+                        "attentiveness": {
+                            "opportunity_present": False,
+                            "rating": None,
+                        }
+                    },
+                }
+            ),
+        }
+    )
+    service = TrainingSessionService(
+        uow_factory=lambda **_: FakeTrainingUow(repository, evaluations),
+        id_factory=lambda: next(session_ids),
+    )
+
+    for report_id in ("501", "502"):
+        session = await service.create_session(make_payload())
+        await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+        await service.complete_session(
+            session.session_id,
+            report_id=report_id,
+            access_scope=_scope(),
+        )
+
+    radar = await service.get_competency_radar(
+        access_scope=_scope(),
+        user_id=None,
+        team_id=None,
+    )
+
+    assert radar.sample_size == 0
+    assert radar.dimensions == []
 
 
 async def test_session_service_can_start_with_explicit_room_id():

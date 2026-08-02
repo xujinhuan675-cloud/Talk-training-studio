@@ -12,7 +12,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$FrontendDir = Join-Path $RepoRoot "frontend"
+$NewApiWebDir = Join-Path $RepoRoot "outside-project\new-api-main\web"
 $BackendDir = Join-Path $RepoRoot "backend"
 
 function Write-Step {
@@ -63,13 +63,13 @@ function Get-BackendPython {
     throw "Python was not found. Create .venv-backend or make python available on PATH."
 }
 
-function Invoke-Npm {
+function Invoke-Bun {
     param(
         [string]$Name,
-        [string[]]$NpmArgs
+        [string[]]$BunArgs
     )
 
-    Invoke-External -Name $Name -WorkingDirectory $FrontendDir -FilePath "npm" -Arguments $NpmArgs
+    Invoke-External -Name $Name -WorkingDirectory $NewApiWebDir -FilePath "bun" -Arguments $BunArgs
 }
 
 function Invoke-Pytest {
@@ -99,14 +99,14 @@ function Invoke-Pytest {
 }
 
 function Invoke-FrontendCore {
-    Invoke-Npm -Name "frontend training-mode tests" -NpmArgs @("run", "test:training-mode")
+    Invoke-Bun -Name "NewAPI training module tests" -BunArgs @("test", "src/features/training")
 
     if ($WithLint) {
-        Invoke-Npm -Name "frontend lint" -NpmArgs @("run", "lint")
+        Invoke-Bun -Name "NewAPI web lint" -BunArgs @("run", "lint")
     }
 
     if ($Full) {
-        Invoke-Npm -Name "frontend build" -NpmArgs @("run", "build")
+        Invoke-Bun -Name "NewAPI web build" -BunArgs @("run", "build")
     }
 }
 

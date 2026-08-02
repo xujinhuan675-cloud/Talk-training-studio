@@ -1,5 +1,5 @@
 # input: Pydantic BaseModel
-# output: CreateChatRoomDTO, ChatRoomDTO, ChatRoomDetailDTO, SendMessageDTO, CreatePersonaDTO(含 organization_id/team_id), UpdatePersonaDTO(含 organization_id/team_id), CreateScenarioDTO, ScenarioDTO, UpdateScenarioDTO, AnalysisReportDTO, AnalysisReportSummaryDTO, AnalysisContentDTO, Organization/Team/Relationship DTOs, Growth/Competency DTOs, BattlePrepGenerateDTO, BattlePrepResultDTO, StartBattleDTO, CheatSheetDTO, ProfileCardDTO, PersonaBuildRequestDTO (Story 2.5), PersonaV2DTO/PersonaPatchV2DTO + 5-layer sub-DTOs (Story 2.7), CreateDefenseSessionDTO, DefenseSessionDTO, DefenseReportDTO
+# output: CreateChatRoomDTO, ChatRoomDTO, ChatRoomDetailDTO, SendMessageDTO, CreatePersonaDTO(含 organization_id/team_id), UpdatePersonaDTO(含 organization_id/team_id), CreateScenarioDTO, ScenarioDTO, UpdateScenarioDTO, AnalysisReportDTO, AnalysisReportSummaryDTO, AnalysisContentDTO, Organization/Team/Relationship DTOs, communication-core-v1 Growth/Competency DTOs, BattlePrepGenerateDTO, BattlePrepResultDTO, StartBattleDTO, CheatSheetDTO, ProfileCardDTO, PersonaBuildRequestDTO (Story 2.5), PersonaV2DTO/PersonaPatchV2DTO + 5-layer sub-DTOs (Story 2.7), CreateDefenseSessionDTO, DefenseSessionDTO, DefenseReportDTO
 # output-update: AnalysisContentDTO also carries Training Studio content_delivery and camera_presence placeholders.
 # owner: wanhua.gu
 # pos: 应用层 - 聊天室、消息、角色、场景数据传输对象；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
@@ -470,12 +470,29 @@ class UpdateRelationshipDTO(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class DimensionScoreDTO(BaseModel):
-    """A single dimension score from LLM-as-Judge evaluation."""
+class EvidenceReferenceDTO(BaseModel):
+    """A verified reference to an original user message."""
 
-    score: int = Field(..., ge=1, le=5)
-    evidence: str = Field(default="")
+    message_id: int | str
+    quote: str
+
+
+class DimensionScoreDTO(BaseModel):
+    """An evidence-anchored observation for one communication competency."""
+
+    opportunity_present: bool = False
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    evidence: list[EvidenceReferenceDTO] = Field(default_factory=list)
+    reason: str = Field(default="")
     suggestion: str = Field(default="")
+
+
+class OutcomeScoreDTO(BaseModel):
+    """An evidence-anchored observation of a single-session task outcome."""
+
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    evidence: list[EvidenceReferenceDTO] = Field(default_factory=list)
+    reason: str = Field(default="")
 
 
 class CompetencyEvaluationDTO(BaseModel):
@@ -487,8 +504,14 @@ class CompetencyEvaluationDTO(BaseModel):
     report_id: int
     room_id: int
     room_name: str = ""
-    scores: dict[str, DimensionScoreDTO] = Field(default_factory=dict)
-    overall_score: float
+    rubric_version: str = "communication-core-v1"
+    judge_version: str = "evidence-anchored-v1"
+    judge_model: Optional[str] = None
+    status: str = "ready"
+    effectiveness: OutcomeScoreDTO = Field(default_factory=OutcomeScoreDTO)
+    appropriateness: OutcomeScoreDTO = Field(default_factory=OutcomeScoreDTO)
+    competencies: dict[str, DimensionScoreDTO] = Field(default_factory=dict)
+    outcome_rating: Optional[float] = None
     created_at: Optional[datetime] = None
 
 
@@ -497,15 +520,15 @@ class GrowthOverviewDTO(BaseModel):
 
     total_sessions: int = 0
     total_evaluations: int = 0
-    avg_overall_score: float = 0.0
-    latest_score: float = 0.0
+    avg_outcome_rating: Optional[float] = None
+    latest_outcome_rating: Optional[float] = None
 
 
 class DimensionTrendPointDTO(BaseModel):
     """A single point in a dimension's trend line."""
 
     date: Optional[datetime] = None
-    score: int = 0
+    score: int = Field(..., ge=1, le=5)
 
 
 class GrowthDashboardDTO(BaseModel):
@@ -581,18 +604,9 @@ class CheatSheetDTO(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ProfileTag(BaseModel):
-    """A tag on the profile card."""
-
-    text: str
-    type: str = Field(..., pattern=r"^(strength|weakness|trait)$")
-
-
 class ProfileCardDTO(BaseModel):
-    """Output: profile card data."""
+    """Evidence-backed communication profile without personality labels."""
 
-    style_label: str
-    tags: list[ProfileTag]
     summary: str
     scores: dict[str, float]
 

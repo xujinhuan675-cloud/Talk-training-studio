@@ -86,7 +86,7 @@ def user_can_access_owned_metadata(
     if owner_user_id and owner_user_id == current_user.user_id:
         return True
     if (
-        (current_user.is_admin or current_user.is_leader)
+        current_user.can_manage_team
         and owner_team_id
         and owner_team_id == current_user.team_id
     ):
@@ -102,7 +102,7 @@ def owned_metadata_scope_for_current_user(
     return OwnedMetadataScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        include_team_scope=current_user.is_admin or current_user.is_leader,
+        include_team_scope=current_user.can_manage_team,
         allow_unscoped=False,
     )
 

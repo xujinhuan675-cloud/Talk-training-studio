@@ -348,13 +348,13 @@ async def test_confirm_presigned_upload_by_key_uses_current_user_scope() -> None
         response = await client.post(
             "/api/v1/storage/complete",
             json={"key": "training_material/17.txt"},
-            headers={"X-Mock-User": "leader"},
+            headers={"X-Mock-User": "sales"},
         )
 
     assert response.status_code == 200
     get_scope = fake.get_by_key_raw_calls[0]["metadata_scope"]
     confirm_scope = fake.complete_calls[0]["metadata_scope"]
-    assert get_scope.user_id == "user-leader-001"
+    assert get_scope.user_id == "user-sales-001"
     assert get_scope.team_id == "team-revenue"
     assert get_scope.include_team_scope is False
     assert get_scope.allow_unscoped is False

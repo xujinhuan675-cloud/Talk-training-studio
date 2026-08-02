@@ -46,6 +46,9 @@ class CompetencyEvaluator(Protocol):
     async def evaluate_competency(
         self,
         report_id: int,
+        *,
+        evaluation_context: Mapping[str, object] | None = None,
+        task_context: Mapping[str, object] | None = None,
     ) -> CompetencyEvaluation | None: ...
 
 
@@ -122,7 +125,11 @@ class MessageTreeTrainingCompletionService:
             tail_id=tail_id,
             access_scope=session_access_scope,
         )
-        evaluation, evaluation_metadata = await self._evaluate_report(report)
+        evaluation, evaluation_metadata = await self._evaluate_report(
+            report,
+            session=session,
+            path=evaluation_path,
+        )
         completion_metadata = _completion_ready_metadata(
             report_id=report.id,
             projection_room_id=projection_room_id,
@@ -322,10 +329,17 @@ class MessageTreeTrainingCompletionService:
     async def _evaluate_report(
         self,
         report: AnalysisReportDTO,
+        *,
+        session: TrainingSession,
+        path: Sequence[MessageDTO_Agent],
     ) -> tuple[CompetencyEvaluation | None, dict[str, object]]:
         report_id = int(report.id)
         try:
-            evaluation = await self._growth_service.evaluate_competency(report_id)
+            evaluation = await self._growth_service.evaluate_competency(
+                report_id,
+                evaluation_context=_evaluation_context(path),
+                task_context=_task_evaluation_context(session),
+            )
         except Exception as exc:
             return None, {
                 "status": "failed",
@@ -342,7 +356,7 @@ class MessageTreeTrainingCompletionService:
         return evaluation, {
             "status": "ready",
             "evaluationId": _optional_text(evaluation.id),
-            "overallScore": evaluation.overall_score,
+            "assessment": dict(evaluation.scores or {}),
             "retryable": False,
         }
 
@@ -630,6 +644,43 @@ def _path_evidence(message: MessageDTO_Agent) -> dict[str, object]:
         "branchId": message.branch_id,
         "parentMessageId": message.parent_message_id,
         "createdAt": message.created_at.isoformat(),
+    }
+
+
+def _evaluation_context(
+    path: Sequence[MessageDTO_Agent],
+) -> dict[str, object]:
+    return {
+        "source": "server_selected_root_to_tail",
+        "messages": [
+            {
+                "message_id": message.public_id,
+                "speaker": "learner" if message.role.strip().lower() == "user" else "counterpart",
+                "content": message.content,
+            }
+            for message in path
+            if _optional_text(message.public_id)
+            and message.role.strip().lower() in {"user", "assistant"}
+        ],
+    }
+
+
+def _task_evaluation_context(session: TrainingSession) -> dict[str, object]:
+    metadata = session.task_config.metadata or {}
+    scenario = metadata.get("scenario_training")
+    scenario = scenario if isinstance(scenario, Mapping) else {}
+    training_points = _text_list(
+        scenario.get("training_points")
+        or scenario.get("trainingPoints")
+        or metadata.get("training_points")
+        or metadata.get("trainingPoints")
+    )
+    return {
+        "scenario_id": session.scenario_template_id,
+        "category": session.task_config.category.value,
+        "difficulty": session.task_config.difficulty.value,
+        "learner_role": session.task_config.role,
+        "training_goals": training_points,
     }
 
 

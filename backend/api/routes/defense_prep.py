@@ -23,7 +23,7 @@ def _access_scope_for_current_user(current_user: CurrentUser) -> DefenseSessionA
     return DefenseSessionAccessScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        include_team_scope=current_user.is_admin or current_user.is_leader,
+        include_team_scope=current_user.can_manage_team,
         unrestricted=current_user.is_admin,
     )
 

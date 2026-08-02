@@ -68,6 +68,7 @@ def current_user_from_session_cookie(cookie_value: str | None) -> CurrentUser | 
             system_role=system_role,
             team_id=_optional_text(user.get("team_id")),
             team_name=_optional_text(user.get("team_name")),
+            team_role=_optional_text(user.get("team_role")),
             username=_optional_text(user.get("username")),
             display_name=_optional_text(user.get("display_name")),
             business_role=_optional_text(user.get("business_role")),
@@ -150,7 +151,7 @@ def _normalize_product_system_role(value: object | None) -> str | None:
     role = _optional_text(value)
     if role in {"admin", "root"}:
         return "admin"
-    if role in {"leader", "staff"}:
+    if role == "staff":
         return "staff"
     return None
 

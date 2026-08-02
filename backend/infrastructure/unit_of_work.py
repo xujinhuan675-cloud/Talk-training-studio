@@ -49,6 +49,9 @@ from infrastructure.repositories.defense_session_repository import (
 from infrastructure.repositories.training_session_repository import (
     SQLAlchemyTrainingSessionRepository,
 )
+from infrastructure.repositories.training_growth_repository import (
+    SQLAlchemyTrainingPointEventRepository,
+)
 
 
 class SQLAlchemyUnitOfWork(AbstractUnitOfWork):
@@ -116,6 +119,10 @@ class SQLAlchemyUnitOfWork(AbstractUnitOfWork):
         self.register_repository("defense_session_repository", self.defense_session_repository)
         self.training_session_repository = SQLAlchemyTrainingSessionRepository(self.session)
         self.register_repository("training_session_repository", self.training_session_repository)
+        self.training_point_event_repository = SQLAlchemyTrainingPointEventRepository(self.session)
+        self.register_repository(
+            "training_point_event_repository", self.training_point_event_repository
+        )
         # 仅在非只读模式下显式开启事务
         if not self._readonly:
             self._transaction = await self.session.begin()
@@ -154,6 +161,7 @@ class SQLAlchemyUnitOfWork(AbstractUnitOfWork):
             self.stakeholder_persona_repository = None  # type: ignore[assignment]
             self.defense_session_repository = None  # type: ignore[assignment]
             self.training_session_repository = None  # type: ignore[assignment]
+            self.training_point_event_repository = None  # type: ignore[assignment]
             self._repositories.clear()
 
     async def commit(self) -> None:

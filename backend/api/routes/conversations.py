@@ -42,8 +42,8 @@ from core.response import Response as ApiResponse
 from core.response import paginated_response, success_response
 
 router = APIRouter(tags=["Conversations"])
-_conversation_user = require_system_roles("admin", "leader", "staff")
-_agent_config_user = require_system_roles("admin", "leader", "staff")
+_conversation_user = require_system_roles("admin", "staff")
+_agent_config_user = require_system_roles("admin", "staff")
 
 
 def _conversation_read_scope(current_user: CurrentUser):

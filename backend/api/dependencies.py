@@ -45,6 +45,7 @@ class CurrentUser:
     system_role: str
     team_id: str | None = None
     team_name: str | None = None
+    team_role: str | None = None
     username: str | None = None
     display_name: str | None = None
     business_role: str | None = None
@@ -62,8 +63,8 @@ class CurrentUser:
         return self.system_role == "admin"
 
     @property
-    def is_leader(self) -> bool:
-        return False
+    def can_manage_team(self) -> bool:
+        return self.is_admin or self.team_role in {"owner", "admin"}
 
     @property
     def is_staff(self) -> bool:
@@ -83,13 +84,6 @@ _MOCK_USERS: dict[str, CurrentUser] = {
         system_role="admin",
         business_role="operations",
         team_id="team-ops",
-    ),
-    "leader": CurrentUser(
-        user_id="user-leader-001",
-        username="leader",
-        system_role="staff",
-        business_role="sales",
-        team_id="team-revenue",
     ),
     "sales": CurrentUser(
         user_id="user-sales-001",
@@ -157,8 +151,9 @@ def _current_user_from_newapi_identity(identity: NewAPIIdentity) -> CurrentUser:
         display_name=identity.display_name,
         system_role="admin" if is_admin else "staff",
         business_role=settings.NEWAPI_DEFAULT_BUSINESS_ROLE,
-        team_id=team_id or (f"newapi:{group}" if group else settings.NEWAPI_DEFAULT_TEAM_ID),
-        team_name=team_name or group,
+        team_id=team_id,
+        team_name=team_name,
+        team_role=_coerce_optional_text(identity.team_role),
         newapi_group=group,
         quota_remaining=quota_remaining,
         quota_used=quota_used,
@@ -229,10 +224,6 @@ async def get_current_user(
     q_system_role: str | None = Query(default=None, alias="auth_role"),
     q_team_id: str | None = Query(default=None, alias="auth_team_id"),
 ) -> CurrentUser:
-    session_user = current_user_from_session_cookie(talkwise_session)
-    if session_user is not None:
-        return session_user
-
     bearer_token = extract_bearer_token(authorization)
     if bearer_token:
         try:
@@ -252,19 +243,27 @@ async def get_current_user(
             ):
                 raise
 
+    # The NewAPI bearer identity is authoritative for same-origin module
+    # requests. The signed cookie remains a compatibility fallback, but must
+    # not preserve stale team membership after an administrator changes it.
+    session_user = current_user_from_session_cookie(talkwise_session)
+    if session_user is not None:
+        return session_user
+
     if settings.NEWAPI_AUTH_ENABLED and not settings.NEWAPI_AUTH_ALLOW_MOCK_FALLBACK:
         raise HTTPException(status_code=401, detail="Access token required")
 
-    mock_key = (
-        _coerce_optional_text(x_mock_user)
-        or _coerce_optional_text(q_mock_user)
-        or _coerce_optional_text(x_user_id)
-        or _coerce_optional_text(q_user_id)
-    )
-    if mock_key in _MOCK_USERS:
-        return _MOCK_USERS[mock_key]
-    if mock_key in _MOCK_USERS_BY_USER_ID:
-        base = _MOCK_USERS_BY_USER_ID[mock_key]
+    named_mock_key = _coerce_optional_text(x_mock_user) or _coerce_optional_text(q_mock_user)
+    if named_mock_key:
+        if named_mock_key in _MOCK_USERS:
+            return _MOCK_USERS[named_mock_key]
+        if named_mock_key not in _MOCK_USERS_BY_USER_ID:
+            raise HTTPException(status_code=401, detail="Unknown mock user")
+
+    explicit_user_id = _coerce_optional_text(x_user_id) or _coerce_optional_text(q_user_id)
+    known_user_id = named_mock_key or explicit_user_id
+    if known_user_id in _MOCK_USERS_BY_USER_ID:
+        base = _MOCK_USERS_BY_USER_ID[known_user_id]
         return CurrentUser(
             user_id=base.user_id,
             username=base.username,
@@ -289,16 +288,13 @@ async def get_current_user(
         role = "staff"
     else:
         business_role = None
-    if role == "leader":
-        role = "staff"
     if role is not None and role not in _SYSTEM_ROLES:
         raise HTTPException(status_code=401, detail="Unsupported mock user role")
 
-    user_id = _coerce_optional_text(x_user_id) or _coerce_optional_text(q_user_id)
-    if user_id:
+    if explicit_user_id:
         return CurrentUser(
-            user_id=user_id,
-            username=user_id,
+            user_id=explicit_user_id,
+            username=explicit_user_id,
             system_role=role or "staff",
             business_role=business_role,
             team_id=_coerce_optional_text(x_team_id) or _coerce_optional_text(q_team_id),
@@ -649,7 +645,7 @@ def persona_access_scope_for(current_user: CurrentUser):
     return PersonaAccessScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        can_manage_team=current_user.is_admin or current_user.is_leader,
+        can_manage_team=current_user.can_manage_team,
         unrestricted=current_user.is_admin,
     )
 

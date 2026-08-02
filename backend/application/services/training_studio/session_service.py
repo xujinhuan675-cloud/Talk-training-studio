@@ -7,6 +7,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
+from statistics import median
 from typing import Literal
 from uuid import uuid4
 
@@ -14,7 +15,10 @@ from pydantic import BaseModel, ConfigDict
 
 from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
-from domain.stakeholder.competency_entity import COMPETENCY_DIMENSIONS
+from domain.stakeholder.competency_entity import (
+    COMMUNICATION_RUBRIC_VERSION,
+    COMPETENCY_DIMENSIONS,
+)
 from domain.training_studio.catalog import TrainingTaskConfig
 from domain.training_studio.session import (
     TrainingSession,
@@ -32,6 +36,10 @@ from domain.training_studio.session_repository import (
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
 
 logger = logging.getLogger(__name__)
+
+_RADAR_OBSERVATION_LIMIT = 5
+_STABLE_RADAR_SAMPLE_COUNT = 3
+_STABLE_RADAR_SCENARIO_COUNT = 2
 
 _FORK_RESET_TASK_METADATA_TOKENS = {
     "authscope",
@@ -127,8 +135,8 @@ class ScenarioTrainingProgressDTO(BaseModel):
     status: str
     failure_reason: str | None = None
     score: int | None = None
-    score_status: Literal["ready", "pending"] = "pending"
-    overall_score: float | None = None
+    score_status: Literal["ready", "pending", "unavailable"] = "pending"
+    outcome_rating: float | None = None
     evaluation_id: int | None = None
     last_practiced_at: datetime | None = None
     training_session_id: str
@@ -148,6 +156,8 @@ class TrainingCompetencyRadarDimensionDTO(BaseModel):
     dimension_id: str
     score: int
     sample_count: int
+    scenario_count: int
+    state: Literal["exploring", "stable"]
 
 
 class TrainingCompetencyRadarDTO(BaseModel):
@@ -652,11 +662,13 @@ class TrainingSessionService:
         user_id: str | None,
         team_id: str | None,
         access_scope: TrainingSessionAccessScope,
-        recent_limit: int = 10,
     ) -> TrainingCompetencyRadarDTO:
+        """Estimate each core competency from its five most recent valid observations."""
+
         scope = _require_access_scope(access_scope)
         user_id = self._normalize_optional_text(user_id)
         team_id = self._normalize_optional_text(team_id)
+        observation_limit = _RADAR_OBSERVATION_LIMIT
         if self._uow_factory is None:
             return TrainingCompetencyRadarDTO(sample_size=0, dimensions=[])
 
@@ -675,49 +687,79 @@ class TrainingSessionService:
             )
             evaluation_lookup = uow.competency_evaluation_repository.get_by_report_id
 
-            totals = {dimension: 0.0 for dimension in COMPETENCY_DIMENSIONS}
-            counts = {dimension: 0 for dimension in COMPETENCY_DIMENSIONS}
-            sample_size = 0
+            observations: dict[str, list[tuple[int, str | None]]] = {
+                dimension: [] for dimension in COMPETENCY_DIMENSIONS
+            }
             for session in sorted(
                 sessions,
                 key=self._session_sort_time,
                 reverse=True,
             ):
-                if (
-                    sample_size >= recent_limit
-                    or session.status != TrainingSessionStatus.COMPLETED
-                    or not session.report_id
-                ):
+                if session.status != TrainingSessionStatus.COMPLETED or not session.report_id:
                     continue
+                if all(
+                    len(observations[dimension]) >= observation_limit
+                    for dimension in COMPETENCY_DIMENSIONS
+                ):
+                    break
                 try:
                     report_id = int(session.report_id)
                 except (TypeError, ValueError):
                     continue
-                evaluation = await evaluation_lookup(report_id)
+                try:
+                    evaluation = await evaluation_lookup(report_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to resolve competency evaluation for radar",
+                        exc_info=True,
+                        extra={
+                            "training_session_id": session.session_id,
+                            "report_id": session.report_id,
+                        },
+                    )
+                    continue
                 if evaluation is None:
                     continue
 
-                sample_size += 1
-                scores = getattr(evaluation, "scores", {})
-                if not isinstance(scores, Mapping):
+                payload = self._communication_core_payload(evaluation)
+                if payload is None:
                     continue
+                competencies = payload["competencies"]
                 for dimension in COMPETENCY_DIMENSIONS:
-                    normalized = self._normalize_competency_score(scores.get(dimension))
-                    if normalized is None:
+                    dimension_observations = observations[dimension]
+                    if len(dimension_observations) >= observation_limit:
                         continue
-                    totals[dimension] += normalized
-                    counts[dimension] += 1
+                    rating = self._communication_core_rating(
+                        competencies.get(dimension),
+                        require_opportunity=True,
+                    )
+                    if rating is None:
+                        continue
+                    dimension_observations.append((rating, session.scenario_template_id))
 
         return TrainingCompetencyRadarDTO(
-            sample_size=sample_size,
+            sample_size=max(
+                (len(dimension_observations) for dimension_observations in observations.values()),
+                default=0,
+            ),
             dimensions=[
                 TrainingCompetencyRadarDimensionDTO(
                     dimension_id=dimension,
-                    score=round(totals[dimension] / counts[dimension]),
-                    sample_count=counts[dimension],
+                    score=self._communication_rating_to_percent(
+                        median(rating for rating, _ in observations[dimension])
+                    ),
+                    sample_count=len(observations[dimension]),
+                    scenario_count=len(
+                        {
+                            scenario_id
+                            for _, scenario_id in observations[dimension]
+                            if scenario_id is not None
+                        }
+                    ),
+                    state=self._radar_dimension_state(observations[dimension]),
                 )
                 for dimension in COMPETENCY_DIMENSIONS
-                if counts[dimension] > 0
+                if observations[dimension]
             ],
         )
 
@@ -804,7 +846,7 @@ class TrainingSessionService:
             failure_reason=session.failure_reason,
             score=score_data["score"],
             score_status=score_data["score_status"],
-            overall_score=score_data["overall_score"],
+            outcome_rating=score_data["outcome_rating"],
             evaluation_id=score_data["evaluation_id"],
             last_practiced_at=session.completed_at or session.started_at,
             training_session_id=session.session_id,
@@ -935,49 +977,102 @@ class TrainingSessionService:
                     )
                     evaluation = None
                 if evaluation is not None:
-                    try:
-                        overall_score = float(getattr(evaluation, "overall_score", 0.0) or 0.0)
-                    except (TypeError, ValueError):
-                        logger.warning(
-                            "Ignoring invalid competency evaluation score for scenario progress",
-                            extra={
-                                "training_session_id": session.session_id,
-                                "report_id": session.report_id,
-                                "evaluation_id": getattr(evaluation, "id", None),
-                            },
-                        )
-                    else:
+                    raw_scores = getattr(evaluation, "scores", None)
+                    if (
+                        isinstance(raw_scores, Mapping)
+                        and raw_scores.get("rubric_version")
+                        == COMMUNICATION_RUBRIC_VERSION
+                        and raw_scores.get("status") == "insufficient_evidence"
+                    ):
                         return {
-                            "score": self._overall_score_to_percent(overall_score),
+                            "score": None,
+                            "score_status": "unavailable",
+                            "outcome_rating": None,
+                            "evaluation_id": getattr(evaluation, "id", None),
+                        }
+                    payload = self._communication_core_payload(evaluation)
+                    if payload is not None:
+                        outcome_ratings = [
+                            rating
+                            for rating in (
+                                self._communication_core_rating(payload.get("effectiveness")),
+                                self._communication_core_rating(payload.get("appropriateness")),
+                            )
+                            if rating is not None
+                        ]
+                    else:
+                        outcome_ratings = []
+                    if len(outcome_ratings) == 2:
+                        outcome_rating = sum(outcome_ratings) / len(outcome_ratings)
+                        return {
+                            "score": self._communication_rating_to_percent(outcome_rating),
                             "score_status": "ready",
-                            "overall_score": overall_score,
+                            "outcome_rating": outcome_rating,
+                            "evaluation_id": getattr(evaluation, "id", None),
+                        }
+                    if payload is not None:
+                        return {
+                            "score": None,
+                            "score_status": "unavailable",
+                            "outcome_rating": None,
                             "evaluation_id": getattr(evaluation, "id", None),
                         }
 
         return {
             "score": None,
             "score_status": "pending",
-            "overall_score": None,
+            "outcome_rating": None,
             "evaluation_id": None,
         }
 
-    def _overall_score_to_percent(self, overall_score: float) -> int:
-        return max(0, min(100, round(overall_score * 20)))
-
-    def _normalize_competency_score(self, value: object) -> int | None:
-        if isinstance(value, Mapping):
-            value = value.get("score")
-        else:
-            value = getattr(value, "score", value)
-        try:
-            score = float(value)
-        except (TypeError, ValueError):
+    def _communication_core_payload(self, evaluation: object) -> Mapping[str, object] | None:
+        scores = getattr(evaluation, "scores", None)
+        if not isinstance(scores, Mapping):
             return None
-        if 1 <= score <= 5:
-            return round(score * 20)
-        if 0 <= score <= 100:
-            return round(score)
+        if scores.get("rubric_version") != COMMUNICATION_RUBRIC_VERSION:
+            return None
+        if scores.get("status") != "ready":
+            return None
+        competencies = scores.get("competencies")
+        if not isinstance(competencies, Mapping):
+            return None
+        return scores
+
+    def _communication_core_rating(
+        self,
+        value: object,
+        *,
+        require_opportunity: bool = False,
+    ) -> int | None:
+        if not isinstance(value, Mapping):
+            return None
+        if require_opportunity and value.get("opportunity_present") is not True:
+            return None
+        value = value.get("rating")
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        if 1 <= value <= 5:
+            return value
         return None
+
+    def _communication_rating_to_percent(self, rating: float) -> int:
+        """Map anchored ordinal ratings so the lowest level is zero, not twenty."""
+
+        return max(0, min(100, round((rating - 1) * 25)))
+
+    def _radar_dimension_state(
+        self,
+        observations: list[tuple[int, str | None]],
+    ) -> Literal["exploring", "stable"]:
+        scenario_count = len(
+            {scenario_id for _, scenario_id in observations if scenario_id is not None}
+        )
+        if (
+            len(observations) >= _STABLE_RADAR_SAMPLE_COUNT
+            and scenario_count >= _STABLE_RADAR_SCENARIO_COUNT
+        ):
+            return "stable"
+        return "exploring"
 
     def _is_later_session(self, candidate: TrainingSession, current: TrainingSession) -> bool:
         candidate_time = self._session_sort_time(candidate)

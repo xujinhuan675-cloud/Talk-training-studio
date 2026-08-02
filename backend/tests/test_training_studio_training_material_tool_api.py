@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_file_asset_service
+from api.dependencies import CurrentUser, get_current_user, get_file_asset_service
 from api.routes.training_studio import router
 from application.dto import FileAssetDTO
 from domain.common.exceptions import FileAssetNotFoundException
@@ -140,10 +140,16 @@ def _matches_metadata_scope(
     return False
 
 
-def _client(fake_service: _FakeFileAssetService) -> TestClient:
+def _client(
+    fake_service: _FakeFileAssetService,
+    *,
+    current_user: CurrentUser | None = None,
+) -> TestClient:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_file_asset_service] = lambda: fake_service
+    if current_user is not None:
+        app.dependency_overrides[get_current_user] = lambda: current_user
     return TestClient(app)
 
 
@@ -185,7 +191,7 @@ def test_training_material_tool_consumer_lists_scoped_safe_materials() -> None:
     assert fake.read_calls == []
 
 
-def test_training_material_tool_consumer_legacy_leader_uses_own_scope() -> None:
+def test_training_material_tool_consumer_team_admin_uses_team_scope() -> None:
     fake = _FakeFileAssetService(
         assets=[
             _material_asset(
@@ -198,19 +204,28 @@ def test_training_material_tool_consumer_legacy_leader_uses_own_scope() -> None:
             )
         ]
     )
-    client = _client(fake)
+    client = _client(
+        fake,
+        current_user=CurrentUser(
+            user_id="user-manager-001",
+            username="manager",
+            system_role="staff",
+            team_id="team-revenue",
+            team_role="admin",
+        ),
+    )
 
     response = client.get(
         "/api/v1/training-studio/tool-consumers/training-materials",
-        headers={"X-Mock-User": "leader"},
     )
 
     assert response.status_code == 200
     scope = fake.list_calls[0]["metadata_scope"]
-    assert scope.user_id == "user-leader-001"
+    assert scope.user_id == "user-manager-001"
     assert scope.team_id == "team-revenue"
-    assert scope.include_team_scope is False
+    assert scope.include_team_scope is True
     assert scope.allow_unscoped is False
+    assert response.json()["data"]["total"] == 1
 
 
 def test_training_material_tool_consumer_list_filters_materials_outside_scope() -> None:

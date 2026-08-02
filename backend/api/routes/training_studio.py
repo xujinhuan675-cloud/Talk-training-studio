@@ -105,6 +105,9 @@ from application.services.training_studio.guidance_persistence_service import (
     guidance_persistence_failure,
     read_selected_path_guidance_history,
 )
+from application.services.training_studio.growth_ledger_service import (
+    TrainingGrowthLedgerService,
+)
 from application.services.training_studio.realtime_pipeline import (
     FINAL_TRANSCRIPT_EVENT_TYPES,
     RealtimeTranscriptPersistenceSink,
@@ -1053,6 +1056,10 @@ def get_training_session_service() -> TrainingSessionService:
     return _training_session_service
 
 
+def get_training_growth_ledger_service() -> TrainingGrowthLedgerService:
+    return TrainingGrowthLedgerService()
+
+
 def get_live_guidance_service() -> TrainingLiveGuidanceService:
     llm = get_stakeholder_llm_client()
     if llm is None:
@@ -1408,7 +1415,7 @@ def _training_session_access_scope_for_current_user(
     return TrainingSessionAccessScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        include_team_scope=current_user.is_admin or current_user.is_leader,
+        include_team_scope=current_user.can_manage_team,
     )
 
 
@@ -1504,7 +1511,7 @@ def _stakeholder_room_scope_for_current_user(
     return StakeholderRoomAccessScope(
         user_id=current_user.user_id,
         team_id=team_id,
-        include_team_scope=current_user.is_admin or current_user.is_leader,
+        include_team_scope=current_user.can_manage_team,
         allowed_team_ids=frozenset([team_id]) if team_id else frozenset(),
         # Administrative read access must not make a newly created room
         # ownerless. The session remains owned by the authenticated creator.
@@ -3620,7 +3627,7 @@ def _material_review_session_access_scope_for_current_user(
     return TrainingSessionAccessScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
-        include_team_scope=current_user.is_admin or current_user.is_leader,
+        include_team_scope=current_user.can_manage_team,
     )
 
 
@@ -3890,7 +3897,6 @@ async def get_scenario_training_progress_summary(
 async def get_training_competency_radar(
     user_id: str | None = Query(default=None),
     team_id: str | None = Query(default=None),
-    sample_size: int = Query(default=10, ge=1, le=50),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_team_id: str | None = Header(default=None, alias="X-Team-Id"),
     svc: TrainingSessionService = Depends(get_training_session_service),
@@ -3905,7 +3911,6 @@ async def get_training_competency_radar(
         user_id=scope.user_id,
         team_id=scope.team_id,
         access_scope=_training_session_access_scope_for_current_user(current_user),
-        recent_limit=sample_size,
     )
     return success_response(data=radar.model_dump(mode="json"))
 
@@ -4345,6 +4350,21 @@ async def complete_training_session(
     return success_response(data=_session_to_dict(completed))
 
 
+@router.get("/growth/summary", summary="Get persisted Training Points and level")
+async def get_training_growth_summary(
+    growth_ledger: TrainingGrowthLedgerService = Depends(
+        get_training_growth_ledger_service
+    ),
+    uow_factory: Callable[..., AbstractUnitOfWork] = Depends(
+        get_training_runtime_uow_factory
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    async with uow_factory() as uow:
+        summary = await growth_ledger.summary(uow, user_id=current_user.user_id)
+    return success_response(data=summary.to_dict())
+
+
 @router.post("/sessions/{session_id}/fail", summary="Fail a Training Studio session")
 async def fail_training_session(
     session_id: str,
@@ -4435,7 +4455,7 @@ async def get_training_session_report(
 
 @router.get("/realtime/capabilities", summary="Get realtime provider capabilities")
 async def get_realtime_capabilities(
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     return success_response(data=_realtime_capabilities_response())
 
@@ -4763,7 +4783,7 @@ async def get_scenario_templates(
     scenario_config_svc: TrainingScenarioConfigService = Depends(
         get_training_scenario_config_service
     ),
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     config = scenario_config_svc.get_config()
     templates = _scenario_templates_from_config(config)
@@ -4782,7 +4802,7 @@ async def create_review_assistant_material_review(
     reader_svc: AnalysisReaderService = Depends(get_analysis_reader_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     llm: LLMPort | None = Depends(get_stakeholder_llm_client),
-    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     material_ids = normalize_material_review_ids(body.material_ids, body.selected_material_ids)
     if not material_ids:
@@ -4843,7 +4863,7 @@ async def list_training_material_tool_consumer_materials(
     limit: int = Query(20, ge=1, le=100),
     include_content_excerpt: bool = Query(False),
     file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
-    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     service = _training_material_tool_consumer(file_assets)
     try:
@@ -4866,7 +4886,7 @@ async def get_training_material_tool_consumer_material(
     asset_id: int,
     include_content_excerpt: bool = Query(False),
     file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
-    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     service = _training_material_tool_consumer(file_assets)
     try:
@@ -4886,7 +4906,7 @@ async def get_training_material_tool_consumer_material(
 async def get_llm_registry(
     llm: LLMPort | None = Depends(get_stakeholder_llm_client),
     conversation_svc: ConversationApplicationService = Depends(get_conversation_service),
-    current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     agent_configs = await _agent_config_inventory_for_user(conversation_svc, current_user)
     return success_response(
@@ -4901,7 +4921,7 @@ async def get_llm_registry(
 
 @router.get("/voice-config", summary="Get voice preference configuration")
 async def get_voice_config(
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     return success_response(data=_voice_config_response().model_dump(mode="json"))
 
@@ -4909,7 +4929,7 @@ async def get_voice_config(
 @router.put("/voice-config", summary="Save voice preference configuration")
 async def save_voice_config(
     body: VoicePreferenceUpdateDTO,
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader")),
+    _current_user: CurrentUser = Depends(require_system_roles("admin")),
 ):
     current_llm = settings.llm
     llm_api_key = current_llm.api_key
@@ -5119,7 +5139,7 @@ async def save_voice_config(
 @router.get("/scenario-config", summary="Get scenario configuration state")
 async def get_scenario_config(
     svc: TrainingScenarioConfigService = Depends(get_training_scenario_config_service),
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     config = svc.get_config()
     return success_response(data=config.model_dump(mode="json", by_alias=True, exclude_none=True))
@@ -5129,7 +5149,7 @@ async def get_scenario_config(
 async def save_scenario_config(
     body: ScenarioConfigStateDTO,
     svc: TrainingScenarioConfigService = Depends(get_training_scenario_config_service),
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader")),
+    _current_user: CurrentUser = Depends(require_system_roles("admin")),
 ):
     config = svc.save_config(body)
     return success_response(data=config.model_dump(mode="json", by_alias=True, exclude_none=True))
@@ -5139,7 +5159,7 @@ async def save_scenario_config(
 async def get_default_rubric(
     category: str = Query(ScenarioCategory.INTERVIEW.value),
     svc: TrainingCatalogService = Depends(get_training_catalog_service),
-    _current_user: CurrentUser = Depends(require_system_roles("admin", "leader", "staff")),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     try:
         rubric = svc.get_default_rubric_weights(category)

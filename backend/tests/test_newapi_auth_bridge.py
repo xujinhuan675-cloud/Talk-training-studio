@@ -77,7 +77,8 @@ async def test_newapi_bearer_token_maps_to_talkwise_user(monkeypatch: pytest.Mon
     assert current_user.system_role == "admin"
     assert current_user.is_admin is True
     assert current_user.business_role == "sales"
-    assert current_user.team_id == "newapi:paid"
+    assert current_user.team_id is None
+    assert current_user.team_name is None
     assert current_user.quota_remaining == 1200
     assert current_user.quota_used == 300
     assert current_user.quota_total == 1500
@@ -116,6 +117,7 @@ async def test_newapi_authorization_code_exchange_maps_control_plane_claims(
             group="premium",
             team_id="team-acme",
             team_name="Acme Revenue",
+            team_role="admin",
             quota=900,
             used_quota=100,
             request_count=7,
@@ -146,6 +148,8 @@ async def test_newapi_authorization_code_exchange_maps_control_plane_claims(
     assert current_user.system_role == "admin"
     assert current_user.team_id == "team-acme"
     assert current_user.team_name == "Acme Revenue"
+    assert current_user.team_role == "admin"
+    assert current_user.can_manage_team is True
     assert current_user.newapi_group == "premium"
     assert current_user.quota_remaining == 900
     assert current_user.quota_used == 100
@@ -219,6 +223,7 @@ async def test_newapi_team_members_route_uses_current_users_group(
     async def fake_fetch_team_members(
         *,
         group: str,
+        team_id: str | None = None,
         base_url: str,
         client_id: str,
         client_secret: str | None,
@@ -226,6 +231,7 @@ async def test_newapi_team_members_route_uses_current_users_group(
         limit: int | None = 100,
     ):
         assert group == "paid"
+        assert team_id is None
         assert base_url == "https://newapi.example"
         assert client_id == "talkwise-prod"
         assert client_secret == "client-secret"
@@ -344,7 +350,7 @@ async def test_newapi_team_user_search_requires_manager() -> None:
             current_user=deps.CurrentUser(
                 user_id="newapi:42",
                 username="alice",
-                system_role="leader",
+                system_role="staff",
                 team_id="newapi:paid",
                 newapi_group="paid",
             ),
@@ -470,7 +476,7 @@ async def test_newapi_admin_maps_to_talkwise_admin(monkeypatch: pytest.MonkeyPat
 
     assert current_user.system_role == "admin"
     assert current_user.is_admin is True
-    assert current_user.team_id == deps.settings.NEWAPI_DEFAULT_TEAM_ID
+    assert current_user.team_id is None
 
 
 @pytest.mark.asyncio
@@ -495,6 +501,19 @@ async def test_mock_default_still_works_when_newapi_auth_is_disabled(
 
     assert current_user.user_id == "user-admin-001"
     assert current_user.system_role == "admin"
+
+
+@pytest.mark.asyncio
+async def test_unknown_named_mock_user_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ENABLED", False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_user(x_mock_user="unknown-user")
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Unknown mock user"
 
 
 @pytest.mark.asyncio
@@ -523,7 +542,7 @@ async def test_talkwise_session_cookie_maps_to_current_user_when_newapi_auth_is_
             user_id="newapi:42",
             username="alice",
             display_name="Alice Zhang",
-            system_role="leader",
+            system_role="staff",
             business_role="sales",
             team_id="newapi:paid",
             team_name="paid",
@@ -545,12 +564,51 @@ async def test_talkwise_session_cookie_maps_to_current_user_when_newapi_auth_is_
     assert current_user.quota_total == 150
 
 
+@pytest.mark.asyncio
+async def test_newapi_bearer_identity_overrides_stale_session_team(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch_identity(access_token: str, *, base_url: str, timeout_seconds: float):
+        assert access_token == "current-token"
+        return NewAPIIdentity(
+            id=42,
+            username="alice",
+            display_name="Alice Zhang",
+            role=1,
+            team_id="training-team-current",
+            team_name="Current Team",
+            team_role="member",
+        )
+
+    monkeypatch.setattr(deps, "fetch_newapi_identity", fake_fetch_identity)
+    stale_cookie = create_session_cookie_value(
+        deps.CurrentUser(
+            user_id="newapi:42",
+            username="alice",
+            system_role="staff",
+            team_id="training-team-stale",
+            team_name="Stale Team",
+            team_role="admin",
+        )
+    )
+
+    current_user = await _resolve_user(
+        talkwise_session=stale_cookie,
+        authorization="Bearer current-token",
+    )
+
+    assert current_user.team_id == "training-team-current"
+    assert current_user.team_name == "Current Team"
+    assert current_user.team_role == "member"
+
+
 def test_training_scope_only_allows_product_admin_cross_user_access() -> None:
-    legacy_leader = deps.CurrentUser(
+    team_admin = deps.CurrentUser(
         user_id="newapi:42",
         username="alice",
-        system_role="leader",
+        system_role="staff",
         team_id="newapi:paid",
+        team_role="admin",
     )
     admin = deps.CurrentUser(
         user_id="newapi:7",
@@ -559,11 +617,11 @@ def test_training_scope_only_allows_product_admin_cross_user_access() -> None:
         team_id="newapi:paid",
     )
 
-    legacy_scope = deps.training_scope_for(legacy_leader, requested_user_id="newapi:99")
+    team_admin_scope = deps.training_scope_for(team_admin, requested_user_id="newapi:99")
     admin_scope = deps.training_scope_for(admin, requested_user_id="newapi:99")
 
-    assert legacy_scope.user_id == "newapi:42"
-    assert legacy_scope.team_id == "newapi:paid"
+    assert team_admin_scope.user_id == "newapi:42"
+    assert team_admin_scope.team_id == "newapi:paid"
     assert admin_scope.user_id == "newapi:99"
     assert admin_scope.team_id == "newapi:paid"
 
@@ -576,7 +634,7 @@ async def test_tampered_talkwise_session_cookie_is_rejected_when_newapi_auth_is_
     monkeypatch.setattr(deps.settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", False)
 
     cookie_value = create_session_cookie_value(
-        deps.CurrentUser(user_id="newapi:42", username="alice", system_role="leader")
+        deps.CurrentUser(user_id="newapi:42", username="alice", system_role="staff")
     )
 
     with pytest.raises(HTTPException) as exc_info:

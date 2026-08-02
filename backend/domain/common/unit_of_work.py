@@ -15,6 +15,7 @@ from domain.defense_prep.repository import DefenseSessionRepository
 from domain.file_asset.repository import FileAssetRepository
 from domain.stakeholder.repository import ScenarioRepository
 from domain.training_studio.session_repository import TrainingSessionRepository
+from domain.training_studio.growth_repository import TrainingPointEventRepository
 
 
 class AbstractUnitOfWork(ABC):
@@ -39,6 +40,7 @@ class AbstractUnitOfWork(ABC):
         self.scenario_repository: ScenarioRepository = None  # type: ignore[assignment]
         self.defense_session_repository: DefenseSessionRepository = None  # type: ignore[assignment]
         self.training_session_repository: TrainingSessionRepository = None  # type: ignore[assignment]
+        self.training_point_event_repository: TrainingPointEventRepository = None  # type: ignore[assignment]
 
     async def __aenter__(self) -> "AbstractUnitOfWork":
         return self

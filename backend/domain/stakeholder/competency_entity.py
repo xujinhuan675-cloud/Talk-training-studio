@@ -1,7 +1,7 @@
 # input: 无外部依赖，纯业务逻辑
-# output: CompetencyEvaluation 领域实体
+# output: communication-core-v1 CompetencyEvaluation 领域实体
 # owner: wanhua.gu
-# pos: 领域层 - 能力评估实体定义（LLM-as-Judge 6 维度评分）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
+# pos: 领域层 - 能力评估实体定义（四维行为证据评估）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Domain entity for competency evaluation (LLM-as-Judge)."""
 
 from __future__ import annotations
@@ -24,28 +24,30 @@ def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
 
 
 COMPETENCY_DIMENSIONS = (
-    "persuasion",
-    "emotional_management",
-    "active_listening",
-    "structured_expression",
-    "conflict_resolution",
-    "stakeholder_alignment",
+    "attentiveness",
+    "expression",
+    "coordination",
+    "composure",
 )
+
+COMMUNICATION_RUBRIC_VERSION = "communication-core-v1"
+COMMUNICATION_JUDGE_VERSION = "evidence-anchored-v1"
 
 
 @dataclass
 class CompetencyEvaluation:
     """LLM-as-Judge evaluation of user communication competency.
 
-    Each evaluation is linked 1:1 to an AnalysisReport and scores the user
-    across 6 dimensions with evidence and improvement suggestions.
+    Each evaluation is linked 1:1 to an AnalysisReport. ``scores`` stores the
+    versioned assessment payload, including four competency observations and
+    the single-session effectiveness and appropriateness outcomes.
     """
 
     id: Optional[int]
     report_id: int
     room_id: int
     scores: dict = field(default_factory=dict)
-    overall_score: float = 0.0
+    outcome_rating: Optional[float] = None
     created_at: Optional[datetime] = None
 
     def __post_init__(self) -> None:

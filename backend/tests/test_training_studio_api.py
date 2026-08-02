@@ -394,13 +394,13 @@ async def test_scenario_config_only_admin_can_save(client: AsyncClient) -> None:
         == scenario_dimension_weights()
     )
 
-    leader_response = await client.put(
+    staff_response = await client.put(
         "/api/v1/training-studio/scenario-config",
-        headers={"X-Mock-User": "leader"},
+        headers={"X-Mock-User": "sales"},
         json=payload,
     )
 
-    assert leader_response.status_code == 403
+    assert staff_response.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -429,7 +429,7 @@ async def test_scenario_config_persists_dimension_weights(client: AsyncClient) -
     )
     assert save_resp.status_code == 200
 
-    data = await read_scenario_config_state(client, headers={"X-Mock-User": "leader"})
+    data = await read_scenario_config_state(client, headers={"X-Mock-User": "sales"})
     saved = next(item for item in data["scenarios"] if item["id"] == scenario_id)
     assert saved["dimensionWeights"] == scenario_dimension_weights()
 
@@ -1497,7 +1497,7 @@ async def test_scenario_training_progress_aggregates_sessions(
             "failure_reason": None,
             "score": None,
             "score_status": "pending",
-            "overall_score": None,
+            "outcome_rating": None,
             "evaluation_id": None,
             "last_practiced_at": data[0]["last_practiced_at"],
             "training_session_id": session_id,
@@ -1730,7 +1730,7 @@ async def test_staff_session_list_ignores_forged_user_filter(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_legacy_leader_scenario_progress_is_limited_to_own_user(client: AsyncClient) -> None:
+async def test_staff_scenario_progress_is_limited_to_own_user(client: AsyncClient) -> None:
     revenue_admin = admin_team_headers("team-revenue")
     service_admin = admin_team_headers("team-service")
     revenue_resp = await client.post(
@@ -1767,7 +1767,11 @@ async def test_legacy_leader_scenario_progress_is_limited_to_own_user(client: As
     resp = await client.get(
         "/api/v1/training-studio/scenario-progress",
         params={"team_id": "team-service"},
-        headers={"X-Mock-User": "leader"},
+        headers={
+            "X-User-Id": "user-observer-001",
+            "X-System-Role": "staff",
+            "X-Team-Id": "team-revenue",
+        },
     )
 
     assert resp.status_code == 200
@@ -1926,7 +1930,7 @@ async def test_staff_cannot_start_own_session_with_arbitrary_existing_room_id(
 
 
 @pytest.mark.asyncio
-async def test_leader_cannot_read_other_team_training_session(client: AsyncClient) -> None:
+async def test_staff_cannot_read_other_team_training_session(client: AsyncClient) -> None:
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload("text", user_id="user-cs-001", team_id="team-service"),
@@ -1935,7 +1939,7 @@ async def test_leader_cannot_read_other_team_training_session(client: AsyncClien
 
     resp = await client.get(
         f"/api/v1/training-studio/sessions/{session_id}",
-        headers={"X-Mock-User": "leader"},
+        headers={"X-Mock-User": "sales"},
     )
 
     assert resp.status_code == 403

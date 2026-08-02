@@ -159,12 +159,21 @@ def register_exception_handlers(app: FastAPI):
         }
         code = code_mapping.get(exc.status_code, BusinessCode.SYSTEM_ERROR)
 
+        detail = exc.detail
+        message = str(detail)
+        error_details = {"status_code": exc.status_code}
+        if isinstance(detail, dict):
+            structured_message = detail.get("message")
+            if isinstance(structured_message, str) and structured_message.strip():
+                message = structured_message.strip()
+            error_details["detail"] = detail
+
         locale = get_locale()
         response = error_response(
             code=code,
-            message=str(exc.detail),
+            message=message,
             error_type="HTTPError",
-            details={"status_code": exc.status_code},
+            details=error_details,
             request_id=request_id,
             locale=locale,
         )

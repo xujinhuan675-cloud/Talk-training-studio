@@ -3,7 +3,6 @@
 param(
     [string]$FrontendUrl = "",
     [string]$BackendUrl = "",
-    [switch]$LegacyViteFrontend,
     [int]$TimeoutSeconds = 5
 )
 
@@ -13,7 +12,6 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $RootEnvPath = Join-Path $RepoRoot ".env"
 $BackendEnvPath = Join-Path $RepoRoot "backend\.env"
-$FrontendEnvPath = Join-Path $RepoRoot "frontend\.env"
 
 function Get-EnvValue {
     param(
@@ -86,13 +84,8 @@ function Get-EndpointStatus {
 }
 
 if ([string]::IsNullOrWhiteSpace($BackendUrl)) {
-    $configuredApiUrl = Get-EnvValue $FrontendEnvPath "VITE_API_URL" ""
-    if (-not [string]::IsNullOrWhiteSpace($configuredApiUrl)) {
-        $BackendUrl = $configuredApiUrl
-    } else {
-        $backendPort = Get-EnvValue $BackendEnvPath "PORT" (Get-EnvValue $RootEnvPath "BACKEND_PORT" "8012")
-        $BackendUrl = "http://127.0.0.1:$backendPort"
-    }
+    $backendPort = Get-EnvValue $BackendEnvPath "PORT" (Get-EnvValue $RootEnvPath "BACKEND_PORT" "8012")
+    $BackendUrl = "http://127.0.0.1:$backendPort"
 }
 
 if ([string]::IsNullOrWhiteSpace($FrontendUrl)) {
@@ -103,15 +96,11 @@ if ([string]::IsNullOrWhiteSpace($FrontendUrl)) {
 $BackendUrl = $BackendUrl.TrimEnd("/")
 $FrontendUrl = $FrontendUrl.TrimEnd("/")
 
-$frontendProxyCheck = if ($LegacyViteFrontend) {
-    Get-EndpointStatus -Name "legacy frontend API proxy" -Url "$FrontendUrl/health/live" -ExpectedContentPattern "alive"
-} else {
-    Get-EndpointStatus -Name "NewAPI web same-origin proxy" -Url "$FrontendUrl/api/status" -ExpectedContentPattern '"success":true'
-}
+$frontendProxyCheck = Get-EndpointStatus -Name "NewAPI web same-origin proxy" -Url "$FrontendUrl/api/status" -ExpectedContentPattern '"success":true'
 
 $checks = @(
     (Get-EndpointStatus -Name "backend health" -Url "$BackendUrl/health/live" -ExpectedContentPattern "alive"),
-    (Get-EndpointStatus -Name "frontend shell" -Url $FrontendUrl),
+    (Get-EndpointStatus -Name "NewAPI web shell" -Url $FrontendUrl),
     $frontendProxyCheck
 )
 
@@ -123,7 +112,7 @@ if ($failed.Count -gt 0) {
     Write-Host "Dev environment check failed." -ForegroundColor Red
     Write-Host "FrontendUrl: $FrontendUrl"
     Write-Host "BackendUrl:  $BackendUrl"
-    Write-Host "Run .\start-dev.cmd to recreate synced local env files and restart both services."
+    Write-Host "Run .\start-dev.cmd to sync the backend env and restart TalkWise plus the NewAPI host."
     exit 1
 }
 

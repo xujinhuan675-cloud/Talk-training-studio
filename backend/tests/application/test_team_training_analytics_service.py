@@ -10,6 +10,10 @@ from application.services.training_studio.team_analytics_service import (
     TeamTrainingAnalyticsService,
 )
 from domain.common.exceptions import DomainValidationException
+from domain.stakeholder.competency_entity import (
+    COMMUNICATION_RUBRIC_VERSION,
+    COMPETENCY_DIMENSIONS,
+)
 from domain.training_studio.session import (
     TrainingSession,
     TrainingSessionMode,
@@ -21,6 +25,31 @@ from domain.training_studio.session_repository import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+def make_evaluation(
+    effectiveness: int,
+    appropriateness: int,
+    **ratings: int,
+) -> SimpleNamespace:
+    competencies = {
+        dimension: {
+            "opportunity_present": dimension in ratings,
+            "rating": ratings.get(dimension),
+            "evidence": [],
+        }
+        for dimension in COMPETENCY_DIMENSIONS
+    }
+    return SimpleNamespace(
+        outcome_rating=(effectiveness + appropriateness) / 2,
+        scores={
+            "rubric_version": COMMUNICATION_RUBRIC_VERSION,
+            "status": "ready",
+            "effectiveness": {"rating": effectiveness},
+            "appropriateness": {"rating": appropriateness},
+            "competencies": competencies,
+        },
+    )
 
 
 def make_session(
@@ -149,22 +178,10 @@ async def test_team_analytics_groups_real_evaluations_by_member_and_scenario() -
         ),
     ]
     evaluations = {
-        1: SimpleNamespace(
-            overall_score=4.0,
-            scores={"persuasion": 4, "active_listening": {"score": 3}},
-        ),
-        2: SimpleNamespace(
-            overall_score=3.0,
-            scores={"persuasion": 3, "active_listening": {"score": 4}},
-        ),
-        3: SimpleNamespace(
-            overall_score=4.8,
-            scores={"persuasion": 5, "active_listening": {"score": 5}},
-        ),
-        4: SimpleNamespace(
-            overall_score=5.0,
-            scores={"persuasion": 5},
-        ),
+        1: make_evaluation(4, 4, attentiveness=4, expression=3),
+        2: make_evaluation(3, 3, attentiveness=3, expression=4),
+        3: make_evaluation(5, 5, attentiveness=5, expression=5),
+        4: make_evaluation(5, 5, attentiveness=5),
     }
     service = analytics_service(sessions, evaluations)
 
@@ -181,24 +198,26 @@ async def test_team_analytics_groups_real_evaluations_by_member_and_scenario() -
 
     assert competency_total == 2
     assert [item.member_id for item in competencies] == ["user-leader", "user-sales"]
-    assert [item.rank for item in competencies] == [1, 2]
-    assert [item.average_score for item in competencies] == [96, 70]
     assert competencies[0].dimensions[0].model_dump() == {
-        "dimension_id": "persuasion",
+        "dimension_id": "attentiveness",
         "score": 100,
         "sample_count": 1,
+        "scenario_count": 1,
+        "state": "exploring",
     }
     assert competencies[1].dimensions[0].model_dump() == {
-        "dimension_id": "persuasion",
-        "score": 70,
+        "dimension_id": "attentiveness",
+        "score": 62,
         "sample_count": 2,
+        "scenario_count": 1,
+        "state": "exploring",
     }
 
     assert scenario_total == 2
     assert [item.member_id for item in scenarios] == ["user-leader", "user-sales"]
     assert [item.rank for item in scenarios] == [1, 2]
     assert [item.completed_sessions for item in scenarios] == [1, 2]
-    assert [item.average_score for item in scenarios] == [96, 70]
+    assert [item.average_score for item in scenarios] == [100, 62]
     assert all(item.member_id != "user-service" for item in scenarios)
 
 
@@ -224,8 +243,8 @@ async def test_scenario_rankings_are_global_across_scenarios() -> None:
     service = analytics_service(
         sessions,
         {
-            1: SimpleNamespace(overall_score=42, scores={}),
-            2: SimpleNamespace(overall_score=60, scores={}),
+            1: make_evaluation(3, 3, attentiveness=3),
+            2: make_evaluation(4, 4, attentiveness=4),
         },
     )
 
@@ -238,6 +257,42 @@ async def test_scenario_rankings_are_global_across_scenarios() -> None:
     assert total == 2
     assert [item.scenario_id for item in scenarios] == ["vip-upgrade", "new-customer"]
     assert [item.rank for item in scenarios] == [1, 2]
+
+
+async def test_team_competencies_use_latest_five_valid_observations_per_dimension() -> None:
+    sessions = [
+        make_session(
+            f"session-{index}",
+            user_id="user-sales",
+            team_id="team-revenue",
+            scenario_id="scenario-a" if index % 2 else "scenario-b",
+            report_id=str(index),
+            completed_at=datetime(2026, 7, index, tzinfo=UTC),
+        )
+        for index in range(1, 8)
+    ]
+    evaluations = {
+        1: make_evaluation(3, 3, attentiveness=1),
+        2: make_evaluation(3, 3, attentiveness=2),
+        3: make_evaluation(3, 3, attentiveness=3),
+        4: make_evaluation(3, 3, attentiveness=4),
+        5: make_evaluation(3, 3),
+        6: make_evaluation(3, 3, attentiveness=5),
+        7: make_evaluation(3, 3),
+    }
+
+    competencies, total = await analytics_service(
+        sessions, evaluations
+    ).list_competency_rankings(
+        skip=0,
+        limit=50,
+        access_scope=team_scope(),
+    )
+
+    assert total == 1
+    attentiveness = competencies[0].dimensions[0]
+    assert attentiveness.sample_count == 5
+    assert attentiveness.score == 50
 
 
 async def test_team_analytics_requires_authorized_team_scope() -> None:

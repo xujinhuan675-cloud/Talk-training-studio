@@ -149,7 +149,7 @@ _PUBLIC_DESCRIPTOR_EXCLUDE_KEYS = {
     "token",
     "updated_at",
 }
-_DEFAULT_AGENT_ROLES = ("admin", "leader", "staff")
+_DEFAULT_AGENT_ROLES = ("admin", "staff")
 _DESCRIPTOR_RUNTIME_CONTRACT = "discovery_readiness_descriptor_only"
 _TOOL_CONSUMER_GATE = "authenticated_tool_consumer"
 

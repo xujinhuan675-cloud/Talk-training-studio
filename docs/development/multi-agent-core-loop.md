@@ -16,11 +16,11 @@ This is for feature work where parallel agents help. Small one-file fixes should
 
 ## Local References
 
-- `start-dev.ps1` / `start-dev.cmd`: local boot loop for backend, frontend, health checks, and browser launch.
+- `start-dev.ps1` / `start-dev.cmd`: local boot loop for TalkWise FastAPI, NewAPI Go, the NewAPI web host, and health checks.
 - `backend/infrastructure/external/agent_sdk/`: existing isolated workspace pattern for sub-agents.
 - `backend/infrastructure/external/agent_sdk/README.md`: import boundary, workspace isolation, timeout, cleanup, allowed tools, and test contract.
 - `backend/pyproject.toml`: backend pytest and quality-tool configuration.
-- `frontend/package.json`: frontend dev/build/lint/test commands.
+- `outside-project/new-api-main/web/package.json`: the only frontend dev/build/lint/test commands.
 - `.github/workflows/ci.yml` and `.gitlab-ci.yml`: merge-level verification expectations.
 
 ## Roles
@@ -141,4 +141,3 @@ The default loop is intentionally small. It should answer: does the core slice s
 - Do not let workers commit, push, or delete user documents unless explicitly asked.
 - Use `start-dev.ps1 -UseSqlite` when the feature needs the running app.
 - Escalate to full CI-style checks before merge, not before the first core path is alive.
-

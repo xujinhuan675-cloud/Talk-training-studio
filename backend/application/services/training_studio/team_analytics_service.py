@@ -3,33 +3,40 @@
 from __future__ import annotations
 
 import logging
-import math
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from statistics import median
+from typing import Literal
 
 from pydantic import BaseModel
 
 from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
-from domain.stakeholder.competency_entity import COMPETENCY_DIMENSIONS
+from domain.stakeholder.competency_entity import (
+    COMMUNICATION_RUBRIC_VERSION,
+    COMPETENCY_DIMENSIONS,
+)
 from domain.training_studio.session import TrainingSession, TrainingSessionStatus
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 logger = logging.getLogger(__name__)
+
+_STABLE_OBSERVATION_COUNT = 3
+_STABLE_SCENARIO_COUNT = 2
 
 
 class TeamCompetencyDimensionDTO(BaseModel):
     dimension_id: str
     score: int | None = None
     sample_count: int
+    scenario_count: int
+    state: Literal["exploring", "stable"]
 
 
 class TeamCompetencyRankingDTO(BaseModel):
     member_id: str
     member_name: str | None = None
-    rank: int
-    average_score: int | None = None
     sample_count: int
     dimensions: list[TeamCompetencyDimensionDTO]
 
@@ -60,7 +67,7 @@ class TeamTrainingAnalyticsService:
         recent_limit_per_member: int = 20,
     ) -> tuple[list[TeamCompetencyRankingDTO], int]:
         scope = self._require_team_scope(access_scope)
-        recent_limit = max(1, min(50, recent_limit_per_member))
+        recent_limit = max(1, min(5, recent_limit_per_member))
         async with self._uow_factory(readonly=True) as uow:
             sessions = await self._list_team_sessions(uow, scope)
             evaluation_lookup = uow.competency_evaluation_repository.get_by_report_id
@@ -69,21 +76,14 @@ class TeamTrainingAnalyticsService:
             for member_id, member_sessions in grouped.items():
                 ranking = await self._build_competency_ranking(
                     member_id=member_id,
-                    sessions=member_sessions[:recent_limit],
+                    sessions=member_sessions,
                     evaluation_lookup=evaluation_lookup,
+                    observation_limit=recent_limit,
                 )
                 if ranking is not None:
                     rankings.append(ranking)
 
-        rankings.sort(
-            key=lambda item: (
-                -(item.average_score if item.average_score is not None else -1),
-                -item.sample_count,
-                item.member_id,
-            )
-        )
-        for rank, ranking in enumerate(rankings, start=1):
-            ranking.rank = rank
+        rankings.sort(key=lambda item: item.member_id)
         return rankings[skip : skip + limit], len(rankings)
 
     async def list_scenario_rankings(
@@ -175,55 +175,66 @@ class TeamTrainingAnalyticsService:
         member_id: str,
         sessions: list[TrainingSession],
         evaluation_lookup,
+        observation_limit: int,
     ) -> TeamCompetencyRankingDTO | None:
-        totals = {dimension: 0.0 for dimension in COMPETENCY_DIMENSIONS}
-        counts = {dimension: 0 for dimension in COMPETENCY_DIMENSIONS}
-        overall_scores: list[int] = []
-        sample_count = 0
+        observations: dict[str, list[tuple[int, str | None]]] = {
+            dimension: [] for dimension in COMPETENCY_DIMENSIONS
+        }
 
         for session in sessions:
             evaluation = await self._load_evaluation(session, evaluation_lookup)
             if evaluation is None:
                 continue
-            sample_count += 1
-            dimensions = getattr(evaluation, "scores", {})
-            if isinstance(dimensions, Mapping):
-                for dimension in COMPETENCY_DIMENSIONS:
-                    score = self._normalize_dimension_score(dimensions.get(dimension))
-                    if score is None:
-                        continue
-                    totals[dimension] += score
-                    counts[dimension] += 1
-            overall_score = self._normalize_overall_score(
-                getattr(evaluation, "overall_score", None)
-            )
-            if overall_score is not None:
-                overall_scores.append(overall_score)
+            payload = self._communication_core_payload(evaluation)
+            if payload is None:
+                continue
+            competencies = payload["competencies"]
+            for dimension in COMPETENCY_DIMENSIONS:
+                if len(observations[dimension]) >= observation_limit:
+                    continue
+                rating = self._communication_core_rating(
+                    competencies.get(dimension),
+                    require_opportunity=True,
+                )
+                if rating is None:
+                    continue
+                observations[dimension].append((rating, session.scenario_template_id))
+            if all(
+                len(dimension_observations) >= observation_limit
+                for dimension_observations in observations.values()
+            ):
+                break
 
+        sample_count = max(
+            (len(dimension_observations) for dimension_observations in observations.values()),
+            default=0,
+        )
         if not sample_count:
             return None
         dimensions = [
             TeamCompetencyDimensionDTO(
                 dimension_id=dimension,
-                score=(round(totals[dimension] / counts[dimension]) if counts[dimension] else None),
-                sample_count=counts[dimension],
+                score=(
+                    self._communication_rating_to_percent(
+                        median(rating for rating, _ in observations[dimension])
+                    )
+                    if observations[dimension]
+                    else None
+                ),
+                sample_count=len(observations[dimension]),
+                scenario_count=len(
+                    {
+                        scenario_id
+                        for _, scenario_id in observations[dimension]
+                        if scenario_id is not None
+                    }
+                ),
+                state=self._dimension_state(observations[dimension]),
             )
             for dimension in COMPETENCY_DIMENSIONS
         ]
-        average_score = (
-            round(sum(overall_scores) / len(overall_scores)) if overall_scores else None
-        )
-        if average_score is None:
-            dimensional_scores = [dimension.score for dimension in dimensions if dimension.score is not None]
-            average_score = (
-                round(sum(dimensional_scores) / len(dimensional_scores))
-                if dimensional_scores
-                else None
-            )
         return TeamCompetencyRankingDTO(
             member_id=member_id,
-            rank=0,
-            average_score=average_score,
             sample_count=sample_count,
             dimensions=dimensions,
         )
@@ -252,8 +263,11 @@ class TeamTrainingAnalyticsService:
             evaluation = await self._load_evaluation(session, evaluation_lookup)
             if evaluation is None:
                 continue
-            score = self._normalize_overall_score(
-                getattr(evaluation, "overall_score", None)
+            payload = self._communication_core_payload(evaluation)
+            score = (
+                self._communication_outcome_score(payload)
+                if payload is not None
+                else None
             )
             if score is not None:
                 scores.append(score)
@@ -310,36 +324,64 @@ class TeamTrainingAnalyticsService:
             return None
 
     @staticmethod
-    def _normalize_dimension_score(value: object) -> int | None:
-        if isinstance(value, Mapping):
-            value = value.get("score")
-        else:
-            value = getattr(value, "score", value)
-        try:
-            score = float(value)
-        except (TypeError, ValueError):
+    def _communication_core_payload(evaluation: object) -> Mapping[str, object] | None:
+        scores = getattr(evaluation, "scores", None)
+        if not isinstance(scores, Mapping):
             return None
-        if not math.isfinite(score):
+        if scores.get("rubric_version") != COMMUNICATION_RUBRIC_VERSION:
             return None
-        if 1 <= score <= 5:
-            return round(score * 20)
-        if 0 <= score <= 100:
-            return round(score)
-        return None
+        if scores.get("status") != "ready":
+            return None
+        competencies = scores.get("competencies")
+        if not isinstance(competencies, Mapping):
+            return None
+        return scores
 
     @staticmethod
-    def _normalize_overall_score(value: object) -> int | None:
-        try:
-            score = float(value)
-        except (TypeError, ValueError):
+    def _communication_core_rating(
+        value: object,
+        *,
+        require_opportunity: bool = False,
+    ) -> int | None:
+        if not isinstance(value, Mapping):
             return None
-        if not math.isfinite(score):
+        if require_opportunity and value.get("opportunity_present") is not True:
             return None
-        if 0 <= score <= 5:
-            return round(score * 20)
-        if 0 <= score <= 100:
-            return round(score)
-        return None
+        value = value.get("rating")
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value if 1 <= value <= 5 else None
+
+    def _communication_outcome_score(self, payload: Mapping[str, object]) -> int | None:
+        ratings = [
+            rating
+            for rating in (
+                self._communication_core_rating(payload.get("effectiveness")),
+                self._communication_core_rating(payload.get("appropriateness")),
+            )
+            if rating is not None
+        ]
+        if len(ratings) != 2:
+            return None
+        return self._communication_rating_to_percent(sum(ratings) / len(ratings))
+
+    @staticmethod
+    def _communication_rating_to_percent(rating: float) -> int:
+        return max(0, min(100, round((rating - 1) * 25)))
+
+    @staticmethod
+    def _dimension_state(
+        observations: list[tuple[int, str | None]],
+    ) -> Literal["exploring", "stable"]:
+        scenario_count = len(
+            {scenario_id for _, scenario_id in observations if scenario_id is not None}
+        )
+        if (
+            len(observations) >= _STABLE_OBSERVATION_COUNT
+            and scenario_count >= _STABLE_SCENARIO_COUNT
+        ):
+            return "stable"
+        return "exploring"
 
     @staticmethod
     def _session_sort_time(session: TrainingSession) -> datetime:

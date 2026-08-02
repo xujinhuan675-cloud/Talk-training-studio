@@ -178,22 +178,22 @@ def test_file_list_hides_assets_outside_current_user_scope() -> None:
     assert [item["id"] for item in data["items"]] == [1]
 
 
-def test_legacy_leader_file_detail_and_delete_are_limited_to_own_metadata_scope() -> None:
-    fake = FakeFileAssetService()
+def test_staff_file_detail_and_delete_are_limited_to_own_metadata_scope() -> None:
+    fake = FakeFileAssetService(assets=[_asset(owner_user_id="user-peer-001")])
     client = _client(fake)
 
-    detail = client.get("/api/v1/files/1", headers={"X-Mock-User": "leader"})
-    deleted = client.delete("/api/v1/files/1", headers={"X-Mock-User": "leader"})
+    detail = client.get("/api/v1/files/1", headers={"X-Mock-User": "sales"})
+    deleted = client.delete("/api/v1/files/1", headers={"X-Mock-User": "sales"})
 
     assert detail.status_code == 404
     assert deleted.status_code == 404
     get_scope = fake.get_scopes[0]
     delete_scope = fake.delete_scopes[0]
-    assert get_scope.user_id == "user-leader-001"
+    assert get_scope.user_id == "user-sales-001"
     assert get_scope.team_id == "team-revenue"
     assert get_scope.include_team_scope is False
     assert get_scope.allow_unscoped is False
-    assert delete_scope.user_id == "user-leader-001"
+    assert delete_scope.user_id == "user-sales-001"
     assert delete_scope.include_team_scope is False
 
 

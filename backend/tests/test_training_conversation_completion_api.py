@@ -40,7 +40,13 @@ def _task_config():
         question_type_ratios={"craft": 1},
         question_count=3,
         category="sales",
-        metadata={"persona_ids": ["persona-1"]},
+        metadata={
+            "persona_ids": ["persona-1"],
+            "scenario_training": {
+                "id": "renewal-objection",
+                "training_points": ["Clarify the objection", "Agree on a next step"],
+            },
+        },
     ).to_domain()
 
 
@@ -238,14 +244,51 @@ class _GrowthService:
     def __init__(self, *, mode: str = "ready") -> None:
         self.mode = mode
         self.calls: list[int] = []
+        self.context_calls: list[dict] = []
 
-    async def evaluate_competency(self, report_id: int):
+    async def evaluate_competency(
+        self,
+        report_id: int,
+        *,
+        evaluation_context=None,
+        task_context=None,
+    ):
         self.calls.append(report_id)
+        self.context_calls.append(
+            {
+                "evaluation_context": evaluation_context,
+                "task_context": task_context,
+            }
+        )
         if self.mode == "unavailable":
             return None
         if self.mode == "failed":
             raise RuntimeError("judge provider unavailable")
-        return SimpleNamespace(id=601, overall_score=4.2)
+        return SimpleNamespace(
+            id=601,
+            outcome_rating=4.0,
+            scores={
+                "rubric_version": "communication-core-v1",
+                "judge_version": "evidence-anchored-v1",
+                "status": "ready",
+                "effectiveness": {"rating": 4, "evidence": [], "reason": "observed"},
+                "appropriateness": {"rating": 4, "evidence": [], "reason": "observed"},
+                "competencies": {
+                    "expression": {
+                        "opportunity_present": True,
+                        "rating": 4,
+                        "evidence": [
+                            {
+                                "message_id": "msg-user",
+                                "quote": "We can start with a small pilot.",
+                            }
+                        ],
+                        "reason": "Specific next step",
+                        "suggestion": "Name the review date",
+                    }
+                },
+            },
+        )
 
 
 def _client(
@@ -304,6 +347,12 @@ def test_message_tree_completion_uses_server_path_and_reuses_report_pipeline() -
     assert report_state["analysisRoomId"] == 900
     assert report_state["selectedTailMessageId"] == "msg-tail"
     assert report_state["evaluation"]["status"] == "ready"
+    assert report_state["evaluation"]["assessment"]["rubric_version"] == (
+        "communication-core-v1"
+    )
+    assert report_state["evaluation"]["assessment"]["competencies"]["expression"][
+        "rating"
+    ] == 4
     assert completed["task_config"]["metadata"]["selectedPath"]["affectsScoring"] is True
     assert completed["task_config"]["metadata"]["selectedPath"]["affectsCompletion"] is True
     assert conversations.path_calls[0][0:2] == (7, "msg-tail")
@@ -313,6 +362,35 @@ def test_message_tree_completion_uses_server_path_and_reuses_report_pipeline() -
     assert analysis.calls[0][1].guarded_by_training_session_id == "session-source"
     assert analysis.calls[0][1].guarded_room_id == "900"
     assert growth.calls == [501]
+    assert growth.context_calls == [
+        {
+            "evaluation_context": {
+                "source": "server_selected_root_to_tail",
+                "messages": [
+                    {
+                        "message_id": "msg-user",
+                        "speaker": "learner",
+                        "content": "We can start with a small pilot.",
+                    },
+                    {
+                        "message_id": "msg-tail",
+                        "speaker": "counterpart",
+                        "content": "I am worried the budget is still too risky.",
+                    },
+                ],
+            },
+            "task_context": {
+                "scenario_id": None,
+                "category": "sales",
+                "difficulty": "medium",
+                "learner_role": "Account Manager",
+                "training_goals": [
+                    "Clarify the objection",
+                    "Agree on a next step",
+                ],
+            },
+        }
+    ]
 
     report_response = client.get(_report_path(), headers={"X-Mock-User": "sales"})
     assert report_response.status_code == 200

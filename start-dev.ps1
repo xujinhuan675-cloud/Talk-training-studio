@@ -9,7 +9,6 @@ param(
     [switch]$NoBrowser,
     [switch]$SkipHealthCheck,
     [switch]$SkipGateway,
-    [switch]$LegacyViteFrontend,
     [switch]$AutoPort,
     [int]$GatewayPort = 0,
     [int]$BackendPort = 0,
@@ -46,7 +45,6 @@ foreach ($pathToAdd in $CandidatePathAdds) {
 }
 
 $BackendDir = Join-Path $RepoRoot "backend"
-$FrontendDir = Join-Path $RepoRoot "frontend"
 $NewApiDir = Join-Path $RepoRoot "outside-project\new-api-main"
 $NewApiWebDir = Join-Path $NewApiDir "web"
 $NewApiExePath = Join-Path $NewApiDir "new-api-talkwise.exe"
@@ -55,7 +53,6 @@ $LogDir = Join-Path $RepoRoot "logs"
 $BackendVenvDir = Join-Path $RepoRoot ".venv-backend"
 $RootEnvPath = Join-Path $RepoRoot ".env"
 $BackendEnvPath = Join-Path $BackendDir ".env"
-$FrontendEnvPath = Join-Path $FrontendDir ".env"
 
 function Write-Step {
     param([string]$Message)
@@ -818,7 +815,7 @@ function Start-LocalNewApiGateway {
 
     Remove-Item -LiteralPath $LogPath, $ErrLogPath -ErrorAction SilentlyContinue
 
-    $redirectUris = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" "$RedirectUri,http://localhost:$frontendPort/login"
+    $redirectUris = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" "$RedirectUri,http://localhost:$frontendPort/training"
     $envValues = @{
         PORT = "$Port"
         SESSION_SECRET = Get-EnvValue $RootEnvPath "NEWAPI_SESSION_SECRET" "newapi-local-session-dev-change-me"
@@ -887,30 +884,6 @@ Write-Host "uv was not found on PATH; using existing backend environment: $backe
     throw "uv was not found and $backendPython does not exist. Install uv or run backend dependency sync before starting the backend."
 }
 
-function New-FrontendCommand {
-    param([int]$Port)
-
-    if (-not (Test-CommandExists "npm")) {
-        throw "npm was not found. Install Node.js first."
-    }
-
-    $viteBin = Join-Path $FrontendDir "node_modules\vite\bin\vite.js"
-    $runVite = @"
-if (-not (Test-Path -LiteralPath "$viteBin")) { throw "Vite binary not found at $viteBin. Run npm install in $FrontendDir." }
-node "$viteBin" --host 127.0.0.1 --port $Port --strictPort
-"@
-
-    if ($SkipInstall) {
-        return $runVite
-    }
-
-    return @"
-npm install
-if (`$LASTEXITCODE -ne 0) { throw "npm install failed." }
-$runVite
-"@
-}
-
 function New-NewApiWebCommand {
     param(
         [int]$Port,
@@ -972,20 +945,11 @@ Ensure-EnvValue $RootEnvPath "NEWAPI_AUTH_TIMEOUT_SECONDS" "5"
 Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
 Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_CLIENT_SECRET" "talkwise-local-handoff-dev-secret"
 Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH" "/api/talkwise/auth/exchange"
-Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" "http://127.0.0.1:5177/login"
-Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" "http://127.0.0.1:5177/login,http://localhost:5177/login"
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" "http://127.0.0.1:5177/training"
+Ensure-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" "http://127.0.0.1:5177/training,http://localhost:5177/training"
 Ensure-EnvValue $RootEnvPath "NEWAPI_SESSION_SECRET" "newapi-local-session-dev-change-me"
 Ensure-EnvValue $RootEnvPath "TALKWISE_SESSION_COOKIE_NAME" "talkwise_session"
 Ensure-EnvValue $RootEnvPath "TALKWISE_SESSION_TTL_SECONDS" "28800"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" "http://127.0.0.1:18080"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" "true"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "http://127.0.0.1:18080/sign-in"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "embedded"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" "http://127.0.0.1:18080"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "http://127.0.0.1:18080/usage-logs/common"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "http://127.0.0.1:18080/keys"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_CLIENT_ID" "talkwise"
-Ensure-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" "http://127.0.0.1:5177/login"
 
 if (-not $SkipGateway) {
     Stop-DockerNewApiServicesIfRunning
@@ -1023,9 +987,8 @@ $frontendUrl = "http://127.0.0.1:$frontendPort"
 $backendUrl = "http://127.0.0.1:$backendPort"
 $newApiUrl = if ($SkipGateway) { Get-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc" } else { "http://127.0.0.1:$resolvedGatewayPort" }
 $newApiGatewayUrl = if ($SkipGateway) { Get-EnvValue $RootEnvPath "NEWAPI_GATEWAY_BASE_URL" "$newApiUrl/v1" } else { "$newApiUrl/v1" }
-$legacyFrontendRedirectUri = "$frontendUrl/login"
-$newApiRedirectUri = if ($LegacyViteFrontend) { $legacyFrontendRedirectUri } else { "$frontendUrl/training" }
-$newApiRedirectUris = "$newApiRedirectUri,$legacyFrontendRedirectUri,http://localhost:$frontendPort/login"
+$newApiRedirectUri = "$frontendUrl/training"
+$newApiRedirectUris = "$newApiRedirectUri,http://localhost:$frontendPort/training"
 $backendLogPath = Join-Path $LogDir "backend-dev.log"
 $frontendLogPath = Join-Path $LogDir "frontend-dev.log"
 $newApiLogPath = Join-Path $LogDir "newapi-dev.log"
@@ -1040,13 +1003,6 @@ if (-not $SkipGateway) {
     Set-EnvValue $RootEnvPath "NEWAPI_AUTH_ENABLED" "true"
     Set-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" $newApiRedirectUri
     Set-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URIS" $newApiRedirectUris
-    Set-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" $newApiUrl
-    Set-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" "true"
-    Set-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "$newApiUrl/sign-in"
-    Set-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" $newApiUrl
-    Set-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "$newApiUrl/usage-logs/common"
-    Set-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "$newApiUrl/keys"
-    Set-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" $newApiRedirectUri
 }
 
 $newApiBaseUrl = Get-EnvValue $RootEnvPath "NEWAPI_BASE_URL" "https://newapi.flowguide.cc"
@@ -1061,15 +1017,6 @@ $newApiTalkwiseAuthExchangePath = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_AUT
 $newApiTalkwiseRedirectUri = Get-EnvValue $RootEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" ""
 $talkwiseSessionCookieName = Get-EnvValue $RootEnvPath "TALKWISE_SESSION_COOKIE_NAME" "talkwise_session"
 $talkwiseSessionTtlSeconds = Get-EnvValue $RootEnvPath "TALKWISE_SESSION_TTL_SECONDS" "28800"
-$viteNewApiBaseUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_BASE_URL" $newApiBaseUrl
-$viteNewApiAuthEnabled = Get-EnvValue $RootEnvPath "VITE_NEWAPI_AUTH_ENABLED" $newApiAuthEnabled
-$viteNewApiLoginUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_URL" "$newApiBaseUrl/login"
-$viteNewApiLoginMode = Get-EnvValue $RootEnvPath "VITE_NEWAPI_LOGIN_MODE" "embedded"
-$viteNewApiConsoleUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_CONSOLE_URL" $newApiBaseUrl
-$viteNewApiUsageUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_USAGE_URL" "$newApiBaseUrl/usage-logs/common"
-$viteNewApiApiKeysUrl = Get-EnvValue $RootEnvPath "VITE_NEWAPI_API_KEYS_URL" "$newApiBaseUrl/keys"
-$viteNewApiTalkwiseClientId = Get-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_CLIENT_ID" $newApiTalkwiseClientId
-$viteNewApiTalkwiseRedirectUri = Get-EnvValue $RootEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" $newApiTalkwiseRedirectUri
 
 Set-EnvValue $BackendEnvPath "SECRET_KEY" "dev-secret-change-me"
 Set-EnvValue $BackendEnvPath "DEBUG" "true"
@@ -1092,17 +1039,6 @@ Set-EnvValue $BackendEnvPath "NEWAPI_TALKWISE_AUTH_EXCHANGE_PATH" $newApiTalkwis
 Set-EnvValue $BackendEnvPath "NEWAPI_TALKWISE_REDIRECT_URI" $newApiTalkwiseRedirectUri
 Set-EnvValue $BackendEnvPath "TALKWISE_SESSION_COOKIE_NAME" $talkwiseSessionCookieName
 Set-EnvValue $BackendEnvPath "TALKWISE_SESSION_TTL_SECONDS" $talkwiseSessionTtlSeconds
-
-Set-EnvValue $FrontendEnvPath "VITE_API_URL" $backendUrl
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_BASE_URL" $viteNewApiBaseUrl
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_AUTH_ENABLED" $viteNewApiAuthEnabled
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_LOGIN_URL" $viteNewApiLoginUrl
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_LOGIN_MODE" $viteNewApiLoginMode
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_CONSOLE_URL" $viteNewApiConsoleUrl
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_USAGE_URL" $viteNewApiUsageUrl
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_API_KEYS_URL" $viteNewApiApiKeysUrl
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_TALKWISE_CLIENT_ID" $viteNewApiTalkwiseClientId
-Set-EnvValue $FrontendEnvPath "VITE_NEWAPI_TALKWISE_REDIRECT_URI" $viteNewApiTalkwiseRedirectUri
 
 if ($UsePostgres) {
     try {
@@ -1149,23 +1085,13 @@ Start-DevWindow `
     -LogPath $backendLogPath `
     -ShowWindow:$ShowServiceWindows
 
-if ($LegacyViteFrontend) {
-    Write-Step "Starting legacy Vite frontend on port $frontendPort"
-    Start-DevWindow `
-        -Title "Talk Training Studio - Legacy Frontend" `
-        -WorkingDirectory $FrontendDir `
-        -Command (New-FrontendCommand -Port $frontendPort) `
-        -LogPath $frontendLogPath `
-        -ShowWindow:$ShowServiceWindows
-} else {
-    Write-Step "Starting NewAPI web host with Rsbuild on port $frontendPort"
-    Start-DevWindow `
-        -Title "Talk Training Studio - NewAPI Web" `
-        -WorkingDirectory $NewApiWebDir `
-        -Command (New-NewApiWebCommand -Port $frontendPort -ServerUrl $newApiUrl) `
-        -LogPath $frontendLogPath `
-        -ShowWindow:$ShowServiceWindows
-}
+Write-Step "Starting NewAPI web host with Rsbuild on port $frontendPort"
+Start-DevWindow `
+    -Title "Talk Training Studio - NewAPI Web" `
+    -WorkingDirectory $NewApiWebDir `
+    -Command (New-NewApiWebCommand -Port $frontendPort -ServerUrl $newApiUrl) `
+    -LogPath $frontendLogPath `
+    -ShowWindow:$ShowServiceWindows
 
 if (-not $SkipHealthCheck) {
     if (-not $SkipGateway) {
@@ -1190,21 +1116,12 @@ if (-not $SkipHealthCheck) {
         -LogPath $frontendLogPath `
         -TimeoutSeconds $ServiceTimeoutSeconds
 
-    if ($LegacyViteFrontend) {
-        Wait-HttpEndpoint `
-            -Name "legacy frontend API proxy" `
-            -Url "$frontendUrl/health/live" `
-            -LogPath $frontendLogPath `
-            -TimeoutSeconds $ServiceTimeoutSeconds `
-            -ExpectedContentPattern "alive"
-    } else {
-        Wait-HttpEndpoint `
-            -Name "NewAPI web same-origin proxy" `
-            -Url "$frontendUrl/api/status" `
-            -LogPath $frontendLogPath `
-            -TimeoutSeconds $ServiceTimeoutSeconds `
-            -ExpectedContentPattern '"success":true'
-    }
+    Wait-HttpEndpoint `
+        -Name "NewAPI web same-origin proxy" `
+        -Url "$frontendUrl/api/status" `
+        -LogPath $frontendLogPath `
+        -TimeoutSeconds $ServiceTimeoutSeconds `
+        -ExpectedContentPattern '"success":true'
 }
 
 if (-not $NoBrowser) {
@@ -1216,18 +1133,14 @@ Write-Ok "Dev startup finished."
 Write-Host "Frontend: $frontendUrl"
 Write-Host "Backend docs: $backendUrl/docs"
 Write-Host "Backend health: $backendUrl/health/live"
-if ($LegacyViteFrontend) {
-    Write-Host "Legacy frontend API proxy health: $frontendUrl/health/live"
-} else {
-    Write-Host "NewAPI web same-origin proxy health: $frontendUrl/api/status"
-}
+Write-Host "NewAPI web same-origin proxy health: $frontendUrl/api/status"
 if (-not $SkipGateway) {
     Write-Host "NewAPI status: $newApiUrl/api/status"
     Write-Host "NewAPI login: $newApiUrl/sign-in"
 }
-Write-Host "NewAPI console: $viteNewApiConsoleUrl"
-Write-Host "NewAPI API keys: $viteNewApiApiKeysUrl"
-Write-Host "NewAPI usage: $viteNewApiUsageUrl"
+Write-Host "Account console: $newApiUrl"
+Write-Host "API keys: $newApiUrl/keys"
+Write-Host "Usage: $newApiUrl/usage-logs/common"
 Write-Host "NewAPI gateway: $newApiGatewayBaseUrl"
 Write-Host "Logs: $LogDir"
 Write-Host ""
