@@ -1,8 +1,8 @@
-# input: core.config.settings.llm, core.config.settings.stakeholder, OpenAI SDK, Anthropic SDK
-# output: LLM client lifecycle functions for OpenAI-compatible and Anthropic providers
-# owner: unknown
-# pos: infrastructure - LLM client lifecycle management; update this header and folder docs when changed
-"""LLM client lifecycle management."""
+# input: NewAPI user relay settings and OpenAI-compatible model selection
+# output: gateway-only LLM client lifecycle
+# owner: TalkWise platform integration
+# pos: infrastructure - NewAPI LLM protocol client lifecycle
+"""Gateway-only LLM client lifecycle management."""
 
 from __future__ import annotations
 
@@ -20,34 +20,30 @@ from infrastructure.external.newapi_user_gateway import (
 logger = get_logger(__name__)
 
 _llm_client: Optional[LLMPort] = None
-_anthropic_client: Optional[LLMPort] = None
-
-
 async def init_llm_client() -> None:
-    """Initialize the LLM client based on configuration."""
+    """Initialize the OpenAI-compatible client through NewAPI user billing."""
     global _llm_client
 
     if _llm_client is not None:
         logger.warning("LLM client already initialized")
         return
 
-    llm_cfg = settings.llm
-    api_key = runtime_api_key(llm_cfg.api_key)
-    if not api_key:
+    if not user_billing_enabled():
         logger.warning(
             "llm_client_skipped",
-            reason="LLM__API_KEY not configured; LLM features will be unavailable",
+            reason="NewAPI user billing is disabled",
         )
         return
 
+    llm_cfg = settings.llm
     try:
         from .openai_provider import OpenAIProvider
 
         _llm_client = OpenAIProvider(
-            api_key=api_key,
-            base_url=user_relay_base_url() if user_billing_enabled() else llm_cfg.base_url,
+            api_key=runtime_api_key() or "newapi-user-session",
+            base_url=user_relay_base_url(),
             wire_api=llm_cfg.wire_api,
-            provider_name=llm_cfg.provider,
+            provider_name="newapi_openai_compatible",
             default_model=llm_cfg.default_model,
             default_temperature=llm_cfg.temperature,
             default_max_tokens=llm_cfg.max_tokens,
@@ -57,7 +53,7 @@ async def init_llm_client() -> None:
         )
         logger.info(
             "llm_client_initialized",
-            provider=llm_cfg.provider,
+            provider="newapi_openai_compatible",
             model=llm_cfg.default_model,
         )
     except Exception as exc:
@@ -89,74 +85,8 @@ async def shutdown_llm_client() -> None:
         _llm_client = None
 
 
-async def init_anthropic_client() -> None:
-    """Initialize the Anthropic client for stakeholder chat."""
-    global _anthropic_client
-
-    if _anthropic_client is not None:
-        logger.warning("Anthropic client already initialized")
-        return
-
-    if user_billing_enabled():
-        logger.info(
-            "anthropic_client_skipped",
-            reason="NewAPI per-user billing routes stakeholder LLM calls through the shared OpenAI-compatible client",
-        )
-        return
-
-    stakeholder_cfg = settings.stakeholder
-    if not stakeholder_cfg.anthropic_api_key:
-        logger.warning(
-            "anthropic_client_skipped",
-            reason="STAKEHOLDER__ANTHROPIC_API_KEY not configured; stakeholder features will be unavailable",
-        )
-        return
-
-    try:
-        from .anthropic_provider import AnthropicProvider
-
-        _anthropic_client = AnthropicProvider(
-            api_key=stakeholder_cfg.anthropic_api_key,
-            base_url=stakeholder_cfg.anthropic_base_url,
-            default_model=stakeholder_cfg.model,
-        )
-        logger.info(
-            "anthropic_client_initialized",
-            model=stakeholder_cfg.model,
-        )
-    except Exception as exc:
-        logger.error("anthropic_client_init_failed", error=str(exc))
-        raise
-
-
-def get_anthropic_client() -> Optional[LLMPort]:
-    """Get the Anthropic client instance (may be None if not configured)."""
-    return _anthropic_client
-
-
-async def shutdown_anthropic_client() -> None:
-    """Shutdown the Anthropic client."""
-    global _anthropic_client
-
-    if _anthropic_client is None:
-        return
-
-    try:
-        client = getattr(_anthropic_client, "_client", None)
-        if client is not None and hasattr(client, "close"):
-            await client.close()
-        logger.info("anthropic_client_shutdown")
-    except Exception as exc:
-        logger.error("anthropic_client_shutdown_failed", error=str(exc))
-    finally:
-        _anthropic_client = None
-
-
 __all__ = [
     "init_llm_client",
     "get_llm_client",
     "shutdown_llm_client",
-    "init_anthropic_client",
-    "get_anthropic_client",
-    "shutdown_anthropic_client",
 ]

@@ -48,8 +48,7 @@ async for event in client.build_persona(
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `anthropic_api_key` | None | SecretStr，从 env 注入 |
-| `anthropic_base_url` | None | 内网中继 URL（如 `http://10.0.3.248:3000/api`） |
+| NewAPI 用户凭据 | request bearer | 仅从当前请求注入到 NewAPI `/pg` relay，不支持静态直连 |
 | `workspace_root` | `/tmp/daboss/workspaces` | 各用户 workspace 根目录 |
 | `agent_timeout_s` | 180 | 单次 sub-agent 总超时 |
 | `cleanup_delay_s` | 300 | 任务结束多久后清理 workspace |

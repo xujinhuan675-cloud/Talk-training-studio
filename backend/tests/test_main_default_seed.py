@@ -36,8 +36,6 @@ async def test_lifespan_invokes_default_config_seed(monkeypatch) -> None:
     monkeypatch.setattr(main, "get_storage_config", lambda: SimpleNamespace(type="local", bucket=None))
     monkeypatch.setattr(main, "init_llm_client", _noop_async)
     monkeypatch.setattr(main, "shutdown_llm_client", _noop_async)
-    monkeypatch.setattr(main, "init_anthropic_client", _noop_async)
-    monkeypatch.setattr(main, "shutdown_anthropic_client", _noop_async)
     monkeypatch.setattr(main, "init_agent_sdk_client", _noop_async)
     monkeypatch.setattr(main, "shutdown_agent_sdk_client", _noop_async)
     monkeypatch.setattr(main, "init_tts_client", _noop_async)

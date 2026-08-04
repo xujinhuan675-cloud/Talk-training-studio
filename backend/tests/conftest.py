@@ -8,8 +8,13 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Mandatory secret key for settings validation
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
+# Local developer settings may enable the NewAPI per-user gateway. Unit tests
+# opt in explicitly so direct adapter tests do not require a request bearer.
+os.environ["NEWAPI_USER_BILLING_ENABLED"] = "false"
 
 # Ensure the real backend/ comes before tests/ in sys.path, otherwise the
 # test-side ``tests/infrastructure/external/`` package shadows the real
@@ -36,3 +41,15 @@ for _mod_name in list(sys.modules):
         _path = getattr(_mod, "__file__", None) or ""
         if "/tests/" in _path:
             del sys.modules[_mod_name]
+
+
+@pytest.fixture(autouse=True)
+def _disable_newapi_user_billing_by_default():
+    from core.config import settings
+
+    original = settings.NEWAPI_USER_BILLING_ENABLED
+    settings.NEWAPI_USER_BILLING_ENABLED = False
+    try:
+        yield
+    finally:
+        settings.NEWAPI_USER_BILLING_ENABLED = original

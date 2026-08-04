@@ -16,7 +16,6 @@ async def test_growth_service_allows_missing_llm(monkeypatch: pytest.MonkeyPatch
     from application.services.stakeholder.growth_service import GrowthService
 
     monkeypatch.setattr(deps, "get_llm_client", lambda: None)
-    monkeypatch.setattr(deps, "get_anthropic_client", lambda: None)
 
     service = await deps.get_growth_service(loader=_StubPersonaLoader())
 
@@ -24,14 +23,11 @@ async def test_growth_service_allows_missing_llm(monkeypatch: pytest.MonkeyPatch
     assert service.has_llm is False
 
 
-def test_stakeholder_llm_prefers_openai(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stakeholder flows should use the OpenAI-compatible client when present."""
+def test_stakeholder_llm_uses_shared_gateway_client(monkeypatch: pytest.MonkeyPatch) -> None:
     import api.dependencies as deps
 
-    openai_client = object()
-    anthropic_client = object()
+    gateway_client = object()
 
-    monkeypatch.setattr(deps, "get_llm_client", lambda: openai_client)
-    monkeypatch.setattr(deps, "get_anthropic_client", lambda: anthropic_client)
+    monkeypatch.setattr(deps, "get_llm_client", lambda: gateway_client)
 
-    assert deps.get_stakeholder_llm_client() is openai_client
+    assert deps.get_stakeholder_llm_client() is gateway_client

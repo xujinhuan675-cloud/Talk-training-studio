@@ -22,7 +22,10 @@ from infrastructure.external.agent_sdk.exceptions import (
     AgentTimeoutError,
 )
 from infrastructure.external.agent_sdk.workspace import WorkspaceManager
-from infrastructure.external.newapi_user_gateway import bind_user_access_token
+from infrastructure.external.newapi_user_gateway import (
+    bind_user_access_token,
+    reset_user_access_token,
+)
 
 
 @dataclass
@@ -63,8 +66,6 @@ def fake_skill_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def settings(tmp_path: Path, fake_skill_dir: Path) -> AgentSDKSettings:
     return AgentSDKSettings(
-        anthropic_api_key=None,  # mocked SDK won't actually call out
-        anthropic_base_url=None,
         workspace_root=tmp_path / "ws_root",
         agent_timeout_s=5,
         cleanup_delay_s=0,
@@ -86,6 +87,21 @@ def manager(settings: AgentSDKSettings) -> WorkspaceManager:
 @pytest.fixture
 def client(settings: AgentSDKSettings, manager: WorkspaceManager) -> AgentSkillClient:
     return AgentSkillClient(settings=settings, workspace_mgr=manager)
+
+
+@pytest.fixture(autouse=True)
+def gateway_user_context(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(app_settings, "NEWAPI_USER_BILLING_ENABLED", True)
+    monkeypatch.setattr(
+        app_settings,
+        "NEWAPI_USER_RELAY_BASE_URL",
+        "https://gateway.example.com/pg",
+    )
+    context_token = bind_user_access_token("dashboard-user-token")
+    try:
+        yield
+    finally:
+        reset_user_access_token(context_token)
 
 
 def _make_query_mock(events: list[Any]):
@@ -245,56 +261,22 @@ async def test_empty_materials_rejected(client: AgentSkillClient) -> None:
             pass
 
 
-@pytest.mark.asyncio
-async def test_env_is_patched_during_run_and_restored_after(
-    client: AgentSkillClient, settings: AgentSDKSettings
+def test_agent_sdk_has_no_static_direct_provider_fallback(
+    client: AgentSkillClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Use a real-looking key via SecretStr
-    from pydantic import SecretStr
+    monkeypatch.setattr(app_settings, "NEWAPI_USER_BILLING_ENABLED", False)
 
-    settings_with_key = AgentSDKSettings(
-        **{
-            **settings.model_dump(),
-            "anthropic_api_key": SecretStr("sk-test-secret"),
-            "anthropic_base_url": "http://10.0.3.248:3000/api",
-        }
-    )
-    mgr = WorkspaceManager(
-        root=settings_with_key.workspace_root,
-        skill_source_dir=settings_with_key.skill_source_dir,
-        cleanup_delay_s=0,
-    )
-    keyed_client = AgentSkillClient(settings=settings_with_key, workspace_mgr=mgr)
-
-    seen_during_run: dict[str, str] = {}
-
-    async def fake_query(*, prompt: str, options: Any):  # noqa: ARG001
-        seen_during_run["key"] = os.environ.get("ANTHROPIC_API_KEY", "")
-        seen_during_run["url"] = os.environ.get("ANTHROPIC_BASE_URL", "")
-        yield ResultMessage()
-
-    # Snapshot env before
-    pre_key = os.environ.get("ANTHROPIC_API_KEY")
-    pre_url = os.environ.get("ANTHROPIC_BASE_URL")
-
-    with patch("claude_agent_sdk.query", fake_query):
-        async for _ in keyed_client.build_persona(user_id="alice", materials=["x"]):
+    with pytest.raises(RuntimeError, match="requires NewAPI user billing"):
+        with client._patched_env():
             pass
-
-    # Inside the run, env was set
-    assert seen_during_run["key"] == "sk-test-secret"
-    assert seen_during_run["url"] == "http://10.0.3.248:3000/api"
-
-    # After the run, env is restored to prior values
-    assert os.environ.get("ANTHROPIC_API_KEY") == pre_key
-    assert os.environ.get("ANTHROPIC_BASE_URL") == pre_url
 
 
 @pytest.mark.asyncio
 async def test_semaphore_limits_concurrent_builds(
     settings: AgentSDKSettings, fake_skill_dir: Path
 ) -> None:
-    # max_concurrent_builds=2, so 3rd call should wait until one releases
+    # Process-level credential injection serializes gateway-billed agent runs.
     settings_2 = AgentSDKSettings(**{**settings.model_dump(), "max_concurrent_builds": 2})
     mgr = WorkspaceManager(
         root=settings_2.workspace_root,
@@ -321,4 +303,4 @@ async def test_semaphore_limits_concurrent_builds(
     with patch("claude_agent_sdk.query", fake_query):
         await asyncio.gather(*[run_one(f"u{i:02d}") for i in range(5)])
 
-    assert max_in_flight <= 2, f"semaphore breached: {max_in_flight} concurrent"
+    assert max_in_flight == 1, f"semaphore breached: {max_in_flight} concurrent"

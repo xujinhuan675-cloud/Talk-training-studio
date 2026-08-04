@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from pathlib import Path
 
-from pydantic import AliasChoices, BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -113,10 +113,6 @@ class AgentSDKSettings(BaseModel):
     用于在 FastAPI 进程内嵌入 sub-agent 加载本地 skill 完成多轮 tool-use 任务。
     """
 
-    # API 凭据 (SecretStr 防 repr 泄漏；从 STAKEHOLDER__ANTHROPIC_API_KEY 复用)
-    anthropic_api_key: Optional[SecretStr] = None
-    anthropic_base_url: Optional[str] = None  # 内网中继 URL，e.g. http://10.0.3.248:3000/api
-
     # Workspace 隔离根目录 (每用户/会话独立子目录)
     workspace_root: Path = Path("/tmp/daboss/workspaces")  # nosec B108
 
@@ -195,20 +191,13 @@ class HealthSettings(BaseModel):
 
 
 class VoiceSettings(BaseModel):
-    tts_provider: str = "minimax"
-    tts_api_key: Optional[str] = None
-    tts_base_url: Optional[str] = None
-    tts_model: str = "speech-2.8-hd"
-    stt_provider: str = "whisper"
-    stt_api_key: Optional[str] = None
-    stt_base_url: Optional[str] = None
-    stt_model: str = "whisper-1"
+    """Models sent through the authenticated NewAPI voice relay."""
+
+    tts_model: str = "tts-1"
+    stt_model: str = "gpt-4o-mini-transcribe"
 
 
 class StakeholderSettings(BaseModel):
-    anthropic_api_key: Optional[str] = None
-    anthropic_base_url: Optional[str] = None
-    model: str = "claude-opus-4-0-20250514"
     persona_dir: str = "data/personas"
     max_group_rounds: int = 20
     context_window_size: int = 20
@@ -440,6 +429,9 @@ class Settings(BaseSettings):
     REALTIME_OPENAI_MODEL: str = Field(
         default="gpt-realtime-2.1", validation_alias=AliasChoices("REALTIME_OPENAI_MODEL")
     )
+    REALTIME_VOLCENGINE_MODEL: str = Field(
+        default="1.2.1.1", validation_alias=AliasChoices("REALTIME_VOLCENGINE_MODEL")
+    )
     REALTIME_OPENAI_CALL_URL: str = Field(
         default="https://api.openai.com/v1/realtime/calls",
         validation_alias=AliasChoices("REALTIME_OPENAI_CALL_URL"),
@@ -558,14 +550,6 @@ class Settings(BaseSettings):
             self.llm.wire_api = (
                 self.OPENAI_COMPATIBLE_WIRE_API or self.OPENAI_WIRE_API or self.llm.wire_api
             )
-        stt_provider = (
-            self.voice.stt_provider or ""
-        ).strip().lower().replace("-", "_").replace(" ", "_")
-        stt_can_reuse_shared_key = stt_provider in {"minimax", "openai", "whisper"}
-        if not self.voice.stt_api_key and stt_can_reuse_shared_key:
-            self.voice.stt_api_key = self.voice.tts_api_key or self.llm.api_key
-        if not self.voice.stt_base_url and stt_can_reuse_shared_key:
-            self.voice.stt_base_url = self.llm.base_url
         return self
 
     @field_validator("CORS_ORIGINS", "CORS_ALLOW_METHODS", "CORS_ALLOW_HEADERS", mode="before")

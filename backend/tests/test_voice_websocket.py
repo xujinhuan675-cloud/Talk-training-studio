@@ -193,7 +193,7 @@ def test_voice_websocket_reports_missing_stt_configuration(monkeypatch) -> None:
     assert error["type"] == "error"
     assert error["code"] == "stt_not_configured"
     assert error["message"] == "STT service not configured"
-    assert "VOICE__STT_API_KEY" in error["details"]
+    assert "NewAPI user billing" in error["details"]
 
 
 def test_voice_websocket_ack_failure_does_not_block_reply_generation(monkeypatch) -> None:

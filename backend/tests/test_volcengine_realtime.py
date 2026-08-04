@@ -27,6 +27,11 @@ from infrastructure.external.voice.volcengine_realtime import (
     normalize_volcengine_realtime_url,
     parse_volcengine_realtime_frame,
 )
+from infrastructure.external.newapi_user_gateway import (
+    bind_user_access_token,
+    reset_user_access_token,
+)
+from core.config import settings
 
 
 def test_volcengine_realtime_uses_public_runtime_identifier() -> None:
@@ -80,7 +85,7 @@ def _realtime_config(**overrides: Any) -> RealtimePipelineConfig:
     values: dict[str, Any] = {
         "provider": VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
         "runtime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
-        "model": "1.2.6.0",
+        "model": "1.2.1.1",
         "voice": "zh_female_vv_uranus_bigtts",
         "input_audio_format": "pcm16",
         "output_audio_format": "pcm16",
@@ -131,31 +136,24 @@ async def _start_adapter(
 async def test_volcengine_realtime_start_sends_session_create_frame() -> None:
     adapter, websocket, fake_context, captured = await _start_adapter()
 
-    assert normalize_volcengine_realtime_url("openspeech.bytedance.com") == (
-        "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
+    assert normalize_volcengine_realtime_url("gateway.example.com") == (
+        "wss://gateway.example.com/pg/realtime"
     )
     assert fake_context.entered is True
     assert captured == {
-        "url": "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue",
+        "url": "wss://openspeech.bytedance.com/pg/realtime?model=1.2.1.1",
         "headers": {
-            "X-Api-Key": "volc-secret",
-            "X-Api-Request-Id": "req-realtime-1",
+            "Authorization": "Bearer volc-secret",
+            "X-Request-Id": "req-realtime-1",
         },
         "timeout": 12.0,
     }
-    assert [_decode_sent(item)["type"] for item in websocket.sent] == ["session.create"]
+    assert [_decode_sent(item)["type"] for item in websocket.sent] == ["session.update"]
 
     start_frame = _decode_sent(websocket.sent[0])
-    assert start_frame["session"]["model"] == "1.2.6.0"
-    assert start_frame["session"]["audio"]["output"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
-    assert start_frame["session"]["audio"]["input"]["format"] == {
-        "type": "pcm",
-        "sample_rate": 16000,
-    }
-    assert start_frame["session"]["audio"]["output"]["format"] == {
-        "type": "pcm_s16le",
-        "sample_rate": 24000,
-    }
+    assert start_frame["session"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
+    assert start_frame["session"]["input_audio_format"] == "pcm16"
+    assert start_frame["session"]["output_audio_format"] == "pcm16"
     assert "Stay in role." in start_frame["session"]["instructions"]
     assert "Practice a renewal negotiation" in start_frame["session"]["instructions"]
     assert "payload" not in start_frame
@@ -165,7 +163,7 @@ async def test_volcengine_realtime_start_sends_session_create_frame() -> None:
     assert ready["type"] == "session.ready"
     assert ready["runtime"] == REALTIME_RUNTIME_VOLCENGINE_DOUBAO
     assert configured["type"] == "session.configured"
-    assert configured["payload"]["model"] == "1.2.6.0"
+    assert configured["payload"]["model"] == "1.2.1.1"
     assert configured["payload"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
 
     await adapter.close()
@@ -191,7 +189,7 @@ async def test_volcengine_realtime_start_replaces_placeholder_voice_with_default
     )
 
     start_frame = _decode_sent(fake_ws.sent[0])
-    assert start_frame["session"]["audio"]["output"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
+    assert start_frame["session"]["voice"] == DEFAULT_VOLCENGINE_REALTIME_VOICE
 
     await adapter.close()
 
@@ -216,23 +214,57 @@ async def test_volcengine_realtime_audio_commit_cancel_and_close_send_provider_f
 
     sent = [_decode_sent(item) for item in websocket.sent]
     assert [item["type"] for item in sent] == [
-        "session.create",
+        "session.update",
         "input_audio_buffer.append",
         "input_audio_buffer.commit",
         "response.cancel",
-        "session.close",
     ]
     assert sent[1]["audio"] == base64.b64encode(b"pcm-audio").decode("ascii")
     assert "payload" not in sent[1]
     assert "sequence" not in sent[2]
     assert "reason" not in sent[3]
-    assert "reason" not in sent[4]
     assert websocket.closed is True
     assert fake_context.exited is True
 
     closed = await _next_event(adapter)
     assert closed["type"] == "session.closed"
     assert closed["payload"]["reason"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_volcengine_realtime_uses_current_user_newapi_gateway(monkeypatch) -> None:
+    fake_ws = _FakeWebSocket()
+    fake_context = _FakeWebSocketContext(fake_ws)
+    captured: dict[str, Any] = {}
+
+    def connector(url: str, *, headers: Mapping[str, str], timeout: float):
+        captured.update(url=url, headers=dict(headers), timeout=timeout)
+        return fake_context
+
+    monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", True)
+    monkeypatch.setattr(
+        settings,
+        "NEWAPI_USER_RELAY_REALTIME_URL",
+        "wss://gateway.example.com/pg/realtime",
+    )
+    context_token = bind_user_access_token("dashboard-user-token")
+    try:
+        adapter = VolcengineDoubaoRealtimeAdapter(
+            api_key="must-not-be-used",
+            websocket_connector=connector,
+            request_id_factory=lambda: "req-gateway-1",
+        )
+        await adapter.start(_voice_context(), _realtime_config())
+        assert captured["url"] == (
+            "wss://gateway.example.com/pg/realtime?model=1.2.1.1"
+        )
+        assert captured["headers"] == {
+            "Authorization": "Bearer dashboard-user-token"
+        }
+        assert "must-not-be-used" not in json.dumps(captured)
+        await adapter.close()
+    finally:
+        reset_user_access_token(context_token)
 
 
 @pytest.mark.asyncio

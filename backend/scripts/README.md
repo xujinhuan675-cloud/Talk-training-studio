@@ -22,7 +22,7 @@ cd backend && uv run python scripts/validate_po.py
 # Persona v1 → v2 迁移（dry-run，不调 LLM、不写 DB）
 cd backend && uv run python scripts/migrate_personas_to_v2.py --dry-run
 
-# Persona v1 → v2 迁移（真实，需 STAKEHOLDER__ANTHROPIC_API_KEY）
+# Persona v1 → v2 迁移（真实，需登录用户凭据和 NewAPI 用户计费）
 cd backend && uv run python scripts/migrate_personas_to_v2.py
 ```
 

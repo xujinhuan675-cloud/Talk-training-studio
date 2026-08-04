@@ -94,4 +94,4 @@ git -C outside-project\new-api-main diff --check
 - 页面迁移事实：[前端迁移矩阵](docs/frontend-migration-matrix.md)
 - 当前部署流程：[服务器部署操作手册](docs/development/server-deployment-runbook.md)
 
-本仓库的代码影响分析使用 code-review-graph；Graphify 只用于 AnchorOS / OpenEvolve 跨文档知识关系。
+本仓库统一使用 code-review-graph 进行代码关系、项目内容检索和影响分析。

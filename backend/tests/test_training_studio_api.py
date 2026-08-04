@@ -1,10 +1,9 @@
-﻿"""API tests for Training Studio catalog and storybank endpoints."""
+"""API tests for Training Studio catalog and storybank endpoints."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from itertools import count
@@ -42,7 +41,7 @@ from application.services.training_studio.scenario_config_service import (
     TrainingScenarioConfigService,
 )
 from application.services.training_studio.session_service import TrainingSessionService
-from core.config import LLMSettings, VoiceSettings, settings
+from core.config import LLMSettings, settings
 from core.exceptions import register_exception_handlers
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 from domain.training_studio.storybank import StoryBankService
@@ -469,561 +468,25 @@ async def test_scenario_templates_use_saved_scenario_config(client: AsyncClient)
 
 
 @pytest.mark.asyncio
-async def test_voice_config_save_writes_env_and_reloads_clients(
-    client: AsyncClient,
-    tmp_path,
+async def test_voice_config_routes_are_removed(client: AsyncClient) -> None:
+    headers = {"X-Mock-User": "admin"}
+
+    get_response = await client.get(
+        "/api/v1/training-studio/voice-config",
+        headers=headers,
+    )
+    put_response = await client.put(
+        "/api/v1/training-studio/voice-config",
+        headers=headers,
+        json={"llm_api_key": "must-not-be-written"},
+    )
+
+    assert get_response.status_code == 404
+    assert put_response.status_code == 404
+
+def test_openai_realtime_key_ignores_generic_provider_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    env_file = tmp_path / ".env"
-    env_file.write_text("SECRET_KEY=test-secret\nVOICE__TTS_PROVIDER=minimax\n", encoding="utf-8")
-    voice_env_keys = [
-        "LLM__PROVIDER",
-        "LLM__BASE_URL",
-        "LLM__DEFAULT_MODEL",
-        "LLM__WIRE_API",
-        "LLM__API_KEY",
-        "VOICE__TTS_PROVIDER",
-        "VOICE__TTS_BASE_URL",
-        "VOICE__TTS_MODEL",
-        "VOICE__TTS_API_KEY",
-        "VOICE__STT_PROVIDER",
-        "VOICE__STT_BASE_URL",
-        "VOICE__STT_MODEL",
-        "VOICE__STT_API_KEY",
-        "REALTIME_PROVIDER",
-        "REALTIME_API_KEY",
-        "REALTIME_BASE_URL",
-        "REALTIME_OPENAI_API_KEY",
-        "REALTIME_OPENAI_MODEL",
-        "REALTIME_OPENAI_VOICE",
-        "REALTIME_OPENAI_TRANSCRIPTION_MODEL",
-    ]
-    old_env = {key: os.environ.get(key) for key in voice_env_keys}
-    original_llm = settings.llm.model_copy(deep=True)
-    original_voice = settings.voice.model_copy(deep=True)
-    original_realtime = {
-        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
-        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
-        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
-        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
-        "REALTIME_OPENAI_MODEL": settings.REALTIME_OPENAI_MODEL,
-        "REALTIME_OPENAI_VOICE": settings.REALTIME_OPENAI_VOICE,
-        "REALTIME_OPENAI_TRANSCRIPTION_MODEL": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
-    }
-    reloads: list[bool] = []
-
-    async def fake_reload_voice_clients() -> None:
-        reloads.append(True)
-
-    async def fake_reload_llm_client() -> None:
-        reloads.append(True)
-
-    try:
-        monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
-        monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
-        monkeypatch.setattr(
-            training_studio_routes,
-            "_settings_env_file_path",
-            lambda: env_file,
-        )
-        monkeypatch.setattr(
-            training_studio_routes,
-            "_reload_voice_clients",
-            fake_reload_voice_clients,
-        )
-        monkeypatch.setattr(
-            training_studio_routes,
-            "_reload_llm_client",
-            fake_reload_llm_client,
-        )
-        settings.llm.api_key = "sk-llm-old"
-        settings.llm.base_url = "https://old-llm.example.com/v1"
-        settings.llm.default_model = "old-model"
-        settings.llm.wire_api = "chat_completions"
-        settings.voice = VoiceSettings(
-            tts_provider="minimax",
-            tts_api_key=None,
-            tts_base_url=None,
-            tts_model="speech-2.8-hd",
-            stt_provider="whisper",
-            stt_api_key=None,
-            stt_base_url=None,
-            stt_model="whisper-1",
-        )
-        settings.REALTIME_OPENAI_API_KEY = None
-        settings.REALTIME_OPENAI_MODEL = "gpt-realtime-2.1"
-        settings.REALTIME_OPENAI_VOICE = "marin"
-        settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
-
-        resp = await client.put(
-            "/api/v1/training-studio/voice-config",
-            headers={"X-Mock-User": "admin"},
-            json={
-                "llm_base_url": "https://ai.flowguide.cc",
-                "llm_provider": "flowguide",
-                "llm_default_model": "gpt-5.5",
-                "llm_wire_api": "responses",
-                "llm_api_key": "sk-flowguide-9999",
-                "tts_provider": "openrouter",
-                "tts_base_url": "https://openrouter.ai/api/v1",
-                "tts_model": "mistralai/voxtral-mini-tts-2603",
-                "tts_api_key": "sk-openrouter-1234",
-                "stt_provider": "whisper",
-                "stt_base_url": "https://openrouter.ai/api/v1",
-                "stt_model": "openai/whisper-1",
-                "stt_use_tts_api_key": True,
-                "realtime_provider": "openai",
-                "realtime_base_url": "https://api.openai.com/v1/realtime/calls",
-                "realtime_api_key": "sk-realtime-5678",
-                "realtime_model": "gpt-realtime-2.1",
-                "realtime_voice": "marin",
-                "realtime_transcription_model": "gpt-realtime-whisper",
-            },
-        )
-
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert data["llm_provider"] == "flowguide"
-        assert data["llm_base_url"] == "https://ai.flowguide.cc"
-        assert data["llm_default_model"] == "gpt-5.5"
-        assert data["llm_api_key_preview"] == "***9999"
-        assert data["tts_provider"] == "openrouter"
-        assert data["tts_api_key_preview"] == "***1234"
-        assert data["stt_api_key_source"] == "tts"
-        assert data["realtime_provider"] == "openai"
-        assert data["realtime_base_url"] == "https://api.openai.com/v1/realtime/calls"
-        assert data["realtime_api_key_preview"] == "***5678"
-        assert "sk-openrouter-1234" not in resp.text
-        assert "sk-realtime-5678" not in resp.text
-        assert "sk-flowguide-9999" not in resp.text
-        assert reloads == [True, True]
-
-        env_text = env_file.read_text(encoding="utf-8")
-        assert "LLM__PROVIDER=flowguide" in env_text
-        assert "LLM__BASE_URL=https://ai.flowguide.cc" in env_text
-        assert "LLM__DEFAULT_MODEL=gpt-5.5" in env_text
-        assert "LLM__WIRE_API=responses" in env_text
-        assert "LLM__API_KEY=sk-flowguide-9999" in env_text
-        assert "VOICE__TTS_PROVIDER=openrouter" in env_text
-        assert "VOICE__TTS_API_KEY=sk-openrouter-1234" in env_text
-        assert "VOICE__STT_API_KEY=" in env_text
-        assert "REALTIME_PROVIDER=openai" in env_text
-        assert "REALTIME_BASE_URL=https://api.openai.com/v1/realtime/calls" in env_text
-        assert "REALTIME_OPENAI_API_KEY=sk-realtime-5678" in env_text
-        assert settings.llm.api_key == "sk-flowguide-9999"
-        assert settings.llm.provider == "flowguide"
-        assert settings.llm.base_url == "https://ai.flowguide.cc"
-        assert settings.llm.default_model == "gpt-5.5"
-        assert settings.voice.tts_provider == "openrouter"
-        assert settings.voice.stt_api_key == "sk-openrouter-1234"
-        assert settings.REALTIME_PROVIDER == "openai"
-        assert settings.REALTIME_BASE_URL == "https://api.openai.com/v1/realtime/calls"
-        assert settings.REALTIME_OPENAI_API_KEY == "sk-realtime-5678"
-    finally:
-        settings.llm = original_llm
-        settings.voice = original_voice
-        for key, value in original_realtime.items():
-            setattr(settings, key, value)
-        for key, value in old_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-@pytest.mark.asyncio
-async def test_voice_config_save_accepts_volcengine_presets(
-    client: AsyncClient,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    env_file = tmp_path / ".env"
-    env_file.write_text("SECRET_KEY=test-secret\n", encoding="utf-8")
-    voice_env_keys = [
-        "LLM__PROVIDER",
-        "LLM__BASE_URL",
-        "LLM__DEFAULT_MODEL",
-        "LLM__WIRE_API",
-        "LLM__API_KEY",
-        "VOICE__TTS_PROVIDER",
-        "VOICE__TTS_BASE_URL",
-        "VOICE__TTS_MODEL",
-        "VOICE__TTS_API_KEY",
-        "VOICE__STT_PROVIDER",
-        "VOICE__STT_BASE_URL",
-        "VOICE__STT_MODEL",
-        "VOICE__STT_API_KEY",
-        "REALTIME_PROVIDER",
-        "REALTIME_API_KEY",
-        "REALTIME_BASE_URL",
-        "REALTIME_OPENAI_API_KEY",
-        "REALTIME_OPENAI_MODEL",
-        "REALTIME_OPENAI_VOICE",
-        "REALTIME_OPENAI_TRANSCRIPTION_MODEL",
-    ]
-    old_env = {key: os.environ.get(key) for key in voice_env_keys}
-    original_llm = settings.llm.model_copy(deep=True)
-    original_voice = settings.voice.model_copy(deep=True)
-    original_realtime = {
-        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
-        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
-        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
-        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
-        "REALTIME_OPENAI_MODEL": settings.REALTIME_OPENAI_MODEL,
-        "REALTIME_OPENAI_VOICE": settings.REALTIME_OPENAI_VOICE,
-        "REALTIME_OPENAI_TRANSCRIPTION_MODEL": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
-    }
-
-    async def fake_reload_voice_clients() -> None:
-        return None
-
-    async def fake_reload_llm_client() -> None:
-        return None
-
-    try:
-        monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
-        monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
-        monkeypatch.setattr(
-            training_studio_routes,
-            "_settings_env_file_path",
-            lambda: env_file,
-        )
-        monkeypatch.setattr(
-            training_studio_routes,
-            "_reload_voice_clients",
-            fake_reload_voice_clients,
-        )
-        monkeypatch.setattr(
-            training_studio_routes,
-            "_reload_llm_client",
-            fake_reload_llm_client,
-        )
-        settings.llm = LLMSettings(
-            provider="openai",
-            api_key="sk-old-llm",
-            base_url="https://api.openai.com/v1",
-            default_model="gpt-4o-mini",
-        )
-        settings.voice = VoiceSettings(
-            tts_provider="minimax",
-            tts_api_key=None,
-            tts_base_url=None,
-            tts_model="speech-2.8-hd",
-            stt_provider="whisper",
-            stt_api_key=None,
-            stt_base_url=None,
-            stt_model="whisper-1",
-        )
-        settings.REALTIME_OPENAI_API_KEY = None
-        settings.REALTIME_API_KEY = None
-        settings.REALTIME_PROVIDER = "openai"
-        settings.REALTIME_BASE_URL = "https://api.openai.com/v1/realtime/calls"
-        settings.REALTIME_OPENAI_MODEL = "gpt-realtime-2.1"
-        settings.REALTIME_OPENAI_VOICE = "marin"
-        settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
-
-        resp = await client.put(
-            "/api/v1/training-studio/voice-config",
-            headers={"X-Mock-User": "admin"},
-            json={
-                "llm_provider": "volcengine",
-                "llm_base_url": "https://ark.cn-beijing.volces.com/api/v3",
-                "llm_default_model": "doubao-seed-1-6-250615",
-                "llm_wire_api": "chat_completions",
-                "llm_api_key": "sk-volc-ark",
-                "tts_provider": "volcengine",
-                "tts_base_url": "https://openspeech.bytedance.com/api/v3/tts/unidirectional",
-                "tts_model": "seed-tts-2.0",
-                "tts_api_key": "sk-volc-speech-tts",
-                "stt_provider": "volcengine",
-                "stt_base_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-                "stt_model": "volc.bigasr.sauc.duration",
-                "stt_api_key": "sk-volc-speech-stt",
-                "realtime_provider": "volcengine.doubao_realtime",
-                "realtime_base_url": (
-                    "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
-                ),
-                "realtime_api_key": "sk-volc-realtime",
-                "realtime_model": "seed-duplex",
-                "realtime_voice": "your-volcengine-voice",
-                "realtime_transcription_model": "volcengine-realtime-transcript",
-            },
-        )
-
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert data["llm_provider"] == "volcengine"
-        assert data["tts_provider"] == "volcengine"
-        assert data["stt_provider"] == "volcengine"
-        assert data["stt_api_key_source"] == "stt"
-        assert data["realtime_provider"] == "volcengine.doubao_realtime"
-        assert data["realtime_api_key_source"] == "realtime"
-        assert settings.voice.stt_api_key == "sk-volc-speech-stt"
-        assert settings.REALTIME_API_KEY == "sk-volc-realtime"
-        assert settings.REALTIME_OPENAI_API_KEY is None
-
-        env_text = env_file.read_text(encoding="utf-8")
-        assert "LLM__PROVIDER=volcengine" in env_text
-        assert "VOICE__TTS_PROVIDER=volcengine" in env_text
-        assert "VOICE__STT_PROVIDER=volcengine" in env_text
-        assert "REALTIME_PROVIDER=volcengine.doubao_realtime" in env_text
-        assert "REALTIME_API_KEY=sk-volc-realtime" in env_text
-    finally:
-        settings.llm = original_llm
-        settings.voice = original_voice
-        for key, value in original_realtime.items():
-            setattr(settings, key, value)
-        for key, value in old_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-def test_voice_config_reports_openrouter_tts_reusing_openrouter_llm_key() -> None:
-    original_llm = settings.llm
-    original_voice = settings.voice
-    settings.llm = LLMSettings(
-        provider="openai",
-        api_key="sk-openrouter-reused",
-        base_url="https://openrouter.ai/api/v1",
-        default_model="openai/gpt-4o-mini",
-    )
-    settings.voice = VoiceSettings(
-        tts_provider="openrouter",
-        tts_api_key=None,
-        tts_base_url="https://openrouter.ai/api/v1",
-        tts_model="mistralai/voxtral-mini-tts-2603",
-        stt_provider="whisper",
-        stt_api_key=None,
-        stt_base_url="https://openrouter.ai/api/v1",
-        stt_model="openai/whisper-1",
-    )
-
-    try:
-        dto = training_studio_routes._voice_config_response()
-
-        assert dto.tts_api_key_configured is True
-        assert dto.tts_api_key_preview == "***used"
-        assert dto.stt_api_key_source == "llm"
-    finally:
-        settings.llm = original_llm
-        settings.voice = original_voice
-
-
-def test_voice_config_reports_tts_runtime_not_initialized(monkeypatch: pytest.MonkeyPatch) -> None:
-    import infrastructure.external.voice as voice_module
-
-    monkeypatch.setattr(voice_module, "get_tts_client", lambda: None)
-    original_llm = settings.llm
-    original_voice = settings.voice
-    settings.llm = LLMSettings(
-        provider="openai",
-        api_key="sk-openrouter-reused",
-        base_url="https://openrouter.ai/api/v1",
-        default_model="openai/gpt-4o-mini",
-    )
-    settings.voice = VoiceSettings(
-        tts_provider="openrouter",
-        tts_api_key=None,
-        tts_base_url="https://openrouter.ai/api/v1",
-        tts_model="mistralai/voxtral-mini-tts-2603",
-        stt_provider="whisper",
-        stt_api_key=None,
-        stt_base_url="https://openrouter.ai/api/v1",
-        stt_model="openai/whisper-1",
-    )
-
-    try:
-        dto = training_studio_routes._voice_config_response()
-
-        assert dto.tts_api_key_configured is True
-        assert dto.tts_runtime_available is False
-        assert dto.tts_runtime_status == "not_initialized"
-        assert "TTS client" in dto.tts_runtime_message
-    finally:
-        settings.llm = original_llm
-        settings.voice = original_voice
-
-
-def test_voice_config_does_not_reuse_llm_key_for_inventory_stt_provider() -> None:
-    original_llm = settings.llm
-    original_voice = settings.voice
-    settings.llm = LLMSettings(
-        provider="openai",
-        api_key="sk-llm-shared",
-        base_url="https://api.openai.com/v1",
-        default_model="gpt-4o-mini",
-    )
-    settings.voice = VoiceSettings(
-        tts_provider="openrouter",
-        tts_api_key=None,
-        tts_base_url="https://openrouter.ai/api/v1",
-        tts_model="mistralai/voxtral-mini-tts-2603",
-        stt_provider="deepgram",
-        stt_api_key=None,
-        stt_base_url="https://api.deepgram.com/v1",
-        stt_model="nova-3",
-    )
-
-    try:
-        dto = training_studio_routes._voice_config_response()
-
-        assert dto.stt_provider == "deepgram"
-        assert dto.stt_api_key_configured is False
-        assert dto.stt_api_key_source == "missing"
-        assert dto.stt_use_tts_api_key is False
-    finally:
-        settings.llm = original_llm
-        settings.voice = original_voice
-
-
-def test_voice_config_reports_volcengine_dedicated_stt_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    original_llm = settings.llm
-    original_voice = settings.voice
-    monkeypatch.delenv("VOICE__STT_API_KEY", raising=False)
-    monkeypatch.setattr(training_studio_routes, "_read_env_file_values", lambda path=None: {})
-    settings.llm = LLMSettings(
-        provider="openai",
-        api_key="sk-llm-shared",
-        base_url="https://api.openai.com/v1",
-        default_model="gpt-4o-mini",
-    )
-    settings.voice = VoiceSettings(
-        tts_provider="volcengine",
-        tts_api_key="sk-volc-tts",
-        tts_base_url="https://openspeech.bytedance.com/api/v3/tts/unidirectional",
-        tts_model="seed-tts-2.0",
-        stt_provider="volcengine",
-        stt_api_key="sk-volc-stt",
-        stt_base_url="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-        stt_model="volc.bigasr.sauc.duration",
-    )
-
-    try:
-        dto = training_studio_routes._voice_config_response()
-
-        assert dto.stt_provider == "volcengine"
-        assert dto.stt_api_key_configured is True
-        assert dto.stt_api_key_preview == "***-stt"
-        assert dto.stt_api_key_source == "stt"
-        assert dto.stt_use_tts_api_key is False
-    finally:
-        settings.llm = original_llm
-        settings.voice = original_voice
-
-
-def test_voice_config_reports_volcengine_stt_reusing_tts_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    original_llm = settings.llm
-    original_voice = settings.voice
-    monkeypatch.delenv("VOICE__STT_API_KEY", raising=False)
-    monkeypatch.setattr(training_studio_routes, "_read_env_file_values", lambda path=None: {})
-    settings.llm = LLMSettings(
-        provider="openai",
-        api_key="sk-llm-shared",
-        base_url="https://api.openai.com/v1",
-        default_model="gpt-4o-mini",
-    )
-    settings.voice = VoiceSettings(
-        tts_provider="volcengine",
-        tts_api_key="sk-volc-speech",
-        tts_base_url="https://openspeech.bytedance.com/api/v3/tts/unidirectional",
-        tts_model="seed-tts-2.0",
-        stt_provider="volcengine",
-        stt_api_key=None,
-        stt_base_url="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-        stt_model="volc.bigasr.sauc.duration",
-    )
-
-    try:
-        dto = training_studio_routes._voice_config_response()
-
-        assert dto.stt_provider == "volcengine"
-        assert dto.stt_api_key_configured is True
-        assert dto.stt_api_key_preview == "***eech"
-        assert dto.stt_api_key_source == "tts"
-        assert dto.stt_use_tts_api_key is True
-    finally:
-        settings.llm = original_llm
-        settings.voice = original_voice
-
-
-def test_voice_config_reports_generic_realtime_provider_key() -> None:
-    original_llm = settings.llm
-    original_realtime = {
-        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
-        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
-        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
-        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
-    }
-    settings.llm = LLMSettings(
-        provider="openai",
-        api_key="sk-llm-fallback",
-        base_url="https://api.openai.com/v1",
-        default_model="gpt-4o-mini",
-    )
-    settings.REALTIME_PROVIDER = "google.gemini_live"
-    settings.REALTIME_API_KEY = "sk-gemini-live"
-    settings.REALTIME_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-    settings.REALTIME_OPENAI_API_KEY = None
-
-    try:
-        dto = training_studio_routes._voice_config_response()
-
-        assert dto.realtime_provider == "google.gemini_live"
-        assert dto.realtime_base_url == "https://generativelanguage.googleapis.com/v1beta"
-        assert dto.realtime_api_key_configured is True
-        assert dto.realtime_effective_api_key_configured is True
-        assert dto.realtime_api_key_preview == "***live"
-        assert dto.realtime_api_key_source == "realtime"
-    finally:
-        settings.llm = original_llm
-        for key, value in original_realtime.items():
-            setattr(settings, key, value)
-
-
-def test_voice_config_does_not_reuse_llm_key_for_non_openai_realtime_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    original_llm = settings.llm
-    original_realtime = {
-        "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
-        "REALTIME_API_KEY": settings.REALTIME_API_KEY,
-        "REALTIME_BASE_URL": settings.REALTIME_BASE_URL,
-        "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
-    }
-    monkeypatch.delenv("REALTIME_API_KEY", raising=False)
-    monkeypatch.setattr(training_studio_routes, "_read_env_file_values", lambda path=None: {})
-    settings.llm = LLMSettings(
-        provider="openai",
-        api_key="sk-llm-fallback",
-        base_url="https://api.openai.com/v1",
-        default_model="gpt-4o-mini",
-    )
-    settings.REALTIME_PROVIDER = "xai.realtime"
-    settings.REALTIME_API_KEY = None
-    settings.REALTIME_BASE_URL = "https://api.x.ai/v1"
-    settings.REALTIME_OPENAI_API_KEY = None
-
-    try:
-        dto = training_studio_routes._voice_config_response()
-
-        assert dto.realtime_provider == "xai.realtime"
-        assert dto.realtime_api_key_configured is False
-        assert dto.realtime_effective_api_key_configured is False
-        assert dto.realtime_api_key_preview is None
-        assert dto.realtime_api_key_source == "missing"
-    finally:
-        settings.llm = original_llm
-        for key, value in original_realtime.items():
-            setattr(settings, key, value)
-
-
-def test_openai_realtime_key_accepts_generic_key_for_openai_provider() -> None:
     original_llm = settings.llm
     original_realtime = {
         "REALTIME_PROVIDER": settings.REALTIME_PROVIDER,
@@ -1031,12 +494,13 @@ def test_openai_realtime_key_accepts_generic_key_for_openai_provider() -> None:
         "REALTIME_OPENAI_API_KEY": settings.REALTIME_OPENAI_API_KEY,
     }
     settings.llm = LLMSettings(provider="openai", api_key=None, default_model="gpt-4o-mini")
+    monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", False)
     settings.REALTIME_PROVIDER = "openai"
     settings.REALTIME_API_KEY = "sk-generic-openai"
     settings.REALTIME_OPENAI_API_KEY = None
 
     try:
-        assert training_studio_routes._openai_realtime_api_key() == "sk-generic-openai"
+        assert training_studio_routes._openai_realtime_api_key() is None
     finally:
         settings.llm = original_llm
         for key, value in original_realtime.items():
@@ -1050,6 +514,7 @@ def test_realtime_capabilities_include_volcengine_doubao_runtime_when_configured
     monkeypatch.setattr(settings, "REALTIME_API_KEY", "sk-volcengine-realtime")
     monkeypatch.setattr(settings, "REALTIME_BASE_URL", "wss://example.test/doubao/realtime")
     monkeypatch.setattr(settings, "REALTIME_OPENAI_MODEL", "seed-duplex-test")
+    monkeypatch.setattr(settings, "REALTIME_VOLCENGINE_MODEL", "seed-duplex-test")
     monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "voice-test")
 
     data = training_studio_routes._realtime_capabilities_response()
@@ -1061,6 +526,30 @@ def test_realtime_capabilities_include_volcengine_doubao_runtime_when_configured
     assert volcengine.get("readyForCall") is True
     assert "sk-volcengine-realtime" not in json.dumps(data, default=str)
     assert find_provider_capability(data, "pipecat") is not None
+
+
+def test_gateway_billing_uses_configured_volcengine_realtime_without_backend_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", True)
+    monkeypatch.setattr(settings, "REALTIME_PROVIDER", "volcengine.doubao_realtime")
+    monkeypatch.setattr(settings, "REALTIME_API_KEY", None)
+    monkeypatch.setattr(settings, "REALTIME_VOLCENGINE_MODEL", "1.2.1.1")
+    monkeypatch.setattr(
+        settings,
+        "NEWAPI_USER_RELAY_REALTIME_URL",
+        "wss://gateway.example.com/pg/realtime",
+    )
+
+    data = training_studio_routes._realtime_capabilities_response()
+
+    assert data["activeProvider"] == "volcengine.doubao_realtime"
+    assert data["active"]["readyForCall"] is True
+    assert "env" not in data["active"]["readiness"]["required"]
+    assert data["active"]["readiness"]["required"]["baseUrl"] == (
+        "wss://gateway.example.com/pg/realtime"
+    )
+    assert data["active"]["readiness"]["required"]["model"] == "1.2.1.1"
 
 
 def test_realtime_pipeline_factory_keeps_pipecat_provider(
@@ -1087,6 +576,7 @@ def test_realtime_pipeline_factory_routes_volcengine_doubao_runtime(
     monkeypatch.setattr(settings, "REALTIME_API_KEY", "sk-volcengine-realtime")
     monkeypatch.setattr(settings, "REALTIME_BASE_URL", "wss://example.test/doubao/realtime")
     monkeypatch.setattr(settings, "REALTIME_OPENAI_MODEL", "seed-duplex-test")
+    monkeypatch.setattr(settings, "REALTIME_VOLCENGINE_MODEL", "seed-duplex-test")
     monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "voice-test")
 
     factory = training_studio_routes.get_training_realtime_pipeline_factory()
@@ -1112,6 +602,7 @@ def test_realtime_pipeline_factory_uses_volcengine_default_for_placeholder_voice
     monkeypatch.setattr(settings, "REALTIME_API_KEY", "sk-volcengine-realtime")
     monkeypatch.setattr(settings, "REALTIME_BASE_URL", "wss://example.test/doubao/realtime")
     monkeypatch.setattr(settings, "REALTIME_OPENAI_MODEL", "seed-duplex-test")
+    monkeypatch.setattr(settings, "REALTIME_VOLCENGINE_MODEL", "seed-duplex-test")
     monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "your-volcengine-voice")
 
     factory = training_studio_routes.get_training_realtime_pipeline_factory()

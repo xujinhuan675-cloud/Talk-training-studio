@@ -1,13 +1,12 @@
-# input: core.config.settings.voice, MiniMax SDK
-# output: init_tts_client, shutdown_tts_client, get_tts_client, init_stt_client, shutdown_stt_client, get_stt_client 生命周期函数
-# owner: wanhua.gu
-# pos: 基础设施层 - 语音客户端(TTS/STT)生命周期管理；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
-"""Voice client (TTS / STT) lifecycle management."""
+# input: NewAPI user relay settings and OpenAI-compatible voice clients
+# output: gateway-only TTS/STT client lifecycle
+# owner: TalkWise platform integration
+# pos: infrastructure - voice protocol client lifecycle
+"""Gateway-only voice client lifecycle management."""
 
 from __future__ import annotations
 
 from typing import Optional
-from urllib.parse import urlsplit
 
 from application.ports.stt import STTPort
 from application.ports.tts import TTSPort
@@ -25,195 +24,36 @@ _tts_client: Optional[TTSPort] = None
 _stt_client: Optional[STTPort] = None
 
 
-_OPENROUTER_PROVIDER_ALIASES = {
-    "openrouter",
-    "open_router",
-    "openrouter_ai",
-    "openrouter_compatible",
-}
-_VOLCENGINE_PROVIDER_ALIASES = {
-    "volcengine",
-    "volc_engine",
-    "doubao",
-    "byteplus",
-    "bytedance",
-    "volcengine_doubao",
-}
-_MINIMAX_TTS_DEFAULT_MODEL = "speech-2.8-hd"
-_OPENAI_STT_DEFAULT_MODEL = "whisper-1"
-_VOLCENGINE_TTS_DEFAULT_MODEL = "seed-tts-2.0"
-_VOLCENGINE_STT_DEFAULT_MODEL = "volc.bigasr.sauc.duration"
-_SHARED_KEY_STT_PROVIDER_ALIASES = {
-    "minimax",
-    "openai",
-    "whisper",
-    *_VOLCENGINE_PROVIDER_ALIASES,
-}
-
-
-def _normalized_provider(value: object | None) -> str:
-    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-
-
-def _is_openrouter_base_url(value: object | None) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    parsed = urlsplit(text if "://" in text else f"https://{text}")
-    hostname = (parsed.hostname or "").lower()
-    return hostname == "openrouter.ai" or hostname.endswith(".openrouter.ai")
-
-
-def _llm_settings_are_openrouter() -> bool:
-    llm_cfg = settings.llm
-    return (
-        _normalized_provider(getattr(llm_cfg, "provider", None)) in _OPENROUTER_PROVIDER_ALIASES
-        or _is_openrouter_base_url(getattr(llm_cfg, "base_url", None))
-    )
-
-
-def _effective_tts_api_key() -> str | None:
-    voice_cfg = settings.voice
-    if user_billing_enabled():
-        return runtime_api_key()
-    if voice_cfg.tts_api_key:
-        return voice_cfg.tts_api_key
-    if (
-        _normalized_provider(voice_cfg.tts_provider) == "openrouter"
-        and _llm_settings_are_openrouter()
-    ):
-        return settings.llm.api_key
-    return None
-
-
-def _effective_tts_base_url() -> str | None:
-    voice_cfg = settings.voice
-    if user_billing_enabled():
-        return user_relay_base_url()
-    if voice_cfg.tts_base_url:
-        return voice_cfg.tts_base_url
-    if (
-        _normalized_provider(voice_cfg.tts_provider) == "openrouter"
-        and _llm_settings_are_openrouter()
-    ):
-        return settings.llm.base_url
-    return None
-
-
-def _effective_volcengine_tts_model(value: str | None) -> str:
-    if value and value != _MINIMAX_TTS_DEFAULT_MODEL:
-        return value
-    return _VOLCENGINE_TTS_DEFAULT_MODEL
-
-
-def _effective_volcengine_stt_model(value: str | None) -> str:
-    if value and value != _OPENAI_STT_DEFAULT_MODEL:
-        return value
-    return _VOLCENGINE_STT_DEFAULT_MODEL
-
-
-def _effective_stt_api_key() -> str | None:
-    voice_cfg = settings.voice
-    if user_billing_enabled():
-        return runtime_api_key()
-    if voice_cfg.stt_api_key:
-        return voice_cfg.stt_api_key
-    if _normalized_provider(voice_cfg.stt_provider) in _SHARED_KEY_STT_PROVIDER_ALIASES:
-        return voice_cfg.tts_api_key or settings.llm.api_key
-    return None
-
-
-# ---- TTS ----
-
-
 async def init_tts_client() -> None:
-    """Initialize the TTS client based on configuration."""
+    """Initialize the OpenAI-compatible TTS client for NewAPI user billing."""
     global _tts_client
 
     if _tts_client is not None:
         logger.warning("TTS client already initialized")
         return
-
-    voice_cfg = settings.voice
-    tts_api_key = _effective_tts_api_key()
-    tts_base_url = _effective_tts_base_url()
-    if not tts_api_key:
-        logger.warning(
-            "tts_client_skipped",
-            reason=(
-                "VOICE__TTS_API_KEY not configured; OpenRouter TTS can reuse "
-                "LLM__API_KEY only when LLM is configured for OpenRouter"
-            ),
-        )
+    if not user_billing_enabled():
+        logger.info("tts_client_skipped", reason="NewAPI user billing is disabled")
         return
 
-    try:
-        tts_provider = _normalized_provider(voice_cfg.tts_provider)
-        if user_billing_enabled():
-            from .openrouter_tts import OpenRouterTTSProvider
+    from .openai_compatible_tts import OpenAICompatibleTTSProvider
 
-            _tts_client = OpenRouterTTSProvider(
-                api_key=tts_api_key,
-                model=voice_cfg.tts_model,
-                base_url=tts_base_url or user_relay_base_url(),
-            )
-        elif tts_provider == "minimax":
-            from .minimax_tts import MinimaxTTSProvider
-
-            _tts_client = MinimaxTTSProvider(
-                api_key=tts_api_key,
-                model=voice_cfg.tts_model,
-                **({"base_url": tts_base_url} if tts_base_url else {}),
-            )
-        elif tts_provider == "elevenlabs":
-            from .elevenlabs_tts import ElevenLabsTTSProvider
-
-            _tts_client = ElevenLabsTTSProvider(
-                api_key=tts_api_key,
-                model=voice_cfg.tts_model or "eleven_multilingual_v2",
-                **({"base_url": tts_base_url} if tts_base_url else {}),
-            )
-        elif tts_provider == "openrouter":
-            from .openrouter_tts import OpenRouterTTSProvider
-
-            _tts_client = OpenRouterTTSProvider(
-                api_key=tts_api_key,
-                model=voice_cfg.tts_model,
-                **({"base_url": tts_base_url} if tts_base_url else {}),
-            )
-        elif tts_provider in _VOLCENGINE_PROVIDER_ALIASES:
-            from .volcengine_voice import VolcengineTTSProvider
-
-            _tts_client = VolcengineTTSProvider(
-                api_key=tts_api_key,
-                model=_effective_volcengine_tts_model(voice_cfg.tts_model),
-                **({"base_url": tts_base_url} if tts_base_url else {}),
-            )
-        else:
-            logger.warning(
-                "tts_client_skipped",
-                provider=voice_cfg.tts_provider,
-                reason="TTS provider preset is saved, but no runtime adapter is wired",
-            )
-            return
-
-        logger.info(
-            "tts_client_initialized",
-            provider=voice_cfg.tts_provider,
-            model=voice_cfg.tts_model,
-        )
-    except Exception as exc:
-        logger.error("tts_client_init_failed", error=str(exc))
-        raise
+    _tts_client = OpenAICompatibleTTSProvider(
+        api_key=runtime_api_key() or "newapi-user-session",
+        model=settings.voice.tts_model,
+        base_url=user_relay_base_url(),
+    )
+    logger.info(
+        "tts_client_initialized",
+        provider="newapi_openai_compatible",
+        model=settings.voice.tts_model,
+    )
 
 
 def get_tts_client() -> Optional[TTSPort]:
-    """Get the TTS client instance (may be None if not configured)."""
     return _tts_client
 
 
 async def shutdown_tts_client() -> None:
-    """Shutdown the TTS client."""
     global _tts_client
 
     if _tts_client is None:
@@ -230,76 +70,36 @@ async def shutdown_tts_client() -> None:
         _tts_client = None
 
 
-# ---- STT ----
-
-
 async def init_stt_client() -> None:
-    """Initialize the STT client based on configuration."""
+    """Initialize the OpenAI-compatible STT client for NewAPI user billing."""
     global _stt_client
 
     if _stt_client is not None:
         logger.warning("STT client already initialized")
         return
-
-    voice_cfg = settings.voice
-    stt_api_key = _effective_stt_api_key()
-    if not stt_api_key:
-        logger.warning(
-            "stt_client_skipped",
-            reason=(
-                "VOICE__STT_API_KEY not configured and no supported shared "
-                "voice/LLM key fallback is available; STT features will be unavailable"
-            ),
-        )
+    if not user_billing_enabled():
+        logger.info("stt_client_skipped", reason="NewAPI user billing is disabled")
         return
 
-    try:
-        stt_provider = _normalized_provider(voice_cfg.stt_provider)
-        if user_billing_enabled():
-            from .minimax_stt import MinimaxSTTProvider
+    from .openai_compatible_stt import OpenAICompatibleSTTProvider
 
-            _stt_client = MinimaxSTTProvider(
-                api_key=stt_api_key,
-                base_url=user_relay_base_url(),
-                model=voice_cfg.stt_model,
-            )
-        elif stt_provider in ("minimax", "openai", "whisper"):
-            from .minimax_stt import MinimaxSTTProvider
-
-            _stt_client = MinimaxSTTProvider(
-                api_key=stt_api_key,
-                base_url=voice_cfg.stt_base_url or "https://api.openai.com/v1",
-                model=voice_cfg.stt_model,
-            )
-        elif stt_provider in _VOLCENGINE_PROVIDER_ALIASES:
-            from .volcengine_voice import VolcengineSTTProvider
-
-            _stt_client = VolcengineSTTProvider(
-                api_key=stt_api_key,
-                model=_effective_volcengine_stt_model(voice_cfg.stt_model),
-                **({"base_url": voice_cfg.stt_base_url} if voice_cfg.stt_base_url else {}),
-            )
-        else:
-            logger.warning(
-                "stt_client_skipped",
-                provider=voice_cfg.stt_provider,
-                reason="STT provider preset is saved, but no runtime adapter is wired",
-            )
-            return
-
-        logger.info("stt_client_initialized", provider=voice_cfg.stt_provider)
-    except Exception as exc:
-        logger.error("stt_client_init_failed", error=str(exc))
-        raise
+    _stt_client = OpenAICompatibleSTTProvider(
+        api_key=runtime_api_key() or "newapi-user-session",
+        base_url=user_relay_base_url(),
+        model=settings.voice.stt_model,
+    )
+    logger.info(
+        "stt_client_initialized",
+        provider="newapi_openai_compatible",
+        model=settings.voice.stt_model,
+    )
 
 
 def get_stt_client() -> Optional[STTPort]:
-    """Get the STT client instance (may be None if not configured)."""
     return _stt_client
 
 
 async def shutdown_stt_client() -> None:
-    """Shutdown the STT client."""
     global _stt_client
 
     if _stt_client is None:
@@ -317,10 +117,10 @@ async def shutdown_stt_client() -> None:
 
 
 __all__ = [
-    "init_tts_client",
-    "get_tts_client",
-    "shutdown_tts_client",
-    "init_stt_client",
     "get_stt_client",
+    "get_tts_client",
+    "init_stt_client",
+    "init_tts_client",
     "shutdown_stt_client",
+    "shutdown_tts_client",
 ]

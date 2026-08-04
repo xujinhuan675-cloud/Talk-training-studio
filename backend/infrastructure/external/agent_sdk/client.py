@@ -62,11 +62,9 @@ class AgentSkillClient:
     ) -> None:
         self._settings = settings
         self._workspace_mgr = workspace_mgr
-        # Claude Agent SDK currently receives credentials through process-level
-        # environment variables. Serialize gateway-billed runs so two users can
-        # never observe each other's short-lived dashboard credential.
-        max_concurrency = 1 if user_billing_enabled() else settings.max_concurrent_builds
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        # Claude Agent SDK receives credentials through process-level environment
+        # variables, so serialize runs to isolate user dashboard credentials.
+        self._semaphore = asyncio.Semaphore(1)
 
     @contextmanager
     def _patched_env(self) -> Iterator[None]:
@@ -85,18 +83,11 @@ class AgentSkillClient:
             else:
                 os.environ[env_key] = value
 
-        if user_billing_enabled():
-            _replace("ANTHROPIC_API_KEY", None)
-            _replace("ANTHROPIC_AUTH_TOKEN", require_user_access_token())
-            _replace("ANTHROPIC_BASE_URL", user_relay_base_url())
-        else:
-            api_key = (
-                self._settings.anthropic_api_key.get_secret_value()
-                if self._settings.anthropic_api_key
-                else None
-            )
-            _replace("ANTHROPIC_API_KEY", api_key)
-            _replace("ANTHROPIC_BASE_URL", self._settings.anthropic_base_url)
+        if not user_billing_enabled():
+            raise RuntimeError("Claude Agent SDK requires NewAPI user billing")
+        _replace("ANTHROPIC_API_KEY", None)
+        _replace("ANTHROPIC_AUTH_TOKEN", require_user_access_token())
+        _replace("ANTHROPIC_BASE_URL", user_relay_base_url())
 
         try:
             yield

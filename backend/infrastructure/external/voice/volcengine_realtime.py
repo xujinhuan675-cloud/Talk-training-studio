@@ -1,10 +1,4 @@
-"""Volcengine/Doubao realtime voice runtime adapter.
-
-The repository currently has only turn-based Volcengine STT/TTS code and no
-checked-in official Doubao Realtime wire protocol. This module therefore keeps
-the provider protocol isolated behind encode/parse helpers while exposing the
-same provider-neutral realtime pipeline shape used by Training Studio.
-"""
+"""Provider-neutral Doubao realtime adapter backed by the NewAPI gateway."""
 
 from __future__ import annotations
 
@@ -19,7 +13,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any, Callable
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from application.ports.realtime import (
     REALTIME_EVENT_SCHEMA_VERSION,
@@ -31,25 +25,28 @@ from application.ports.realtime import (
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
 )
+from infrastructure.external.newapi_user_gateway import (
+    authorization_headers,
+    user_billing_enabled,
+    user_relay_realtime_url,
+)
 
 logger = logging.getLogger(__name__)
 
 VOLCENGINE_DOUBAO_REALTIME_PROVIDER = "volcengine.doubao_realtime"
 DEFAULT_VOLCENGINE_REALTIME_URL = (
-    "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
+    "ws://127.0.0.1:3000/pg/realtime"
 )
-DEFAULT_VOLCENGINE_REALTIME_MODEL = "1.2.6.0"
+DEFAULT_VOLCENGINE_REALTIME_MODEL = "1.2.1.1"
 DEFAULT_VOLCENGINE_REALTIME_VOICE = "zh_female_vv_uranus_bigtts"
 DEFAULT_INPUT_AUDIO_FORMAT = "pcm16"
 DEFAULT_OUTPUT_AUDIO_FORMAT = "pcm16"
 DEFAULT_INPUT_SAMPLE_RATE = 16000
 DEFAULT_OUTPUT_SAMPLE_RATE = 24000
-_VOLCENGINE_EVENT_SESSION_CREATE = "session.create"
 _VOLCENGINE_EVENT_SESSION_UPDATE = "session.update"
 _VOLCENGINE_EVENT_AUDIO_APPEND = "input_audio_buffer.append"
 _VOLCENGINE_EVENT_AUDIO_COMMIT = "input_audio_buffer.commit"
 _VOLCENGINE_EVENT_RESPONSE_CANCEL = "response.cancel"
-_VOLCENGINE_EVENT_SESSION_CLOSE = "session.close"
 _VOLCENGINE_REALTIME_PLACEHOLDER_VOICES = {
     "marin",
     "your-voice",
@@ -108,7 +105,7 @@ class VolcengineRealtimeError(RuntimeError):
 
 
 class VolcengineDoubaoRealtimeAdapter:
-    """Provider-neutral realtime pipeline adapter for Doubao Realtime."""
+    """TalkWise realtime adapter using NewAPI's OpenAI-compatible gateway."""
 
     def __init__(
         self,
@@ -154,9 +151,9 @@ class VolcengineDoubaoRealtimeAdapter:
         self._closed = False
 
         api_key = _config_api_key(self._config, fallback=self._api_key)
-        if not api_key:
+        if not user_billing_enabled() and not api_key:
             raise VolcengineRealtimeError(
-                "Volcengine Doubao realtime API key is required",
+                "A NewAPI gateway API key is required for Doubao realtime",
                 code="MISSING_VOLCENGINE_REALTIME_API_KEY",
                 phase="configuration",
                 provider=self._config.provider,
@@ -165,15 +162,21 @@ class VolcengineDoubaoRealtimeAdapter:
             )
 
         url = normalize_volcengine_realtime_url(
-            _metadata_text(self._config.metadata, "baseUrl", "base_url")
+            user_relay_realtime_url()
+            if user_billing_enabled()
+            else _metadata_text(self._config.metadata, "baseUrl", "base_url")
             or self._base_url
         )
         model = _config_model(self._config, fallback=self._model)
+        url = _realtime_url_with_model(url, model)
         voice = _config_voice(self._config, fallback=self._voice) or DEFAULT_VOLCENGINE_REALTIME_VOICE
-        headers = build_volcengine_realtime_headers(
-            api_key=api_key,
-            request_id=self._request_id,
-            resource_id=_config_resource_id(self._config),
+        headers = (
+            authorization_headers(api_key)
+            if user_billing_enabled()
+            else build_volcengine_realtime_headers(
+                api_key=str(api_key),
+                request_id=self._request_id,
+            )
         )
 
         try:
@@ -184,7 +187,7 @@ class VolcengineDoubaoRealtimeAdapter:
             )
             self._websocket = await _enter_websocket(self._websocket_context)
             await self._send_provider_event(
-                _VOLCENGINE_EVENT_SESSION_CREATE,
+                _VOLCENGINE_EVENT_SESSION_UPDATE,
                 build_volcengine_realtime_session_payload(
                     context,
                     self._config,
@@ -328,12 +331,6 @@ class VolcengineDoubaoRealtimeAdapter:
             return
         config = self._config
         context = self._context
-        if not self._closed and self._websocket is not None:
-            with suppress(Exception):
-                await self._send_provider_event(
-                    _VOLCENGINE_EVENT_SESSION_CLOSE,
-                    {},
-                )
         self._closed = True
         if self._receive_task is not None and not self._receive_task.done():
             self._receive_task.cancel()
@@ -450,8 +447,15 @@ def normalize_volcengine_realtime_url(base_url: str | None = None) -> str:
         raw_url = f"wss://{raw_url}"
     parsed = urlparse(raw_url)
     scheme = "wss" if parsed.scheme == "https" else "ws" if parsed.scheme == "http" else parsed.scheme
-    path = parsed.path if parsed.path and parsed.path != "/" else "/api/v3/duplex/realtime/dialogue"
+    path = parsed.path if parsed.path and parsed.path != "/" else "/pg/realtime"
     return urlunparse(parsed._replace(scheme=scheme, path=path))
+
+
+def _realtime_url_with_model(url: str, model: str) -> str:
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["model"] = model
+    return urlunparse(parsed._replace(query=urlencode(query)))
 
 
 def build_volcengine_realtime_headers(
@@ -462,11 +466,9 @@ def build_volcengine_realtime_headers(
     model: str | None = None,
 ) -> dict[str, str]:
     headers = {
-        "X-Api-Key": api_key,
-        "X-Api-Request-Id": request_id,
+        "Authorization": f"Bearer {api_key}",
+        "X-Request-Id": request_id,
     }
-    if resource_id:
-        headers["X-Api-Resource-Id"] = resource_id
     return headers
 
 
@@ -481,23 +483,12 @@ def build_volcengine_realtime_session_payload(
     resolved_voice = voice or DEFAULT_VOLCENGINE_REALTIME_VOICE
     payload: dict[str, Any] = {
         "session": {
-            "model": model,
+            "modalities": ["audio", "text"],
             "instructions": _volcengine_realtime_instructions(context, config),
-            "audio": {
-                "input": {
-                    "format": {
-                        "type": _volcengine_input_audio_format(config.input_audio_format),
-                        "sample_rate": DEFAULT_INPUT_SAMPLE_RATE,
-                    },
-                },
-                "output": {
-                    "format": {
-                        "type": _volcengine_output_audio_format(config.output_audio_format),
-                        "sample_rate": DEFAULT_OUTPUT_SAMPLE_RATE,
-                    },
-                    "voice": resolved_voice,
-                },
-            },
+            "voice": resolved_voice,
+            "input_audio_format": "pcm16",
+            "output_audio_format": "pcm16",
+            "turn_detection": {"type": "server_vad"},
         }
     }
     safe_payload = sanitize_realtime_public_value(payload)
@@ -529,15 +520,9 @@ def build_volcengine_realtime_configure_payload(
             if instructions and isinstance(payload.get("session"), Mapping):
                 payload["session"]["instructions"] = instructions
             model = _clean_text(safe_overrides.get("model"))
-            if model and isinstance(payload.get("session"), Mapping):
-                payload["session"]["model"] = model
             voice = _clean_volcengine_realtime_voice(safe_overrides.get("voice"))
             if voice and isinstance(payload.get("session"), Mapping):
-                audio = payload["session"].setdefault("audio", {})
-                if isinstance(audio, dict):
-                    output = audio.setdefault("output", {})
-                    if isinstance(output, dict):
-                        output["voice"] = voice
+                payload["session"]["voice"] = voice
     return payload
 
 

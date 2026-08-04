@@ -1031,8 +1031,8 @@ async def voice_ws(
                 "code": "stt_not_configured",
                 "message": "STT service not configured",
                 "details": (
-                    "Set VOICE__STT_API_KEY, or configure an OpenAI-compatible "
-                    "LLM__API_KEY gateway that supports /audio/transcriptions, then restart."
+                    "Enable NewAPI user billing and configure a channel that supports "
+                    "/audio/transcriptions, then restart."
                 ),
             }
         )

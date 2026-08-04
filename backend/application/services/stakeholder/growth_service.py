@@ -787,8 +787,7 @@ class GrowthService:
             return GrowthInsightDTO(
                 insight=(
                     "当前未配置 Stakeholder LLM，无法生成跨 session 成长洞察。"
-                    "请配置 LLM__API_KEY（OpenAI 兼容模式），或 "
-                    "STAKEHOLDER__ANTHROPIC_API_KEY（Anthropic fallback）后重启服务。"
+                    "请启用 NewAPI 用户计费并在网关中配置模型后重启服务。"
                 )
             )
         response = await self._llm.generate(llm_messages, temperature=0.4)
@@ -824,8 +823,7 @@ class GrowthService:
             return ProfileCardDTO(
                 summary=(
                     "当前未配置 Stakeholder LLM，无法生成沟通力名片。"
-                    "请配置 LLM__API_KEY（OpenAI 兼容模式），或 "
-                    "STAKEHOLDER__ANTHROPIC_API_KEY（Anthropic fallback）后重启服务。"
+                    "请启用 NewAPI 用户计费并在网关中配置模型后重启服务。"
                 ),
                 scores={},
             )

@@ -149,7 +149,7 @@ NewAPI UI 复用遵循“原实现优先”，不是只做风格模仿：
 2. 运行或查看 `git status --short`，确认已有改动。
 3. 不要 revert、覆盖或清理别人/其他 agent 的改动。
 4. 先用 code-review-graph 理解影响面：
-   - `code-review-graph` 是本仓库唯一代码图谱工具；Graphify 只用于跨文档知识关系，不能替代代码 changed files、impact radius、affected flows 或 review context 分析。
+   - `code-review-graph` 是本仓库唯一图谱工具，用于代码关系、项目内容检索、changed files、impact radius、affected flows 和 review context 分析。
    - TalkWise 根仓库与嵌套 NewAPI 仓库分别建图，只有图谱 HEAD 与当前仓库 HEAD 匹配时才视为有效快照。
    - 增量更新图谱。
    - 检测 changed files、impact radius、affected flows 或 review context。
@@ -209,6 +209,14 @@ NewAPI UI 复用遵循“原实现优先”，不是只做风格模仿：
 - branch/edit/retry/fork 的 metadata 必须能支撑复盘，但不能默认污染 scoring/growth/report。
 - readiness/capability/error 信息必须结构化、可读、不可泄露密钥。
 - API 边界优先覆盖 conversation/chat/training；在完整 auth 迁移前使用现有 mock user/role 机制补最小可测隔离。
+
+### 4.5 配置优先与错误分级
+
+- 已有后台配置、环境变量、渠道参数、模型价格或路由开关可以解决的问题，优先修改配置并验证，不通过改代码逻辑绕过配置。
+- 发现报错时，低风险且局部明确的小错误可以在当前任务中直接修复，并补充最小验证；涉及公共运行时、计费、认证、协议、数据迁移、跨模块行为或可能破坏现有训练闭环的大问题，先汇报影响、证据、候选方案和回滚方式，单独处理。
+- 新增 provider、渠道类型、计费规则或媒体协议前，先检查 NewAPI、LibreChat、Pipecat 及现有适配器是否已经具备可配置能力；能通过渠道参数、模型列表、代理、倍率或 endpoint 选择完成时，不新增平行实现。
+- 配置密钥、访问令牌和数据库敏感字段只允许读取长度、格式和是否存在等非敏感信息；日志、报告、提交和最终回复不得回显密钥。
+- 配置变更必须可回退：数据库直接修改前先创建带时间戳的备份，记录修改的非敏感字段和验证结果；没有有效凭据时，不创建伪装成可用的占位渠道。
 
 ## 5. 验证和 git 节奏
 

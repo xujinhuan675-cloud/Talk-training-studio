@@ -1,8 +1,8 @@
-# input: OpenRouter Audio Speech API (/api/v1/audio/speech)
-# output: OpenRouterTTSProvider implements TTSPort with streamed mp3 audio bytes
-# owner: wanhua.gu
-# pos: infrastructure layer - OpenRouter TTS provider; update this header and folder docs when changed
-"""OpenRouter TTS provider using the OpenAI-compatible audio speech endpoint."""
+# input: NewAPI OpenAI-compatible audio speech endpoint and request-scoped user bearer
+# output: OpenAICompatibleTTSProvider implementing TTSPort with streamed audio bytes
+# owner: TalkWise platform integration
+# pos: infrastructure - gateway-only TTS protocol client
+"""TTS client for NewAPI's OpenAI-compatible audio speech relay."""
 
 from __future__ import annotations
 
@@ -16,20 +16,36 @@ from infrastructure.external.newapi_user_gateway import authorization_headers
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 _SPEECH_PATH = "/audio/speech"
-_DEFAULT_VOICE = "en_paul_neutral"
+_DEFAULT_VOICE = "alloy"
+_OPENAI_VOICES = {
+    "alloy",
+    "ash",
+    "ballad",
+    "coral",
+    "echo",
+    "fable",
+    "nova",
+    "onyx",
+    "sage",
+    "shimmer",
+}
 
 
-class OpenRouterTTSProvider:
-    """OpenRouter TTS provider with raw audio streaming support."""
+def _uses_native_openai_voices(model: str) -> bool:
+    normalized = model.strip().lower()
+    return "/" not in normalized and normalized.startswith(("tts-", "gpt-4o-mini-tts"))
+
+
+class OpenAICompatibleTTSProvider:
+    """Stream speech through the authenticated NewAPI user relay."""
 
     def __init__(
         self,
         *,
         api_key: str,
         model: str,
-        base_url: str = _DEFAULT_BASE_URL,
+        base_url: str,
         timeout: float = 30.0,
     ) -> None:
         self._api_key = api_key
@@ -45,11 +61,10 @@ class OpenRouterTTSProvider:
         text: str,
         config: TTSConfig,
     ) -> AsyncIterator[bytes]:
-        """Stream mp3 audio chunks from OpenRouter TTS."""
         url = f"{self._base_url}{_SPEECH_PATH}"
         voice = config.voice_id or _DEFAULT_VOICE
-        if voice in {"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"}:
-            voice = _DEFAULT_VOICE
+        if voice in _OPENAI_VOICES and not _uses_native_openai_voices(self._model):
+            voice = "en_paul_neutral"
 
         payload: dict[str, object] = {
             "model": self._model,
@@ -66,7 +81,6 @@ class OpenRouterTTSProvider:
             "Content-Type": "application/json",
             "Accept": "audio/mpeg",
         }
-
         async with self._client.stream(
             "POST",
             url,
@@ -76,12 +90,12 @@ class OpenRouterTTSProvider:
             if response.status_code != 200:
                 body = await response.aread()
                 logger.error(
-                    "openrouter_tts_error status=%s body=%s",
+                    "newapi_tts_error status=%s body=%s",
                     response.status_code,
                     body.decode("utf-8", errors="replace")[:500],
                 )
                 raise RuntimeError(
-                    f"OpenRouter TTS request failed with status {response.status_code}"
+                    f"NewAPI TTS request failed with status {response.status_code}"
                 )
 
             async for chunk in response.aiter_bytes(chunk_size=8192):
@@ -89,5 +103,4 @@ class OpenRouterTTSProvider:
                     yield chunk
 
     async def close(self) -> None:
-        """Close the underlying HTTP client."""
         await self._client.aclose()

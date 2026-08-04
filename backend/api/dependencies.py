@@ -24,7 +24,7 @@ from application.ports.tts import TTSPort
 from application.ports.stt import STTPort
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 from infrastructure.external.storage import get_storage
-from infrastructure.external.llm import get_llm_client, get_anthropic_client
+from infrastructure.external.llm import get_llm_client
 from infrastructure.external.voice import get_tts_client, get_stt_client
 from infrastructure.external.newapi_user_gateway import bind_user_access_token
 from infrastructure.adapters.storage_port import StorageProviderPortAdapter
@@ -411,12 +411,8 @@ async def get_llm_port() -> LLMPort:
 
 
 def get_stakeholder_llm_client() -> LLMPort | None:
-    """Prefer the configured OpenAI-compatible client for stakeholder flows.
-
-    Anthropic remains a fallback for deployments that still configure the
-    stakeholder-specific Claude provider.
-    """
-    return get_llm_client() or get_anthropic_client()
+    """Return the shared NewAPI-billed LLM client for stakeholder flows."""
+    return get_llm_client()
 
 
 async def get_stakeholder_llm_port() -> LLMPort:
@@ -424,8 +420,7 @@ async def get_stakeholder_llm_port() -> LLMPort:
     if client is None:
         raise RuntimeError(
             "Stakeholder LLM client not initialized. "
-            "Set LLM__API_KEY for OpenAI-compatible mode, or "
-            "STAKEHOLDER__ANTHROPIC_API_KEY for Anthropic mode, then restart."
+            "Enable NewAPI user billing and configure the selected model in NewAPI."
         )
     return client
 
@@ -435,7 +430,7 @@ async def get_tts_port() -> TTSPort:
     if client is None:
         raise RuntimeError(
             "TTS client not initialized. "
-            "Set VOICE__TTS_API_KEY in environment or .env and restart."
+            "Enable NewAPI user billing and configure the TTS model in NewAPI."
         )
     return client
 
@@ -445,7 +440,7 @@ async def get_stt_port() -> STTPort:
     if client is None:
         raise RuntimeError(
             "STT client not initialized. "
-            "Set VOICE__STT_API_KEY in environment or .env and restart."
+            "Enable NewAPI user billing and configure the STT model in NewAPI."
         )
     return client
 
@@ -508,22 +503,14 @@ async def get_stakeholder_chat_service(
     )
     # TTS is optional — None if not configured
     tts = get_tts_client()
-    tts_provider = settings.voice.tts_provider
-    normalized_tts_provider = str(tts_provider or "").strip().lower().replace("-", "_").replace(" ", "_")
-    native_tts_provider = (
-        normalized_tts_provider in {"openai", "openai_tts"}
-        and _turn_based_openai_tts_key_available()
-    )
     voice_pipeline = None
-    if tts is not None or native_tts_provider:
+    if tts is not None:
         from infrastructure.external.pipecat import PipecatTurnBasedCascadePipeline
 
         voice_pipeline = PipecatTurnBasedCascadePipeline(
             tts,
-            tts_provider=tts_provider,
+            tts_provider="openai_compatible_gateway",
             tts_model=settings.voice.tts_model,
-            tts_api_key=settings.voice.tts_api_key,
-            tts_base_url=settings.voice.tts_base_url,
         )
     return StakeholderChatService(
         uow_factory=SQLAlchemyUnitOfWork,
@@ -534,30 +521,6 @@ async def get_stakeholder_chat_service(
         compression_service=compression,
         voice_pipeline=voice_pipeline,
     )
-
-
-def _turn_based_openai_tts_key_available() -> bool:
-    llm_provider = (
-        str(getattr(settings.llm, "provider", "") or "")
-        .strip()
-        .lower()
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
-    llm_base_url = str(getattr(settings.llm, "base_url", "") or "").strip().lower()
-    llm_key = None
-    if (
-        llm_provider not in {"openrouter", "open_router", "openrouter_ai", "openrouter_compatible"}
-        and "openrouter.ai" not in llm_base_url
-    ):
-        llm_key = settings.llm.api_key
-    return bool(
-        settings.voice.tts_api_key
-        or settings.REALTIME_OPENAI_API_KEY
-        or settings.OPENAI_API_KEY
-        or llm_key
-    )
-
 
 async def get_analysis_service(
     loader: PersonaLoader = Depends(get_persona_loader),

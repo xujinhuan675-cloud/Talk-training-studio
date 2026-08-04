@@ -42,8 +42,6 @@ from infrastructure.external.cache import init_redis_client, shutdown_redis_clie
 from infrastructure.external.llm import (
     init_llm_client,
     shutdown_llm_client,
-    init_anthropic_client,
-    shutdown_anthropic_client,
 )
 from infrastructure.external.newapi_user_gateway import NewAPIUserGatewayContextMiddleware
 from infrastructure.external.voice import (
@@ -139,12 +137,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("llm_init_failed", error=str(exc))
 
-    # 初始化 Anthropic 客户端（Stakeholder Chat）
-    try:
-        await init_anthropic_client()
-    except Exception as exc:
-        logger.error("anthropic_init_failed", error=str(exc))
-
     # 初始化 Claude Agent SDK 客户端（Epic 2 / Persona Builder）
     try:
         await init_agent_sdk_client()
@@ -166,8 +158,6 @@ async def lifespan(app: FastAPI):
     await shutdown_stt_client()
     await shutdown_tts_client()
     logger.info("voice_shutdown", message="Voice clients (TTS/STT) shutdown")
-    await shutdown_anthropic_client()
-    logger.info("anthropic_shutdown", message="Anthropic client shutdown")
     await shutdown_agent_sdk_client()
     logger.info("agent_sdk_shutdown", message="Agent SDK client shutdown")
     await shutdown_llm_client()
