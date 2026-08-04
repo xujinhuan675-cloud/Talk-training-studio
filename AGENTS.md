@@ -241,6 +241,17 @@ git diff --check
 
 如果只改了极小范围，可以先跑 focused test，但最终进入稳定提交前应跑上述全量验证。
 
+### 5.1.1 Windows 下的 Go 工具链
+
+本项目的 Go 工具链统一使用 WSL 中的 `Ubuntu-22.04`。当 Windows 主机未提供 `go` 或 `gofmt` 时，直接通过 WSL 执行 Go 格式化、测试、构建和静态检查，不再重复寻找或安装 Windows 本机 Go。进入本仓库时使用对应的 `/mnt/f` 路径，例如：
+
+```powershell
+wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training-studio/outside-project/new-api-main && gofmt -w <files>"
+wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training-studio/outside-project/new-api-main && go test ./..."
+```
+
+后续 `go test`、`go vet`、`go build` 等 Go 命令默认遵循同一 WSL 工作目录和工具链。
+
 ### 5.2 暂存和提交
 
 - 一轮功能完成并通过测试后，将本轮稳定改动进入 git 暂存区，便于下一轮继续开发时隔离状态。

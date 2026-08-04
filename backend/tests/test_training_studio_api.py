@@ -140,8 +140,52 @@ class FakeTrainingRuntimeConversationRepository:
             model=conversation.model,
             metadata=dict(conversation.metadata),
         )
+        saved._touch = lambda: None
         self._state.created_conversations.append(saved)
         return saved
+
+    async def get_by_id(self, conversation_id, *, metadata_scope=None):
+        return next(
+            (
+                conversation
+                for conversation in self._state.created_conversations
+                if conversation.id == int(conversation_id)
+            ),
+            None,
+        )
+
+    async def update(self, conversation, *, metadata_scope=None):
+        return conversation
+
+
+class FakeTrainingRuntimeConversationMessageRepository:
+    def __init__(self, state) -> None:
+        self._state = state
+
+    async def create(self, message):
+        if self._state.fail_next_conversation_message:
+            self._state.fail_next_conversation_message = False
+            raise RuntimeError("simulated opening persistence failure")
+        self._state.conversation_messages.append(message)
+        return message
+
+    async def list_by_conversation(
+        self,
+        conversation_id,
+        *,
+        skip=0,
+        limit=100,
+        branch_id=None,
+        statuses=None,
+        include_deleted=False,
+    ):
+        messages = [
+            message
+            for message in self._state.conversation_messages
+            if message.conversation_id == int(conversation_id)
+            and (branch_id is None or message.branch_id == branch_id)
+        ]
+        return messages[skip : skip + limit]
 
 
 class FakeTrainingRuntimeChatRoomRepository:
@@ -189,6 +233,7 @@ class FakeTrainingRuntimeUnitOfWork:
         self._state = state
         self._kwargs = kwargs
         self.conversation_repository = FakeTrainingRuntimeConversationRepository(state)
+        self.message_repository = FakeTrainingRuntimeConversationMessageRepository(state)
         self.chat_room_repository = FakeTrainingRuntimeChatRoomRepository(state)
         self.stakeholder_message_repository = FakeTrainingRuntimeMessageRepository(state)
 
@@ -213,6 +258,8 @@ def app(tmp_path):
     session_service = TrainingSessionService(id_factory=lambda: f"session-{next(session_ids)}")
     runtime_state = SimpleNamespace(
         created_conversations=[],
+        conversation_messages=[],
+        fail_next_conversation_message=False,
         rooms={},
         messages=[],
         last_message_updates=[],
@@ -1579,6 +1626,172 @@ async def test_training_session_start_persists_runtime_persona_opening_message(
     assert opening.metadata["eventKind"] == "scenario_opening"
     assert opening.metadata["trainingSessionId"] == session_id
     assert app.state.training_runtime_state.last_message_updates[0][0] == 701
+
+    repeated_start = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={
+            "opening_message": {
+                "content": "你好，我看到你们门口说有新客优惠，能介绍一下吗？",
+                "metadata": {
+                    "source": "scenario_training_opening",
+                    "scenarioTrainingId": "new-customer-discount",
+                },
+            }
+        },
+    )
+
+    assert repeated_start.status_code == 200
+    assert len(app.state.training_runtime_state.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_message_tree_training_start_persists_opening_once(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            metadata={
+                "ownerUserId": "user-sales-001",
+                "teamId": "team-revenue",
+                "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            },
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+        headers={"X-Mock-User": "sales"},
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    opening_request = {
+        "runtime": "conversation_message_tree",
+        "opening_message": {
+            "content": "Your renewal price is too high.",
+            "metadata": {"source": "scenario_training_opening"},
+        },
+    }
+
+    first_start = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json=opening_request,
+        headers={"X-Mock-User": "sales"},
+    )
+    second_start = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json=opening_request,
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert first_start.status_code == 200
+    assert second_start.status_code == 200
+    assert len(app.state.training_runtime_state.conversation_messages) == 1
+    opening = app.state.training_runtime_state.conversation_messages[0]
+    assert opening.role == "assistant"
+    assert opening.content == "Your renewal price is too high."
+    assert opening.metadata["eventKind"] == "scenario_opening"
+    assert opening.metadata["trainingSessionId"] == session_id
+
+
+@pytest.mark.asyncio
+async def test_message_tree_opening_failure_preserves_session_and_can_retry(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            metadata={
+                "ownerUserId": "user-sales-001",
+                "teamId": "team-revenue",
+                "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            },
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+        headers={"X-Mock-User": "sales"},
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    request = {
+        "runtime": "conversation_message_tree",
+        "opening_message": {"content": "Let us discuss the renewal."},
+    }
+    app.state.training_runtime_state.fail_next_conversation_message = True
+
+    failed_start = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json=request,
+        headers={"X-Mock-User": "sales"},
+    )
+    preserved = await client.get(
+        f"/api/v1/training-studio/sessions/{session_id}",
+        headers={"X-Mock-User": "sales"},
+    )
+    retried_start = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json=request,
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert failed_start.status_code == 503
+    assert "Retry starting this session" in failed_start.json()["message"]
+    assert preserved.status_code == 200
+    assert preserved.json()["data"]["status"] == "active"
+    assert retried_start.status_code == 200
+    assert len(app.state.training_runtime_state.conversation_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_message_tree_start_does_not_backfill_existing_history(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            metadata={
+                "ownerUserId": "user-sales-001",
+                "teamId": "team-revenue",
+                "authScope": {"userId": "user-sales-001", "teamId": "team-revenue"},
+            },
+            user_id="user-sales-001",
+            team_id="team-revenue",
+        ),
+        headers={"X-Mock-User": "sales"},
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"runtime": "conversation_message_tree"},
+        headers={"X-Mock-User": "sales"},
+    )
+    assert start_resp.status_code == 200
+    app.state.training_runtime_state.conversation_messages.append(
+        SimpleNamespace(
+            id=1,
+            conversation_id=1,
+            role="user",
+            content="I need to understand the objection first.",
+            public_id="existing-message",
+            parent_message_id=None,
+            branch_id="main",
+            metadata={},
+        )
+    )
+
+    repeated_start = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={
+            "runtime": "conversation_message_tree",
+            "opening_message": {"content": "Do not backfill this line."},
+        },
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert repeated_start.status_code == 200
+    assert len(app.state.training_runtime_state.conversation_messages) == 1
 
 
 @pytest.mark.asyncio

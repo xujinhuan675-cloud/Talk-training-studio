@@ -712,7 +712,10 @@ def test_guidance_event_persistence_endpoint_stores_system_coach_messages_withou
     assert session_response.json()["data"]["message_count"] == 0
 
 
-def test_realtime_websocket_defaults_to_pipecat_and_requires_binding_before_audio() -> None:
+def test_realtime_websocket_defaults_to_pipecat_and_requires_binding_before_audio(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "REALTIME_PROVIDER", "openai")
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)

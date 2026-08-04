@@ -154,6 +154,7 @@ from application.services.training_studio.training_material_tool_service import 
 from application.services.training_studio.training_core import (
     ConversationRef,
     StartedTrainingSession,
+    TrainingTurn,
     TrainingCoreOrchestrator,
     training_core_metadata_for_session,
 )
@@ -175,7 +176,11 @@ from domain.conversation.repository import OwnedMetadataScope
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import Message
 from domain.training_studio.catalog import ScenarioCategory
-from domain.training_studio.session import TrainingSessionMode, TrainingSessionStatus
+from domain.training_studio.session import (
+    TrainingSession,
+    TrainingSessionMode,
+    TrainingSessionStatus,
+)
 from domain.training_studio.session_repository import (
     TrainingSessionAccessScope,
     training_session_matches_access_scope,
@@ -402,6 +407,7 @@ _TEXT_MESSAGE_TREE_OPT_IN_VALUES = {
     "message_tree",
     "conversation_tree",
 }
+_TRAINING_OPENING_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _openai_realtime_api_key() -> str | None:
@@ -885,15 +891,30 @@ def _create_training_runtime_persona(
     raise HTTPException(status_code=500, detail="Failed to allocate a training runtime persona")
 
 
-async def _persist_training_opening_message(
+def _training_opening_turn(
+    opening_message: TrainingOpeningMessageDTO,
+    *,
+    session_id: str,
+) -> TrainingTurn:
+    metadata = dict(opening_message.metadata)
+    metadata.setdefault("source", "training_opening_message")
+    metadata["eventKind"] = "scenario_opening"
+    metadata["trainingSessionId"] = session_id
+    if opening_message.sender_id:
+        metadata["sender_id"] = opening_message.sender_id.strip()
+    return TrainingTurn(
+        speaker=TranscriptSpeaker.COUNTERPART,
+        text=opening_message.content,
+        metadata=metadata,
+    )
+
+
+async def _persist_room_training_opening_message(
     *,
     room_id: str,
-    opening_message: TrainingOpeningMessageDTO | None,
-    session_id: str,
+    opening_turn: TrainingTurn,
     uow_factory: Callable[..., AbstractUnitOfWork],
 ) -> MessageDTO | None:
-    if opening_message is None:
-        return None
     try:
         numeric_room_id = int(str(room_id).strip())
     except ValueError as exc:
@@ -906,20 +927,20 @@ async def _persist_training_opening_message(
         room = await uow.chat_room_repository.get_by_id(numeric_room_id)
         if room is None:
             raise HTTPException(status_code=404, detail=f"Chat room {numeric_room_id} not found")
-        sender_id = (opening_message.sender_id or "").strip()
+        if await uow.stakeholder_message_repository.count_by_room_id(numeric_room_id) > 0:
+            return None
+        sender_id = str(opening_turn.metadata.get("sender_id") or "").strip()
         if not sender_id:
             sender_id = room.persona_ids[0] if room.persona_ids else "training_customer"
-        metadata = dict(opening_message.metadata)
-        metadata.setdefault("source", "training_opening_message")
-        metadata["eventKind"] = "scenario_opening"
-        metadata["trainingSessionId"] = session_id
+        metadata = dict(opening_turn.metadata)
+        metadata.pop("sender_id", None)
         saved = await uow.stakeholder_message_repository.create(
             Message(
                 id=None,
                 room_id=numeric_room_id,
                 sender_type="persona",
                 sender_id=sender_id,
-                content=opening_message.content,
+                content=opening_turn.text,
                 metadata=metadata,
             )
         )
@@ -931,6 +952,64 @@ async def _persist_training_opening_message(
 
     await room_event_bus.publish(numeric_room_id, "message", dto.model_dump(mode="json"))
     return dto
+
+
+async def _ensure_training_opening_message(
+    *,
+    session: TrainingSession,
+    opening_message: TrainingOpeningMessageDTO | None,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+    conversation: ConversationRef | None = None,
+) -> None:
+    if opening_message is None:
+        return
+
+    lock = _TRAINING_OPENING_LOCKS.setdefault(session.session_id, asyncio.Lock())
+    async with lock:
+        opening_turn = _training_opening_turn(
+            opening_message,
+            session_id=session.session_id,
+        )
+        try:
+            if str(session.room_id or "").startswith(
+                f"{ConversationTrainingConversationAdapter.provider}:"
+            ):
+                adapter = ConversationTrainingConversationAdapter(uow_factory)
+                active_conversation = conversation or ConversationRef(
+                    provider=ConversationTrainingConversationAdapter.provider,
+                    conversation_id=str(_message_tree_conversation_id_for_session(session)),
+                    metadata=dict(session.task_config.metadata or {}),
+                )
+                if await adapter.recent_turns(active_conversation, limit=1):
+                    return
+                await adapter.append_turn(active_conversation, opening_turn)
+                return
+
+            room_id = str(session.room_id or "").strip()
+            if not room_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Training session is not bound to a conversation runtime",
+                )
+            await _persist_room_training_opening_message(
+                room_id=room_id,
+                opening_turn=opening_turn,
+                uow_factory=uow_factory,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Failed to persist training opening message for session %s",
+                session.session_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "The training session started, but the opening message could not be saved. "
+                    "Retry starting this session."
+                ),
+            ) from exc
 
 
 def _requests_message_tree_runtime(body: StartTrainingSessionDTO) -> bool:
@@ -3645,11 +3724,6 @@ async def start_training_session(
                 status_code=422,
                 detail="runtime_persona is only available for room-backed training sessions",
             )
-        if body.opening_message is not None:
-            raise HTTPException(
-                status_code=422,
-                detail="opening_message is only available for room-backed training sessions",
-            )
         mode = str(getattr(session.mode, "value", session.mode)).strip().lower()
         if mode != "text":
             raise HTTPException(
@@ -3660,6 +3734,23 @@ async def start_training_session(
             raise HTTPException(
                 status_code=422,
                 detail="room_id cannot be provided when starting a conversation_message_tree session",
+            )
+        if session.status == TrainingSessionStatus.ACTIVE:
+            conversation = ConversationRef(
+                provider=ConversationTrainingConversationAdapter.provider,
+                conversation_id=str(_message_tree_conversation_id_for_session(session)),
+                metadata=dict(session.task_config.metadata or {}),
+            )
+            await _ensure_training_opening_message(
+                session=session,
+                opening_message=body.opening_message,
+                uow_factory=uow_factory,
+                conversation=conversation,
+            )
+            return success_response(
+                data=_started_training_session_to_dict(
+                    StartedTrainingSession(session=session, conversation=conversation)
+                )
             )
         orchestrator = TrainingCoreOrchestrator(
             session_service=svc,
@@ -3674,7 +3765,33 @@ async def start_training_session(
             raise _session_access_denied(exc) from exc
         except ValueError as exc:
             raise _not_found_if_missing(exc) from exc
+        await _ensure_training_opening_message(
+            session=started.session,
+            opening_message=body.opening_message,
+            uow_factory=uow_factory,
+            conversation=started.conversation,
+        )
         return success_response(data=_started_training_session_to_dict(started))
+
+    if session.status == TrainingSessionStatus.ACTIVE:
+        requested_room_id = (
+            str(body.room_id).strip() if body.room_id is not None else ""
+        )
+        active_room_id = str(session.room_id or "").strip()
+        if requested_room_id and requested_room_id != active_room_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Training session is already bound to room {active_room_id}; "
+                    f"cannot bind room {requested_room_id}"
+                ),
+            )
+        await _ensure_training_opening_message(
+            session=session,
+            opening_message=body.opening_message,
+            uow_factory=uow_factory,
+        )
+        return success_response(data=_session_to_dict(session))
 
     room_id = str(body.room_id).strip() if body.room_id is not None else ""
     if room_id and body.runtime_persona is not None:
@@ -3725,10 +3842,9 @@ async def start_training_session(
         raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
-    await _persist_training_opening_message(
-        room_id=room_id,
+    await _ensure_training_opening_message(
+        session=started,
         opening_message=body.opening_message,
-        session_id=session_id,
         uow_factory=uow_factory,
     )
     return success_response(data=_session_to_dict(started))
