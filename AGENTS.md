@@ -291,6 +291,7 @@ wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training
 ## 8. 文档和报告规则
 
 - 仓库工程事实源写在仓库内，例如本文件、README、API、测试、迁移说明。
+- 生产部署、服务器路径、PostgreSQL/Redis 接入、域名切换、验证和回滚流程以 `docs/development/server-deployment-runbook.md` 为快速入口；后续本地更新推送到服务器前先读该文档。
 - 架构理解、阶段路线、跨会话推进和复盘可以沉淀到 AnchorOS，但仓库内规则仍以本 `AGENTS.md` 为开发入口。
 - 任何新增长期约束，都应更新本文件，避免后续反复口头对齐。
 - 最终回复必须包含：

@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import Enum
 import random
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, Callable, AsyncGenerator
+from urllib.parse import urlsplit, urlunsplit
 
 from redis import asyncio as aioredis
 from redis.exceptions import RedisError
@@ -22,6 +23,21 @@ from core.config import settings
 import socket
 
 logger = get_logger(__name__)
+
+
+def _redact_redis_url(value: str | None) -> str:
+    if not value:
+        return "<unset>"
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "<configured>"
+    host = parsed.hostname or ""
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    if parsed.username or parsed.password:
+        host = f"<redacted>@{host}"
+    return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
 
 
 # ============= 枚举和数据类 =============
@@ -1189,7 +1205,7 @@ async def init_redis_client(
                 enable_logging=enable_logging,
             )
 
-            logger.info(f"Redis客户端初始化成功: {settings.redis.url}")
+            logger.info("Redis客户端初始化成功: %s", _redact_redis_url(settings.redis.url))
             return _cache_instance
 
         except Exception as e:
