@@ -45,6 +45,7 @@ async def test_llm_lifecycle_only_initializes_newapi_relay(monkeypatch) -> None:
         base_url="https://direct-provider.example/v1",
         wire_api="responses",
         default_model="gpt-5.5",
+        trust_env=False,
     )
 
     try:
@@ -58,6 +59,7 @@ async def test_llm_lifecycle_only_initializes_newapi_relay(monkeypatch) -> None:
         )
         assert _FakeGatewayLLM.instances[0].kwargs["default_model"] == "gpt-5.5"
         assert _FakeGatewayLLM.instances[0].kwargs["wire_api"] == "responses"
+        assert _FakeGatewayLLM.instances[0].kwargs["trust_env"] is False
     finally:
         llm_lifecycle._llm_client = None
         settings.llm = original_llm

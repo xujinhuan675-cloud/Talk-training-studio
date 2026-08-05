@@ -152,6 +152,66 @@ class MessageTreeTrainingCompletionService:
             access_scope=session_access_scope,
         )
 
+    async def complete_without_report(
+        self,
+        session_id: str,
+        *,
+        selected_tail_message_id: str,
+        session_access_scope: TrainingSessionAccessScope,
+        conversation_metadata_scope: OwnedMetadataScope,
+    ) -> MessageTreeCompletionResult:
+        """Finish a selected conversation path without report or score generation."""
+
+        tail_id = _required_text(selected_tail_message_id, "selected_tail_message_id")
+        session = await self._session_service.get_session(
+            session_id,
+            access_scope=session_access_scope,
+        )
+        conversation_id = _message_tree_conversation_id(session)
+        existing_result = _active_or_idempotent_result(session, tail_id=tail_id)
+        if existing_result is not None:
+            return existing_result
+
+        conversation = await self._conversation_service.get_conversation(
+            conversation_id,
+            metadata_scope=conversation_metadata_scope,
+        )
+        _require_session_binding(conversation, session_id)
+        path = await self._conversation_service.get_message_path(
+            conversation_id,
+            tail_id,
+            limit=_MAX_PATH_MESSAGES,
+            statuses=["active"],
+            metadata_scope=conversation_metadata_scope,
+        )
+        selected_path = _evaluation_messages(path)
+        _validate_selected_path(selected_path, tail_id=tail_id)
+        completion_metadata = _completion_skipped_metadata(
+            conversation_id=conversation_id,
+            selected_tail_message_id=tail_id,
+            path=selected_path,
+        )
+        try:
+            completed = await self._session_service.complete_session(
+                session_id,
+                metadata=completion_metadata,
+                access_scope=session_access_scope,
+            )
+        except Exception:
+            current = await self._session_service.get_session(
+                session_id,
+                access_scope=session_access_scope,
+            )
+            idempotent = _completed_result_for_tail(current, tail_id=tail_id)
+            if idempotent is not None:
+                return idempotent
+            raise
+        return MessageTreeCompletionResult(
+            session=completed,
+            report=None,
+            idempotent=False,
+        )
+
     async def _prepare_projection(
         self,
         session: TrainingSession,
@@ -499,6 +559,17 @@ def _validate_evaluation_path(
         )
 
 
+def _validate_selected_path(
+    path: Sequence[MessageDTO_Agent],
+    *,
+    tail_id: str,
+) -> None:
+    if not path or path[-1].public_id != tail_id:
+        raise MessageTreeCompletionConflict(
+            "Selected message tail is not an active conversation path"
+        )
+
+
 def _projected_message(
     room_id: int,
     source: MessageDTO_Agent,
@@ -595,6 +666,51 @@ def _completion_ready_metadata(
             "branchId": _optional_text(path[-1].branch_id),
             "path": evidence_path,
             **selected_path,
+        },
+        "selectedPath": selected_path,
+        "currentBranchTail": {
+            "branchId": _optional_text(path[-1].branch_id),
+            "messageId": selected_tail_message_id,
+        },
+    }
+
+
+def _completion_skipped_metadata(
+    *,
+    conversation_id: int,
+    selected_tail_message_id: str,
+    path: Sequence[MessageDTO_Agent],
+) -> dict[str, object]:
+    selected_message_ids = [
+        message.public_id for message in path if _optional_text(message.public_id)
+    ]
+    selected_path = {
+        "branchId": _optional_text(path[-1].branch_id),
+        "tailMessageId": selected_tail_message_id,
+        "messageIds": selected_message_ids,
+        "purpose": "session_replay_context",
+        "source": "server_selected_root_to_tail",
+        "replayContextOnly": True,
+        "affectsScoring": False,
+        "affectsCompletion": False,
+    }
+    return {
+        "completionReport": {
+            "status": "skipped",
+            "phase": "complete",
+            "generation": "none",
+            "runtime": "message_tree",
+            "conversationId": str(conversation_id),
+            "selectedTailMessageId": selected_tail_message_id,
+            "completedWithoutReport": True,
+            "skipReason": "user_requested",
+            "capabilities": {
+                "reportRead": False,
+                "evaluation": False,
+                "backgroundGeneration": False,
+                "retry": False,
+            },
+            "recordedAt": datetime.now(UTC).isoformat(),
         },
         "selectedPath": selected_path,
         "currentBranchTail": {

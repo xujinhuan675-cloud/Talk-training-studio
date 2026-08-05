@@ -356,9 +356,7 @@ class ChatApplicationService:
                     await uow.run_repository.update(run_entity)
                 await uow.commit()
 
-            yield _sse_event(
-                "error", {"message": "An error occurred while generating the response."}
-            )
+            yield _sse_event("error", _llm_stream_error_payload(exc))
             yield _sse_event("done", {})
             return
 
@@ -733,6 +731,27 @@ def _failed_run_metadata(
         "error_type": type(exc).__name__,
         "retryable": _is_retryable_llm_error(exc),
     }
+
+
+def _llm_stream_error_payload(exc: Exception) -> dict[str, object]:
+    retryable = _is_retryable_llm_error(exc)
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        message = f"Model service request failed (HTTP {status_code})."
+    elif retryable:
+        message = "Model service is temporarily unavailable."
+    else:
+        message = "Model service could not generate a response."
+    if retryable:
+        message += " Please retry."
+    payload: dict[str, object] = {
+        "message": message,
+        "retryable": retryable,
+        "error_type": type(exc).__name__,
+    }
+    if isinstance(status_code, int):
+        payload["status_code"] = status_code
+    return payload
 
 
 def _is_retryable_llm_error(exc: Exception) -> bool:

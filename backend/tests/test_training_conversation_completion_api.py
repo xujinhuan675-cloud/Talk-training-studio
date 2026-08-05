@@ -437,6 +437,45 @@ def test_message_tree_completion_failure_keeps_session_active_and_retryable() ->
     assert "training_session_report_not_ready" in report_response.text
 
 
+def test_message_tree_completion_can_skip_report_without_analysis_or_scoring() -> None:
+    client, sessions, conversations, projections, analysis, _reader, growth = _client()
+
+    response = client.post(
+        _complete_path(),
+        headers={"X-Mock-User": "sales"},
+        json={"selected_tail_message_id": "msg-tail", "generate_report": False},
+    )
+
+    assert response.status_code == 200
+    completed = response.json()["data"]
+    assert completed["status"] == "completed"
+    assert completed["report_id"] is None
+    assert completed["score_id"] is None
+    report_state = completed["task_config"]["metadata"]["completionReport"]
+    assert report_state["status"] == "skipped"
+    assert report_state["generation"] == "none"
+    assert report_state["runtime"] == "message_tree"
+    assert report_state["completedWithoutReport"] is True
+    assert report_state["skipReason"] == "user_requested"
+    selected_path = completed["task_config"]["metadata"]["selectedPath"]
+    assert selected_path["tailMessageId"] == "msg-tail"
+    assert selected_path["replayContextOnly"] is True
+    assert selected_path["affectsScoring"] is False
+    assert selected_path["affectsCompletion"] is False
+    assert conversations.path_calls[0][0:2] == (7, "msg-tail")
+    assert projections.rooms == {}
+    assert analysis.calls == []
+    assert growth.calls == []
+
+    repeated = client.post(
+        _complete_path(),
+        headers={"X-Mock-User": "sales"},
+        json={"selected_tail_message_id": "msg-tail", "generate_report": False},
+    )
+    assert repeated.status_code == 200
+    assert len(sessions.complete_calls) == 1
+
+
 def test_message_tree_report_can_complete_with_truthful_unavailable_evaluation() -> None:
     client, sessions, _conversations, _projections, _analysis, _reader, growth = _client(
         growth_mode="unavailable"

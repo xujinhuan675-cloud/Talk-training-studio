@@ -2668,6 +2668,10 @@ def _query_realtime_provider(websocket: WebSocket) -> str:
     provider = _coerce_optional_text(websocket.query_params.get("provider"))
     if provider is None:
         return _configured_realtime_provider()
+    return _normalized_realtime_provider_choice(provider)
+
+
+def _normalized_realtime_provider_choice(provider: str) -> str:
     normalized = _normalized_realtime_llm_provider(provider)
     if normalized in {"configured", "default"}:
         return _configured_realtime_provider()
@@ -2678,6 +2682,45 @@ def _query_realtime_provider(websocket: WebSocket) -> str:
     if normalized in _VOLCENGINE_DOUBAO_REALTIME_PROVIDER_ALIASES:
         return _VOLCENGINE_DOUBAO_REALTIME_PROVIDER
     return normalized
+
+
+def _training_session_realtime_provider(session, *, fallback: str) -> str:
+    task_config = getattr(session, "task_config", None)
+    metadata = getattr(task_config, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return fallback
+    choice = _coerce_optional_text(
+        metadata.get("realtimeProvider") or metadata.get("realtime_provider")
+    )
+    if choice is None:
+        return fallback
+    normalized = _normalized_realtime_llm_provider(choice)
+    if normalized == "openai":
+        return "pipecat"
+    if normalized == _VOLCENGINE_DOUBAO_REALTIME_PROVIDER:
+        return _VOLCENGINE_DOUBAO_REALTIME_PROVIDER
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Training session realtimeProvider must be either "
+            "openai or volcengine.doubao_realtime"
+        ),
+    )
+
+
+async def _bound_training_session_realtime_provider(
+    binding: tuple[str, int],
+    *,
+    fallback: str,
+    svc: TrainingSessionService,
+    current_user: CurrentUser,
+) -> str:
+    training_session = await _require_accessible_training_session(
+        binding[0],
+        svc=svc,
+        current_user=current_user,
+    )
+    return _training_session_realtime_provider(training_session, fallback=fallback)
 
 
 def _configured_realtime_provider() -> str:
@@ -3890,12 +3933,7 @@ async def complete_training_session(
                 status_code=422,
                 detail="Message-tree completion does not accept client report_id or score_id",
             )
-        if not body.generate_report:
-            raise HTTPException(
-                status_code=422,
-                detail="Message-tree completion requires server-generated evaluation and report",
-            )
-        if body.report_generation != "sync":
+        if body.generate_report and body.report_generation != "sync":
             raise HTTPException(
                 status_code=422,
                 detail="Message-tree completion currently supports synchronous report generation only",
@@ -3913,12 +3951,20 @@ async def complete_training_session(
             growth_service=growth_svc,
         )
         try:
-            outcome = await completion_svc.complete(
-                session_id,
-                selected_tail_message_id=body.selected_tail_message_id,
-                session_access_scope=session_access_scope,
-                conversation_metadata_scope=owned_metadata_scope_for_current_user(current_user),
-            )
+            if body.generate_report:
+                outcome = await completion_svc.complete(
+                    session_id,
+                    selected_tail_message_id=body.selected_tail_message_id,
+                    session_access_scope=session_access_scope,
+                    conversation_metadata_scope=owned_metadata_scope_for_current_user(current_user),
+                )
+            else:
+                outcome = await completion_svc.complete_without_report(
+                    session_id,
+                    selected_tail_message_id=body.selected_tail_message_id,
+                    session_access_scope=session_access_scope,
+                    conversation_metadata_scope=owned_metadata_scope_for_current_user(current_user),
+                )
         except PermissionError as exc:
             raise _session_access_denied(exc) from exc
         except MessageTreeCompletionConflict as exc:
@@ -4810,26 +4856,6 @@ async def realtime_training_session(
     provider = _query_realtime_provider(websocket)
     realtime_profile = _query_realtime_profile(websocket)
     input_sample_rate = _query_realtime_input_sample_rate(websocket, profile=realtime_profile)
-    logger.info(
-        "Training realtime websocket accepted",
-        extra={
-            "realtime_session": dict(
-                sanitize_realtime_public_value(
-                    {
-                        "provider": provider,
-                        "runtime": realtime_runtime_for_provider(provider),
-                        "realtimeProfile": realtime_profile,
-                        "queryTrainingSessionId": query_session_id,
-                        "queryRoomId": query_room_id,
-                        "inputSampleRate": input_sample_rate,
-                        "userId": current_user.user_id,
-                        "teamId": current_user.team_id,
-                    }
-                )
-                or {}
-            )
-        },
-    )
     session = RealtimeSession(session_id=query_session_id)
     binding: tuple[str, int] | None = None
     pipeline_runner: RealtimePipelineSessionRunner | None = None
@@ -4952,17 +4978,44 @@ async def realtime_training_session(
         pipeline_runner = runner
 
     try:
-        if not _uses_supported_realtime_provider(provider):
-            raise HTTPException(
-                status_code=400,
-                detail="Realtime voice provider is not wired to a backend runtime",
-            )
         binding = await _resolve_realtime_binding(
             query_session_id,
             query_room_id,
             svc=svc,
             uow_factory=uow_factory,
             current_user=current_user,
+        )
+        if binding is not None:
+            provider = await _bound_training_session_realtime_provider(
+                binding,
+                fallback=provider,
+                svc=svc,
+                current_user=current_user,
+            )
+        if not _uses_supported_realtime_provider(provider):
+            raise HTTPException(
+                status_code=400,
+                detail="Realtime voice provider is not wired to a backend runtime",
+            )
+        logger.info(
+            "Training realtime websocket accepted",
+            extra={
+                "realtime_session": dict(
+                    sanitize_realtime_public_value(
+                        {
+                            "provider": provider,
+                            "runtime": realtime_runtime_for_provider(provider),
+                            "realtimeProfile": realtime_profile,
+                            "queryTrainingSessionId": query_session_id,
+                            "queryRoomId": query_room_id,
+                            "inputSampleRate": input_sample_rate,
+                            "userId": current_user.user_id,
+                            "teamId": current_user.team_id,
+                        }
+                    )
+                    or {}
+                )
+            },
         )
         if binding is not None:
             await _ensure_pipeline_runner(binding)
@@ -5031,6 +5084,17 @@ async def realtime_training_session(
                     raise HTTPException(status_code=400, detail="Realtime session is already bound")
                 binding = configured
                 session.session_id = configured[0]
+                provider = await _bound_training_session_realtime_provider(
+                    configured,
+                    fallback=provider,
+                    svc=svc,
+                    current_user=current_user,
+                )
+                if not _uses_supported_realtime_provider(provider):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Realtime voice provider is not wired to a backend runtime",
+                    )
                 await _ensure_pipeline_runner(binding)
                 await _send_wire_event(
                     websocket,

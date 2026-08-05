@@ -105,6 +105,7 @@ class LLMSettings(BaseModel):
     timeout: int = 60
     max_retries: int = 2
     user_agent: str = "TalkTrainingStudio/1.0"
+    trust_env: bool = True
 
 
 class AgentSDKSettings(BaseModel):

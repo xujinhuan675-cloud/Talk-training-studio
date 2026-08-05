@@ -11,6 +11,7 @@ import json
 from typing import Any, AsyncIterator, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 from openai import AsyncOpenAI
 
 from application.ports.llm import (
@@ -48,6 +49,7 @@ class OpenAIProvider:
         timeout: int = 60,
         max_retries: int = 2,
         user_agent: str = "TalkTrainingStudio/1.0",
+        trust_env: bool = True,
     ) -> None:
         normalized_base_url = self._normalize_base_url(base_url)
         self._client = AsyncOpenAI(
@@ -56,6 +58,7 @@ class OpenAIProvider:
             timeout=timeout,
             max_retries=max_retries,
             default_headers={"User-Agent": user_agent},
+            http_client=httpx.AsyncClient(trust_env=trust_env),
         )
         self._api_key = api_key
         self.provider = (provider_name or "openai").strip() or "openai"
@@ -65,6 +68,7 @@ class OpenAIProvider:
         self._wire_api = wire_api.lower().replace("-", "_")
         self._endpoint = normalized_base_url
         self._max_retries = max_retries
+        self._trust_env = trust_env
 
     @property
     def provider_metadata(self) -> LLMProviderMetadata:

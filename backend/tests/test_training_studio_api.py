@@ -599,6 +599,26 @@ def test_gateway_billing_uses_configured_volcengine_realtime_without_backend_key
     assert data["active"]["readiness"]["required"]["model"] == "1.2.1.1"
 
 
+def test_persisted_realtime_provider_accepts_only_product_choices() -> None:
+    session = SimpleNamespace(
+        task_config=SimpleNamespace(metadata={"realtimeProvider": "openai"})
+    )
+    assert (
+        training_studio_routes._training_session_realtime_provider(
+            session,
+            fallback="volcengine.doubao_realtime",
+        )
+        == "pipecat"
+    )
+
+    session.task_config.metadata["realtimeProvider"] = "configured"
+    with pytest.raises(HTTPException, match="realtimeProvider must be either"):
+        training_studio_routes._training_session_realtime_provider(
+            session,
+            fallback="pipecat",
+        )
+
+
 def test_realtime_pipeline_factory_keeps_pipecat_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -689,6 +709,7 @@ def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection
         session = await app.state.training_session_service.create_session(
             session_payload(
                 "realtime",
+                metadata={"realtimeProvider": "volcengine.doubao_realtime"},
                 user_id="user-admin-001",
                 team_id="team-ops",
             )
@@ -703,6 +724,8 @@ def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection
     adapter = FakeRealtimePipelineAdapter()
     monkeypatch.setattr(settings, "NEWAPI_AUTH_ENABLED", False)
     monkeypatch.setattr(settings, "NEWAPI_AUTH_ALLOW_MOCK_FALLBACK", True)
+    monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", True)
+    monkeypatch.setattr(settings, "REALTIME_PROVIDER", "pipecat")
     monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "your-volcengine-voice")
     session_id = asyncio.run(create_bound_session())
     app.state.training_runtime_state.rooms[42] = SimpleNamespace(id=42, name="Realtime Room")
@@ -716,7 +739,7 @@ def test_realtime_websocket_routes_volcengine_provider_without_pipecat_rejection
 
     with client.websocket_connect(
         f"/api/v1/training-studio/realtime?session_id={session_id}&room_id=42"
-        "&provider=volcengine.doubao_realtime",
+        "&provider=openai",
         headers={"X-Mock-User": "admin"},
     ) as ws:
         started = ws.receive_json()

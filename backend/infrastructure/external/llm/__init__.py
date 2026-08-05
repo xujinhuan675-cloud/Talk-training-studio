@@ -50,6 +50,7 @@ async def init_llm_client() -> None:
             timeout=llm_cfg.timeout,
             max_retries=llm_cfg.max_retries,
             user_agent=llm_cfg.user_agent,
+            trust_env=llm_cfg.trust_env,
         )
         logger.info(
             "llm_client_initialized",

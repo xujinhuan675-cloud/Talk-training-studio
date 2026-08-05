@@ -65,6 +65,14 @@ class _FailingLLM(_FakeLLM):
         raise exc
 
 
+class _FailingStreamLLM(_FakeLLM):
+    async def stream(self, messages, **_kwargs):
+        self.calls.append(list(messages))
+        if False:
+            yield None
+        raise TimeoutError("provider timed out")
+
+
 def _metadata() -> dict:
     return {
         "ownerUserId": "user-sales-001",
@@ -774,6 +782,38 @@ async def test_chat_sync_failure_marks_run_retryable(session_factory):
     assert runs[0].metadata["error_type"] == "TimeoutError"
     assert runs[0].metadata["retryable"] is True
     assert runs[0].metadata["trigger_message_id"].startswith("msg_")
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_failure_returns_safe_retryable_error(session_factory):
+    conversation, *_ = await _seed_conversation(session_factory)
+    service = ChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=_FailingStreamLLM(),
+    )
+
+    events = [
+        event
+        async for event in service.send_message_stream(
+            conversation.id,
+            ChatRequestDTO(message="This stream will fail.", stream=True),
+            metadata_scope=_scope(),
+        )
+    ]
+
+    error_event = next(event for event in events if event.startswith("event: error"))
+    assert "Model service is temporarily unavailable. Please retry." in error_event
+    assert '"retryable": true' in error_event
+    assert "provider timed out" not in error_event
+
+    async with SQLAlchemyUnitOfWork(session_factory=session_factory, readonly=True) as uow:
+        runs = await uow.run_repository.list_by_conversation(conversation.id)
+
+    assert runs[0].status == "failed"
+    assert runs[0].metadata["retryable"] is True
 
 
 @pytest.mark.asyncio

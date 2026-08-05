@@ -110,6 +110,13 @@ def test_openai_provider_uses_project_user_agent() -> None:
     assert provider._client.default_headers["User-Agent"] == "TestApp/1.0"
 
 
+def test_openai_provider_can_ignore_system_proxy_environment() -> None:
+    provider = OpenAIProvider(api_key="test-key", trust_env=False)
+
+    assert provider._trust_env is False
+    assert provider._client._client._trust_env is False
+
+
 @pytest.mark.asyncio
 async def test_openai_provider_overrides_static_key_with_current_newapi_user(
     monkeypatch: pytest.MonkeyPatch,
