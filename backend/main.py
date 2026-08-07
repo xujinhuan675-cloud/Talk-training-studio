@@ -22,6 +22,7 @@ from api.routes import stakeholder as stakeholder_routes
 from api.routes.defense_prep import router as defense_prep_router
 from api.routes import storage as storage_routes
 from api.routes import training_studio as training_studio_routes
+from api.routes import training_assist as training_assist_routes
 from api.routes import training_team as training_team_routes
 from core.config import settings
 from core.exceptions import register_exception_handlers
@@ -222,6 +223,7 @@ app.include_router(chat_routes.router, prefix="/api/v1")
 app.include_router(stakeholder_routes.router, prefix="/api/v1")
 app.include_router(defense_prep_router, prefix="/api/v1")
 app.include_router(training_studio_routes.router, prefix="/api/v1")
+app.include_router(training_assist_routes.router, prefix="/api/v1")
 app.include_router(training_team_routes.router, prefix="/api/v1")
 app.include_router(health_routes.router)
 app.include_router(metrics_routes.router)

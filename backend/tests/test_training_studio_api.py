@@ -25,6 +25,8 @@ from api.dependencies import (
 )
 import api.routes.training_studio as training_studio_routes
 from api.routes.training_studio import (
+    _apply_scenario_voice_defaults,
+    _scenario_templates_from_config,
     get_live_guidance_service,
     get_training_realtime_pipeline_factory,
     get_training_realtime_uow_factory,
@@ -45,6 +47,55 @@ from core.config import LLMSettings, settings
 from core.exceptions import register_exception_handlers
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 from domain.training_studio.storybank import StoryBankService
+
+
+def test_scenario_template_uses_bound_persona_voice_when_default_is_implicit() -> None:
+    config = TrainingScenarioConfigService().default_config()
+    scenario = config.scenarios[0].model_copy(
+        update={
+            "persona": config.scenarios[0].persona.model_copy(
+                update={"persona_id": "persona-asset-1", "voice_id": None}
+            )
+        }
+    )
+    config = config.model_copy(update={"scenarios": [scenario]})
+
+    class Loader:
+        def get_persona(self, persona_id: str):
+            assert persona_id == "persona-asset-1"
+            return SimpleNamespace(voice_id="zh_male_dayi_saturn_bigtts")
+
+    template = _scenario_templates_from_config(config, Loader())[0]
+
+    assert template.persona.voice_id == "zh_male_dayi_saturn_bigtts"
+
+
+def test_builtin_scenarios_use_distinct_validated_voices() -> None:
+    config = TrainingScenarioConfigService().default_config()
+    voices = {scenario.id: scenario.persona.voice_id for scenario in config.scenarios}
+
+    assert voices["new-customer-discount"] == "zh_female_tianmeitaozi_mars_bigtts"
+    assert voices["daily-upward-results-report"] == "zh_male_dayi_saturn_bigtts"
+    assert voices["ai-web3-agent-pm-comprehensive-interview"] == "zh_male_ruyayichen_saturn_bigtts"
+    assert len(set(voices.values())) == 4
+
+
+def test_scenario_voice_defaults_preserve_explicit_override() -> None:
+    config = TrainingScenarioConfigService().default_config()
+    scenario = config.scenarios[0].model_copy(
+        update={
+            "persona": config.scenarios[0].persona.model_copy(
+                update={"voice_id": "zh_female_tianmeitaozi_mars_bigtts"}
+            )
+        }
+    )
+
+    resolved = _apply_scenario_voice_defaults(
+        config.model_copy(update={"scenarios": [scenario]}),
+        SimpleNamespace(get_persona=lambda _persona_id: None),
+    )
+
+    assert resolved.scenarios[0].persona.voice_id == "zh_female_tianmeitaozi_mars_bigtts"
 
 
 class FakeReport(BaseModel):
@@ -218,6 +269,38 @@ class FakeTrainingRuntimeMessageRepository:
         self._state.messages.append(saved)
         return saved
 
+    async def get_by_id(self, message_id: int, *, room_id: int | None = None):
+        return next(
+            (
+                message
+                for message in self._state.messages
+                if message.id == message_id and (room_id is None or message.room_id == room_id)
+            ),
+            None,
+        )
+
+    async def update_metadata(self, message_id: int, *, room_id: int, metadata: dict):
+        message = await self.get_by_id(message_id, room_id=room_id)
+        if message is None:
+            return None
+        message.metadata = dict(metadata)
+        return message
+
+    async def update_emotion(
+        self,
+        message_id: int,
+        *,
+        room_id: int,
+        emotion_score: int,
+        emotion_label: str | None,
+    ):
+        message = await self.get_by_id(message_id, room_id=room_id)
+        if message is None:
+            return None
+        message.emotion_score = emotion_score
+        message.emotion_label = emotion_label
+        return message
+
     async def list_by_room_id(
         self, room_id: int, *, skip: int = 0, limit: int = 50
     ) -> list[SimpleNamespace]:
@@ -324,6 +407,20 @@ async def test_catalog_exposes_training_dimensions(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_voice_catalog_exposes_capability_metadata(client: AsyncClient) -> None:
+    resp = await client.get(
+        "/api/v1/training-studio/voice-catalog",
+        headers={"X-Mock-User": "sales"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data
+    assert all(item["provider"] == "volcengine" for item in data)
+    assert all(item["service"] == "tts_streaming" for item in data)
+
+
+@pytest.mark.asyncio
 async def test_scenario_templates_expose_business_training_cards(client: AsyncClient) -> None:
     resp = await client.get(
         "/api/v1/training-studio/scenario-templates",
@@ -350,6 +447,8 @@ async def test_scenario_templates_expose_business_training_cards(client: AsyncCl
     assert new_customer["status"] == "not_started"
     assert new_customer["opening_line"]
     assert new_customer["persona"]["name"]
+    assert "voice_id" in new_customer["persona"]
+    assert "voice_speed" in new_customer["persona"]
     assert len(new_customer["training_points"]) >= 1
     assert sum(item["weight"] for item in new_customer["dimension_weights"]) == pytest.approx(100)
 
@@ -1580,6 +1679,7 @@ async def test_training_session_start_can_create_runtime_persona(
                     "Roadmap prioritization",
                 ],
                 "difficulty": "hard",
+                "voice_id": "zh_female_vv_uranus_bigtts",
             },
         },
     )
@@ -1593,6 +1693,7 @@ async def test_training_session_start_can_create_runtime_persona(
     assert created_persona.id.startswith("ts-")
     assert created_persona.temporary is True
     assert created_persona.name == "Hiring Panel"
+    assert created_persona.voice_id == "zh_female_vv_uranus_bigtts"
     assert "Full AI/Web3 Agent PM interview simulation." in created_persona.content
     assert "Roadmap prioritization" in created_persona.content
     assert "strong pressure" in created_persona.content
@@ -1665,6 +1766,87 @@ async def test_training_session_start_persists_runtime_persona_opening_message(
 
     assert repeated_start.status_code == 200
     assert len(app.state.training_runtime_state.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_training_session_start_does_not_wait_for_opening_enrichment(
+    client: AsyncClient,
+    app: FastAPI,
+) -> None:
+    class SlowOpeningLLM:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def generate(self, messages, **kwargs):
+            self.started.set()
+            await self.release.wait()
+            return SimpleNamespace(content='{"score": -2, "label": "guarded"}')
+
+    class SlowOpeningAudio:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def synthesize_and_attach(self, message_id: int, **kwargs):
+            self.started.set()
+            await self.release.wait()
+            return None
+
+    llm = SlowOpeningLLM()
+    audio = SlowOpeningAudio()
+    dependencies = (
+        training_studio_routes.get_stakeholder_llm_client,
+        training_studio_routes.get_optional_training_audio_service,
+        training_studio_routes.get_optional_turn_based_voice_pipeline,
+    )
+    app.dependency_overrides[dependencies[0]] = lambda: llm
+    app.dependency_overrides[dependencies[1]] = lambda: audio
+    app.dependency_overrides[dependencies[2]] = lambda: object()
+
+    try:
+        create_resp = await client.post(
+            "/api/v1/training-studio/sessions",
+            json=session_payload("voice", scenario_template_id="async-opening"),
+        )
+        session_id = create_resp.json()["data"]["session_id"]
+        start_resp = await asyncio.wait_for(
+            client.post(
+                f"/api/v1/training-studio/sessions/{session_id}/start",
+                json={
+                    "room_name": "Async opening training",
+                    "runtime_persona": {
+                        "name": "Customer",
+                        "role": "Guarded buyer",
+                        "style": "Ask direct questions.",
+                        "scenario_context": "Opening latency test.",
+                        "training_points": ["Clarify the concern"],
+                        "difficulty": "normal",
+                    },
+                    "opening_message": {"content": "Why should I trust this offer?"},
+                },
+            ),
+            timeout=1.0,
+        )
+
+        assert start_resp.status_code == 200
+        assert len(app.state.training_runtime_state.messages) == 1
+        opening = app.state.training_runtime_state.messages[0]
+        assert "trainingEmotion" not in opening.metadata
+        await asyncio.wait_for(audio.started.wait(), timeout=1.0)
+
+        audio.release.set()
+        await asyncio.wait_for(llm.started.wait(), timeout=1.0)
+        llm.release.set()
+        tasks = tuple(training_studio_routes._TRAINING_OPENING_ENRICHMENT_TASKS)
+        if tasks:
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=1.0)
+        assert opening.metadata["trainingEmotion"]["score"] == -2
+    finally:
+        llm.release.set()
+        audio.release.set()
+        for dependency in dependencies:
+            app.dependency_overrides.pop(dependency, None)
 
 
 @pytest.mark.asyncio

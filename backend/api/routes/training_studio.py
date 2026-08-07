@@ -12,6 +12,7 @@ import mimetypes
 import re
 from collections.abc import Callable, Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.dependencies import (
     CurrentUser,
@@ -43,7 +44,10 @@ from api.dependencies import (
     get_current_user,
     get_file_asset_service,
     get_growth_service,
+    get_optional_training_audio_service,
+    get_optional_turn_based_voice_pipeline,
     get_persona_editor_service,
+    get_persona_loader_with_v2,
     get_stakeholder_llm_client,
     require_system_roles,
     training_scope_for,
@@ -76,10 +80,16 @@ from application.ports.realtime import (
     realtime_runtime_for_provider,
     sanitize_realtime_public_value,
 )
+from application.ports.tts import (
+    DEFAULT_TRAINING_VOICE_ID,
+    TRAINING_VOICE_CATALOG,
+    normalize_training_voice_id,
+)
 from application.services.stakeholder.analysis_service import AnalysisReaderService, AnalysisService
 from application.services.stakeholder.chatroom_service import ChatRoomApplicationService
 from application.services.stakeholder.dto import CreateChatRoomDTO, CreatePersonaDTO, MessageDTO
 from application.services.stakeholder.persona_editor_service import PersonaEditorService
+from application.services.stakeholder.persona_loader import PersonaLoader
 from application.services.stakeholder.room_access_policy import (
     StakeholderRoomAccessScope,
     legacy_training_session_room_scope,
@@ -99,6 +109,7 @@ from application.services.training_studio.live_guidance_service import (
     TranscriptSpeaker,
     TranscriptTurn,
 )
+from application.ports.turn_based_voice import TurnBasedVoicePipelinePort
 from application.services.training_studio.guidance_persistence_service import (
     append_selected_path_guidance,
     guidance_persistence_failure,
@@ -125,6 +136,7 @@ from application.services.training_studio.scenario_config_service import (
     JsonFileScenarioConfigStore,
     ScenarioConfigStateDTO,
     TrainingScenarioConfigService,
+    default_scenario_voice_id,
 )
 from application.services.training_studio.session_service import (
     CreateTrainingSessionDTO,
@@ -147,6 +159,15 @@ from application.services.training_studio.message_tree_completion_service import
     MessageTreeTrainingCompletionService,
     message_tree_analysis_room_id,
     message_tree_completion_report_metadata,
+)
+from application.services.training_studio.message_presentation import emotion_metadata
+from application.services.training_studio.opening_emotion_service import (
+    analyze_training_opening_emotion,
+)
+from application.services.training_studio.training_audio_service import (
+    TrainingAudioContext,
+    TrainingAudioSegment,
+    TrainingAudioService,
 )
 from application.services.training_studio.training_material_tool_service import (
     TrainingMaterialToolConsumerService,
@@ -408,6 +429,19 @@ _TEXT_MESSAGE_TREE_OPT_IN_VALUES = {
     "conversation_tree",
 }
 _TRAINING_OPENING_LOCKS: dict[str, asyncio.Lock] = {}
+_TRAINING_OPENING_ENRICHMENT_TASKS: set[asyncio.Task[None]] = set()
+_TRAINING_OPENING_ENRICHMENT_SESSIONS: set[str] = set()
+
+
+@dataclass(frozen=True)
+class _TrainingOpeningTarget:
+    """Persisted opening message that can receive optional async enrichment."""
+
+    session_id: str
+    runtime: str
+    message_id: str
+    room_id: int | None = None
+    conversation_id: int | None = None
 
 
 def _openai_realtime_api_key() -> str | None:
@@ -563,6 +597,7 @@ def get_training_scenario_config_service() -> TrainingScenarioConfigService:
 
 def _scenario_templates_from_config(
     config: ScenarioConfigStateDTO,
+    persona_loader: PersonaLoader | None = None,
 ) -> list[ScenarioTrainingTemplateDTO]:
     return [
         ScenarioTrainingTemplateDTO(
@@ -576,9 +611,16 @@ def _scenario_templates_from_config(
             status="not_started",
             opening_line=draft.opening_line,
             persona=ScenarioTrainingPersonaDTO(
+                persona_id=draft.persona.persona_id,
                 name=draft.persona.name,
                 role=draft.persona.role,
                 style=draft.persona.style,
+                voice_id=_resolved_scenario_voice_id(draft, persona_loader),
+                voice_speed=draft.persona.voice_speed,
+                voice_loudness=draft.persona.voice_loudness,
+                voice_emotion=draft.persona.voice_emotion,
+                voice_emotion_scale=draft.persona.voice_emotion_scale,
+                voice_style=draft.persona.voice_style,
             ),
             learner_role=draft.learner_role,
             framework=draft.framework,
@@ -594,6 +636,41 @@ def _scenario_templates_from_config(
         for draft in config.scenarios
         if draft.enabled
     ]
+
+
+def _resolved_scenario_voice_id(
+    draft: ScenarioConfigDraftDTO,
+    persona_loader: PersonaLoader | None,
+) -> str:
+    configured = draft.persona.voice_id
+    persona_id = (draft.persona.persona_id or "").strip()
+    if persona_loader is not None and persona_id:
+        asset = persona_loader.get_persona(persona_id)
+        asset_voice_id = str(getattr(asset, "voice_id", "") or "").strip()
+        # Existing configs used the global default as an implicit value.
+        # Treat that value as unset when a bound asset has its own voice.
+        if asset_voice_id and configured in {None, DEFAULT_TRAINING_VOICE_ID}:
+            return asset_voice_id
+    return configured or default_scenario_voice_id(draft.id)
+
+
+def _apply_scenario_voice_defaults(
+    config: ScenarioConfigStateDTO,
+    persona_loader: PersonaLoader,
+) -> ScenarioConfigStateDTO:
+    scenarios: list[ScenarioConfigDraftDTO] = []
+    changed = False
+    for draft in config.scenarios:
+        resolved = _resolved_scenario_voice_id(draft, persona_loader)
+        if resolved != draft.persona.voice_id:
+            draft = draft.model_copy(
+                update={
+                    "persona": draft.persona.model_copy(update={"voice_id": resolved}),
+                }
+            )
+            changed = True
+        scenarios.append(draft)
+    return config.model_copy(update={"scenarios": scenarios}) if changed else config
 
 
 def get_storybank_service() -> StoryBankService:
@@ -698,6 +775,17 @@ class TrainingRuntimePersonaDTO(BaseModel):
     scenario_context: str = Field(..., min_length=1, max_length=8000)
     training_points: list[str] = Field(default_factory=list, max_length=20)
     difficulty: str = Field(default="normal", pattern=r"^(easy|normal|hard)$")
+    voice_id: str | None = Field(default=None, min_length=1, max_length=120)
+    voice_speed: float = Field(default=1.0, ge=0.1, le=2.0)
+    voice_loudness: float = Field(default=1.0, ge=0.5, le=2.0)
+    voice_emotion: str | None = Field(default=None, max_length=80)
+    voice_emotion_scale: float = Field(default=1.0, ge=0.0, le=2.0)
+    voice_style: str | None = Field(default=None, max_length=500)
+
+    @field_validator("voice_id")
+    @classmethod
+    def validate_voice_id(cls, value: str | None) -> str | None:
+        return normalize_training_voice_id(value)
 
 
 class TrainingOpeningMessageDTO(BaseModel):
@@ -834,6 +922,22 @@ def _required_runtime_persona_text(value: str, field_name: str) -> str:
     return text
 
 
+def _training_voice_number(metadata: Mapping[str, object], key: str, default: float) -> float:
+    try:
+        value = float(metadata.get(key, default) or default)
+    except (TypeError, ValueError):
+        return default
+    return value
+
+
+def _training_voice_style(metadata: Mapping[str, object]) -> str | None:
+    style = str(metadata.get("trainingVoiceStyle") or "").strip()
+    emotion = str(metadata.get("trainingVoiceEmotion") or "").strip()
+    scale = _training_voice_number(metadata, "trainingVoiceEmotionScale", 1.0)
+    parts = [item for item in (style, f"emotion: {emotion} (scale {scale:g})" if emotion else "") if item]
+    return "; ".join(parts) or None
+
+
 def _training_runtime_persona_content(persona: TrainingRuntimePersonaDTO) -> str:
     style = _required_runtime_persona_text(persona.style, "style")
     scenario_context = _required_runtime_persona_text(
@@ -873,6 +977,10 @@ def _create_training_runtime_persona(
     name = _required_runtime_persona_text(persona.name, "name")
     role = _required_runtime_persona_text(persona.role, "role")
     content = _training_runtime_persona_content(persona)
+    voice_style = persona.voice_style.strip() if persona.voice_style else ""
+    if persona.voice_emotion:
+        emotion_hint = f"emotion: {persona.voice_emotion.strip()} (scale {persona.voice_emotion_scale:g})"
+        voice_style = "; ".join(item for item in (voice_style, emotion_hint) if item)
     for _ in range(8):
         persona_id = f"ts-{uuid4().hex[:10]}"
         try:
@@ -883,6 +991,10 @@ def _create_training_runtime_persona(
                     role=role,
                     content=content,
                     temporary=True,
+                    voice_id=persona.voice_id,
+                    voice_speed=persona.voice_speed,
+                    voice_volume=persona.voice_loudness,
+                    voice_style=voice_style or None,
                 )
             )
             return persona_id
@@ -933,6 +1045,16 @@ async def _persist_room_training_opening_message(
         if not sender_id:
             sender_id = room.persona_ids[0] if room.persona_ids else "training_customer"
         metadata = dict(opening_turn.metadata)
+        training_emotion = metadata.get("trainingEmotion")
+        emotion_score = None
+        emotion_label = None
+        if isinstance(training_emotion, Mapping):
+            raw_score = training_emotion.get("score")
+            if isinstance(raw_score, int) and not isinstance(raw_score, bool):
+                emotion_score = max(-5, min(5, raw_score))
+            raw_label = training_emotion.get("label")
+            if raw_label is not None:
+                emotion_label = str(raw_label).strip()[:20] or None
         metadata.pop("sender_id", None)
         saved = await uow.stakeholder_message_repository.create(
             Message(
@@ -942,6 +1064,8 @@ async def _persist_room_training_opening_message(
                 sender_id=sender_id,
                 content=opening_turn.text,
                 metadata=metadata,
+                emotion_score=emotion_score,
+                emotion_label=emotion_label,
             )
         )
         await uow.chat_room_repository.update_last_message_at(
@@ -960,9 +1084,9 @@ async def _ensure_training_opening_message(
     opening_message: TrainingOpeningMessageDTO | None,
     uow_factory: Callable[..., AbstractUnitOfWork],
     conversation: ConversationRef | None = None,
-) -> None:
+) -> _TrainingOpeningTarget | None:
     if opening_message is None:
-        return
+        return None
 
     lock = _TRAINING_OPENING_LOCKS.setdefault(session.session_id, asyncio.Lock())
     async with lock:
@@ -981,9 +1105,20 @@ async def _ensure_training_opening_message(
                     metadata=dict(session.task_config.metadata or {}),
                 )
                 if await adapter.recent_turns(active_conversation, limit=1):
-                    return
-                await adapter.append_turn(active_conversation, opening_turn)
-                return
+                    return None
+                updated_conversation = await adapter.append_turn(
+                    active_conversation,
+                    opening_turn,
+                )
+                message_id = updated_conversation.branch_tail_message_id
+                if not message_id:
+                    return None
+                return _TrainingOpeningTarget(
+                    session_id=session.session_id,
+                    runtime="conversation_message_tree",
+                    message_id=message_id,
+                    conversation_id=int(updated_conversation.conversation_id),
+                )
 
             room_id = str(session.room_id or "").strip()
             if not room_id:
@@ -991,10 +1126,18 @@ async def _ensure_training_opening_message(
                     status_code=409,
                     detail="Training session is not bound to a conversation runtime",
                 )
-            await _persist_room_training_opening_message(
+            saved = await _persist_room_training_opening_message(
                 room_id=room_id,
                 opening_turn=opening_turn,
                 uow_factory=uow_factory,
+            )
+            if saved is None:
+                return None
+            return _TrainingOpeningTarget(
+                session_id=session.session_id,
+                runtime="stakeholder_room",
+                message_id=str(saved.id),
+                room_id=int(room_id),
             )
         except HTTPException:
             raise
@@ -1010,6 +1153,220 @@ async def _ensure_training_opening_message(
                     "Retry starting this session."
                 ),
             ) from exc
+
+
+def _schedule_training_opening_enrichment(
+    target: _TrainingOpeningTarget | None,
+    *,
+    session: TrainingSession,
+    opening_message: TrainingOpeningMessageDTO | None,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+    conversation: ConversationRef | None,
+    current_user: CurrentUser | None,
+    audio_service: TrainingAudioService | None,
+    voice_pipeline: TurnBasedVoicePipelinePort | None,
+    llm: LLMPort | None,
+) -> None:
+    """Run optional opening enrichment after the start response is available."""
+
+    if target is None or opening_message is None:
+        return
+    mode = str(getattr(session.mode, "value", session.mode)).strip().lower()
+    has_audio_work = (
+        target.runtime == "stakeholder_room"
+        and current_user is not None
+        and audio_service is not None
+        and voice_pipeline is not None
+        and mode in {"voice", "realtime", "realtime_voice", "video"}
+    )
+    if llm is None and not has_audio_work:
+        return
+    if target.session_id in _TRAINING_OPENING_ENRICHMENT_SESSIONS:
+        return
+
+    _TRAINING_OPENING_ENRICHMENT_SESSIONS.add(target.session_id)
+
+    async def run() -> None:
+        try:
+            await _enrich_training_opening_message(
+                target,
+                session=session,
+                opening_message=opening_message,
+                uow_factory=uow_factory,
+                conversation=conversation,
+                current_user=current_user,
+                audio_service=audio_service,
+                voice_pipeline=voice_pipeline,
+                llm=llm,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Training opening enrichment failed for session %s",
+                target.session_id,
+            )
+        finally:
+            _TRAINING_OPENING_ENRICHMENT_SESSIONS.discard(target.session_id)
+
+    task = asyncio.create_task(
+        run(),
+        name=f"training-opening-enrichment:{target.session_id}",
+    )
+    _TRAINING_OPENING_ENRICHMENT_TASKS.add(task)
+    task.add_done_callback(_TRAINING_OPENING_ENRICHMENT_TASKS.discard)
+
+
+async def _enrich_training_opening_message(
+    target: _TrainingOpeningTarget,
+    *,
+    session: TrainingSession,
+    opening_message: TrainingOpeningMessageDTO,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+    conversation: ConversationRef | None,
+    current_user: CurrentUser | None,
+    audio_service: TrainingAudioService | None,
+    voice_pipeline: TurnBasedVoicePipelinePort | None,
+    llm: LLMPort | None,
+) -> None:
+    mode = str(getattr(session.mode, "value", session.mode)).strip().lower()
+    if (
+        target.runtime == "stakeholder_room"
+        and current_user is not None
+        and audio_service is not None
+        and voice_pipeline is not None
+        and target.room_id is not None
+        and mode in {"voice", "realtime", "realtime_voice", "video"}
+    ):
+        try:
+            audio_message = await audio_service.synthesize_and_attach(
+                int(target.message_id),
+                context=TrainingAudioContext(
+                    training_session_id=session.session_id,
+                    room_id=target.room_id,
+                    user_id=current_user.user_id,
+                    team_id=current_user.team_id,
+                    can_manage_team=current_user.can_manage_team,
+                    training_mode=mode,
+                    voice_id=normalize_training_voice_id(
+                        str(
+                            (session.task_config.metadata or {}).get("trainingVoiceId")
+                            or ""
+                        )
+                    ),
+                    voice_speed=_training_voice_number(
+                        session.task_config.metadata or {},
+                        "trainingVoiceSpeed",
+                        1.0,
+                    ),
+                    voice_volume=_training_voice_number(
+                        session.task_config.metadata or {},
+                        "trainingVoiceLoudness",
+                        1.0,
+                    ),
+                    style_instruction=_training_voice_style(
+                        session.task_config.metadata or {}
+                    ),
+                ),
+                voice_pipeline=voice_pipeline,
+                original=True,
+            )
+            if audio_message is not None:
+                await room_event_bus.publish(
+                    target.room_id,
+                    "message",
+                    audio_message.model_dump(mode="json"),
+                )
+        except Exception:
+            logger.exception(
+                "Failed to synthesize opening audio for training session %s",
+                session.session_id,
+            )
+
+    if llm is not None and "trainingEmotion" not in opening_message.metadata:
+        analyzed = await analyze_training_opening_emotion(
+            llm,
+            content=opening_message.content,
+            context=session.task_config.metadata,
+        )
+        if analyzed is not None:
+            score, label = analyzed
+            await _persist_training_opening_emotion(
+                target,
+                score=score,
+                label=label,
+                uow_factory=uow_factory,
+                conversation=conversation,
+                current_user=current_user,
+            )
+
+
+async def _persist_training_opening_emotion(
+    target: _TrainingOpeningTarget,
+    *,
+    score: int,
+    label: str | None,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+    conversation: ConversationRef | None,
+    current_user: CurrentUser | None,
+) -> None:
+    emotion = emotion_metadata(score, label)
+    if target.runtime == "stakeholder_room":
+        if target.room_id is None:
+            return
+        async with uow_factory() as uow:
+            message = await uow.stakeholder_message_repository.get_by_id(
+                int(target.message_id),
+                room_id=target.room_id,
+            )
+            if message is None or "trainingEmotion" in (message.metadata or {}):
+                return
+            metadata = dict(message.metadata or {})
+            metadata["trainingEmotion"] = emotion
+            updated = await uow.stakeholder_message_repository.update_metadata(
+                int(target.message_id),
+                room_id=target.room_id,
+                metadata=metadata,
+            )
+            update_emotion = getattr(
+                uow.stakeholder_message_repository,
+                "update_emotion",
+                None,
+            )
+            if updated is not None and callable(update_emotion):
+                updated = await update_emotion(
+                    int(target.message_id),
+                    room_id=target.room_id,
+                    emotion_score=score,
+                    emotion_label=label,
+                )
+        if updated is not None:
+            await room_event_bus.publish(
+                target.room_id,
+                "message",
+                MessageDTO.model_validate(updated).model_dump(mode="json"),
+            )
+        return
+
+    if target.conversation_id is None or conversation is None or current_user is None:
+        return
+    metadata_scope = owned_metadata_scope_for_current_user(current_user)
+    async with uow_factory() as uow:
+        persisted = await uow.conversation_repository.get_by_id(
+            target.conversation_id,
+            metadata_scope=metadata_scope,
+        )
+        if persisted is None:
+            return
+        message = await uow.message_repository.get_by_public_id(target.message_id)
+        if message is None or message.conversation_id != target.conversation_id:
+            return
+        metadata = dict(message.metadata or {})
+        if "trainingEmotion" in metadata:
+            return
+        metadata["trainingEmotion"] = emotion
+        message.metadata = metadata
+        await uow.message_repository.update(message)
 
 
 def _requests_message_tree_runtime(body: StartTrainingSessionDTO) -> bool:
@@ -3063,17 +3420,54 @@ class _WebSocketTrainingTranscriptSink:
         svc: TrainingSessionService,
         uow_factory: Callable[..., AbstractUnitOfWork],
         access_scope: TrainingSessionAccessScope,
+        audio_service: TrainingAudioService | None,
+        audio_context: TrainingAudioContext,
     ) -> None:
         self._websocket = websocket
         self._session = session
         self._training_session_id = training_session_id
         self._room_id = room_id
+        self._audio_service = audio_service
+        self._audio_context = audio_context
+        self._pending_audio: list[TrainingAudioSegment] = []
         self._sink = RealtimeTranscriptPersistenceSink(
             uow_factory=uow_factory,
             session_service=svc,
-            publish_message=_publish_realtime_room_message,
+            publish_message=None,
             access_scope=access_scope,
         )
+
+    def record_audio(self, payload: Mapping[str, object]) -> None:
+        audio_bytes = _decode_pipeline_audio_bytes(payload)
+        if not audio_bytes:
+            return
+        self._pending_audio.append(
+            TrainingAudioSegment(
+                data=audio_bytes,
+                mime_type=_coerce_optional_text(
+                    _pipeline_event_value(
+                        payload,
+                        "mimeType",
+                        "mime_type",
+                        "contentType",
+                        "content_type",
+                    )
+                )
+                or "audio/pcm",
+                sequence=_coerce_optional_int(_pipeline_event_value(payload, "sequence")),
+                sample_rate=_coerce_optional_int(
+                    _pipeline_event_value(payload, "sampleRate", "sample_rate")
+                ),
+                channels=_coerce_optional_int(
+                    _pipeline_event_value(payload, "channels", "numChannels")
+                ),
+                runtime=_coerce_optional_text(_pipeline_event_value(payload, "runtime")),
+                provider=_coerce_optional_text(_pipeline_event_value(payload, "provider")),
+            )
+        )
+
+    def discard_audio(self) -> None:
+        self._pending_audio.clear()
 
     async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
         if _echoes_realtime_transcript_done(transcript.provider):
@@ -3085,6 +3479,27 @@ class _WebSocketTrainingTranscriptSink:
             )
         persisted = await self._sink.persist(transcript)
         payload = dict(persisted.payload)
+        if transcript.role == "assistant" and self._pending_audio and persisted.message_id:
+            segments, self._pending_audio = self._pending_audio, []
+            attached = (
+                await self._audio_service.attach_audio(
+                    int(persisted.message_id),
+                    context=self._audio_context,
+                    segments=segments,
+                    runtime=transcript.runtime,
+                    provider=transcript.provider,
+                )
+                if self._audio_service is not None
+                else None
+            )
+            if attached is not None:
+                payload["message"] = attached.model_dump(mode="json")
+        message_payload = payload.get("message")
+        if isinstance(message_payload, Mapping):
+            await _publish_realtime_room_message(
+                self._room_id,
+                MessageDTO.model_validate(dict(message_payload)),
+            )
         payload.setdefault("trainingSessionId", self._training_session_id)
         payload.setdefault("roomId", self._room_id)
         await _send_wire_event(
@@ -3752,6 +4167,11 @@ async def start_training_session(
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
     persona_editor: PersonaEditorService = Depends(get_persona_editor_service),
     uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_runtime_uow_factory),
+    training_audio: TrainingAudioService | None = Depends(get_optional_training_audio_service),
+    voice_pipeline: TurnBasedVoicePipelinePort | None = Depends(
+        get_optional_turn_based_voice_pipeline
+    ),
+    llm: LLMPort | None = Depends(get_stakeholder_llm_client),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     access_scope = _training_session_access_scope_for_current_user(current_user)
@@ -3784,11 +4204,22 @@ async def start_training_session(
                 conversation_id=str(_message_tree_conversation_id_for_session(session)),
                 metadata=dict(session.task_config.metadata or {}),
             )
-            await _ensure_training_opening_message(
+            opening_target = await _ensure_training_opening_message(
                 session=session,
                 opening_message=body.opening_message,
                 uow_factory=uow_factory,
                 conversation=conversation,
+            )
+            _schedule_training_opening_enrichment(
+                opening_target,
+                session=session,
+                opening_message=body.opening_message,
+                uow_factory=uow_factory,
+                conversation=conversation,
+                current_user=current_user,
+                audio_service=training_audio,
+                voice_pipeline=voice_pipeline,
+                llm=llm,
             )
             return success_response(
                 data=_started_training_session_to_dict(
@@ -3808,11 +4239,22 @@ async def start_training_session(
             raise _session_access_denied(exc) from exc
         except ValueError as exc:
             raise _not_found_if_missing(exc) from exc
-        await _ensure_training_opening_message(
+        opening_target = await _ensure_training_opening_message(
             session=started.session,
             opening_message=body.opening_message,
             uow_factory=uow_factory,
             conversation=started.conversation,
+        )
+        _schedule_training_opening_enrichment(
+            opening_target,
+            session=started.session,
+            opening_message=body.opening_message,
+            uow_factory=uow_factory,
+            conversation=started.conversation,
+            current_user=current_user,
+            audio_service=training_audio,
+            voice_pipeline=voice_pipeline,
+            llm=llm,
         )
         return success_response(data=_started_training_session_to_dict(started))
 
@@ -3829,10 +4271,21 @@ async def start_training_session(
                     f"cannot bind room {requested_room_id}"
                 ),
             )
-        await _ensure_training_opening_message(
+        opening_target = await _ensure_training_opening_message(
             session=session,
             opening_message=body.opening_message,
             uow_factory=uow_factory,
+        )
+        _schedule_training_opening_enrichment(
+            opening_target,
+            session=session,
+            opening_message=body.opening_message,
+            uow_factory=uow_factory,
+            conversation=None,
+            current_user=current_user,
+            audio_service=training_audio,
+            voice_pipeline=voice_pipeline,
+            llm=llm,
         )
         return success_response(data=_session_to_dict(session))
 
@@ -3885,10 +4338,21 @@ async def start_training_session(
         raise _session_access_denied(exc) from exc
     except ValueError as exc:
         raise _not_found_if_missing(exc) from exc
-    await _ensure_training_opening_message(
+    opening_target = await _ensure_training_opening_message(
         session=started,
         opening_message=body.opening_message,
         uow_factory=uow_factory,
+    )
+    _schedule_training_opening_enrichment(
+        opening_target,
+        session=started,
+        opening_message=body.opening_message,
+        uow_factory=uow_factory,
+        conversation=None,
+        current_user=current_user,
+        audio_service=training_audio,
+        voice_pipeline=voice_pipeline,
+        llm=llm,
     )
     return success_response(data=_session_to_dict(started))
 
@@ -4088,7 +4552,10 @@ async def complete_training_session(
     return success_response(data=_session_to_dict(completed))
 
 
-@router.get("/growth/summary", summary="Get persisted Training Points and level")
+@router.get(
+    "/growth/summary",
+    summary="Get Training Points, level, and career path progress",
+)
 async def get_training_growth_summary(
     growth_ledger: TrainingGrowthLedgerService = Depends(
         get_training_growth_ledger_service
@@ -4516,15 +4983,25 @@ async def get_catalog(
     return success_response(data=svc.get_catalog().model_dump(mode="json"))
 
 
+@router.get("/voice-catalog", summary="Get available training voice profiles")
+async def get_training_voice_catalog(
+    _current_user: CurrentUser = Depends(get_current_user),
+):
+    return success_response(
+        data=[item.to_public_dict() for item in TRAINING_VOICE_CATALOG]
+    )
+
+
 @router.get("/scenario-templates", summary="Get scenario training templates")
 async def get_scenario_templates(
     scenario_config_svc: TrainingScenarioConfigService = Depends(
         get_training_scenario_config_service
     ),
+    persona_loader: PersonaLoader = Depends(get_persona_loader_with_v2),
     _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     config = scenario_config_svc.get_config()
-    templates = _scenario_templates_from_config(config)
+    templates = _scenario_templates_from_config(config, persona_loader)
     return success_response(data=[template.model_dump(mode="json") for template in templates])
 
 
@@ -4660,9 +5137,10 @@ async def get_llm_registry(
 @router.get("/scenario-config", summary="Get scenario configuration state")
 async def get_scenario_config(
     svc: TrainingScenarioConfigService = Depends(get_training_scenario_config_service),
+    persona_loader: PersonaLoader = Depends(get_persona_loader_with_v2),
     _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
-    config = svc.get_config()
+    config = _apply_scenario_voice_defaults(svc.get_config(), persona_loader)
     return success_response(data=config.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
@@ -4670,9 +5148,10 @@ async def get_scenario_config(
 async def save_scenario_config(
     body: ScenarioConfigStateDTO,
     svc: TrainingScenarioConfigService = Depends(get_training_scenario_config_service),
+    persona_loader: PersonaLoader = Depends(get_persona_loader_with_v2),
     _current_user: CurrentUser = Depends(require_system_roles("admin")),
 ):
-    config = svc.save_config(body)
+    config = svc.save_config(_apply_scenario_voice_defaults(body, persona_loader))
     return success_response(data=config.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
@@ -4848,10 +5327,11 @@ async def realtime_training_session(
     uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_realtime_uow_factory),
     current_user: CurrentUser = Depends(get_current_user),
     pipeline_factory: RealtimePipelineFactory = Depends(get_training_realtime_pipeline_factory),
+    training_audio: TrainingAudioService | None = Depends(get_optional_training_audio_service),
 ):
     """Minimal bidirectional realtime session endpoint for audio event wiring."""
 
-    await websocket.accept()
+    await websocket.accept(subprotocol="talkwise.realtime")
     query_session_id, query_room_id = _query_binding(websocket)
     provider = _query_realtime_provider(websocket)
     realtime_profile = _query_realtime_profile(websocket)
@@ -4878,15 +5358,33 @@ async def realtime_training_session(
             svc=svc,
             uow_factory=uow_factory,
             access_scope=_training_session_access_scope_for_current_user(current_user),
+            audio_service=training_audio,
+            audio_context=TrainingAudioContext(
+                training_session_id=active_binding[0],
+                room_id=active_binding[1],
+                user_id=current_user.user_id,
+                team_id=current_user.team_id,
+                can_manage_team=current_user.can_manage_team,
+                training_mode="realtime_voice",
+            ),
         )
 
         async def _relay_pipeline_event(payload: Mapping[str, Any]) -> None:
             event_type = _pipeline_event_type(payload)
             if event_type == "audio.output":
+                sink.record_audio(payload)
                 await _send_pipeline_audio_output_event(
                     websocket=websocket,
                     session=session,
                     payload=payload,
+                )
+            elif event_type == "interrupted":
+                sink.discard_audio()
+                await _send_wire_event(
+                    websocket,
+                    event_type,
+                    session,
+                    _pipeline_realtime_event_payload(payload),
                 )
             elif event_type == "training.live_guidance.triggered":
                 await _send_wire_event(

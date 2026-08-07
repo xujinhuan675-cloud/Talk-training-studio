@@ -17,7 +17,11 @@ from api.dependencies import (
     get_current_user,
     get_stakeholder_chat_service,
 )
-from api.routes.stakeholder import get_stakeholder_training_session_service, router
+from api.routes.stakeholder import (
+    _training_audio_context,
+    get_stakeholder_training_session_service,
+    router,
+)
 from application.ports.stt import TranscriptionResult
 from application.services.stakeholder.dto import MessageDTO
 from domain.stakeholder.entity import ChatRoom
@@ -117,6 +121,26 @@ class _FakeTrainingSessionService:
         return SimpleNamespace(session_id=session_id, room_id=str(self.room_id))
 
 
+def test_training_audio_context_prefers_saved_session_voice() -> None:
+    context = _training_audio_context(
+        current_user=CurrentUser(user_id="admin", username="admin", system_role="admin"),
+        training_session_id="session-1",
+        room_id=7,
+        training_mode="voice",
+        voice_metadata={"trainingVoiceId": "zh_female_vv_uranus_bigtts"},
+        session_metadata={
+            "trainingMode": "voice",
+            "trainingVoiceId": "zh_male_dayi_saturn_bigtts",
+            "trainingVoiceSpeed": 1.25,
+        },
+    )
+
+    assert context is not None
+    assert context.voice_id == "zh_male_dayi_saturn_bigtts"
+    assert context.voice_speed == 1.25
+    assert context.training_mode == "voice"
+
+
 def _make_client(
     fake_chat: _FakeStakeholderChatService,
     fake_rooms: _FakeChatRoomService | None = None,
@@ -150,7 +174,11 @@ def test_voice_websocket_transcription_auto_sends_chat_message(monkeypatch) -> N
 
     client = _make_client(fake_chat)
 
-    with client.websocket_connect("/api/v1/stakeholder/rooms/7/voice") as ws:
+    with client.websocket_connect(
+        "/api/v1/stakeholder/rooms/7/voice",
+        subprotocols=["talkwise.voice"],
+    ) as ws:
+        assert ws.accepted_subprotocol == "talkwise.voice"
         ws.send_json(
             {
                 "type": "audio_chunk",

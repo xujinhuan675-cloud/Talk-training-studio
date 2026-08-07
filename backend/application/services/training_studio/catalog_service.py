@@ -59,9 +59,16 @@ class ScenarioPresetDTO(BaseModel):
 
 
 class ScenarioTrainingPersonaDTO(BaseModel):
+    persona_id: str | None = None
     name: str
     role: str
     style: str
+    voice_id: str | None = None
+    voice_speed: float = 1.0
+    voice_loudness: float = 1.0
+    voice_emotion: str | None = None
+    voice_emotion_scale: float = 1.0
+    voice_style: str | None = None
 
 
 class ScenarioTrainingDimensionWeightDTO(BaseModel):

@@ -18,9 +18,11 @@ from application.services.stakeholder.scenario_service import ScenarioApplicatio
 from application.services.stakeholder.analysis_service import AnalysisService, AnalysisReaderService
 from application.services.stakeholder.coaching_service import CoachingService
 from application.services.stakeholder.stakeholder_chat_service import StakeholderChatService
+from application.services.training_studio.training_audio_service import TrainingAudioService
 from application.ports.storage import StoragePort
 from application.ports.llm import LLMPort
 from application.ports.tts import TTSPort
+from application.ports.turn_based_voice import TurnBasedVoicePipelinePort
 from application.ports.stt import STTPort
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 from infrastructure.external.storage import get_storage
@@ -367,6 +369,47 @@ async def get_file_asset_service(
     return FileAssetApplicationService(uow_factory=SQLAlchemyUnitOfWork, storage=storage)
 
 
+async def get_training_audio_service(
+    storage: StoragePort = Depends(get_storage_port),
+    file_assets: FileAssetApplicationService = Depends(get_file_asset_service),
+) -> TrainingAudioService:
+    return TrainingAudioService(
+        uow_factory=SQLAlchemyUnitOfWork,
+        storage=storage,
+        file_assets=file_assets,
+    )
+
+
+async def get_optional_training_audio_service() -> TrainingAudioService | None:
+    """Resolve audio persistence without making unrelated chat startup depend on storage."""
+    try:
+        provider = await get_storage()
+    except RuntimeError:
+        return None
+    storage = StorageProviderPortAdapter(provider)
+    return TrainingAudioService(
+        uow_factory=SQLAlchemyUnitOfWork,
+        storage=storage,
+        file_assets=FileAssetApplicationService(
+            uow_factory=SQLAlchemyUnitOfWork,
+            storage=storage,
+        ),
+    )
+
+
+def get_optional_turn_based_voice_pipeline() -> TurnBasedVoicePipelinePort | None:
+    tts = get_tts_client()
+    if tts is None:
+        return None
+    from infrastructure.external.pipecat import PipecatTurnBasedCascadePipeline
+
+    return PipecatTurnBasedCascadePipeline(
+        tts,
+        tts_provider="openai_compatible_gateway",
+        tts_model=settings.voice.tts_model,
+    )
+
+
 async def get_idempotency_service() -> IdempotencyService:
     if not settings.redis.url:
 
@@ -491,6 +534,12 @@ def get_chatroom_service(
 async def get_stakeholder_chat_service(
     loader: PersonaLoader = Depends(get_persona_loader_with_v2),
     llm: LLMPort = Depends(get_stakeholder_llm_port),
+    training_audio: TrainingAudioService | None = Depends(
+        get_optional_training_audio_service
+    ),
+    voice_pipeline: TurnBasedVoicePipelinePort | None = Depends(
+        get_optional_turn_based_voice_pipeline
+    ),
 ) -> StakeholderChatService:
     from application.services.stakeholder.compression_service import CompressionService
     from application.services.stakeholder.dispatcher import Dispatcher
@@ -502,16 +551,6 @@ async def get_stakeholder_chat_service(
         persona_loader=loader,
     )
     # TTS is optional — None if not configured
-    tts = get_tts_client()
-    voice_pipeline = None
-    if tts is not None:
-        from infrastructure.external.pipecat import PipecatTurnBasedCascadePipeline
-
-        voice_pipeline = PipecatTurnBasedCascadePipeline(
-            tts,
-            tts_provider="openai_compatible_gateway",
-            tts_model=settings.voice.tts_model,
-        )
     return StakeholderChatService(
         uow_factory=SQLAlchemyUnitOfWork,
         persona_loader=loader,
@@ -520,6 +559,7 @@ async def get_stakeholder_chat_service(
         max_group_rounds=settings.stakeholder.max_group_rounds,
         compression_service=compression,
         voice_pipeline=voice_pipeline,
+        training_audio=training_audio,
     )
 
 async def get_analysis_service(

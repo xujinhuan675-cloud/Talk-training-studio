@@ -13,6 +13,9 @@ from application.services.training_studio.training_core import (
     training_core_metadata_for_session,
     text_conversation_runtime_contract_metadata,
 )
+from application.services.training_studio.message_presentation import (
+    training_reply_instruction,
+)
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.conversation.entity import Conversation as ConversationEntity
 from domain.conversation.entity import Message as ConversationMessage
@@ -78,7 +81,7 @@ class ConversationTrainingConversationAdapter:
                 ConversationEntity(
                     id=None,
                     title=_conversation_title_for_session(session),
-                    system_prompt=_metadata_text(session, "system_prompt", "instructions"),
+                    system_prompt=_training_system_prompt(session),
                     model=_metadata_text(session, "model") or self._default_model,
                     metadata=metadata,
                 )
@@ -270,6 +273,16 @@ class StakeholderRoomTrainingConversationAdapter:
                 limit=limit,
             )
         return [_turn_for_message(message) for message in messages]
+
+
+def _training_system_prompt(session: TrainingSession) -> str | None:
+    base = _metadata_text(session, "system_prompt", "instructions")
+    instruction = training_reply_instruction()
+    if not base:
+        return instruction.strip()
+    if instruction.strip() in base:
+        return base
+    return f"{base.rstrip()}\n{instruction}"
 
 
 def _conversation_ref_for_room(room: ChatRoom, *, session: TrainingSession) -> ConversationRef:

@@ -720,7 +720,11 @@ def test_realtime_websocket_defaults_to_pipecat_and_requires_binding_before_audi
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
 
-    with client.websocket_connect("/api/v1/training-studio/realtime") as ws:
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime",
+        subprotocols=["talkwise.realtime"],
+    ) as ws:
+        assert ws.accepted_subprotocol == "talkwise.realtime"
         started = ws.receive_json()
         listening = ws.receive_json()
         assert started["type"] == "session.started"

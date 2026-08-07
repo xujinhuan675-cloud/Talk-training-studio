@@ -5,7 +5,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from application.ports.tts import (
+    DEFAULT_TRAINING_VOICE_ID,
+    REFINED_MALE_TRAINING_VOICE_ID,
+    STEADY_MALE_TRAINING_VOICE_ID,
+    WARM_FEMALE_TRAINING_VOICE_ID,
+    normalize_training_voice_id,
+)
 
 from domain.training_studio.catalog import (
     DEFAULT_RUBRIC_WEIGHTS,
@@ -17,6 +25,20 @@ from domain.training_studio.catalog import (
 _DEFAULT_UPDATED_AT = "2026-01-01T00:00:00.000Z"
 _CATEGORY_WEIGHT_ALIASES = {
     "customer_service": ScenarioCategory.WORKPLACE,
+}
+_SCENARIO_DEFAULT_VOICE_IDS = {
+    "daily-upward-results-report": STEADY_MALE_TRAINING_VOICE_ID,
+    "new-customer-discount": WARM_FEMALE_TRAINING_VOICE_ID,
+    "enterprise-demo-objection": REFINED_MALE_TRAINING_VOICE_ID,
+    "refund-service-recovery": STEADY_MALE_TRAINING_VOICE_ID,
+    "renewal-price-negotiation": STEADY_MALE_TRAINING_VOICE_ID,
+    "recruiter-sales-interview": DEFAULT_TRAINING_VOICE_ID,
+    "ai-web3-agent-pm-comprehensive-interview": REFINED_MALE_TRAINING_VOICE_ID,
+    "angry-vip-priority": STEADY_MALE_TRAINING_VOICE_ID,
+    "budget-freeze-expansion": STEADY_MALE_TRAINING_VOICE_ID,
+    "cross-team-roadmap-tradeoff": REFINED_MALE_TRAINING_VOICE_ID,
+    "project-scope-creep-boundary": REFINED_MALE_TRAINING_VOICE_ID,
+    "service-apology-retention": WARM_FEMALE_TRAINING_VOICE_ID,
 }
 _DIMENSION_LABELS: dict[str, tuple[str, str]] = {
     RubricDimension.SUBSTANCE.value: (
@@ -42,6 +64,11 @@ _DIMENSION_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
+def default_scenario_voice_id(scenario_id: str) -> str:
+    """Return the validated built-in voice selected for a scenario."""
+    return _SCENARIO_DEFAULT_VOICE_IDS.get(scenario_id, DEFAULT_TRAINING_VOICE_ID)
+
+
 class ScenarioDimensionDefinitionDTO(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -61,9 +88,29 @@ class ScenarioDimensionWeightDTO(BaseModel):
 
 
 class ScenarioConfigPersonaDTO(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    persona_id: str | None = Field(default=None, alias="personaId")
     name: str = ""
     role: str = ""
     style: str = ""
+    # None means inherit the bound asset or the built-in scenario voice.
+    voice_id: str | None = Field(default=None, alias="voiceId")
+    voice_speed: float = Field(default=1.0, ge=0.1, le=2.0, alias="voiceSpeed")
+    voice_loudness: float = Field(default=1.0, ge=0.5, le=2.0, alias="voiceLoudness")
+    voice_emotion: str | None = Field(default=None, max_length=80, alias="voiceEmotion")
+    voice_emotion_scale: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        alias="voiceEmotionScale",
+    )
+    voice_style: str | None = Field(default=None, max_length=500, alias="voiceStyle")
+
+    @field_validator("voice_id")
+    @classmethod
+    def validate_voice_id(cls, value: str | None) -> str | None:
+        return normalize_training_voice_id(value)
 
 
 class ScenarioConfigDraftDTO(BaseModel):
@@ -175,6 +222,7 @@ class TrainingScenarioConfigService:
                     name=template.persona.name,
                     role=template.persona.role,
                     style=template.persona.style,
+                    voice_id=default_scenario_voice_id(template.id),
                 ),
                 learner_role=template.learner_role,
                 framework=template.framework.value,
