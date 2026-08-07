@@ -148,6 +148,30 @@ async def test_tts_posts_to_newapi_with_native_openai_voice(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_tts_maps_openai_placeholder_to_seed_tts_compatible_voice(monkeypatch) -> None:
+    fake_client = _FakeAsyncClient()
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: fake_client)
+    provider = OpenAICompatibleTTSProvider(
+        api_key="newapi-user-session",
+        model="seed-tts-2.0",
+        base_url="https://gateway.example.com/pg",
+    )
+    try:
+        chunks = [
+            chunk
+            async for chunk in provider.synthesize_stream(
+                "Hello.",
+                TTSConfig(voice_id="alloy"),
+            )
+        ]
+    finally:
+        await provider.close()
+
+    assert chunks == [b"mp3-audio"]
+    assert fake_client.captured["json"]["voice"] == "zh_female_vv_uranus_bigtts"
+
+
+@pytest.mark.asyncio
 async def test_voice_lifecycle_only_initializes_gateway_clients(monkeypatch) -> None:
     original_voice = settings.voice
     voice_lifecycle._tts_client = None

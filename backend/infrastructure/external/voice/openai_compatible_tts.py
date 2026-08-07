@@ -11,13 +11,13 @@ from typing import AsyncIterator
 
 import httpx
 
-from application.ports.tts import TTSConfig
+from application.ports.tts import DEFAULT_TRAINING_VOICE_ID, TTSConfig
 from infrastructure.external.newapi_user_gateway import authorization_headers
 
 logger = logging.getLogger(__name__)
 
 _SPEECH_PATH = "/audio/speech"
-_DEFAULT_VOICE = "alloy"
+_DEFAULT_OPENAI_VOICE = "alloy"
 _OPENAI_VOICES = {
     "alloy",
     "ash",
@@ -62,9 +62,9 @@ class OpenAICompatibleTTSProvider:
         config: TTSConfig,
     ) -> AsyncIterator[bytes]:
         url = f"{self._base_url}{_SPEECH_PATH}"
-        voice = config.voice_id or _DEFAULT_VOICE
+        voice = config.voice_id or _DEFAULT_OPENAI_VOICE
         if voice in _OPENAI_VOICES and not _uses_native_openai_voices(self._model):
-            voice = "en_paul_neutral"
+            voice = DEFAULT_TRAINING_VOICE_ID
 
         payload: dict[str, object] = {
             "model": self._model,
