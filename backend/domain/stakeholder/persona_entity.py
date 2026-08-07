@@ -106,6 +106,7 @@ class Persona:
     parse_status: str = "ok"  # ok | partial
     voice_id: Optional[str] = None
     voice_speed: float = 1.0
+    voice_volume: float = 1.0
     voice_style: Optional[str] = None
     # v2 fields (5-layer structured)
     hard_rules: list[HardRule] = field(default_factory=list)
@@ -157,6 +158,10 @@ class Persona:
             "decision": asdict(self.decision) if self.decision else None,
             "interpersonal": asdict(self.interpersonal) if self.interpersonal else None,
             "user_context": self.user_context,
+            "voice_id": self.voice_id,
+            "voice_speed": self.voice_speed,
+            "voice_volume": self.voice_volume,
+            "voice_style": self.voice_style,
         }
 
 

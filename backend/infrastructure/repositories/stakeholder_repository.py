@@ -168,6 +168,58 @@ class SQLAlchemyStakeholderMessageRepository(MessageRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
+    async def get_by_id(self, message_id: int, *, room_id: int | None = None) -> Optional[Message]:
+        query = select(StakeholderMessageModel).where(StakeholderMessageModel.id == message_id)
+        if room_id is not None:
+            query = query.where(StakeholderMessageModel.room_id == room_id)
+        result = await self.session.execute(query)
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def update_metadata(
+        self,
+        message_id: int,
+        *,
+        room_id: int,
+        metadata: dict,
+    ) -> Optional[Message]:
+        result = await self.session.execute(
+            select(StakeholderMessageModel).where(
+                StakeholderMessageModel.id == message_id,
+                StakeholderMessageModel.room_id == room_id,
+            )
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return None
+        model.extra_metadata = dict(metadata)
+        await self.session.flush()
+        await self.session.refresh(model)
+        return self._to_entity(model)
+
+    async def update_emotion(
+        self,
+        message_id: int,
+        *,
+        room_id: int,
+        emotion_score: int,
+        emotion_label: str | None,
+    ) -> Optional[Message]:
+        result = await self.session.execute(
+            select(StakeholderMessageModel).where(
+                StakeholderMessageModel.id == message_id,
+                StakeholderMessageModel.room_id == room_id,
+            )
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return None
+        model.emotion_score = max(-5, min(5, emotion_score))
+        model.emotion_label = (emotion_label or "").strip()[:20] or None
+        await self.session.flush()
+        await self.session.refresh(model)
+        return self._to_entity(model)
+
     async def get_user_message_by_client_request_id(
         self,
         room_id: int,

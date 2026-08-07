@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import logging
 import time
 from datetime import timezone
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import (
     APIRouter,
@@ -39,6 +41,8 @@ from api.dependencies import (
     get_scenario_service,
     get_speaker_detection_service,
     get_stakeholder_chat_service,
+    get_optional_turn_based_voice_pipeline,
+    get_training_audio_service,
     get_current_user,
     persona_access_scope_for,
 )
@@ -85,9 +89,17 @@ from application.services.stakeholder.sse import format_sse, room_event_bus
 from application.services.stakeholder.analysis_service import AnalysisService, AnalysisReaderService
 from application.services.stakeholder.coaching_service import CoachingService
 from application.services.stakeholder.stakeholder_chat_service import StakeholderChatService
+from application.services.training_studio.training_audio_service import (
+    TrainingAudioContext,
+    TrainingAudioService,
+)
+from application.ports.turn_based_voice import TurnBasedVoicePipelinePort
+from application.ports.tts import TRAINING_VOICE_CATALOG, normalize_training_voice_id
 from core.response import success_response
 from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stakeholder", tags=["Stakeholder Chat"])
 
@@ -174,6 +186,108 @@ async def _room_access_scope_for_request(
         room_id=session_room_id,
         operation=operation,
     )
+
+
+def _training_audio_context(
+    *,
+    current_user: CurrentUser,
+    training_session_id: str | None,
+    room_id: int,
+    training_mode: object | None,
+    voice_metadata: Mapping[str, Any] | None = None,
+    session_metadata: Mapping[str, Any] | None = None,
+) -> TrainingAudioContext | None:
+    session_id = (training_session_id or "").strip()
+    if not session_id:
+        return None
+    mode = str(
+        (session_metadata or {}).get("trainingMode")
+        or (session_metadata or {}).get("training_mode")
+        or training_mode
+        or "text"
+    ).strip().lower() or "text"
+    metadata = dict(voice_metadata or {})
+    # The session stores the scenario snapshot. It is authoritative for voice
+    # settings so direct API callers and old clients cannot silently fall back
+    # to the persona's unrelated default voice.
+    for key in (
+        "trainingVoiceId",
+        "trainingVoiceSpeed",
+        "trainingVoiceLoudness",
+        "trainingVoiceEmotion",
+        "trainingVoiceEmotionScale",
+        "trainingVoiceStyle",
+    ):
+        if session_metadata is not None and key in session_metadata:
+            metadata[key] = session_metadata[key]
+    try:
+        voice_id = normalize_training_voice_id(
+            str(metadata.get("trainingVoiceId") or metadata.get("training_voice_id") or "")
+        )
+    except ValueError:
+        voice_id = None
+    try:
+        voice_speed = min(2.0, max(0.1, float(metadata.get("trainingVoiceSpeed") or 1.0)))
+    except (TypeError, ValueError):
+        voice_speed = 1.0
+    try:
+        voice_volume = min(2.0, max(0.5, float(metadata.get("trainingVoiceLoudness") or 1.0)))
+    except (TypeError, ValueError):
+        voice_volume = 1.0
+    style = str(metadata.get("trainingVoiceStyle") or "").strip()
+    emotion = str(metadata.get("trainingVoiceEmotion") or "").strip()
+    if emotion:
+        style = "; ".join(
+            item for item in (style, f"emotion: {emotion} (scale {metadata.get('trainingVoiceEmotionScale', 1)})") if item
+        )
+    return TrainingAudioContext(
+        training_session_id=session_id,
+        room_id=room_id,
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
+        can_manage_team=current_user.can_manage_team,
+        training_mode=mode,
+        voice_id=voice_id,
+        voice_speed=voice_speed,
+        voice_volume=voice_volume,
+        style_instruction=style or None,
+    )
+
+
+async def _training_session_metadata_for_request(
+    *,
+    training_session_id: str | None,
+    training_session_svc: TrainingSessionService,
+    current_user: CurrentUser,
+) -> Mapping[str, Any]:
+    session_id = (training_session_id or "").strip()
+    if not session_id:
+        return {}
+    session = await training_session_svc.get_session(
+        session_id,
+        access_scope=_training_session_access_scope_for_current_user(current_user),
+    )
+    task_config = getattr(session, "task_config", None)
+    metadata = getattr(task_config, "metadata", None)
+    resolved = dict(metadata) if isinstance(metadata, Mapping) else {}
+    session_mode = getattr(session, "mode", None)
+    session_mode = getattr(session_mode, "value", session_mode)
+    if session_mode is not None and str(session_mode).strip():
+        resolved["trainingMode"] = str(session_mode).strip()
+    return resolved
+
+
+async def _generate_replies_with_optional_audio(
+    svc: StakeholderChatService,
+    room_id: int,
+    room,
+    audio_context: TrainingAudioContext | None,
+) -> None:
+    parameters = inspect.signature(svc.generate_replies).parameters
+    if audio_context is not None and "audio_context" in parameters:
+        await svc.generate_replies(room_id, room, audio_context=audio_context)
+        return
+    await svc.generate_replies(room_id, room)
 
 
 async def _require_stakeholder_room_access(
@@ -325,6 +439,10 @@ async def list_personas(
                 "id": visible.id,
                 "name": visible.name,
                 "role": visible.role,
+                "voice_id": visible.voice_id,
+                "voice_speed": visible.voice_speed,
+                "voice_volume": visible.voice_volume,
+                "voice_style": visible.voice_style,
                 "organization_id": visible.organization_id,
                 "team_id": visible.team_id,
                 "parse_status": visible.parse_status,
@@ -382,6 +500,10 @@ async def get_persona(
             "id": persona.id,
             "name": persona.name,
             "role": persona.role,
+            "voice_id": persona.voice_id,
+            "voice_speed": persona.voice_speed,
+            "voice_volume": persona.voice_volume,
+            "voice_style": persona.voice_style,
             "organization_id": persona.organization_id,
             "team_id": persona.team_id,
             "profile_summary": persona.profile_summary,
@@ -437,6 +559,15 @@ async def update_persona(
     except PersonaAccessDeniedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return success_response(data={"id": persona_id, "version": updated.version})
+
+
+@router.get("/voice-catalog", summary="Get available training voice profiles")
+async def list_training_voice_catalog(
+    _current_user: CurrentUser = Depends(get_current_user),
+):
+    return success_response(
+        data=[item.to_public_dict() for item in TRAINING_VOICE_CATALOG]
+    )
 
 
 @router.delete("/personas/{persona_id}", summary="删除角色")
@@ -884,6 +1015,11 @@ async def send_message(
         chatroom_svc,
         access_scope,
     )
+    session_metadata = await _training_session_metadata_for_request(
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        current_user=current_user,
+    )
     result = await svc.send_message_with_status(
         room_id,
         body.content,
@@ -893,8 +1029,185 @@ async def send_message(
     msg = result.message
     room = result.room
     if result.created:
-        background_tasks.add_task(svc.generate_replies, room_id, room)
+        background_tasks.add_task(
+            _generate_replies_with_optional_audio,
+            svc,
+            room_id,
+            room,
+            _training_audio_context(
+                current_user=current_user,
+                training_session_id=training_session_id,
+                room_id=room_id,
+                training_mode=body.metadata.get("trainingMode"),
+                voice_metadata=body.metadata,
+                session_metadata=session_metadata,
+            ),
+        )
     return success_response(data=msg.model_dump())
+
+
+@router.get(
+    "/rooms/{room_id}/messages/{message_id}/audio",
+    summary="Get the authenticated persisted AI audio manifest",
+)
+async def get_message_audio_manifest(
+    room_id: int,
+    message_id: int,
+    training_session_id: str = Query(..., alias="trainingSessionId", min_length=1),
+    audio_svc: TrainingAudioService = Depends(get_training_audio_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    await _room_access_scope_for_request(
+        room_id,
+        current_user=current_user,
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        operation="read_training_message_audio",
+    )
+    context = _training_audio_context(
+        current_user=current_user,
+        training_session_id=training_session_id,
+        room_id=room_id,
+        training_mode="voice",
+        session_metadata=await _training_session_metadata_for_request(
+            training_session_id=training_session_id,
+            training_session_svc=training_session_svc,
+            current_user=current_user,
+        ),
+    )
+    if context is None:
+        raise HTTPException(status_code=404, detail="Training message audio not found")
+    manifest = await audio_svc.get_manifest(message_id, context=context)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Training message audio not found")
+    return success_response(data=manifest)
+
+
+@router.post(
+    "/rooms/{room_id}/messages/{message_id}/audio/synthesize",
+    summary="Synthesize missing historical training opening audio",
+)
+async def synthesize_message_audio(
+    room_id: int,
+    message_id: int,
+    training_session_id: str = Query(..., alias="trainingSessionId", min_length=1),
+    audio_svc: TrainingAudioService = Depends(get_training_audio_service),
+    voice_pipeline: TurnBasedVoicePipelinePort | None = Depends(
+        get_optional_turn_based_voice_pipeline
+    ),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    await _room_access_scope_for_request(
+        room_id,
+        current_user=current_user,
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        operation="synthesize_training_message_audio",
+    )
+    if voice_pipeline is None:
+        raise HTTPException(status_code=503, detail="Training voice synthesis is unavailable")
+    context = _training_audio_context(
+        current_user=current_user,
+        training_session_id=training_session_id,
+        room_id=room_id,
+        training_mode="voice",
+        session_metadata=await _training_session_metadata_for_request(
+            training_session_id=training_session_id,
+            training_session_svc=training_session_svc,
+            current_user=current_user,
+        ),
+    )
+    if context is None:
+        raise HTTPException(status_code=404, detail="Training message audio not found")
+    try:
+        attached = await audio_svc.synthesize_and_attach(
+            message_id,
+            context=context,
+            voice_pipeline=voice_pipeline,
+            original=False,
+        )
+    except RuntimeError as exc:
+        logger.warning(
+            "Training message audio synthesis upstream failed for room %s message %s: %s",
+            room_id,
+            message_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "The configured AI voice could not be synthesized. "
+                "Check that the TTS resource and selected voice are compatible."
+            ),
+        ) from exc
+    if attached is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Eligible historical training opening audio was not found",
+        )
+    manifest = await audio_svc.get_manifest(message_id, context=context)
+    if manifest is None:
+        raise HTTPException(status_code=503, detail="Training voice synthesis failed")
+    return success_response(data=manifest)
+
+
+@router.get(
+    "/rooms/{room_id}/messages/{message_id}/audio/{segment_index}",
+    summary="Stream one authenticated persisted AI audio segment",
+)
+async def stream_message_audio_segment(
+    room_id: int,
+    message_id: int,
+    segment_index: int,
+    training_session_id: str = Query(..., alias="trainingSessionId", min_length=1),
+    audio_svc: TrainingAudioService = Depends(get_training_audio_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    await _room_access_scope_for_request(
+        room_id,
+        current_user=current_user,
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        operation="stream_training_message_audio",
+    )
+    context = _training_audio_context(
+        current_user=current_user,
+        training_session_id=training_session_id,
+        room_id=room_id,
+        training_mode="voice",
+        session_metadata=await _training_session_metadata_for_request(
+            training_session_id=training_session_id,
+            training_session_svc=training_session_svc,
+            current_user=current_user,
+        ),
+    )
+    if context is None:
+        raise HTTPException(status_code=404, detail="Training message audio not found")
+    download = await audio_svc.get_segment(
+        message_id,
+        segment_index,
+        context=context,
+    )
+    if download is None:
+        raise HTTPException(status_code=404, detail="Training message audio not found")
+    return StreamingResponse(
+        audio_svc.stream_segment(download),
+        media_type=download.mime_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Length": str(download.size),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -998,7 +1311,12 @@ async def voice_ws(
         current_user=current_user,
         access_scope=access_scope,
     )
-    await websocket.accept()
+    session_metadata = await _training_session_metadata_for_request(
+        training_session_id=training_session_id,
+        training_session_svc=training_session_svc,
+        current_user=current_user,
+    )
+    await websocket.accept(subprotocol="talkwise.voice")
 
     import base64
     import logging
@@ -1155,7 +1473,23 @@ async def voice_ws(
                             **send_kwargs,
                         )
                         # Generate replies in background (TTS audio will come via SSE)
-                        asyncio.create_task(svc.generate_replies(room_id, room))
+                        asyncio.create_task(
+                            _generate_replies_with_optional_audio(
+                                svc,
+                                room_id,
+                                room,
+                                _training_audio_context(
+                                    current_user=current_user,
+                                    training_session_id=training_session_id,
+                                    room_id=room_id,
+                                    training_mode=(message_metadata or {}).get(
+                                        "trainingMode", "voice"
+                                    ),
+                                    voice_metadata=message_metadata,
+                                    session_metadata=session_metadata,
+                                ),
+                            )
+                        )
                         message_ack_sent = await send_voice_json(
                             {
                                 "type": "message_sent",

@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import re
 
+from application.services.training_studio.message_presentation import (
+    strip_parenthetical_cues_for_speech,
+)
+
 # Punctuation marks that indicate a sentence boundary
 _SENTENCE_ENDS = frozenset("。！？；.!?\n")
 
@@ -28,7 +32,7 @@ def _strip_emotion(text: str) -> str:
     """Remove complete and partial emotion tags from text."""
     text = _EMOTION_TAG_RE.sub("", text)
     text = _EMOTION_PARTIAL_RE.sub("", text)
-    return text.strip()
+    return strip_parenthetical_cues_for_speech(text)
 
 
 class SentenceBuffer:

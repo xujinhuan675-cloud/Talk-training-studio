@@ -39,8 +39,13 @@ def _serialize_structured_profile(persona: Persona) -> Optional[dict]:
     if persona.user_context:
         result["user_context"] = persona.user_context
     # Story 2.7: rejected_features lives in _metadata to avoid DB schema churn.
+    metadata: dict[str, object] = {}
     if persona.rejected_features:
-        result["_metadata"] = {"rejected_features": persona.rejected_features}
+        metadata["rejected_features"] = persona.rejected_features
+    if persona.voice_volume != 1.0:
+        metadata["voice_volume"] = persona.voice_volume
+    if metadata:
+        result["_metadata"] = metadata
     return result
 
 
@@ -97,6 +102,7 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
         profile_dict = model.structured_profile or {}
         metadata = profile_dict.get("_metadata") if isinstance(profile_dict, dict) else None
         rejected = (metadata or {}).get("rejected_features") or {}
+        voice_volume = float((metadata or {}).get("voice_volume") or 1.0)
         return Persona(
             id=model.id,
             name=model.name,
@@ -106,6 +112,7 @@ class SQLAlchemyStakeholderPersonaRepository(StakeholderPersonaRepository):
             profile_summary=model.profile_summary or "",
             voice_id=model.voice_id,
             voice_speed=model.voice_speed if model.voice_speed is not None else 1.0,
+            voice_volume=voice_volume,
             voice_style=model.voice_style,
             hard_rules=structured["hard_rules"],
             identity=structured["identity"],

@@ -103,6 +103,31 @@ def test_v1_persona_from_markdown(v1_markdown_dir: Path) -> None:
     persona = loader.get_persona("boss")
     assert persona is not None
     assert persona.name == "老板"
+    assert persona.voice_id == "zh_female_vv_uranus_bigtts"
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_voice_id"),
+    [
+        ("李女士", "zh_female_tianmeitaozi_mars_bigtts"),
+        ("周经理", "zh_male_dayi_saturn_bigtts"),
+        ("顾面试官", "zh_male_ruyayichen_saturn_bigtts"),
+    ],
+)
+def test_legacy_persona_receives_stable_voice_assignment(
+    tmp_path: Path,
+    name: str,
+    expected_voice_id: str,
+) -> None:
+    (tmp_path / "legacy.md").write_text(
+        f"---\nname: {name}\nrole: 训练角色\n---\n\n# {name}\n",
+        encoding="utf-8",
+    )
+
+    persona = PersonaLoader(persona_dir=str(tmp_path)).get_persona("legacy")
+
+    assert persona is not None
+    assert persona.voice_id == expected_voice_id
 
 
 @pytest.mark.asyncio

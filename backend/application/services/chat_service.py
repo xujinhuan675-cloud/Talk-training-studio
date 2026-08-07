@@ -19,6 +19,12 @@ from application.dto import (
     RunDTO,
 )
 from application.ports.llm import LLMChunk, LLMMessage, LLMPort, LLMProviderMetadata, LLMResponse
+from application.services.training_studio.message_presentation import (
+    emotion_metadata,
+    extract_emotion,
+    split_visible_stream_delta,
+    strip_emotion_markers,
+)
 from core.logging_config import get_logger
 from domain.common.exceptions import DomainValidationException
 from domain.common.unit_of_work import AbstractUnitOfWork
@@ -290,6 +296,7 @@ class ChatApplicationService:
 
         run_id = run.id
         user_msg_id = user_msg.id
+        training_conversation = _is_training_conversation(conv.metadata)
 
         # Build LLM messages
         llm_messages: list[LLMMessage] = []
@@ -316,6 +323,7 @@ class ChatApplicationService:
         completion_tokens = 0
         total_tokens = 0
         finish_reason: Optional[str] = None
+        emotion_stream_buffer = ""
         provider_metadata = _llm_provider_metadata(self._llm)
         response_model = runtime_selection.model
         response_provider = runtime_selection.provider
@@ -329,12 +337,18 @@ class ChatApplicationService:
             ):
                 if chunk.content:
                     full_content += chunk.content
-                    yield _sse_event(
-                        "message_delta",
-                        {
-                            "content": chunk.content,
-                        },
-                    )
+                    visible_delta = chunk.content
+                    if training_conversation:
+                        visible_delta, emotion_stream_buffer = split_visible_stream_delta(
+                            emotion_stream_buffer + chunk.content
+                        )
+                    if visible_delta:
+                        yield _sse_event(
+                            "message_delta",
+                            {
+                                "content": visible_delta,
+                            },
+                        )
                 # Capture usage from final chunk
                 if chunk.total_tokens > 0:
                     prompt_tokens = chunk.prompt_tokens
@@ -361,12 +375,29 @@ class ChatApplicationService:
             return
 
         # Phase 3: persist assistant message and complete run
+        assistant_content = full_content
+        emotion_score: int | None = None
+        emotion_label: str | None = None
+        if training_conversation:
+            assistant_content, emotion_score, emotion_label = extract_emotion(full_content)
+            assistant_content = strip_emotion_markers(assistant_content)
         async with self._uow_factory() as uow:
+            assistant_metadata = _run_request_metadata(
+                provider=response_provider,
+                model=response_model,
+                model_spec=runtime_selection.model_spec,
+                provider_metadata=provider_metadata,
+                runtime_selection=runtime_selection,
+                request_metadata=dto.metadata,
+            )
+            training_emotion = emotion_metadata(emotion_score, emotion_label)
+            if training_emotion is not None:
+                assistant_metadata["trainingEmotion"] = training_emotion
             assistant_msg = Message(
                 id=None,
                 conversation_id=conversation_id,
                 role="assistant",
-                content=full_content,
+                content=assistant_content,
                 parent_message_id=user_msg.public_id,
                 branch_id=user_msg.branch_id,
                 finish_reason=finish_reason,
@@ -374,14 +405,7 @@ class ChatApplicationService:
                 model=response_model,
                 run_id=run_id,
                 token_count=completion_tokens,
-                metadata=_run_request_metadata(
-                    provider=response_provider,
-                    model=response_model,
-                    model_spec=runtime_selection.model_spec,
-                    provider_metadata=provider_metadata,
-                    runtime_selection=runtime_selection,
-                    request_metadata=dto.metadata,
-                ),
+                metadata=assistant_metadata,
                 created_at=_utcnow(),
             )
             assistant_msg = await uow.message_repository.create(assistant_msg)
@@ -406,7 +430,9 @@ class ChatApplicationService:
                 "parent_message_id": assistant_msg.parent_message_id,
                 "branch_id": assistant_msg.branch_id,
                 "role": "assistant",
-                "content": full_content,
+                "content": assistant_content,
+                "metadata": assistant_msg.metadata,
+                "content_parts": assistant_msg.content_parts,
             },
         )
         yield _sse_event(
@@ -457,6 +483,7 @@ class ChatApplicationService:
             await uow.commit()
 
         run_id = run.id
+        training_conversation = _is_training_conversation(conv.metadata)
 
         llm_messages: list[LLMMessage] = []
         if conv.system_prompt:
@@ -487,11 +514,30 @@ class ChatApplicationService:
             provider_metadata = _llm_provider_metadata(self._llm)
             response_provider = runtime_selection.provider
             response_model = response.model or runtime_selection.model
+            assistant_content = response.content
+            emotion_score: int | None = None
+            emotion_label: str | None = None
+            if training_conversation:
+                assistant_content, emotion_score, emotion_label = extract_emotion(
+                    assistant_content
+                )
+                assistant_content = strip_emotion_markers(assistant_content)
+            assistant_metadata = _run_request_metadata(
+                provider=response_provider,
+                model=response_model,
+                model_spec=runtime_selection.model_spec,
+                provider_metadata=provider_metadata,
+                runtime_selection=runtime_selection,
+                request_metadata=dto.metadata,
+            )
+            training_emotion = emotion_metadata(emotion_score, emotion_label)
+            if training_emotion is not None:
+                assistant_metadata["trainingEmotion"] = training_emotion
             assistant_msg = Message(
                 id=None,
                 conversation_id=conversation_id,
                 role="assistant",
-                content=response.content,
+                content=assistant_content,
                 parent_message_id=user_msg.public_id,
                 branch_id=user_msg.branch_id,
                 finish_reason=response.finish_reason,
@@ -499,14 +545,7 @@ class ChatApplicationService:
                 model=response_model,
                 run_id=run_id,
                 token_count=response.completion_tokens,
-                metadata=_run_request_metadata(
-                    provider=response_provider,
-                    model=response_model,
-                    model_spec=runtime_selection.model_spec,
-                    provider_metadata=provider_metadata,
-                    runtime_selection=runtime_selection,
-                    request_metadata=dto.metadata,
-                ),
+                metadata=assistant_metadata,
                 created_at=_utcnow(),
             )
             assistant_msg = await uow.message_repository.create(assistant_msg)
@@ -552,6 +591,21 @@ def _llm_provider_metadata(llm: LLMPort) -> LLMProviderMetadata:
 
 def _metadata_mapping(value: object | None) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _is_training_conversation(metadata: object | None) -> bool:
+    """Limit the private emotion protocol to TalkWise training conversations."""
+
+    values = _metadata_mapping(metadata)
+    runtime = _clean_optional_text(
+        values.get("runtime") or values.get("trainingRuntime") or values.get("training_runtime")
+    )
+    return bool(
+        _clean_optional_text(
+            values.get("trainingSessionId") or values.get("training_session_id")
+        )
+        or runtime in {"conversation_message_tree", "stakeholder_room"}
+    )
 
 
 def _metadata_key_token(key: object) -> str:

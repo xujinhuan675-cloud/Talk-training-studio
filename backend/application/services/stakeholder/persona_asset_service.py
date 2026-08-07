@@ -59,6 +59,10 @@ class PersonaAssetService:
                 team_id=dto.team_id,
                 profile_summary=dto.content[:500],
                 user_context=dto.content or None,
+                voice_id=dto.voice_id,
+                voice_speed=dto.voice_speed,
+                voice_volume=dto.voice_volume,
+                voice_style=dto.voice_style,
                 owner_user_id=access_scope.user_id,
                 owner_team_id=access_scope.team_id,
                 visibility=dto.visibility,
@@ -88,6 +92,14 @@ class PersonaAssetService:
                 persona.organization_id = dto.organization_id
             if dto.team_id is not None:
                 persona.team_id = dto.team_id
+            if dto.voice_id is not None:
+                persona.voice_id = dto.voice_id
+            if dto.voice_speed is not None:
+                persona.voice_speed = dto.voice_speed
+            if dto.voice_volume is not None:
+                persona.voice_volume = dto.voice_volume
+            if dto.voice_style is not None:
+                persona.voice_style = dto.voice_style
             if dto.content is not None:
                 persona.user_context = dto.content
                 persona.profile_summary = dto.content[:500]

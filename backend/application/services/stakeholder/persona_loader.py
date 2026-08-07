@@ -1,5 +1,5 @@
-# input: Markdown 画像文件目录 (persona_dir) + 可选 StakeholderPersonaRepository (v2 DB 路径), TTL 缓存配置
-# output: PersonaLoader 服务（含 TTL 缓存 + v1/v2 双路径）, Persona 数据结构 re-export 自 domain.stakeholder.persona_entity (向后兼容)
+# input: Markdown 画像文件目录 + 可选 v2 repository + 已验证训练音色目录
+# output: PersonaLoader（v1/v2 合并、缓存、旧资产音色补齐）+ Persona 兼容导出
 # owner: wanhua.gu
 # pos: 应用层 - 利益相关者画像加载（v1 markdown 扫描 + v2 DB 合并，v2 优先）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """PersonaLoader: scan and parse stakeholder persona Markdown files (v1) + merge structured v2 from DB."""
@@ -13,14 +13,36 @@ from typing import Optional
 from core.logging_config import get_logger
 from domain.stakeholder.persona_entity import Persona  # re-export for backward compatibility
 from domain.stakeholder.repository import StakeholderPersonaRepository
+from application.ports.tts import (
+    DEFAULT_TRAINING_VOICE_ID,
+    REFINED_MALE_TRAINING_VOICE_ID,
+    STEADY_MALE_TRAINING_VOICE_ID,
+    WARM_FEMALE_TRAINING_VOICE_ID,
+)
 
 logger = get_logger(__name__)
 
 # Default cache TTL in seconds (persona files rarely change mid-request)
 _DEFAULT_CACHE_TTL = 30.0
+_WARM_FEMALE_PERSONA_NAMES = frozenset({"李女士", "唐女士", "李娜", "林乔", "王敏"})
+_STEADY_MALE_PERSONA_NAMES = frozenset(
+    {"王先生", "周经理", "陈总", "赵经理", "沈总", "李总", "许经理", "张伟", "陈宇"}
+)
+_REFINED_MALE_PERSONA_NAMES = frozenset({"顾面试官", "赵睿", "直属负责人", "产品经理教练"})
 
 
 __all__ = ["Persona", "PersonaLoader"]
+
+
+def _legacy_persona_voice_id(name: str) -> str:
+    normalized = name.strip()
+    if normalized in _WARM_FEMALE_PERSONA_NAMES:
+        return WARM_FEMALE_TRAINING_VOICE_ID
+    if normalized in _STEADY_MALE_PERSONA_NAMES:
+        return STEADY_MALE_TRAINING_VOICE_ID
+    if normalized in _REFINED_MALE_PERSONA_NAMES:
+        return REFINED_MALE_TRAINING_VOICE_ID
+    return DEFAULT_TRAINING_VOICE_ID
 
 
 class PersonaLoader:
@@ -143,8 +165,11 @@ class PersonaLoader:
         organization_id = self._parse_optional_int(frontmatter.get("organization_id"))
         team_id = self._parse_optional_int(frontmatter.get("team_id"))
 
-        voice_id = frontmatter.get("voice_id")
+        # Preserve explicit values. Only legacy assets without voice metadata
+        # receive a stable assignment from the validated local catalog.
+        voice_id = str(frontmatter.get("voice_id") or _legacy_persona_voice_id(name)).strip()
         voice_speed = self._parse_optional_float(frontmatter.get("voice_speed")) or 1.0
+        voice_volume = self._parse_optional_float(frontmatter.get("voice_volume")) or 1.0
         voice_style = frontmatter.get("voice_style")
 
         if not name or not role:
@@ -169,6 +194,7 @@ class PersonaLoader:
             parse_status=parse_status,
             voice_id=voice_id,
             voice_speed=voice_speed,
+            voice_volume=voice_volume,
             voice_style=voice_style,
         )
 

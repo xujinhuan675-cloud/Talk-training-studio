@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,7 +14,7 @@ from application.dto import (
     MessageActionDTO,
     RetryMessageDTO,
 )
-from application.ports.llm import LLMMessage, LLMProviderMetadata, LLMResponse
+from application.ports.llm import LLMChunk, LLMMessage, LLMProviderMetadata, LLMResponse
 from application.services.chat_service import ChatApplicationService as _BaseChatApplicationService
 from application.services.conversation_service import (
     ConversationApplicationService as _BaseConversationApplicationService,
@@ -71,6 +72,14 @@ class _FailingStreamLLM(_FakeLLM):
         if False:
             yield None
         raise TimeoutError("provider timed out")
+
+
+class _EmotionStreamLLM(_FakeLLM):
+    async def stream(self, messages, **_kwargs):
+        self.calls.append(list(messages))
+        yield LLMChunk(content='（皱眉）这个数字不对。<!--emotion:')
+        yield LLMChunk(content='{"score":-2,"label":"质疑"}-->')
+        yield LLMChunk(content="", finish_reason="stop")
 
 
 def _metadata() -> dict:
@@ -201,7 +210,7 @@ async def session_factory():
     await engine.dispose()
 
 
-async def _seed_conversation(session_factory):
+async def _seed_conversation(session_factory, *, metadata: dict | None = None):
     async with SQLAlchemyUnitOfWork(session_factory=session_factory) as uow:
         conversation = await uow.conversation_repository.create(
             Conversation(
@@ -209,7 +218,7 @@ async def _seed_conversation(session_factory):
                 title="Message tree",
                 system_prompt="Stay concise.",
                 model="gpt-test",
-                metadata=_metadata(),
+                metadata={**_metadata(), **(metadata or {})},
             )
         )
         first_user = await uow.message_repository.create(
@@ -236,6 +245,46 @@ async def _seed_conversation(session_factory):
         )
         await uow.commit()
     return conversation, first_user, first_assistant, off_path_user
+
+
+@pytest.mark.asyncio
+async def test_training_chat_stream_hides_emotion_marker_and_persists_metadata(session_factory):
+    conversation, *_ = await _seed_conversation(
+        session_factory,
+        metadata={
+            "runtime": "conversation_message_tree",
+            "trainingSessionId": "session-1",
+        },
+    )
+    service = _BaseChatApplicationService(
+        uow_factory=lambda **kwargs: SQLAlchemyUnitOfWork(
+            session_factory=session_factory,
+            **kwargs,
+        ),
+        llm=_EmotionStreamLLM(),
+    )
+
+    events = []
+    async for frame in service.send_message_stream(
+        conversation.id,
+        ChatRequestDTO(message="请说明原因。"),
+        metadata_scope=_scope(),
+    ):
+        lines = frame.splitlines()
+        event_name = lines[0].removeprefix("event: ")
+        payload = next(line for line in lines if line.startswith("data: "))
+        events.append((event_name, json.loads(payload.removeprefix("data: "))))
+
+    deltas = [data["content"] for event, data in events if event == "message_delta"]
+    complete = next(data for event, data in events if event == "message_complete")
+    assert "<!--emotion:" not in "".join(deltas)
+    assert complete["content"] == "（皱眉）这个数字不对。"
+    assert complete["metadata"]["trainingEmotion"] == {
+        "source": "model",
+        "score": -2,
+        "label": "质疑",
+        "version": 1,
+    }
 
 
 @pytest.mark.asyncio

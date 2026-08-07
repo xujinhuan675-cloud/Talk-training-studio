@@ -252,6 +252,31 @@ wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training
 
 后续 `go test`、`go vet`、`go build` 等 Go 命令默认遵循同一 WSL 工作目录和工具链。
 
+### 5.1.2 NewAPI web 本地生效、嵌入构建与重启
+
+NewAPI Go 通过 `//go:embed web/dist` 把前端产物编译进二进制。凡是修改了 NewAPI web 的可见界面或前端运行逻辑，不能把 `bun run build` 视为本地交付完成；必须继续完成嵌入式 Go 编译、原位替换、进程重启和运行实例验收。
+
+默认执行顺序：
+
+1. 在 `outside-project/new-api-main/web` 完成 focused tests、`bun run typecheck`（如被既有无关错误阻塞需明确记录）和 `bun run build`。
+2. 在 WSL `Ubuntu-22.04` 的 NewAPI 根目录交叉编译 Windows 二进制，先输出到未运行的临时文件，不直接覆盖运行中的 `.exe`：
+
+```powershell
+wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training-studio/outside-project/new-api-main && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o new-api-talkwise-next.exe ."
+```
+
+3. 校验新二进制存在且大小合理；解析本机 `18080` 监听 PID，记录其可执行文件路径和命令行，并确认该进程属于本仓库 `outside-project/new-api-main`。只停止已确认的监听 PID，不得按进程名批量停止；如果监听进程来自本仓库内的其他历史构建文件，也应先结束该精确 PID，再切换到统一入口 `new-api-talkwise.exe`。若监听进程不属于本仓库，停止并向用户报告，不自动终止无关程序。
+4. 用时间戳备份当前 `new-api-talkwise.exe`，然后停止第 3 步确认的目标 PID，把 `new-api-talkwise-next.exe` 原位替换为 `new-api-talkwise.exe`。
+5. 从 NewAPI 根目录隐藏窗口启动新二进制，并保留 `.logs` 日志目录：
+
+```powershell
+Start-Process -FilePath .\new-api-talkwise.exe -ArgumentList '--log-dir','.logs' -WorkingDirectory (Get-Location) -WindowStyle Hidden
+```
+
+6. 启动后必须验证：新 PID 正在监听 `18080`、目标页面返回 `200`、页面 HTML 引用的主 bundle 哈希与 `web/dist/index.html` 一致，并对本轮可见功能做一次实际页面验收。浏览器缓存刷新不能替代二进制替换与重启。
+
+本流程是 NewAPI web 前端改动的默认完成条件。只有用户明确要求“不替换运行实例”或当前实例不属于本仓库时才允许跳过，并必须在最终回复中说明。
+
 ### 5.2 暂存和提交
 
 - 一轮功能完成并通过测试后，将本轮稳定改动进入 git 暂存区，便于下一轮继续开发时隔离状态。

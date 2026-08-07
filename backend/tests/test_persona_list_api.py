@@ -65,6 +65,9 @@ def _personas() -> list[Persona]:
             role="Owner asset",
             owner_user_id="newapi:owner",
             owner_team_id="team-a",
+            voice_id="zh_female_vv_uranus_bigtts",
+            voice_speed=1.1,
+            voice_style="steady",
             hard_rules=[HardRule(statement="Keep structured data", severity="high")],
         ),
         Persona(
@@ -116,8 +119,33 @@ async def test_list_personas_projects_owner_peer_and_system_permissions(tmp_path
     assert data["owned"]["supports_v2"] is True
     assert data["owned"]["can_manage"] is True
     assert data["owned"]["read_only"] is False
+    assert data["owned"]["voice_id"] == "zh_female_vv_uranus_bigtts"
+    assert data["owned"]["voice_speed"] == 1.1
+    assert data["owned"]["voice_style"] == "steady"
     assert data["team-shared"]["can_manage"] is False
     assert data["team-shared"]["read_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_voice_catalog_is_provider_neutral_and_authenticated(tmp_path: Path) -> None:
+    app = _app_for(tmp_path, _current_user(user_id="newapi:owner"))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get("/api/v1/stakeholder/voice-catalog")
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data
+    assert {item["service"] for item in data} == {"tts_streaming"}
+    assert all(item["provider"] == "volcengine" for item in data)
+    assert all("supports_emotion" in item for item in data)
+    default_voice = next(
+        item for item in data if item["id"] == "zh_female_vv_uranus_bigtts"
+    )
+    assert default_voice["chinese_label"] == "Vivi 2.0（活泼女声）"
 
 
 @pytest.mark.asyncio

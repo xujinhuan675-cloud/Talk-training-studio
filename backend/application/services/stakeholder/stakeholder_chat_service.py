@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-import json
 import re
 import uuid
 from dataclasses import dataclass
@@ -43,6 +42,17 @@ from application.services.stakeholder.room_access_policy import (
 )
 from core.config import settings
 from application.services.stakeholder.sse import room_event_bus
+from application.services.training_studio.training_audio_service import (
+    TrainingAudioContext,
+    TrainingAudioSegment,
+    TrainingAudioService,
+)
+from application.services.training_studio.message_presentation import (
+    extract_emotion,
+    split_visible_stream_delta,
+    strip_parenthetical_cues_for_speech,
+    strip_emotion_markers,
+)
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import ChatRoom, Message
 
@@ -86,8 +96,6 @@ def _extract_mentions(content: str, persona_loader) -> list[str]:
     return mentioned_ids
 
 
-_EMOTION_RE = re.compile(r"\s*<!--emotion:\s*(\{.*?\})\s*-->\s*$", re.DOTALL)
-_EMOTION_STREAM_MARKER = "<!--emotion:"
 _REPLY_LANGUAGE_LABELS = {
     "zh-CN": "Chinese (Simplified)",
     "zh-TW": "Chinese (Traditional)",
@@ -111,36 +119,15 @@ _TTS_LANGUAGE_INSTRUCTIONS = {
 
 
 def _extract_emotion(content: str) -> tuple[str, int | None, str | None]:
-    """Extract emotion tag from the end of LLM reply content.
+    """Backward-compatible wrapper for the shared training message contract."""
 
-    Returns:
-        (cleaned_content, score, label) — score/label are None if not found.
-    """
-    m = _EMOTION_RE.search(content)
-    if not m:
-        return content, None, None
-    try:
-        data = json.loads(m.group(1))
-        score = int(data.get("score", 0))
-        score = max(-5, min(5, score))
-        label = str(data.get("label", ""))[:20] or None
-    except (json.JSONDecodeError, ValueError, TypeError):
-        return content[: m.start()].rstrip(), None, None
-    return content[: m.start()].rstrip(), score, label
+    return extract_emotion(content)
 
 
 def _split_visible_stream_delta(buffer: str) -> tuple[str, str]:
-    """Return visible delta text while keeping trailing emotion markup private."""
-    lower = buffer.lower()
-    marker_index = lower.find(_EMOTION_STREAM_MARKER)
-    if marker_index >= 0:
-        return buffer[:marker_index], buffer[marker_index:]
+    """Backward-compatible wrapper for the shared streaming contract."""
 
-    max_prefix = min(len(buffer), len(_EMOTION_STREAM_MARKER) - 1)
-    for size in range(max_prefix, 0, -1):
-        if _EMOTION_STREAM_MARKER.startswith(lower[-size:]):
-            return buffer[:-size], buffer[-size:]
-    return buffer, ""
+    return split_visible_stream_delta(buffer)
 
 
 def _clean_llm_selection_text(value: object) -> str | None:
@@ -243,6 +230,7 @@ class StakeholderChatService:
         max_group_rounds: int = 20,
         compression_service=None,
         voice_pipeline: TurnBasedVoicePipelinePort | None = None,
+        training_audio: TrainingAudioService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._persona_loader = persona_loader
@@ -251,6 +239,7 @@ class StakeholderChatService:
         self._max_group_rounds = max_group_rounds
         self._compression = compression_service
         self._voice_pipeline = voice_pipeline
+        self._training_audio = training_audio
 
     async def send_message(
         self,
@@ -398,13 +387,23 @@ class StakeholderChatService:
             scenario = await uow.scenario_repository.get_by_id(room.scenario_id)
             return scenario.context_prompt if scenario else None
 
-    async def generate_replies(self, room_id: int, room: ChatRoom) -> None:
+    async def generate_replies(
+        self,
+        room_id: int,
+        room: ChatRoom,
+        *,
+        audio_context: TrainingAudioContext | None = None,
+    ) -> None:
         """Background task: route to private or group chat reply generation."""
         try:
             scenario_context = await self._load_scenario_context(room)
 
             if room.type == "group" and self._dispatcher:
-                await self._orchestrate_group_chat(room, scenario_context=scenario_context)
+                await self._orchestrate_group_chat(
+                    room,
+                    scenario_context=scenario_context,
+                    audio_context=audio_context,
+                )
             else:
                 persona_id = room.persona_ids[0] if room.persona_ids else None
                 if persona_id:
@@ -412,6 +411,7 @@ class StakeholderChatService:
                         room_id,
                         persona_id,
                         scenario_context=scenario_context,
+                        audio_context=audio_context,
                     )
         except asyncio.CancelledError:
             logger.warning("Reply generation cancelled for room %d", room_id)
@@ -427,6 +427,7 @@ class StakeholderChatService:
         is_mentioned: bool = False,
         scenario_context: str | None = None,
         cached_history: list[dict[str, object]] | None = None,
+        audio_context: TrainingAudioContext | None = None,
     ) -> tuple[bool, dict[str, object] | None]:
         """Generate and save a persona reply using LLM, emitting SSE events.
 
@@ -519,7 +520,8 @@ class StakeholderChatService:
                     # Set up TTS pipeline if voice is enabled for this persona
                     tts_enabled = self._voice_pipeline is not None
                     sentence_buf = None
-                    tts_tasks: list[asyncio.Task] = []
+                    tts_tasks: list[asyncio.Task[list[TrainingAudioSegment]]] = []
+                    audio_segments: list[TrainingAudioSegment] = []
                     audio_index = 0
                     tts_reply_id = ""
                     if tts_enabled:
@@ -554,6 +556,7 @@ class StakeholderChatService:
                                             audio_index,
                                             tts_reply_id,
                                             selected_reply_language,
+                                            audio_context,
                                         )
                                     )
                                     tts_tasks.append(task)
@@ -572,13 +575,17 @@ class StakeholderChatService:
                                     audio_index,
                                     tts_reply_id,
                                     selected_reply_language,
+                                    audio_context,
                                 )
                             )
                             tts_tasks.append(task)
 
                     # Wait for all TTS tasks to finish before continuing
                     if tts_tasks:
-                        await asyncio.gather(*tts_tasks, return_exceptions=True)
+                        results = await asyncio.gather(*tts_tasks, return_exceptions=True)
+                        for result in results:
+                            if isinstance(result, list):
+                                audio_segments.extend(result)
 
                     reply_content = "".join(chunks) if chunks else None
                 except Exception as exc:
@@ -615,19 +622,36 @@ class StakeholderChatService:
                     room_id, saved_reply.timestamp
                 )
 
-                # Emit final message first, then typing stop (avoids flash)
                 reply_dto = MessageDTO.model_validate(saved_reply)
-                await room_event_bus.publish(room_id, "message", reply_dto.model_dump(mode="json"))
-                await room_event_bus.publish(
-                    room_id, "typing", {"persona_id": persona_id, "status": "stop"}
+
+            if (
+                reply_content
+                and audio_segments
+                and audio_context is not None
+                and self._training_audio is not None
+            ):
+                attached = await self._training_audio.attach_audio(
+                    reply_dto.id,
+                    context=audio_context,
+                    segments=audio_segments,
+                    runtime=audio_segments[0].runtime,
+                    provider=audio_segments[0].provider,
                 )
+                if attached is not None:
+                    reply_dto = attached
+
+            # Emit the durable message before typing stop so replay metadata is present.
+            await room_event_bus.publish(room_id, "message", reply_dto.model_dump(mode="json"))
+            await room_event_bus.publish(
+                room_id, "typing", {"persona_id": persona_id, "status": "stop"}
+            )
 
             # Return dict for caller to append to cached_history
             saved_msg_dict = {
-                "sender_type": saved_reply.sender_type,
-                "sender_id": saved_reply.sender_id,
-                "content": saved_reply.content,
-                "metadata": saved_reply.metadata or {},
+                "sender_type": reply_dto.sender_type,
+                "sender_id": reply_dto.sender_id,
+                "content": reply_dto.content,
+                "metadata": reply_dto.metadata or {},
             }
 
             # Trigger background compression (fire-and-forget, non-blocking).
@@ -662,7 +686,8 @@ class StakeholderChatService:
         index: int,
         reply_id: str = "",
         reply_language: str | None = None,
-    ) -> None:
+        audio_context: TrainingAudioContext | None = None,
+    ) -> list[TrainingAudioSegment]:
         """Synthesize a sentence via TTS and push audio chunks via SSE.
 
         Runs as a concurrent task alongside LLM generation so that
@@ -670,17 +695,43 @@ class StakeholderChatService:
         """
         # Strip emotion tags — they arrive as trailing <!--emotion:{...}-->
         # and must not be spoken aloud.
-        text = _EMOTION_RE.sub("", text).strip()
+        text = strip_parenthetical_cues_for_speech(strip_emotion_markers(text))
         if not text or self._voice_pipeline is None:
-            return
+            return []
 
+        segments: list[TrainingAudioSegment] = []
         try:
+            has_training_voice_override = audio_context is not None and (
+                audio_context.voice_id is not None
+                or audio_context.voice_speed != 1.0
+                or audio_context.voice_volume != 1.0
+                or audio_context.style_instruction is not None
+            )
+            voice_id = (
+                audio_context.voice_id
+                if has_training_voice_override and audio_context is not None
+                else persona.voice_id
+            )
+            voice_speed = (
+                audio_context.voice_speed
+                if has_training_voice_override and audio_context is not None
+                else persona.voice_speed
+            )
+            voice_volume = (
+                audio_context.voice_volume
+                if has_training_voice_override and audio_context is not None
+                else persona.voice_volume
+            )
+            style_instruction = persona.voice_style
+            if has_training_voice_override and audio_context is not None:
+                style_instruction = audio_context.style_instruction or style_instruction
             config = TurnBasedVoiceSynthesisConfig(
                 persona_id=persona_id,
-                voice_id=persona.voice_id or "",
-                voice_speed=persona.voice_speed,
+                voice_id=voice_id or "",
+                voice_speed=voice_speed,
+                voice_volume=voice_volume,
                 style_instruction=_tts_style_instruction(
-                    persona.voice_style,
+                    style_instruction,
                     reply_language,
                 ),
                 language=reply_language,
@@ -692,6 +743,16 @@ class StakeholderChatService:
                 },
             )
             async for audio_output in self._voice_pipeline.synthesize_stream(text, config):
+                segments.append(
+                    TrainingAudioSegment(
+                        data=audio_output.data,
+                        mime_type=audio_output.mime_type,
+                        sequence=audio_output.sequence,
+                        sentence_index=index,
+                        runtime=audio_output.runtime,
+                        provider=audio_output.provider,
+                    )
+                )
                 await room_event_bus.publish(
                     room_id,
                     "audio_chunk",
@@ -715,6 +776,7 @@ class StakeholderChatService:
                 persona_id,
                 index,
             )
+        return segments
 
     async def _safe_compress(self, room_id: int) -> None:
         """Run compression in background, swallowing errors."""
@@ -724,7 +786,11 @@ class StakeholderChatService:
             logger.exception("Background compression failed for room %d", room_id)
 
     async def _orchestrate_group_chat(
-        self, room: ChatRoom, *, scenario_context: str | None = None
+        self,
+        room: ChatRoom,
+        *,
+        scenario_context: str | None = None,
+        audio_context: TrainingAudioContext | None = None,
     ) -> None:
         """Orchestrate multi-round group chat using the Dispatcher.
 
@@ -822,6 +888,7 @@ class StakeholderChatService:
                 is_mentioned=(persona_id in mentioned_ids),
                 scenario_context=scenario_context,
                 cached_history=history,
+                audio_context=audio_context,
             )
 
             round_count += 1

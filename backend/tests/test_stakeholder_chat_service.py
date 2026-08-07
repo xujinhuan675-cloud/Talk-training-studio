@@ -470,6 +470,9 @@ async def test_reply_language_metadata_is_appended_to_system_prompt(session_fact
 
 @pytest.mark.asyncio
 async def test_reply_language_metadata_is_passed_to_voice_pipeline_config(session_factory):
+    from application.services.training_studio.training_audio_service import (
+        TrainingAudioContext,
+    )
     from application.services.stakeholder.stakeholder_chat_service import (
         StakeholderChatService,
     )
@@ -497,12 +500,27 @@ async def test_reply_language_metadata_is_passed_to_voice_pipeline_config(sessio
             },
         },
     )
-    await svc.generate_replies(room_id, room)
+    await svc.generate_replies(
+        room_id,
+        room,
+        audio_context=TrainingAudioContext(
+            training_session_id="training-session-1",
+            room_id=room_id,
+            user_id="user-1",
+            voice_id="zh_male_dayi_saturn_bigtts",
+            voice_speed=1.2,
+            voice_volume=0.8,
+            style_instruction="Sound firm.",
+        ),
+    )
 
     assert voice_pipeline.requests
     config = voice_pipeline.requests[0][1]
     assert config.language == "zh-CN"
-    assert "Speak calmly." in config.style_instruction
+    assert config.voice_id == "zh_male_dayi_saturn_bigtts"
+    assert config.voice_speed == 1.2
+    assert config.voice_volume == 0.8
+    assert "Sound firm." in config.style_instruction
     assert "Mandarin Chinese" in config.style_instruction
     assert "Do not translate" in config.style_instruction
 

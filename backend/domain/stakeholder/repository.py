@@ -48,6 +48,30 @@ class MessageRepository(ABC):
     async def create(self, message: Message) -> Message: ...
 
     @abstractmethod
+    async def get_by_id(
+        self, message_id: int, *, room_id: int | None = None
+    ) -> Optional[Message]: ...
+
+    @abstractmethod
+    async def update_metadata(
+        self,
+        message_id: int,
+        *,
+        room_id: int,
+        metadata: dict,
+    ) -> Optional[Message]: ...
+
+    @abstractmethod
+    async def update_emotion(
+        self,
+        message_id: int,
+        *,
+        room_id: int,
+        emotion_score: int,
+        emotion_label: str | None,
+    ) -> Optional[Message]: ...
+
+    @abstractmethod
     async def get_user_message_by_client_request_id(
         self,
         room_id: int,

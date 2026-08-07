@@ -86,6 +86,14 @@ def _apply_patch(persona: Persona, patch: PersonaPatchV2DTO) -> None:
         persona.name = patch.name
     if patch.role is not None:
         persona.role = patch.role
+    if patch.voice_id is not None:
+        persona.voice_id = patch.voice_id
+    if patch.voice_speed is not None:
+        persona.voice_speed = patch.voice_speed
+    if patch.voice_volume is not None:
+        persona.voice_volume = patch.voice_volume
+    if patch.voice_style is not None:
+        persona.voice_style = patch.voice_style
     if patch.hard_rules is not None:
         persona.hard_rules = [HardRule(**r.model_dump()) for r in patch.hard_rules]
     if patch.identity is not None:
@@ -112,6 +120,10 @@ def _to_dto(persona: Persona, evidence: list) -> PersonaV2DTO:
         id=persona.id,
         name=persona.name,
         role=persona.role,
+        voice_id=persona.voice_id,
+        voice_speed=persona.voice_speed,
+        voice_volume=persona.voice_volume,
+        voice_style=persona.voice_style,
         visibility=persona.visibility,
         version=persona.version,
         hard_rules=[asdict(r) for r in persona.hard_rules],

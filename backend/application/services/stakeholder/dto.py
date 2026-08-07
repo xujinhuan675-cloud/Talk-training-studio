@@ -78,6 +78,10 @@ class CreatePersonaDTO(BaseModel):
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
     temporary: bool = False
+    voice_id: Optional[str] = Field(None, min_length=1, max_length=120)
+    voice_speed: float = Field(1.0, ge=0.1, le=2.0)
+    voice_volume: float = Field(1.0, ge=0.5, le=2.0)
+    voice_style: Optional[str] = Field(None, max_length=50)
     visibility: Literal["private", "team"] = "private"
 
 
@@ -91,6 +95,10 @@ class UpdatePersonaDTO(BaseModel):
     content: Optional[str] = None
     organization_id: Optional[int] = None
     team_id: Optional[int] = None
+    voice_id: Optional[str] = Field(None, min_length=1, max_length=120)
+    voice_speed: Optional[float] = Field(None, ge=0.1, le=2.0)
+    voice_volume: Optional[float] = Field(None, ge=0.5, le=2.0)
+    voice_style: Optional[str] = Field(None, max_length=50)
     visibility: Optional[Literal["private", "team"]] = None
 
 
@@ -712,6 +720,10 @@ class PersonaV2DTO(BaseModel):
     id: str
     name: str
     role: str
+    voice_id: Optional[str] = None
+    voice_speed: float = 1.0
+    voice_volume: float = 1.0
+    voice_style: Optional[str] = None
     visibility: str = "private"
     version: int = 1
     can_manage: bool = False
@@ -739,6 +751,10 @@ class PersonaPatchV2DTO(BaseModel):
 
     name: Optional[str] = None
     role: Optional[str] = None
+    voice_id: Optional[str] = None
+    voice_speed: Optional[float] = Field(None, ge=0.1, le=2.0)
+    voice_volume: Optional[float] = Field(None, ge=0.5, le=2.0)
+    voice_style: Optional[str] = Field(None, max_length=50)
     hard_rules: Optional[list[HardRuleDTO]] = None
     identity: Optional[IdentityDTO] = None
     expression: Optional[ExpressionDTO] = None

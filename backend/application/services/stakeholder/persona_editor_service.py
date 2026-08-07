@@ -64,13 +64,24 @@ class PersonaEditorService:
             raise FileExistsError(f"Persona '{dto.id}' already exists")
 
         self._persona_dir.mkdir(parents=True, exist_ok=True)
+        extra_frontmatter = {}
+        if dto.temporary:
+            extra_frontmatter["temporary"] = "true"
+        if dto.voice_id:
+            extra_frontmatter["voice_id"] = dto.voice_id
+        if dto.voice_speed != 1.0:
+            extra_frontmatter["voice_speed"] = dto.voice_speed
+        if dto.voice_volume != 1.0:
+            extra_frontmatter["voice_volume"] = dto.voice_volume
+        if dto.voice_style:
+            extra_frontmatter["voice_style"] = dto.voice_style
         md = self._build_markdown(
             dto.name,
             dto.role,
             dto.content,
             organization_id=dto.organization_id,
             team_id=dto.team_id,
-            extra_frontmatter={"temporary": "true"} if dto.temporary else None,
+            extra_frontmatter=extra_frontmatter or None,
         )
         path.write_text(md, encoding="utf-8")
         logger.info("persona_created", persona_id=dto.id)
@@ -106,6 +117,14 @@ class PersonaEditorService:
 
         # Collect extra frontmatter keys to preserve (e.g. last_updated, confidence)
         managed_keys = {"name", "role", "organization_id", "team_id"}
+        if dto.voice_id is not None:
+            frontmatter["voice_id"] = dto.voice_id
+        if dto.voice_speed is not None:
+            frontmatter["voice_speed"] = dto.voice_speed
+        if dto.voice_volume is not None:
+            frontmatter["voice_volume"] = dto.voice_volume
+        if dto.voice_style is not None:
+            frontmatter["voice_style"] = dto.voice_style
         extra_fm = {k: v for k, v in frontmatter.items() if k not in managed_keys}
 
         md = self._build_markdown(

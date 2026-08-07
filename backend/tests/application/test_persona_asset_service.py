@@ -72,6 +72,9 @@ async def test_create_assigns_owner_from_server_scope_not_request_body() -> None
             name="Buyer",
             role="Procurement",
             content="Needs evidence",
+            voice_id="zh_male_dayi_saturn_bigtts",
+            voice_speed=1.2,
+            voice_style="calm and concise",
             visibility="team",
         ),
         access_scope=_scope("newapi:42"),
@@ -80,6 +83,9 @@ async def test_create_assigns_owner_from_server_scope_not_request_body() -> None
     assert created.owner_user_id == "newapi:42"
     assert created.owner_team_id == "team-a"
     assert created.visibility == "team"
+    assert created.voice_id == "zh_male_dayi_saturn_bigtts"
+    assert created.voice_speed == 1.2
+    assert created.voice_style == "calm and concise"
     assert created.version == 1
 
 
