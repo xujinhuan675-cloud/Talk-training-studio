@@ -39,9 +39,15 @@ class _FakeSTT:
         *,
         language: str = "zh",
         audio_format: str = "webm",
+        model: str | None = None,
     ) -> TranscriptionResult:
         self.calls.append(
-            {"audio": audio, "language": language, "audio_format": audio_format}
+            {
+                "audio": audio,
+                "language": language,
+                "audio_format": audio_format,
+                "model": model,
+            }
         )
         return TranscriptionResult(text=self.text, language=language)
 
@@ -98,10 +104,7 @@ class _FakeChatRoomService:
         access_scope=None,
     ) -> SimpleNamespace:
         self.access_scopes.append(access_scope)
-        messages = [
-            SimpleNamespace(sender_type="user")
-            for _ in range(self.user_message_count)
-        ]
+        messages = [SimpleNamespace(sender_type="user") for _ in range(self.user_message_count)]
         return SimpleNamespace(
             room=SimpleNamespace(id=room_id, type=self.room_type),
             messages=messages,
@@ -109,16 +112,30 @@ class _FakeChatRoomService:
 
 
 class _FakeTrainingSessionService:
-    def __init__(self, *, room_id: int, owner_user_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        room_id: int,
+        owner_user_id: str,
+        metadata: dict[str, object] | None = None,
+        mode: str = "voice",
+    ) -> None:
         self.room_id = room_id
         self.owner_user_id = owner_user_id
+        self.metadata = metadata or {}
+        self.mode = mode
         self.access_scopes: list[Any] = []
 
     async def get_session(self, session_id: str, *, access_scope: Any) -> SimpleNamespace:
         self.access_scopes.append(access_scope)
         if access_scope.user_id != self.owner_user_id:
             raise PermissionError("Training session is outside current user scope")
-        return SimpleNamespace(session_id=session_id, room_id=str(self.room_id))
+        return SimpleNamespace(
+            session_id=session_id,
+            room_id=str(self.room_id),
+            mode=self.mode,
+            task_config=SimpleNamespace(metadata=self.metadata),
+        )
 
 
 def test_training_audio_context_prefers_saved_session_voice() -> None:
@@ -132,13 +149,27 @@ def test_training_audio_context_prefers_saved_session_voice() -> None:
             "trainingMode": "voice",
             "trainingVoiceId": "zh_male_dayi_saturn_bigtts",
             "trainingVoiceSpeed": 1.25,
+            "voiceRoute": {
+                "id": "cascade-standard",
+                "name": "Cascade standard",
+                "mode": "cascade",
+                "stt": {"provider": "openai", "model": "stt-session"},
+                "llm": {"provider": "openai", "model": "llm-session"},
+                "tts": {
+                    "provider": "openai",
+                    "model": "tts-session",
+                    "voice": "marin",
+                },
+            },
         },
     )
 
     assert context is not None
-    assert context.voice_id == "zh_male_dayi_saturn_bigtts"
+    assert context.voice_id == "marin"
     assert context.voice_speed == 1.25
     assert context.training_mode == "voice"
+    assert context.tts_provider == "openai"
+    assert context.tts_model == "tts-session"
 
 
 def _make_client(
@@ -196,7 +227,12 @@ def test_voice_websocket_transcription_auto_sends_chat_message(monkeypatch) -> N
         "is_final": True,
     }
     assert fake_stt.calls == [
-        {"audio": b"voice-bytes", "language": "zh", "audio_format": "webm"}
+        {
+            "audio": b"voice-bytes",
+            "language": "zh",
+            "audio_format": "webm",
+            "model": None,
+        }
     ]
     assert fake_chat.sent_messages == [(7, "Here is my spoken answer.")]
     assert fake_chat.sent_metadata == [None]
@@ -399,6 +435,48 @@ def test_voice_websocket_rejects_training_session_room_mismatch_before_accept() 
     assert exc_info.value.status_code == 403
     assert fake_rooms.access_scopes == []
     assert fake_chat.sent_messages == []
+
+
+def test_voice_websocket_uses_the_session_voice_route_stt_model(monkeypatch) -> None:
+    fake_stt = _FakeSTT("Preset transcription")
+    fake_chat = _FakeStakeholderChatService()
+    training_sessions = _FakeTrainingSessionService(
+        room_id=7,
+        owner_user_id="admin",
+        metadata={
+            "voiceRoute": {
+                "id": "cascade-standard",
+                "name": "Cascade standard",
+                "mode": "cascade",
+                "stt": {"provider": "openai", "model": "stt-session"},
+                "llm": {"provider": "openai", "model": "llm-session"},
+                "tts": {"provider": "openai", "model": "tts-session"},
+            }
+        },
+    )
+
+    import infrastructure.external.voice as voice_module
+
+    monkeypatch.setattr(voice_module, "get_stt_client", lambda: fake_stt)
+    client = _make_client(
+        fake_chat,
+        training_session_service=training_sessions,
+    )
+
+    with client.websocket_connect(
+        "/api/v1/stakeholder/rooms/7/voice?trainingSessionId=session-1"
+    ) as ws:
+        ws.send_json(
+            {
+                "type": "audio_chunk",
+                "data": base64.b64encode(b"voice-bytes").decode("ascii"),
+            }
+        )
+        ws.send_json({"type": "speech_end", "format": "wav"})
+        ws.receive_json()
+        ws.receive_json()
+
+    assert fake_stt.calls[0]["model"] == "stt-session"
 
 
 def test_voice_websocket_uses_newapi_bearer_identity_for_session_and_room_scope(

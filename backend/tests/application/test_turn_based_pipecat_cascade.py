@@ -33,6 +33,8 @@ async def test_turn_based_cascade_wraps_gateway_tts_as_training_audio_output() -
             TurnBasedVoiceSynthesisConfig(
                 persona_id="customer",
                 voice_id="alloy",
+                tts_provider="openai",
+                tts_model="gpt-4o-mini-tts",
                 voice_speed=1.2,
                 style_instruction="Use natural Mandarin pronunciation.",
                 language="zh-CN",
@@ -60,8 +62,8 @@ async def test_turn_based_cascade_wraps_gateway_tts_as_training_audio_output() -
         "transport": "talkwise.audio_chunks",
     }
     assert outputs[0].metadata["tts"] == {
-        "provider": "openai_compatible_gateway",
-        "model": "tts-1",
+        "provider": "openai",
+        "model": "gpt-4o-mini-tts",
         "voice": "alloy",
         "language": "zh-CN",
     }
@@ -74,6 +76,7 @@ async def test_turn_based_cascade_wraps_gateway_tts_as_training_audio_output() -
     text, config = tts.requests[0]
     assert text == "Continue the negotiation in Chinese."
     assert config.voice_id == "alloy"
+    assert config.model == "gpt-4o-mini-tts"
     assert config.speed == 1.2
     assert config.style_instruction == "Use natural Mandarin pronunciation."
     assert config.language == "zh-CN"

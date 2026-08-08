@@ -41,9 +41,7 @@ class TrainingVoiceProfile:
     def to_public_dict(self) -> dict[str, object]:
         payload = asdict(self)
         payload["tags"] = list(self.tags)
-        payload["chinese_label"] = _TRAINING_VOICE_CHINESE_LABELS.get(
-            self.id, self.chinese_label
-        )
+        payload["chinese_label"] = _TRAINING_VOICE_CHINESE_LABELS.get(self.id, self.chinese_label)
         return payload
 
 
@@ -123,6 +121,7 @@ class TTSConfig:
     """Configuration for a single TTS synthesis request."""
 
     voice_id: str
+    model: Optional[str] = None
     speed: float = 1.0
     volume: float = 1.0
     pitch: float = 0.0

@@ -54,6 +54,9 @@ from application.services.stakeholder.room_access_policy import (
     legacy_training_session_room_scope,
 )
 from application.services.training_studio.session_service import TrainingSessionService
+from application.services.training_studio.voice_route_service import (
+    voice_route_snapshot_from_metadata,
+)
 from application.services.stakeholder.dto import (
     BattlePrepGenerateDTO,
     CreateChatRoomDTO,
@@ -200,12 +203,17 @@ def _training_audio_context(
     session_id = (training_session_id or "").strip()
     if not session_id:
         return None
-    mode = str(
-        (session_metadata or {}).get("trainingMode")
-        or (session_metadata or {}).get("training_mode")
-        or training_mode
+    mode = (
+        str(
+            (session_metadata or {}).get("trainingMode")
+            or (session_metadata or {}).get("training_mode")
+            or training_mode
+            or "text"
+        )
+        .strip()
+        .lower()
         or "text"
-    ).strip().lower() or "text"
+    )
     metadata = dict(voice_metadata or {})
     # The session stores the scenario snapshot. It is authoritative for voice
     # settings so direct API callers and old clients cannot silently fall back
@@ -220,12 +228,18 @@ def _training_audio_context(
     ):
         if session_metadata is not None and key in session_metadata:
             metadata[key] = session_metadata[key]
-    try:
-        voice_id = normalize_training_voice_id(
-            str(metadata.get("trainingVoiceId") or metadata.get("training_voice_id") or "")
-        )
-    except ValueError:
-        voice_id = None
+    voice_route = voice_route_snapshot_from_metadata(session_metadata)
+    tts_service = voice_route.tts if voice_route is not None else None
+    preset_voice = str(tts_service.voice or "").strip() if tts_service is not None else ""
+    if preset_voice:
+        voice_id = preset_voice
+    else:
+        try:
+            voice_id = normalize_training_voice_id(
+                str(metadata.get("trainingVoiceId") or metadata.get("training_voice_id") or "")
+            )
+        except ValueError:
+            voice_id = None
     try:
         voice_speed = min(2.0, max(0.1, float(metadata.get("trainingVoiceSpeed") or 1.0)))
     except (TypeError, ValueError):
@@ -238,7 +252,12 @@ def _training_audio_context(
     emotion = str(metadata.get("trainingVoiceEmotion") or "").strip()
     if emotion:
         style = "; ".join(
-            item for item in (style, f"emotion: {emotion} (scale {metadata.get('trainingVoiceEmotionScale', 1)})") if item
+            item
+            for item in (
+                style,
+                f"emotion: {emotion} (scale {metadata.get('trainingVoiceEmotionScale', 1)})",
+            )
+            if item
         )
     return TrainingAudioContext(
         training_session_id=session_id,
@@ -251,6 +270,8 @@ def _training_audio_context(
         voice_speed=voice_speed,
         voice_volume=voice_volume,
         style_instruction=style or None,
+        tts_provider=tts_service.provider if tts_service is not None else None,
+        tts_model=tts_service.model if tts_service is not None else None,
     )
 
 
@@ -565,9 +586,7 @@ async def update_persona(
 async def list_training_voice_catalog(
     _current_user: CurrentUser = Depends(get_current_user),
 ):
-    return success_response(
-        data=[item.to_public_dict() for item in TRAINING_VOICE_CATALOG]
-    )
+    return success_response(data=[item.to_public_dict() for item in TRAINING_VOICE_CATALOG])
 
 
 @router.delete("/personas/{persona_id}", summary="删除角色")
@@ -656,7 +675,9 @@ async def patch_persona_v2_endpoint(
 async def start_battle_from_persona(
     persona_id: str,
     svc=Depends(get_battle_prep_service),
-    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
@@ -664,9 +685,7 @@ async def start_battle_from_persona(
             persona_id,
             access_scope=_stakeholder_room_scope_for_current_user(current_user),
             training_session_service=training_session_svc,
-            conversation_adapter=ConversationTrainingConversationAdapter(
-                SQLAlchemyUnitOfWork
-            ),
+            conversation_adapter=ConversationTrainingConversationAdapter(SQLAlchemyUnitOfWork),
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -731,7 +750,9 @@ async def get_room_detail(
     limit: int = Query(50, ge=1, le=200),
     training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     svc: ChatRoomApplicationService = Depends(get_chatroom_service),
-    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     access_scope = await _room_access_scope_for_request(
@@ -1000,7 +1021,9 @@ async def send_message(
     training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
-    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     access_scope = await _room_access_scope_for_request(
@@ -1220,7 +1243,9 @@ async def stream_room(
     room_id: int,
     training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
-    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Subscribe to real-time events for a chat room via Server-Sent Events."""
@@ -1279,7 +1304,9 @@ async def voice_ws(
     training_session_id: str | None = Query(default=None, alias="trainingSessionId"),
     svc: StakeholderChatService = Depends(get_stakeholder_chat_service),
     chatroom_svc: ChatRoomApplicationService = Depends(get_chatroom_service),
-    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """WebSocket for voice message input.
@@ -1327,6 +1354,10 @@ async def voice_ws(
 
     logger = logging.getLogger(__name__)
     stt = get_stt_client()
+    voice_route = voice_route_snapshot_from_metadata(session_metadata)
+    stt_model = (
+        voice_route.stt.model if voice_route is not None and voice_route.stt is not None else None
+    )
 
     async def send_voice_json(payload: dict) -> bool:
         try:
@@ -1446,10 +1477,15 @@ async def voice_ws(
                         ):
                             break
                         continue
+                    transcription_options = {
+                        "language": "zh",
+                        "audio_format": audio_format,
+                    }
+                    if stt_model:
+                        transcription_options["model"] = stt_model
                     result = await stt.transcribe(
                         bytes(audio_buffer),
-                        language="zh",
-                        audio_format=audio_format,
+                        **transcription_options,
                     )
                     text = result.text.strip()
 
@@ -1994,7 +2030,9 @@ async def generate_battle_prep(
 async def start_battle(
     body: StartBattleDTO,
     svc=Depends(get_battle_prep_service),
-    training_session_svc: TrainingSessionService = Depends(get_stakeholder_training_session_service),
+    training_session_svc: TrainingSessionService = Depends(
+        get_stakeholder_training_session_service
+    ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:

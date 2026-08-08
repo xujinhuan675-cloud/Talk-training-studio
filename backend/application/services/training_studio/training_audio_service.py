@@ -42,6 +42,8 @@ class TrainingAudioContext:
     voice_speed: float = 1.0
     voice_volume: float = 1.0
     style_instruction: str | None = None
+    tts_provider: str | None = None
+    tts_model: str | None = None
 
     @property
     def enabled(self) -> bool:
@@ -249,30 +251,34 @@ class TrainingAudioService:
                     return None
             if audio_manifest(metadata) is not None:
                 return MessageDTO.model_validate(message)
-            content = strip_parenthetical_cues_for_speech(
-                strip_emotion_markers(message.content)
-            )
+            content = strip_parenthetical_cues_for_speech(strip_emotion_markers(message.content))
             persona_id = message.sender_id or "training_customer"
 
+        # A session-level route snapshot is authoritative. Older opening
+        # messages may still carry a voice id from the previous provider
+        # catalog, which must not override the route's model/voice pair.
+        configured_voice_id = (
+            context.voice_id
+            or str(
+                metadata.get("trainingVoiceId")
+                or metadata.get("training_voice_id")
+                or ""
+            ).strip()
+        )
         segments: list[TrainingAudioSegment] = []
         config = TurnBasedVoiceSynthesisConfig(
             persona_id=persona_id,
-            voice_id=str(
-                metadata.get("trainingVoiceId")
-                or metadata.get("training_voice_id")
-                or context.voice_id
-                or ""
-            ).strip(),
+            voice_id=configured_voice_id,
             voice_speed=context.voice_speed,
             voice_volume=context.voice_volume,
+            tts_provider=context.tts_provider,
+            tts_model=context.tts_model,
             style_instruction=context.style_instruction,
             metadata={
                 "trainingSessionId": context.training_session_id,
                 "roomId": context.room_id,
                 "messageId": message_id,
-                "audioProvenance": (
-                    "generated_for_message" if original else "server_resynthesis"
-                ),
+                "audioProvenance": ("generated_for_message" if original else "server_resynthesis"),
             },
         )
         async for output in voice_pipeline.synthesize_stream(content, config):
@@ -371,8 +377,7 @@ class TrainingAudioService:
             or str(metadata.get("messageId") or "") != str(message_id)
             or str(metadata.get("segmentIndex") or "") != str(segment_index)
             or str(metadata.get("originalAiAudio") or "").lower() != expected_original
-            or str(metadata.get("audioProvenance") or "")
-            != str(manifest.get("provenance") or "")
+            or str(metadata.get("audioProvenance") or "") != str(manifest.get("provenance") or "")
         ):
             return None
         return TrainingAudioDownload(

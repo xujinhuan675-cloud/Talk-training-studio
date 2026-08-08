@@ -75,9 +75,6 @@ USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
 OPENAI_API_KEY_ENV_KEYS = OPENAI_REALTIME_API_KEY_ENV_KEYS
-OPENAI_REALTIME_MODEL_SETTING = "REALTIME_OPENAI_MODEL"
-OPENAI_REALTIME_VOICE_SETTING = "REALTIME_OPENAI_VOICE"
-OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING = "REALTIME_OPENAI_INPUT_AUDIO_FORMAT"
 _OPENAI_RUNTIME_VALUE_UNSET = object()
 OPENROUTER_LLM_PROVIDER = "openrouter"
 OPENROUTER_LLM_PROVIDER_ALIASES = {
@@ -965,7 +962,7 @@ def pipecat_realtime_readiness(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_API_KEY",
                 message=(
-                    "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
+                    "Select a published voice preset with an available OpenAI credential "
                     "before starting Pipecat realtime calls"
                 ),
                 phase="configuration",
@@ -977,22 +974,22 @@ def pipecat_realtime_readiness(
         blockers.append(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_MODEL",
-                message="Configure REALTIME_OPENAI_MODEL before starting Pipecat realtime calls",
+                message="The selected voice preset is missing its realtime model",
                 phase="configuration",
                 provider="pipecat",
                 feature="model",
-                missing_env=(OPENAI_REALTIME_MODEL_SETTING,),
+                missing_env=(),
             )
         )
     if not openai_requirements["voice"]:
         blockers.append(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_VOICE",
-                message="Configure REALTIME_OPENAI_VOICE before starting Pipecat realtime calls",
+                message="The selected voice preset is missing its voice",
                 phase="configuration",
                 provider="pipecat",
                 feature="voice",
-                missing_env=(OPENAI_REALTIME_VOICE_SETTING,),
+                missing_env=(),
             )
         )
     if not openai_requirements["inputAudioFormat"]:
@@ -1000,13 +997,12 @@ def pipecat_realtime_readiness(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
                 message=(
-                    "Configure REALTIME_OPENAI_INPUT_AUDIO_FORMAT before starting "
-                    "Pipecat realtime calls"
+                    "The selected voice preset is missing its input audio format"
                 ),
                 phase="configuration",
                 provider="pipecat",
                 feature="audioFormat",
-                missing_env=(OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING,),
+                missing_env=(),
             )
         )
 
@@ -1597,21 +1593,9 @@ def _clean_text(value: object | None) -> str | None:
     return text or None
 
 
-def _settings_text(name: str) -> str | None:
-    try:
-        from core.config import settings as app_settings
-    except Exception:
-        return None
-    return _clean_text(getattr(app_settings, name, None))
-
-
-def _resolve_openai_runtime_value(
-    value: object = _OPENAI_RUNTIME_VALUE_UNSET,
-    *,
-    setting_name: str | None = None,
-) -> str | None:
+def _resolve_openai_runtime_value(value: object = _OPENAI_RUNTIME_VALUE_UNSET) -> str | None:
     if value is _OPENAI_RUNTIME_VALUE_UNSET:
-        return _settings_text(setting_name) if setting_name is not None else None
+        return None
     return _clean_text(value)
 
 
@@ -1624,7 +1608,6 @@ def _resolved_openai_runtime_requirements(
 ) -> dict[str, str | None]:
     resolved_input_audio_format = _resolve_openai_runtime_value(
         input_audio_format,
-        setting_name=OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING,
     )
     resolved_output_audio_format = _clean_text(
         output_audio_format
@@ -1634,11 +1617,9 @@ def _resolved_openai_runtime_requirements(
     return {
         "model": _resolve_openai_runtime_value(
             model,
-            setting_name=OPENAI_REALTIME_MODEL_SETTING,
         ),
         "voice": _resolve_openai_runtime_value(
             voice,
-            setting_name=OPENAI_REALTIME_VOICE_SETTING,
         ),
         "inputAudioFormat": resolved_input_audio_format,
         "outputAudioFormat": resolved_output_audio_format,
@@ -2698,7 +2679,7 @@ def _pipecat_pipeline_readiness(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_API_KEY",
                 message=(
-                    "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
+                    "Select a published voice preset with an available OpenAI credential "
                     "before starting Pipecat realtime calls"
                 ),
                 phase="configuration",
@@ -2725,22 +2706,22 @@ def _pipecat_pipeline_readiness(
         blockers.append(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_MODEL",
-                message="Configure REALTIME_OPENAI_MODEL before starting Pipecat realtime calls",
+                message="The selected voice preset is missing its realtime model",
                 phase="configuration",
                 provider="pipecat",
                 feature="model",
-                missing_env=(OPENAI_REALTIME_MODEL_SETTING,),
+                missing_env=(),
             )
         )
     if not openai_requirements.get("voice"):
         blockers.append(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_VOICE",
-                message="Configure REALTIME_OPENAI_VOICE before starting Pipecat realtime calls",
+                message="The selected voice preset is missing its voice",
                 phase="configuration",
                 provider="pipecat",
                 feature="voice",
-                missing_env=(OPENAI_REALTIME_VOICE_SETTING,),
+                missing_env=(),
             )
         )
     if not openai_requirements.get("inputAudioFormat"):
@@ -2748,13 +2729,12 @@ def _pipecat_pipeline_readiness(
             RealtimeReadinessIssue(
                 code="MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
                 message=(
-                    "Configure REALTIME_OPENAI_INPUT_AUDIO_FORMAT before starting "
-                    "Pipecat realtime calls"
+                    "The selected voice preset is missing its input audio format"
                 ),
                 phase="configuration",
                 provider="pipecat",
                 feature="audioFormat",
-                missing_env=(OPENAI_REALTIME_INPUT_AUDIO_FORMAT_SETTING,),
+                missing_env=(),
             )
         )
 
@@ -3946,7 +3926,6 @@ def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
     return (
         _metadata_text(metadata, "openaiApiKey", "openai_api_key", "apiKey", "api_key")
         or _settings_openai_api_key()
-        or os.getenv("REALTIME_OPENAI_API_KEY")
         or os.getenv("OPENAI_API_KEY")
     )
 
@@ -4131,11 +4110,7 @@ def _settings_openai_api_key() -> str | None:
         llm_api_key = getattr(llm_settings, "api_key", None) if llm_settings is not None else None
     if user_billing_enabled():
         return current_user_access_token() or runtime_api_key()
-    return (
-        app_settings.REALTIME_OPENAI_API_KEY
-        or llm_api_key
-        or getattr(app_settings, "OPENAI_API_KEY", None)
-    )
+    return llm_api_key or getattr(app_settings, "OPENAI_API_KEY", None)
 
 
 def _settings_openrouter_api_key() -> str | None:

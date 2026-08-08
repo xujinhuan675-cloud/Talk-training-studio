@@ -264,6 +264,8 @@ async def test_historical_server_resynthesis_is_persisted_but_never_marked_origi
         room_id=42,
         user_id="101",
         training_mode="voice",
+        tts_provider="openai",
+        tts_model="gpt-4o-mini-tts",
     )
 
     pipeline = _VoicePipeline()
@@ -280,7 +282,48 @@ async def test_historical_server_resynthesis_is_persisted_but_never_marked_origi
     assert manifest["original"] is False
     assert manifest["provenance"] == "server_resynthesis"
     assert pipeline.configs[0].voice_id == "zh_female_vv_uranus_bigtts"
+    assert pipeline.configs[0].tts_provider == "openai"
+    assert pipeline.configs[0].tts_model == "gpt-4o-mini-tts"
     assert pipeline.texts == ["Historical opening"]
+
+
+@pytest.mark.asyncio
+async def test_route_voice_overrides_legacy_message_voice_for_resynthesis():
+    message = Message(
+        id=10,
+        room_id=42,
+        sender_type="persona",
+        sender_id="salesperson",
+        content="Welcome",
+        metadata={
+            "trainingSessionId": "session-1",
+            "trainingMode": "voice",
+            "eventKind": "scenario_opening",
+            "trainingVoiceId": "zh_female_vv_uranus_bigtts",
+        },
+    )
+    service, _, _ = _service(message)
+    pipeline = _VoicePipeline()
+
+    attached = await service.synthesize_and_attach(
+        10,
+        context=TrainingAudioContext(
+            training_session_id="session-1",
+            room_id=42,
+            user_id="101",
+            training_mode="voice",
+            voice_id="marin",
+            tts_provider="openai",
+            tts_model="gpt-4o-mini-tts",
+        ),
+        voice_pipeline=pipeline,
+        original=False,
+    )
+
+    assert attached is not None
+    assert pipeline.configs[0].voice_id == "marin"
+    assert pipeline.configs[0].tts_provider == "openai"
+    assert pipeline.configs[0].tts_model == "gpt-4o-mini-tts"
 
 
 @pytest.mark.asyncio

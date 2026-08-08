@@ -45,6 +45,8 @@ def test_real_pipecat_runtime_imports_declared_voice_symbols():
     capabilities = pipecat_realtime_capability_response(
         require_websocket=True,
         openai_api_key_available=True,
+        openai_model="gpt-realtime",
+        openai_voice="marin",
         include_source_snapshot=False,
         input_audio_format="pcm16",
         output_audio_format="pcm16",

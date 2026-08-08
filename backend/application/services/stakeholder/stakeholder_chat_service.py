@@ -150,9 +150,8 @@ def _selected_llm_model_from_history(history: list[dict[str, object]]) -> str | 
             model = _clean_llm_selection_text(nested_llm.get("model"))
             if model:
                 return model
-        return (
-            _clean_llm_selection_text(metadata.get("llm_model"))
-            or _clean_llm_selection_text(metadata.get("model"))
+        return _clean_llm_selection_text(metadata.get("llm_model")) or _clean_llm_selection_text(
+            metadata.get("model")
         )
     return None
 
@@ -160,10 +159,9 @@ def _selected_llm_model_from_history(history: list[dict[str, object]]) -> str | 
 def _metadata_reply_language(metadata: dict[str, object]) -> str | None:
     nested_language = metadata.get("language")
     if isinstance(nested_language, dict):
-        nested_value = (
-            _clean_llm_selection_text(nested_language.get("replyLanguage"))
-            or _clean_llm_selection_text(nested_language.get("reply_language"))
-        )
+        nested_value = _clean_llm_selection_text(
+            nested_language.get("replyLanguage")
+        ) or _clean_llm_selection_text(nested_language.get("reply_language"))
         if nested_value:
             return nested_value
     return (
@@ -580,13 +578,6 @@ class StakeholderChatService:
                             )
                             tts_tasks.append(task)
 
-                    # Wait for all TTS tasks to finish before continuing
-                    if tts_tasks:
-                        results = await asyncio.gather(*tts_tasks, return_exceptions=True)
-                        for result in results:
-                            if isinstance(result, list):
-                                audio_segments.extend(result)
-
                     reply_content = "".join(chunks) if chunks else None
                 except Exception as exc:
                     logger.error(
@@ -624,6 +615,21 @@ class StakeholderChatService:
 
                 reply_dto = MessageDTO.model_validate(saved_reply)
 
+            # The durable reply carries the emotion marker and must not wait for
+            # every TTS sentence. Give the first sentence a short head start so
+            # the existing audio-before-message envelope remains intact, then
+            # finish audio persistence in the background of this turn.
+            if tts_tasks:
+                await asyncio.wait({tts_tasks[0]}, timeout=1.0)
+
+            await room_event_bus.publish(room_id, "message", reply_dto.model_dump(mode="json"))
+
+            if tts_tasks:
+                results = await asyncio.gather(*tts_tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, list):
+                        audio_segments.extend(result)
+
             if (
                 reply_content
                 and audio_segments
@@ -640,8 +646,13 @@ class StakeholderChatService:
                 if attached is not None:
                     reply_dto = attached
 
-            # Emit the durable message before typing stop so replay metadata is present.
-            await room_event_bus.publish(room_id, "message", reply_dto.model_dump(mode="json"))
+            # Publish the enriched message once audio metadata is available.
+            # Consumers replace the same message by id; the first event already
+            # made the emotion label visible without waiting for TTS.
+            if reply_dto.metadata and reply_dto.metadata.get("aiAudio"):
+                await room_event_bus.publish(
+                    room_id, "message", reply_dto.model_dump(mode="json")
+                )
             await room_event_bus.publish(
                 room_id, "typing", {"persona_id": persona_id, "status": "stop"}
             )
@@ -730,6 +741,8 @@ class StakeholderChatService:
                 voice_id=voice_id or "",
                 voice_speed=voice_speed,
                 voice_volume=voice_volume,
+                tts_provider=audio_context.tts_provider if audio_context else None,
+                tts_model=audio_context.tts_model if audio_context else None,
                 style_instruction=_tts_style_instruction(
                     style_instruction,
                     reply_language,

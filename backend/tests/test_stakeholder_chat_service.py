@@ -511,6 +511,8 @@ async def test_reply_language_metadata_is_passed_to_voice_pipeline_config(sessio
             voice_speed=1.2,
             voice_volume=0.8,
             style_instruction="Sound firm.",
+            tts_provider="openai",
+            tts_model="gpt-4o-mini-tts",
         ),
     )
 
@@ -520,6 +522,8 @@ async def test_reply_language_metadata_is_passed_to_voice_pipeline_config(sessio
     assert config.voice_id == "zh_male_dayi_saturn_bigtts"
     assert config.voice_speed == 1.2
     assert config.voice_volume == 0.8
+    assert config.tts_provider == "openai"
+    assert config.tts_model == "gpt-4o-mini-tts"
     assert "Sound firm." in config.style_instruction
     assert "Mandarin Chinese" in config.style_instruction
     assert "Do not translate" in config.style_instruction
@@ -557,9 +561,7 @@ async def test_voice_pipeline_audio_chunk_sse_keeps_turn_based_envelope(session_
         room_event_bus.unsubscribe(room_id, queue)
 
     audio_index, audio_payload = next(
-        (index, payload)
-        for index, (event, payload) in enumerate(events)
-        if event == "audio_chunk"
+        (index, payload) for index, (event, payload) in enumerate(events) if event == "audio_chunk"
     )
     persona_message_index = next(
         index

@@ -45,6 +45,7 @@ class PipecatTurnBasedCascadePipeline:
         audio_parts: list[bytes] = []
         tts_config = TTSConfig(
             voice_id=config.voice_id,
+            model=config.tts_model or self._tts_model,
             speed=config.voice_speed,
             volume=config.voice_volume,
             pitch=config.voice_pitch,

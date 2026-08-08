@@ -38,7 +38,28 @@ def _session_payload(
     *,
     user_id: str | None = None,
     team_id: str | None = None,
+    voice_route: dict | None = None,
 ) -> dict:
+    selected_route = voice_route or {
+        "id": "openai-cascade-standard",
+        "name": "OpenAI Near Realtime",
+        "description": "test route",
+        "mode": "cascade",
+        "enabled": True,
+        "default": True,
+        "revision": 1,
+        "stt": {"provider": "openai", "model": "gpt-4o-mini-transcribe"},
+        "llm": {"provider": "openai", "model": "gpt-4.1-mini"},
+        "tts": {
+            "provider": "openai",
+            "model": "gpt-4o-mini-tts",
+            "voice": "marin",
+        },
+        "inputSampleRate": 16000,
+        "outputSampleRate": 24000,
+        "latencyProfile": "near_realtime",
+        "costProfile": "configured",
+    }
     payload = {
         "mode": mode,
         "task_config": {
@@ -50,6 +71,12 @@ def _session_payload(
             "framework": "prep",
             "difficulty": "medium",
             "category": "sales",
+            "metadata": {
+                "voiceRouteId": selected_route["id"],
+                "voiceRoute": selected_route,
+                "realtimeProfile": selected_route["mode"],
+                "realtimeProvider": "pipecat",
+            },
         },
     }
     if user_id is not None:
@@ -65,6 +92,27 @@ def _session_scope_from_payload(payload: dict) -> TrainingSessionAccessScope:
         team_id=payload.get("team_id") if isinstance(payload.get("team_id"), str) else None,
         include_team_scope=True,
     )
+
+
+def _speech_to_speech_route() -> dict:
+    return {
+        "id": "openai-realtime-standard",
+        "name": "OpenAI Realtime",
+        "description": "test route",
+        "mode": "speech_to_speech",
+        "enabled": True,
+        "default": False,
+        "revision": 1,
+        "realtime": {
+            "provider": "openai",
+            "model": "gpt-realtime",
+            "voice": "marin",
+        },
+        "inputSampleRate": 24000,
+        "outputSampleRate": 24000,
+        "latencyProfile": "true_realtime",
+        "costProfile": "configured",
+    }
 
 
 def _llm_settings(
@@ -194,6 +242,8 @@ def _make_bound_app(
         user_id="user-admin-001",
         team_id="team-ops",
     )
+    resolved_payload.setdefault("user_id", "user-admin-001")
+    resolved_payload.setdefault("team_id", "team-ops")
     session = asyncio.run(session_service.create_session(resolved_payload))
     if active:
         asyncio.run(
@@ -243,6 +293,9 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
         *,
         require_websocket: bool = True,
         openai_api_key_available: bool | None = None,
+        openai_model: object = None,
+        openai_voice: object = None,
+        input_audio_format: object = None,
         include_source_snapshot: bool = True,
     ):
         from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
@@ -270,6 +323,9 @@ def _fake_pipecat_adapter(capability, snapshot: dict | None = None):
             capability,
             require_websocket=require_websocket,
             openai_api_key_available=openai_api_key_available,
+            openai_model=openai_model,
+            openai_voice=openai_voice,
+            input_audio_format=input_audio_format,
         ).to_dict()
         data["readyForCall"] = readiness["ready"]
         data["readiness"] = readiness
@@ -326,10 +382,7 @@ def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> No
         "build_pipecat_realtime_capability_response",
         adapter.pipecat_realtime_capability_response,
     )
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", "sk-realtime-capability")
-    monkeypatch.setattr(settings.llm, "api_key", None)
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_MODEL", "gpt-realtime-test")
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_VOICE", "marin-test")
+    monkeypatch.setattr(settings.llm, "api_key", "sk-realtime-capability")
     client = TestClient(_make_realtime_capability_app())
 
     response = client.get("/api/v1/training-studio/realtime/capabilities")
@@ -471,7 +524,7 @@ def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch
         "build_pipecat_realtime_capability_response",
         adapter.pipecat_realtime_capability_response,
     )
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings.llm, "api_key", None)
     monkeypatch.setattr(settings.llm, "api_key", "sk-llm-fallback")
     client = TestClient(_make_realtime_capability_app())
 
@@ -547,7 +600,7 @@ def test_realtime_capabilities_reports_pipecat_capability_exception(monkeypatch)
         "build_pipecat_realtime_capability_response",
         _raise_capability_failure,
     )
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", "sk-realtime-snapshot")
+    monkeypatch.setattr(settings.llm, "api_key", "sk-realtime-snapshot")
     monkeypatch.setattr(settings.llm, "api_key", None)
     client = TestClient(_make_realtime_capability_app())
 
@@ -591,7 +644,7 @@ def test_realtime_capabilities_reports_missing_openai_key_for_pipecat_readiness(
         "build_pipecat_realtime_capability_response",
         adapter.pipecat_realtime_capability_response,
     )
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings.llm, "api_key", None)
     monkeypatch.setattr(settings.llm, "api_key", None)
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
     client = TestClient(_make_realtime_capability_app())
@@ -608,12 +661,12 @@ def test_realtime_capabilities_reports_missing_openai_key_for_pipecat_readiness(
         {
             "code": "MISSING_OPENAI_API_KEY",
             "message": (
-                "Set REALTIME_OPENAI_API_KEY, LLM__API_KEY, or OPENAI_API_KEY "
+                "Select a published voice preset with an available OpenAI credential "
                 "before starting Pipecat realtime calls"
             ),
             "phase": "configuration",
             "provider": "pipecat",
-            "missingEnv": ["REALTIME_OPENAI_API_KEY", "LLM__API_KEY", "OPENAI_API_KEY"],
+            "missingEnv": ["LLM__API_KEY", "OPENAI_API_KEY"],
         }
     ]
 
@@ -715,7 +768,6 @@ def test_guidance_event_persistence_endpoint_stores_system_coach_messages_withou
 def test_realtime_websocket_defaults_to_pipecat_and_requires_binding_before_audio(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(settings, "REALTIME_PROVIDER", "openai")
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     client = TestClient(app)
@@ -750,7 +802,7 @@ def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
         }
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
     queue = room_event_bus.subscribe(42)
@@ -804,7 +856,7 @@ def test_realtime_websocket_rejects_client_transcript_events() -> None:
     app, state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -841,7 +893,7 @@ def test_realtime_websocket_configure_binding_persists_final_transcript() -> Non
         }
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -881,7 +933,7 @@ def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline()
     app, _state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -924,6 +976,8 @@ def test_realtime_websocket_pipecat_provider_configure_binding_starts_pipeline()
         "runtime": "realtime_voice",
         "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "transport": "websocket",
+        "voiceRouteId": "openai-cascade-standard",
+        "voiceRouteRevision": 1,
     }
     assert adapter.closed is True
 
@@ -941,10 +995,15 @@ def test_realtime_websocket_pipecat_provider_uses_openrouter_llm_metadata(
             wire_api="responses",
         ),
     )
-    app, _state = _make_bound_app()
+    route = _session_payload()["task_config"]["metadata"]["voiceRoute"]
+    route["llm"] = {
+        "provider": "openrouter",
+        "model": "openai/gpt-4o-mini",
+    }
+    app, _state = _make_bound_app(session_payload=_session_payload(voice_route=route))
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -965,20 +1024,27 @@ def test_realtime_websocket_pipecat_provider_uses_openrouter_llm_metadata(
     assert adapter.started_config.provider == "pipecat"
     assert adapter.started_config.runtime == REALTIME_RUNTIME_PIPECAT
     assert adapter.started_config.metadata["stt"]["provider"] == "openai"
-    assert adapter.started_config.metadata["tts"] == {"provider": "openai"}
+    assert adapter.started_config.metadata["tts"] == {
+        "provider": "openai",
+        "model": "gpt-4o-mini-tts",
+        "voice": "marin",
+        "baseUrl": "http://127.0.0.1:18080/pg",
+    }
     assert adapter.started_config.metadata["llm"] == {
         "provider": "openrouter",
         "model": "openai/gpt-4o-mini",
-        "baseUrl": "https://openrouter.ai/api/v1",
+        "baseUrl": "http://127.0.0.1:18080/pg",
     }
     assert adapter.closed is True
 
 
 def test_realtime_websocket_pipecat_provider_speech_to_speech_profile_metadata() -> None:
-    app, _state = _make_bound_app()
+    app, _state = _make_bound_app(
+        session_payload=_session_payload(voice_route=_speech_to_speech_route())
+    )
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1020,29 +1086,13 @@ def test_realtime_websocket_pipecat_provider_speech_to_speech_profile_metadata()
     realtime_llm = metadata["realtimeLlm"]
     assert isinstance(realtime_llm, dict)
     assert realtime_llm["provider"] == "openai"
-    assert realtime_llm["model"] == settings.REALTIME_OPENAI_MODEL
-    assert realtime_llm["voice"] == settings.REALTIME_OPENAI_VOICE
+    assert realtime_llm["model"] == "gpt-realtime"
+    assert realtime_llm["voice"] == "marin"
     assert realtime_llm["outputModalities"] == ["audio"]
     assert metadata["profileContract"]["latencyProfile"] == "true_realtime"
     assert metadata["audioContract"]["input"]["sampleRate"] == 24000
     assert adapter.audio_chunks[0].metadata["realtimeProfile"] == "speech_to_speech"
     assert adapter.audio_chunks[0].metadata["sampleRate"] == 24000
-
-
-def test_pipecat_realtime_llm_provider_detects_openrouter_compatible_base_url(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        settings,
-        "llm",
-        _llm_settings(
-            provider="openai",
-            base_url="https://openrouter.ai/api/v1",
-            default_model="openai/gpt-4o-mini",
-        ),
-    )
-
-    assert training_studio_routes._pipecat_realtime_llm_provider() == "openrouter"
 
 
 def test_realtime_websocket_pipecat_provider_injects_recent_room_turns() -> None:
@@ -1077,7 +1127,7 @@ def test_realtime_websocket_pipecat_provider_injects_recent_room_turns() -> None
     )
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1170,7 +1220,7 @@ def test_realtime_websocket_openai_provider_alias_routes_to_pipecat(
     app, state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda provider: adapter if provider == "pipecat" else None
+        lambda: lambda provider, _route: adapter if provider == "pipecat" else None
     )
     client = TestClient(app)
 
@@ -1205,7 +1255,7 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
         }
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1278,7 +1328,7 @@ def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_fi
         ]
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1385,7 +1435,7 @@ def test_realtime_websocket_relays_pipecat_turn_events() -> None:
         }
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1414,7 +1464,7 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline(monkeypa
     app, _state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
     audio = b"\x01\x02\x03"
@@ -1468,11 +1518,16 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline(monkeypa
     assert isinstance(stt_metadata, dict)
     assert stt_metadata["provider"] == "openai"
     assert stt_metadata["turnDetection"] == "disabled"
-    if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
-        assert stt_metadata["model"] == settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
-    assert adapter.started_config.metadata["tts"] == {"provider": "openai"}
+    if stt_metadata.get("model"):
+        assert stt_metadata["model"] == "gpt-4o-mini-transcribe"
+    assert adapter.started_config.metadata["tts"] == {
+        "provider": "openai",
+        "model": "gpt-4o-mini-tts",
+        "voice": "marin",
+        "baseUrl": "http://127.0.0.1:18080/pg",
+    }
     assert adapter.started_config.metadata["llm"]["provider"] == "openai"
-    assert adapter.started_config.metadata["llm"]["model"] == settings.llm.default_model
+    assert adapter.started_config.metadata["llm"]["model"] == "gpt-4.1-mini"
     assert adapter.started_config.metadata["context"] == {
         "provider": "pipecat",
         "realtimeServiceMode": False,
@@ -1493,6 +1548,8 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline(monkeypa
         "runtime": "realtime_voice",
         "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "transport": "websocket",
+        "voiceRouteId": "openai-cascade-standard",
+        "voiceRouteRevision": 1,
     }
     assert len(adapter.audio_chunks) == 1
     audio_chunk = adapter.audio_chunks[0]
@@ -1510,7 +1567,7 @@ def test_realtime_websocket_pipecat_provider_forwards_binary_audio_to_pipeline()
     app, _state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
     audio = b"\x09\x08\x07"
@@ -1546,7 +1603,7 @@ def test_realtime_websocket_pipecat_provider_rejects_invalid_base64_audio() -> N
     app, _state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1575,7 +1632,7 @@ def test_realtime_websocket_pipecat_provider_surfaces_pipeline_error_on_commit()
         }
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1619,7 +1676,7 @@ def test_realtime_websocket_pipecat_provider_forwards_nonfatal_provider_error() 
         }
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1660,7 +1717,7 @@ def test_realtime_websocket_pipecat_provider_surfaces_pipeline_start_error() -> 
     adapter = _FakeRealtimePipelineAdapter()
     adapter.start_error = RuntimeError("Pipecat OpenAI realtime STT service is unavailable")
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1685,7 +1742,7 @@ def test_realtime_websocket_pipecat_provider_surfaces_missing_api_key_start_erro
     adapter = _FakeRealtimePipelineAdapter()
     adapter.start_error = RuntimeError("OpenAI API key is required for Pipecat OpenAI STT")
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
 
@@ -1700,7 +1757,6 @@ def test_realtime_websocket_pipecat_provider_surfaces_missing_api_key_start_erro
     assert error["payload"]["phase"] == "configuration"
     assert error["payload"]["feature"] == "stt:openai"
     assert error["payload"]["missingEnv"] == [
-        "REALTIME_OPENAI_API_KEY",
         "LLM__API_KEY",
         "OPENAI_API_KEY",
     ]
@@ -1713,7 +1769,7 @@ def test_realtime_websocket_pipecat_provider_surfaces_missing_api_key_start_erro
 def test_realtime_websocket_pipecat_provider_requires_pipeline_adapter() -> None:
     app, _state = _make_bound_app()
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: None
+        lambda: lambda _provider, _route: None
     )
     client = TestClient(app)
 
@@ -1758,7 +1814,7 @@ def test_realtime_demo_vertical_slice_creates_session_starts_room_and_persists_t
         }
     )
     app.dependency_overrides[get_training_realtime_pipeline_factory] = (
-        lambda: lambda _provider: adapter
+        lambda: lambda _provider, _route: adapter
     )
     client = TestClient(app)
     queue = room_event_bus.subscribe(42)

@@ -33,6 +33,7 @@ class STTPort(Protocol):
         *,
         language: str = "zh",
         audio_format: str = "webm",
+        model: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe audio bytes to text.
 
@@ -40,6 +41,7 @@ class STTPort(Protocol):
             audio: Raw audio bytes.
             language: Language hint (BCP-47 or short code).
             audio_format: Audio format (webm, wav, mp3, opus).
+            model: Optional per-session model override.
 
         Returns:
             TranscriptionResult with transcribed text.

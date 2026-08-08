@@ -158,7 +158,7 @@ class VolcengineDoubaoRealtimeAdapter:
                 phase="configuration",
                 provider=self._config.provider,
                 error_category="authentication",
-                metadata={"missingEnv": ("REALTIME_API_KEY",)},
+                metadata={"missingCredential": "newapiAccessToken"},
             )
 
         url = normalize_volcengine_realtime_url(

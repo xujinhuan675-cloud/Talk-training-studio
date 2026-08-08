@@ -138,6 +138,13 @@ from application.services.training_studio.scenario_config_service import (
     TrainingScenarioConfigService,
     default_scenario_voice_id,
 )
+from application.services.training_studio.voice_route_service import (
+    JsonFileVoiceRouteStore,
+    TrainingVoiceRouteService,
+    VoiceRouteConfigDTO,
+    VoiceRouteDTO,
+    voice_route_snapshot_from_metadata,
+)
 from application.services.training_studio.session_service import (
     CreateTrainingSessionDTO,
     TrainingCompetencyRadarDTO,
@@ -221,6 +228,9 @@ _TRAINING_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "training_st
 _storybank_service = StoryBankService(JsonFileStoryBankStore(_TRAINING_DATA_DIR / "storybank.json"))
 _training_scenario_config_service = TrainingScenarioConfigService(
     JsonFileScenarioConfigStore(_TRAINING_DATA_DIR / "scenario_config.json")
+)
+_training_voice_route_service = TrainingVoiceRouteService(
+    JsonFileVoiceRouteStore(_TRAINING_DATA_DIR / "voice_routes.json")
 )
 _PIPECAT_REALTIME_REQUIRED_FEATURES = {
     "stt": "openai",
@@ -447,11 +457,7 @@ class _TrainingOpeningTarget:
 def _openai_realtime_api_key() -> str | None:
     if user_billing_enabled():
         return runtime_api_key()
-    return (
-        settings.REALTIME_OPENAI_API_KEY
-        or settings.llm.api_key
-        or settings.OPENAI_API_KEY
-    )
+    return settings.llm.api_key or settings.OPENAI_API_KEY
 
 
 def _completion_report_failure_metadata(exc: Exception) -> dict[str, object]:
@@ -595,6 +601,10 @@ def get_training_scenario_config_service() -> TrainingScenarioConfigService:
     return _training_scenario_config_service
 
 
+def get_training_voice_route_service() -> TrainingVoiceRouteService:
+    return _training_voice_route_service
+
+
 def _scenario_templates_from_config(
     config: ScenarioConfigStateDTO,
     persona_loader: PersonaLoader | None = None,
@@ -707,11 +717,13 @@ def get_training_realtime_uow_factory() -> Callable[..., AbstractUnitOfWork]:
     return get_training_runtime_uow_factory()
 
 
-RealtimePipelineFactory = Callable[[str], RealtimePipelineAdapter | None]
+RealtimePipelineFactory = Callable[[str, VoiceRouteDTO | None], RealtimePipelineAdapter | None]
 
 
 def get_training_realtime_pipeline_factory() -> RealtimePipelineFactory:
-    def _factory(provider: str) -> RealtimePipelineAdapter | None:
+    def _factory(
+        provider: str, route: VoiceRouteDTO | None = None
+    ) -> RealtimePipelineAdapter | None:
         if _uses_pipecat_realtime(provider):
             try:
                 pipecat_adapter = _load_pipecat_realtime_adapter()
@@ -733,13 +745,15 @@ def get_training_realtime_pipeline_factory() -> RealtimePipelineFactory:
                 )
                 return None
         if _uses_volcengine_doubao_realtime(provider):
+            if route is None or route.realtime is None:
+                return None
             try:
                 volcengine_adapter = _load_volcengine_doubao_realtime_adapter()
                 return volcengine_adapter.create_volcengine_doubao_realtime_adapter(
-                    api_key=(runtime_api_key() if user_billing_enabled() else settings.REALTIME_API_KEY),
+                    api_key=(runtime_api_key() if user_billing_enabled() else None),
                     base_url=user_relay_realtime_url(),
-                    model=_realtime_model_for_provider(provider),
-                    voice=_realtime_voice_for_provider(provider),
+                    model=route.realtime.model,
+                    voice=route.realtime.voice,
                 )
             except Exception as exc:
                 logger.warning(
@@ -934,7 +948,9 @@ def _training_voice_style(metadata: Mapping[str, object]) -> str | None:
     style = str(metadata.get("trainingVoiceStyle") or "").strip()
     emotion = str(metadata.get("trainingVoiceEmotion") or "").strip()
     scale = _training_voice_number(metadata, "trainingVoiceEmotionScale", 1.0)
-    parts = [item for item in (style, f"emotion: {emotion} (scale {scale:g})" if emotion else "") if item]
+    parts = [
+        item for item in (style, f"emotion: {emotion} (scale {scale:g})" if emotion else "") if item
+    ]
     return "; ".join(parts) or None
 
 
@@ -979,7 +995,9 @@ def _create_training_runtime_persona(
     content = _training_runtime_persona_content(persona)
     voice_style = persona.voice_style.strip() if persona.voice_style else ""
     if persona.voice_emotion:
-        emotion_hint = f"emotion: {persona.voice_emotion.strip()} (scale {persona.voice_emotion_scale:g})"
+        emotion_hint = (
+            f"emotion: {persona.voice_emotion.strip()} (scale {persona.voice_emotion_scale:g})"
+        )
         voice_style = "; ".join(item for item in (voice_style, emotion_hint) if item)
     for _ in range(8):
         persona_id = f"ts-{uuid4().hex[:10]}"
@@ -1239,6 +1257,10 @@ async def _enrich_training_opening_message(
         and mode in {"voice", "realtime", "realtime_voice", "video"}
     ):
         try:
+            session_metadata = session.task_config.metadata or {}
+            voice_route = voice_route_snapshot_from_metadata(session_metadata)
+            tts_service = voice_route.tts if voice_route is not None else None
+            preset_voice = str(tts_service.voice or "").strip() if tts_service is not None else ""
             audio_message = await audio_service.synthesize_and_attach(
                 int(target.message_id),
                 context=TrainingAudioContext(
@@ -1248,25 +1270,25 @@ async def _enrich_training_opening_message(
                     team_id=current_user.team_id,
                     can_manage_team=current_user.can_manage_team,
                     training_mode=mode,
-                    voice_id=normalize_training_voice_id(
-                        str(
-                            (session.task_config.metadata or {}).get("trainingVoiceId")
-                            or ""
+                    voice_id=(
+                        preset_voice
+                        or normalize_training_voice_id(
+                            str(session_metadata.get("trainingVoiceId") or "")
                         )
                     ),
                     voice_speed=_training_voice_number(
-                        session.task_config.metadata or {},
+                        session_metadata,
                         "trainingVoiceSpeed",
                         1.0,
                     ),
                     voice_volume=_training_voice_number(
-                        session.task_config.metadata or {},
+                        session_metadata,
                         "trainingVoiceLoudness",
                         1.0,
                     ),
-                    style_instruction=_training_voice_style(
-                        session.task_config.metadata or {}
-                    ),
+                    style_instruction=_training_voice_style(session_metadata),
+                    tts_provider=(tts_service.provider if tts_service is not None else None),
+                    tts_model=(tts_service.model if tts_service is not None else None),
                 ),
                 voice_pipeline=voice_pipeline,
                 original=True,
@@ -2287,40 +2309,21 @@ def _normalized_realtime_llm_provider(value: object | None) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
-def _is_openrouter_base_url(value: object | None) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    parsed = urlsplit(text if "://" in text else f"https://{text}")
-    hostname = (parsed.hostname or "").lower()
-    return hostname == "openrouter.ai" or hostname.endswith(".openrouter.ai")
-
-
-def _pipecat_realtime_llm_provider() -> str:
-    if user_billing_enabled():
-        return "openai"
-    llm_settings = settings.llm
-    provider = _normalized_realtime_llm_provider(getattr(llm_settings, "provider", None))
-    if provider in _OPENROUTER_LLM_PROVIDER_ALIASES or _is_openrouter_base_url(
-        getattr(llm_settings, "base_url", None)
-    ):
-        return _OPENROUTER_LLM_PROVIDER
-    return "openai"
-
-
 def _pipecat_realtime_pipeline_metadata(
     binding: tuple[str, int],
     *,
-    profile: str = _PIPECAT_REALTIME_PROFILE_CASCADE,
+    route: VoiceRouteDTO,
     input_sample_rate: int | None = None,
 ) -> dict[str, object]:
-    if profile == _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
+    if route.mode == _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
         return _pipecat_speech_to_speech_pipeline_metadata(
             binding,
+            route=route,
             input_sample_rate=input_sample_rate,
         )
     return _pipecat_cascade_pipeline_metadata(
         binding,
+        route=route,
         input_sample_rate=input_sample_rate,
     )
 
@@ -2328,36 +2331,41 @@ def _pipecat_realtime_pipeline_metadata(
 def _pipecat_cascade_pipeline_metadata(
     binding: tuple[str, int],
     *,
+    route: VoiceRouteDTO,
     input_sample_rate: int | None = None,
 ) -> dict[str, object]:
-    resolved_input_sample_rate = input_sample_rate or 16000
+    if route.stt is None or route.llm is None or route.tts is None:
+        raise HTTPException(status_code=409, detail="Cascade voice route is incomplete")
+    resolved_input_sample_rate = input_sample_rate or route.input_sample_rate
     profile_contract = _pipecat_realtime_profile_contract(
         _PIPECAT_REALTIME_PROFILE_CASCADE,
         input_sample_rate=resolved_input_sample_rate,
     )
     stt: dict[str, object] = {
-        "provider": "openai",
+        "provider": route.stt.provider,
+        "model": route.stt.model,
         "turnDetection": "disabled",
     }
-    if user_billing_enabled():
-        stt["baseUrl"] = user_relay_realtime_url()
-    if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
-        stt["model"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
+    stt["baseUrl"] = user_relay_base_url()
     llm: dict[str, object] = {
-        "provider": _pipecat_realtime_llm_provider(),
-        "model": settings.llm.default_model,
+        "provider": route.llm.provider,
+        "model": route.llm.model,
+        "baseUrl": user_relay_base_url(),
     }
-    if user_billing_enabled():
-        llm["baseUrl"] = user_relay_base_url()
-    elif settings.llm.base_url:
-        llm["baseUrl"] = settings.llm.base_url
+    tts: dict[str, object] = {
+        "provider": route.tts.provider,
+        "model": route.tts.model,
+        "baseUrl": user_relay_base_url(),
+    }
+    if route.tts.voice:
+        tts["voice"] = route.tts.voice
 
     return {
         "transport": "websocket",
         "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "profile": _PIPECAT_REALTIME_PROFILE_CASCADE,
         "realtimeProfile": _PIPECAT_REALTIME_PROFILE_CASCADE,
-        "transcriptionModel": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+        "transcriptionModel": route.stt.model,
         "inputSampleRate": resolved_input_sample_rate,
         "outputSampleRate": 24000,
         "inputAudioFormat": "pcm16",
@@ -2374,10 +2382,7 @@ def _pipecat_cascade_pipeline_metadata(
         "stt": stt,
         "llm": llm,
         "context": {"provider": "pipecat", "realtimeServiceMode": False},
-        "tts": {
-            "provider": "openai",
-            **({"baseUrl": user_relay_base_url()} if user_billing_enabled() else {}),
-        },
+        "tts": tts,
         "vad": {"provider": "silero", "source": "pipecat", "sampleRate": 16000},
         "turnDetection": {"provider": "pipecat", "source": "pipecat"},
         "talkwise": {
@@ -2387,6 +2392,8 @@ def _pipecat_cascade_pipeline_metadata(
             "runtime": "realtime_voice",
             "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
             "transport": "websocket",
+            "voiceRouteId": route.id,
+            "voiceRouteRevision": route.revision,
         },
     }
 
@@ -2394,9 +2401,12 @@ def _pipecat_cascade_pipeline_metadata(
 def _pipecat_speech_to_speech_pipeline_metadata(
     binding: tuple[str, int],
     *,
+    route: VoiceRouteDTO,
     input_sample_rate: int | None = None,
 ) -> dict[str, object]:
-    resolved_input_sample_rate = input_sample_rate or 24000
+    if route.realtime is None:
+        raise HTTPException(status_code=409, detail="Native realtime voice route is incomplete")
+    resolved_input_sample_rate = input_sample_rate or route.input_sample_rate
     profile_contract = _pipecat_realtime_profile_contract(
         _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
         input_sample_rate=resolved_input_sample_rate,
@@ -2407,28 +2417,26 @@ def _pipecat_speech_to_speech_pipeline_metadata(
         "mode": "semantic_vad",
     }
     realtime_llm: dict[str, object] = {
-        "provider": "openai",
-        "model": settings.REALTIME_OPENAI_MODEL,
-        "voice": settings.REALTIME_OPENAI_VOICE,
+        "provider": route.realtime.provider,
+        "model": route.realtime.model,
         "turnDetection": turn_detection,
         "noiseReduction": "near_field",
         "outputModalities": ["audio"],
+        "baseUrl": user_relay_realtime_url(),
     }
-    if user_billing_enabled():
-        realtime_llm["baseUrl"] = user_relay_realtime_url()
-    if settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL:
-        realtime_llm["transcriptionModel"] = settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL
+    if route.realtime.voice:
+        realtime_llm["voice"] = route.realtime.voice
 
     return {
         "transport": "websocket",
         "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
         "profile": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
         "realtimeProfile": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
-        "transcriptionModel": settings.REALTIME_OPENAI_TRANSCRIPTION_MODEL,
+        "transcriptionModel": None,
         "inputSampleRate": resolved_input_sample_rate,
         "outputSampleRate": 24000,
-        "inputAudioFormat": settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
-        "outputAudioFormat": settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
+        "inputAudioFormat": "pcm16",
+        "outputAudioFormat": "pcm16",
         "audioContract": _pipecat_realtime_audio_contract(
             _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
             input_sample_rate=resolved_input_sample_rate,
@@ -2448,6 +2456,8 @@ def _pipecat_speech_to_speech_pipeline_metadata(
             "runtime": "realtime_voice",
             "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
             "transport": "websocket",
+            "voiceRouteId": route.id,
+            "voiceRouteRevision": route.revision,
         },
     }
 
@@ -2512,14 +2522,17 @@ def _volcengine_doubao_realtime_profile_contract(
 def _volcengine_doubao_realtime_pipeline_metadata(
     binding: tuple[str, int],
     *,
+    route: VoiceRouteDTO,
     input_sample_rate: int | None = None,
 ) -> dict[str, object]:
-    resolved_input_sample_rate = input_sample_rate or 16000
+    if route.realtime is None:
+        raise HTTPException(status_code=409, detail="Native realtime voice route is incomplete")
+    resolved_input_sample_rate = input_sample_rate or route.input_sample_rate
     profile_contract = _volcengine_doubao_realtime_profile_contract(
         input_sample_rate=resolved_input_sample_rate,
     )
-    model = _realtime_model_for_provider(_VOLCENGINE_DOUBAO_REALTIME_PROVIDER)
-    voice = _realtime_voice_for_provider(_VOLCENGINE_DOUBAO_REALTIME_PROVIDER)
+    model = route.realtime.model
+    voice = route.realtime.voice
     realtime_llm: dict[str, object] = {
         "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
         "model": model,
@@ -2563,6 +2576,8 @@ def _volcengine_doubao_realtime_pipeline_metadata(
             "runtime": "realtime_voice",
             "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
             "transport": "websocket",
+            "voiceRouteId": route.id,
+            "voiceRouteRevision": route.revision,
         },
     }
 
@@ -2571,17 +2586,18 @@ def _realtime_pipeline_metadata(
     provider: str,
     binding: tuple[str, int],
     *,
-    profile: str = _PIPECAT_REALTIME_PROFILE_CASCADE,
+    route: VoiceRouteDTO,
     input_sample_rate: int | None = None,
 ) -> dict[str, object]:
     if _uses_volcengine_doubao_realtime(provider):
         return _volcengine_doubao_realtime_pipeline_metadata(
             binding,
+            route=route,
             input_sample_rate=input_sample_rate,
         )
     return _pipecat_realtime_pipeline_metadata(
         binding,
-        profile=profile,
+        route=route,
         input_sample_rate=input_sample_rate,
     )
 
@@ -2678,10 +2694,28 @@ def _provider_neutral_realtime_smoke_contract(smoke: object) -> dict[str, object
 
 
 def _pipecat_realtime_capability_response() -> dict[str, object]:
+    route = next(
+        (item for item in _training_voice_route_service.list_published() if item.default),
+        next(iter(_training_voice_route_service.list_published()), None),
+    )
+    route_model = (
+        route.realtime.model
+        if route is not None and route.realtime is not None
+        else route.llm.model if route is not None and route.llm is not None else None
+    )
+    route_voice = (
+        route.realtime.voice
+        if route is not None and route.realtime is not None
+        else route.tts.voice if route is not None and route.tts is not None else None
+    )
+    route_input_rate = route.input_sample_rate if route is not None else None
     try:
         response = build_pipecat_realtime_capability_response(
             require_websocket=True,
             openai_api_key_available=bool(_openai_realtime_api_key()),
+            openai_model=route_model,
+            openai_voice=route_voice,
+            input_audio_format="pcm16" if route_input_rate else None,
             include_source_snapshot=True,
         )
     except Exception as exc:
@@ -2700,7 +2734,7 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
         websocket_available = importlib.util.find_spec("websockets") is not None
     except Exception:
         websocket_available = False
-    api_key_configured = user_billing_enabled() or bool(settings.REALTIME_API_KEY)
+    api_key_configured = user_billing_enabled() or bool(settings.llm.api_key)
     missing_modules = [] if websocket_available else ["websockets"]
     blocking_reasons: list[RealtimeReadinessIssue] = []
     if not websocket_available:
@@ -2720,7 +2754,7 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
                 message="Volcengine Doubao realtime API key is required",
                 phase="configuration",
                 provider=_VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
-                missing_env=("REALTIME_API_KEY",),
+                missing_env=("LLM__API_KEY",),
             )
         )
 
@@ -2728,12 +2762,10 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
         required={
             "transport": "websocket",
             "features": dict(_VOLCENGINE_DOUBAO_REALTIME_REQUIRED_FEATURES),
-            "env": [] if user_billing_enabled() else ["REALTIME_API_KEY"],
-            "model": _realtime_model_for_provider(_VOLCENGINE_DOUBAO_REALTIME_PROVIDER),
-            "voice": _realtime_voice_for_provider(_VOLCENGINE_DOUBAO_REALTIME_PROVIDER),
-            "baseUrl": (
-                user_relay_realtime_url()
-            ),
+            "env": [] if user_billing_enabled() else ["LLM__API_KEY"],
+            "model": None,
+            "voice": None,
+            "baseUrl": (user_relay_realtime_url()),
         },
         blocking_reasons=blocking_reasons,
         runtime=REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
@@ -2844,12 +2876,8 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
 def _realtime_capabilities_response() -> dict[str, object]:
     pipecat = _pipecat_realtime_capability_response()
     volcengine = _volcengine_doubao_realtime_capability_response()
-    active_provider = _configured_realtime_provider()
-    active = (
-        volcengine
-        if _uses_volcengine_doubao_realtime(active_provider)
-        else pipecat
-    )
+    active_provider = "pipecat"
+    active = pipecat
     return {
         "active": active,
         "activeProvider": active_provider,
@@ -2861,6 +2889,60 @@ def _realtime_capabilities_response() -> dict[str, object]:
             _VOLCENGINE_DOUBAO_REALTIME_PROVIDER: volcengine,
         },
     }
+
+
+def _voice_route_snapshot_for_task(
+    body: CreateTrainingSessionDTO,
+    svc: TrainingVoiceRouteService,
+) -> CreateTrainingSessionDTO:
+    metadata = dict(body.task_config.metadata)
+    interaction_mode = str(metadata.get("interactionMode") or "").strip().lower()
+    is_realtime = body.mode == TrainingSessionMode.REALTIME.value or interaction_mode == "realtime"
+    is_turn_based_voice = (
+        body.mode == TrainingSessionMode.VOICE.value and interaction_mode != "realtime"
+    )
+    if not is_realtime and not is_turn_based_voice:
+        return body
+    route_id = str(metadata.get("voiceRouteId") or "").strip()
+    if not route_id:
+        raise HTTPException(status_code=422, detail="voiceRouteId is required for voice sessions")
+    try:
+        route = svc.get_published(route_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=422, detail="The selected voice route is not published"
+        ) from exc
+    if is_turn_based_voice and route.mode != "cascade":
+        raise HTTPException(
+            status_code=422,
+            detail="Turn-based voice sessions require a cascade voice route",
+        )
+    snapshot = route.to_public_dict()
+    metadata.update(
+        {
+            "voiceRouteId": route.id,
+            "voiceRouteRevision": route.revision,
+            "voiceRoute": snapshot,
+            "voiceRouteMode": route.mode,
+            "latencyProfile": route.latency_profile,
+        }
+    )
+    if route.llm is not None:
+        metadata["llmModel"] = route.llm.model
+    if is_realtime:
+        metadata.update(
+            {
+                "realtimeProfile": route.mode,
+                "realtimeProvider": (
+                    route.realtime.provider if route.realtime is not None else "pipecat"
+                ),
+            }
+        )
+    return body.model_copy(
+        update={
+            "task_config": body.task_config.model_copy(update={"metadata": metadata}),
+        }
+    )
 
 
 def _wire_value(payload: dict[str, object], *keys: str) -> object | None:
@@ -3020,18 +3102,16 @@ def _query_binding(websocket: WebSocket) -> tuple[str | None, int | None]:
 
 
 def _query_realtime_provider(websocket: WebSocket) -> str:
-    if user_billing_enabled():
-        return _configured_realtime_provider()
     provider = _coerce_optional_text(websocket.query_params.get("provider"))
     if provider is None:
-        return _configured_realtime_provider()
+        return "pipecat"
     return _normalized_realtime_provider_choice(provider)
 
 
 def _normalized_realtime_provider_choice(provider: str) -> str:
     normalized = _normalized_realtime_llm_provider(provider)
     if normalized in {"configured", "default"}:
-        return _configured_realtime_provider()
+        return "pipecat"
     if normalized in {"pipecat", "pipecat_pipeline"}:
         return "pipecat"
     if normalized in {"openai", "openai.realtime", "openai_realtime", "openai_webrtc"}:
@@ -3041,34 +3121,33 @@ def _normalized_realtime_provider_choice(provider: str) -> str:
     return normalized
 
 
-def _training_session_realtime_provider(session, *, fallback: str) -> str:
+def _training_session_voice_route(session) -> VoiceRouteDTO:
     task_config = getattr(session, "task_config", None)
     metadata = getattr(task_config, "metadata", None)
-    if not isinstance(metadata, Mapping):
-        return fallback
-    choice = _coerce_optional_text(
-        metadata.get("realtimeProvider") or metadata.get("realtime_provider")
-    )
-    if choice is None:
-        return fallback
-    normalized = _normalized_realtime_llm_provider(choice)
-    if normalized == "openai":
+    route = voice_route_snapshot_from_metadata(metadata if isinstance(metadata, Mapping) else None)
+    if route is None:
+        raise HTTPException(status_code=409, detail="Training session has no voice route snapshot")
+    return route
+
+
+def _training_session_realtime_provider(session, *, fallback: str | None = None) -> str:
+    route = _training_session_voice_route(session)
+    if route.mode == "cascade":
         return "pipecat"
-    if normalized == _VOLCENGINE_DOUBAO_REALTIME_PROVIDER:
+    provider = route.realtime.provider if route.realtime is not None else ""
+    if provider == _VOLCENGINE_DOUBAO_REALTIME_PROVIDER:
         return _VOLCENGINE_DOUBAO_REALTIME_PROVIDER
+    if provider == "openai":
+        return "pipecat"
     raise HTTPException(
-        status_code=400,
-        detail=(
-            "Training session realtimeProvider must be either "
-            "openai or volcengine.doubao_realtime"
-        ),
+        status_code=409, detail="Training session voice route provider is not supported"
     )
 
 
 async def _bound_training_session_realtime_provider(
     binding: tuple[str, int],
     *,
-    fallback: str,
+    fallback: str | None,
     svc: TrainingSessionService,
     current_user: CurrentUser,
 ) -> str:
@@ -3078,13 +3157,6 @@ async def _bound_training_session_realtime_provider(
         current_user=current_user,
     )
     return _training_session_realtime_provider(training_session, fallback=fallback)
-
-
-def _configured_realtime_provider() -> str:
-    provider = _normalized_realtime_llm_provider(settings.REALTIME_PROVIDER)
-    if provider in _VOLCENGINE_DOUBAO_REALTIME_PROVIDER_ALIASES:
-        return _VOLCENGINE_DOUBAO_REALTIME_PROVIDER
-    return "pipecat"
 
 
 def _query_realtime_profile(websocket: WebSocket) -> str:
@@ -3184,25 +3256,6 @@ def _realtime_pipeline_unavailable_detail(provider: str) -> str:
     if _uses_volcengine_doubao_realtime(provider):
         return "Volcengine Doubao realtime pipeline is not available"
     return "Pipecat realtime pipeline is not available"
-
-
-def _realtime_voice_for_provider(provider: str) -> str | None:
-    voice = _coerce_optional_text(settings.REALTIME_OPENAI_VOICE)
-    if _uses_volcengine_doubao_realtime(provider):
-        if voice is None:
-            return _DEFAULT_VOLCENGINE_DOUBAO_REALTIME_VOICE
-        normalized = voice.lower().replace("_", "-").replace(" ", "-")
-        if normalized in _VOLCENGINE_DOUBAO_REALTIME_PLACEHOLDER_VOICES:
-            return _DEFAULT_VOLCENGINE_DOUBAO_REALTIME_VOICE
-    if voice is None:
-        return None
-    return voice
-
-
-def _realtime_model_for_provider(provider: str) -> str:
-    if _uses_volcengine_doubao_realtime(provider):
-        return _coerce_optional_text(settings.REALTIME_VOLCENGINE_MODEL) or "1.2.1.1"
-    return settings.REALTIME_OPENAI_MODEL
 
 
 def _echoes_realtime_transcript_done(provider: str) -> bool:
@@ -3884,6 +3937,7 @@ async def create_training_session(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_team_id: str | None = Header(default=None, alias="X-Team-Id"),
     svc: TrainingSessionService = Depends(get_training_session_service),
+    voice_routes: TrainingVoiceRouteService = Depends(get_training_voice_route_service),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     scope = training_scope_for(
@@ -3894,6 +3948,7 @@ async def create_training_session(
     if scope.user_id != body.user_id or scope.team_id != body.team_id:
         body = body.model_copy(update={"user_id": scope.user_id, "team_id": scope.team_id})
     try:
+        body = _voice_route_snapshot_for_task(body, voice_routes)
         session = await svc.create_session(body)
     except (DomainValidationException, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -4259,9 +4314,7 @@ async def start_training_session(
         return success_response(data=_started_training_session_to_dict(started))
 
     if session.status == TrainingSessionStatus.ACTIVE:
-        requested_room_id = (
-            str(body.room_id).strip() if body.room_id is not None else ""
-        )
+        requested_room_id = str(body.room_id).strip() if body.room_id is not None else ""
         active_room_id = str(session.room_id or "").strip()
         if requested_room_id and requested_room_id != active_room_id:
             raise HTTPException(
@@ -4557,12 +4610,8 @@ async def complete_training_session(
     summary="Get Training Points, level, and career path progress",
 )
 async def get_training_growth_summary(
-    growth_ledger: TrainingGrowthLedgerService = Depends(
-        get_training_growth_ledger_service
-    ),
-    uow_factory: Callable[..., AbstractUnitOfWork] = Depends(
-        get_training_runtime_uow_factory
-    ),
+    growth_ledger: TrainingGrowthLedgerService = Depends(get_training_growth_ledger_service),
+    uow_factory: Callable[..., AbstractUnitOfWork] = Depends(get_training_runtime_uow_factory),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     async with uow_factory() as uow:
@@ -4987,9 +5036,38 @@ async def get_catalog(
 async def get_training_voice_catalog(
     _current_user: CurrentUser = Depends(get_current_user),
 ):
+    return success_response(data=[item.to_public_dict() for item in TRAINING_VOICE_CATALOG])
+
+
+@router.get("/voice-routes", summary="List published realtime voice routes")
+async def list_training_voice_routes(
+    svc: TrainingVoiceRouteService = Depends(get_training_voice_route_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+):
+    return success_response(data=[route.to_public_dict() for route in svc.list_published()])
+
+
+@router.get("/voice-route-config", summary="Get platform realtime voice route configuration")
+async def get_training_voice_route_config(
+    svc: TrainingVoiceRouteService = Depends(get_training_voice_route_service),
+    _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
+):
     return success_response(
-        data=[item.to_public_dict() for item in TRAINING_VOICE_CATALOG]
+        data=svc.get_config().model_dump(mode="json", by_alias=True, exclude_none=True)
     )
+
+
+@router.put("/voice-route-config", summary="Save platform realtime voice route configuration")
+async def save_training_voice_route_config(
+    body: VoiceRouteConfigDTO,
+    svc: TrainingVoiceRouteService = Depends(get_training_voice_route_service),
+    _current_user: CurrentUser = Depends(require_system_roles("admin")),
+):
+    try:
+        state = svc.save_config(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return success_response(data=state.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
 @router.get("/scenario-templates", summary="Get scenario training templates")
@@ -5338,13 +5416,18 @@ async def realtime_training_session(
     input_sample_rate = _query_realtime_input_sample_rate(websocket, profile=realtime_profile)
     session = RealtimeSession(session_id=query_session_id)
     binding: tuple[str, int] | None = None
+    voice_route: VoiceRouteDTO | None = None
     pipeline_runner: RealtimePipelineSessionRunner | None = None
 
     async def _ensure_pipeline_runner(active_binding: tuple[str, int]) -> None:
         nonlocal pipeline_runner
         if pipeline_runner is not None:
             return
-        adapter = pipeline_factory(provider)
+        if voice_route is None:
+            raise HTTPException(
+                status_code=409, detail="Realtime session has no voice route snapshot"
+            )
+        adapter = pipeline_factory(provider, voice_route)
         if adapter is None:
             raise HTTPException(
                 status_code=503,
@@ -5417,8 +5500,18 @@ async def realtime_training_session(
         pipeline_metadata = _realtime_pipeline_metadata(
             provider,
             active_binding,
-            profile=realtime_profile,
+            route=voice_route,
             input_sample_rate=input_sample_rate,
+        )
+        route_model = (
+            voice_route.realtime.model
+            if voice_route.realtime is not None
+            else voice_route.llm.model if voice_route.llm is not None else None
+        )
+        route_voice = (
+            voice_route.realtime.voice
+            if voice_route.realtime is not None
+            else voice_route.tts.voice if voice_route.tts is not None else None
         )
         logger.info(
             "Training realtime pipeline starting",
@@ -5436,18 +5529,21 @@ async def realtime_training_session(
                             "outputSampleRate": pipeline_metadata.get("outputSampleRate"),
                             "inputAudioFormat": pipeline_metadata.get("inputAudioFormat"),
                             "outputAudioFormat": pipeline_metadata.get("outputAudioFormat"),
-                            "model": _realtime_model_for_provider(provider),
-                            "voice": _realtime_voice_for_provider(provider),
-                            "voiceIgnored": bool(
-                                _coerce_optional_text(settings.REALTIME_OPENAI_VOICE)
-                                and _realtime_voice_for_provider(provider) is None
+                            "model": route_model,
+                            "voice": route_voice,
+                            "voiceRouteId": voice_route.id,
+                            "voiceRouteRevision": voice_route.revision,
+                            "baseUrl": (
+                                pipeline_metadata.get("realtimeLlm", {}).get("baseUrl")
+                                if isinstance(pipeline_metadata.get("realtimeLlm"), Mapping)
+                                else (
+                                    pipeline_metadata.get("llm", {}).get("baseUrl")
+                                    if isinstance(pipeline_metadata.get("llm"), Mapping)
+                                    else None
+                                )
                             ),
-                            "baseUrl": settings.REALTIME_BASE_URL,
-                            "apiKeyConfigured": (
-                                user_billing_enabled() or bool(settings.REALTIME_API_KEY)
-                                if _uses_volcengine_doubao_realtime(provider)
-                                else bool(_openai_realtime_api_key())
-                            ),
+                            "apiKeyConfigured": user_billing_enabled()
+                            or bool(settings.llm.api_key),
                         }
                     )
                     or {}
@@ -5465,10 +5561,10 @@ async def realtime_training_session(
             rubric=voice_context["rubric"],
             recent_turns=voice_context["recent_turns"],
             runtime=realtime_runtime_for_provider(provider),
-            model=_realtime_model_for_provider(provider),
-            voice=_realtime_voice_for_provider(provider),
-            input_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
-            output_audio_format=settings.REALTIME_OPENAI_INPUT_AUDIO_FORMAT,
+            model=route_model,
+            voice=route_voice,
+            input_audio_format="pcm16",
+            output_audio_format="pcm16",
             instructions=_default_realtime_agent_instructions(),
             context_metadata=voice_context["metadata"],
             config_metadata=pipeline_metadata,
@@ -5484,12 +5580,13 @@ async def realtime_training_session(
             current_user=current_user,
         )
         if binding is not None:
-            provider = await _bound_training_session_realtime_provider(
-                binding,
-                fallback=provider,
-                svc=svc,
-                current_user=current_user,
+            bound_session = await _require_accessible_training_session(
+                binding[0], svc=svc, current_user=current_user
             )
+            voice_route = _training_session_voice_route(bound_session)
+            provider = _training_session_realtime_provider(bound_session)
+            realtime_profile = voice_route.mode
+            input_sample_rate = voice_route.input_sample_rate
         if not _uses_supported_realtime_provider(provider):
             raise HTTPException(
                 status_code=400,
@@ -5582,12 +5679,13 @@ async def realtime_training_session(
                     raise HTTPException(status_code=400, detail="Realtime session is already bound")
                 binding = configured
                 session.session_id = configured[0]
-                provider = await _bound_training_session_realtime_provider(
-                    configured,
-                    fallback=provider,
-                    svc=svc,
-                    current_user=current_user,
+                configured_session = await _require_accessible_training_session(
+                    configured[0], svc=svc, current_user=current_user
                 )
+                voice_route = _training_session_voice_route(configured_session)
+                provider = _training_session_realtime_provider(configured_session)
+                realtime_profile = voice_route.mode
+                input_sample_rate = voice_route.input_sample_rate
                 if not _uses_supported_realtime_provider(provider):
                     raise HTTPException(
                         status_code=400,

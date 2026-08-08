@@ -643,6 +643,9 @@ def test_pipecat_realtime_readiness_reports_structured_blockers_without_secrets(
         "PIPECAT_FEATURE_UNAVAILABLE",
         "PIPECAT_FEATURE_UNAVAILABLE",
         "MISSING_OPENAI_API_KEY",
+        "MISSING_OPENAI_REALTIME_MODEL",
+        "MISSING_OPENAI_REALTIME_VOICE",
+        "MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
     ]
     by_feature = {error.get("feature"): error for error in errors}
     assert by_feature["stt:openai"]["modules"] == [pipecat_adapter.OPENAI_STT_PIPECAT_MODULE]
@@ -654,11 +657,11 @@ def test_pipecat_realtime_readiness_reports_structured_blockers_without_secrets(
     assert by_feature["turnDetection:pipecat"]["modules"] == [
         pipecat_adapter.USER_TURN_PROCESSOR_PIPECAT_MODULE
     ]
-    assert errors[-1]["missingEnv"] == [
-        "REALTIME_OPENAI_API_KEY",
+    assert errors[4]["missingEnv"] == [
         "LLM__API_KEY",
         "OPENAI_API_KEY",
     ]
+    assert all("missingEnv" not in error for error in errors[5:])
     assert "secret-should-not-appear" not in json.dumps(readiness)
 
 
@@ -685,7 +688,6 @@ def test_pipecat_realtime_readiness_reports_missing_openai_runtime_settings():
     assert readiness["ready"] is False
     assert readiness["status"] == "blocked"
     assert readiness["required"]["env"] == [
-        "REALTIME_OPENAI_API_KEY",
         "LLM__API_KEY",
         "OPENAI_API_KEY",
     ]
@@ -694,10 +696,10 @@ def test_pipecat_realtime_readiness_reports_missing_openai_runtime_settings():
         "MISSING_OPENAI_REALTIME_VOICE",
         "MISSING_OPENAI_REALTIME_AUDIO_FORMAT",
     ]
-    assert [error["missingEnv"] for error in readiness["blockingReasons"]] == [
-        ["REALTIME_OPENAI_MODEL"],
-        ["REALTIME_OPENAI_VOICE"],
-        ["REALTIME_OPENAI_INPUT_AUDIO_FORMAT"],
+    assert [error.get("missingEnv") for error in readiness["blockingReasons"]] == [
+        None,
+        None,
+        None,
     ]
 
 
@@ -798,6 +800,9 @@ def test_pipecat_realtime_capability_response_is_public_safe(monkeypatch):
 
     response = pipecat_adapter.pipecat_realtime_capability_response(
         openai_api_key_available=True,
+        openai_model="gpt-realtime",
+        openai_voice="marin",
+        input_audio_format="pcm16",
     )
 
     assert response["runtime"] == REALTIME_RUNTIME_PIPECAT
@@ -847,6 +852,9 @@ def test_pipecat_realtime_capability_response_omits_snapshot_when_snapshot_fails
 
     response = pipecat_adapter.pipecat_realtime_capability_response(
         openai_api_key_available=True,
+        openai_model="gpt-realtime",
+        openai_voice="marin",
+        input_audio_format="pcm16",
     )
 
     assert response["runtime"] == REALTIME_RUNTIME_PIPECAT
@@ -1334,10 +1342,8 @@ def test_build_pipecat_voice_processors_reports_missing_optional_service():
 
 
 def test_build_pipecat_voice_processors_reports_missing_openai_key(monkeypatch):
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", None)
     monkeypatch.setattr(settings.llm, "api_key", None)
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
-    monkeypatch.delenv("REALTIME_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(
@@ -1357,14 +1363,13 @@ def test_build_pipecat_voice_processors_reports_missing_openai_key(monkeypatch):
     assert error["phase"] == "configuration"
     assert error["feature"] == "stt:openai"
     assert error["missingEnv"] == (
-        "REALTIME_OPENAI_API_KEY",
         "LLM__API_KEY",
         "OPENAI_API_KEY",
     )
 
 
 def test_build_pipecat_voice_processors_uses_settings_key_without_metadata(monkeypatch):
-    monkeypatch.setattr(settings, "REALTIME_OPENAI_API_KEY", "sk-settings-realtime")
+    monkeypatch.setattr(settings.llm, "api_key", "sk-settings-realtime")
 
     processors = pipecat_adapter.build_pipecat_voice_processors(
         fake_runtime(False),

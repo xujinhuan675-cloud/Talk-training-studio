@@ -62,12 +62,13 @@ class OpenAICompatibleTTSProvider:
         config: TTSConfig,
     ) -> AsyncIterator[bytes]:
         url = f"{self._base_url}{_SPEECH_PATH}"
+        model = (config.model or self._model).strip()
         voice = config.voice_id or _DEFAULT_OPENAI_VOICE
-        if voice in _OPENAI_VOICES and not _uses_native_openai_voices(self._model):
+        if voice in _OPENAI_VOICES and not _uses_native_openai_voices(model):
             voice = DEFAULT_TRAINING_VOICE_ID
 
         payload: dict[str, object] = {
-            "model": self._model,
+            "model": model,
             "input": text,
             "voice": voice,
             "response_format": "mp3",
@@ -88,15 +89,13 @@ class OpenAICompatibleTTSProvider:
             headers=headers,
         ) as response:
             if response.status_code != 200:
-                body = await response.aread()
+                await response.aread()
                 logger.error(
-                    "newapi_tts_error status=%s body=%s",
+                    "newapi_tts_error status=%s content_type=%s",
                     response.status_code,
-                    body.decode("utf-8", errors="replace")[:500],
+                    response.headers.get("content-type", "unknown"),
                 )
-                raise RuntimeError(
-                    f"NewAPI TTS request failed with status {response.status_code}"
-                )
+                raise RuntimeError(f"NewAPI TTS request failed with status {response.status_code}")
 
             async for chunk in response.aiter_bytes(chunk_size=8192):
                 if chunk:

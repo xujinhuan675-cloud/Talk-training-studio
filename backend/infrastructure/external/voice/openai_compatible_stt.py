@@ -38,7 +38,9 @@ def normalize_transcriptions_url(base_url: str) -> str:
     elif lower_path.endswith(("/v1", "/pg")):
         normalized_path = f"{path}{_TRANSCRIPTIONS_PATH}"
     else:
-        normalized_path = f"{path}/v1{_TRANSCRIPTIONS_PATH}" if path else f"/v1{_TRANSCRIPTIONS_PATH}"
+        normalized_path = (
+            f"{path}/v1{_TRANSCRIPTIONS_PATH}" if path else f"/v1{_TRANSCRIPTIONS_PATH}"
+        )
 
     return urlunparse(parsed._replace(path=normalized_path))
 
@@ -67,12 +69,13 @@ class OpenAICompatibleSTTProvider:
         *,
         language: str = "zh",
         audio_format: str = "webm",
+        model: str | None = None,
     ) -> TranscriptionResult:
         response = await self._client.post(
             self._transcriptions_url,
             files={"file": (f"audio.{audio_format}", audio, f"audio/{audio_format}")},
             data={
-                "model": self._model,
+                "model": (model or self._model).strip(),
                 "language": language,
                 "response_format": "json",
             },
@@ -81,14 +84,11 @@ class OpenAICompatibleSTTProvider:
 
         if response.status_code != 200:
             logger.error(
-                "newapi_stt_error status=%s body=%s",
+                "newapi_stt_error status=%s content_type=%s",
                 response.status_code,
-                response.text[:500],
+                response.headers.get("content-type", "unknown"),
             )
-            raise RuntimeError(
-                f"NewAPI STT request failed with status {response.status_code}: "
-                f"{response.text[:200]}"
-            )
+            raise RuntimeError(f"NewAPI STT request failed with status {response.status_code}")
 
         result = response.json()
         return TranscriptionResult(
