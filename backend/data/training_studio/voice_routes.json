@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "id": "openai-cascade-standard",
+      "name": "OpenAI Near Realtime",
+      "description": "Platform-managed STT, LLM, and TTS cascade for low-cost practice.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": true,
+      "revision": 1,
+      "stt": {
+        "provider": "openai",
+        "model": "gpt-4o-mini-transcribe"
+      },
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini"
+      },
+      "tts": {
+        "provider": "openai",
+        "model": "gpt-4o-mini-tts",
+        "voice": "marin"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "near_realtime",
+      "costProfile": "configured"
+    },
+    {
+      "id": "doubao-realtime-standard",
+      "name": "Doubao Realtime Standard",
+      "description": "Platform-managed native realtime voice route.",
+      "mode": "speech_to_speech",
+      "enabled": true,
+      "default": false,
+      "revision": 1,
+      "realtime": {
+        "provider": "volcengine.doubao_realtime",
+        "model": "1.2.1.1",
+        "voice": "zh_female_vv_uranus_bigtts"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "configured"
+    }
+  ],
+  "updatedAt": "2026-08-07T00:00:00.000Z"
+}

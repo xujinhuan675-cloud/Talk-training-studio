@@ -53,6 +53,17 @@ class _FakeAsyncClient:
         return None
 
 
+class _FakeSTTAsyncClient:
+    def __init__(self, response: httpx.Response) -> None:
+        self.response = response
+
+    async def post(self, *_args, **_kwargs) -> httpx.Response:
+        return self.response
+
+    async def aclose(self) -> None:
+        return None
+
+
 class _FakeGatewayProvider:
     instances: list["_FakeGatewayProvider"] = []
 
@@ -90,11 +101,12 @@ def test_normalize_transcriptions_url(base_url: str, expected: str) -> None:
 async def test_stt_posts_to_newapi_with_current_user_token(monkeypatch) -> None:
     monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", True)
     context_token = bind_user_access_token("dashboard-user-token")
-    seen: dict[str, str | None] = {}
+    seen: dict[str, object] = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
         seen["authorization"] = request.headers.get("Authorization")
+        seen["body"] = await request.aread()
         return httpx.Response(200, json={"text": "hello", "duration": 1.25})
 
     provider = OpenAICompatibleSTTProvider(
@@ -105,15 +117,18 @@ async def test_stt_posts_to_newapi_with_current_user_token(monkeypatch) -> None:
     await provider._client.aclose()
     provider._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
-        result = await provider.transcribe(b"audio", language="en")
+        result = await provider.transcribe(
+            b"audio",
+            language="en",
+            model="gpt-4o-transcribe-route",
+        )
     finally:
         await provider.close()
         reset_user_access_token(context_token)
 
-    assert seen == {
-        "url": "https://gateway.example.com/pg/audio/transcriptions",
-        "authorization": "Bearer dashboard-user-token",
-    }
+    assert seen["url"] == "https://gateway.example.com/pg/audio/transcriptions"
+    assert seen["authorization"] == "Bearer dashboard-user-token"
+    assert b"gpt-4o-transcribe-route" in seen["body"]
     assert result.text == "hello"
     assert result.duration_seconds == 1.25
 
@@ -145,6 +160,79 @@ async def test_tts_posts_to_newapi_with_native_openai_voice(monkeypatch) -> None
     assert fake_client.captured["url"] == "https://gateway.example.com/pg/audio/speech"
     assert fake_client.captured["headers"]["Authorization"] == "Bearer dashboard-user-token"
     assert fake_client.captured["json"]["voice"] == "alloy"
+
+
+@pytest.mark.asyncio
+async def test_voice_gateway_errors_do_not_expose_upstream_response_bodies(monkeypatch) -> None:
+    secret_body = "provider rejected confidential training content"
+    tts_response = httpx.Response(
+        502,
+        text=secret_body,
+        request=httpx.Request("POST", "https://gateway.example.com/pg/audio/speech"),
+    )
+    tts_client = _FakeAsyncClient(response=tts_response)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: tts_client)
+    tts = OpenAICompatibleTTSProvider(
+        api_key="newapi-user-session",
+        model="gpt-4o-mini-tts",
+        base_url="https://gateway.example.com/pg",
+    )
+    with pytest.raises(RuntimeError) as tts_error:
+        _ = [
+            chunk
+            async for chunk in tts.synthesize_stream(
+                "Confidential training text",
+                TTSConfig(voice_id="marin"),
+            )
+        ]
+    await tts.close()
+
+    stt = OpenAICompatibleSTTProvider(
+        api_key="newapi-user-session",
+        base_url="https://gateway.example.com/pg",
+        model="gpt-4o-mini-transcribe",
+    )
+    await stt._client.aclose()
+    stt._client = _FakeSTTAsyncClient(
+        httpx.Response(
+            502,
+            text=secret_body,
+            request=httpx.Request(
+                "POST", "https://gateway.example.com/pg/audio/transcriptions"
+            ),
+        )
+    )
+    with pytest.raises(RuntimeError) as stt_error:
+        await stt.transcribe(b"confidential audio")
+    await stt.close()
+
+    assert secret_body not in str(tts_error.value)
+    assert secret_body not in str(stt_error.value)
+
+
+@pytest.mark.asyncio
+async def test_tts_uses_the_session_model_override(monkeypatch) -> None:
+    fake_client = _FakeAsyncClient()
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: fake_client)
+    provider = OpenAICompatibleTTSProvider(
+        api_key="newapi-user-session",
+        model="tts-global-default",
+        base_url="https://gateway.example.com/pg",
+    )
+    try:
+        chunks = [
+            chunk
+            async for chunk in provider.synthesize_stream(
+                "Hello.",
+                TTSConfig(voice_id="marin", model="gpt-4o-mini-tts"),
+            )
+        ]
+    finally:
+        await provider.close()
+
+    assert chunks == [b"mp3-audio"]
+    assert fake_client.captured["json"]["model"] == "gpt-4o-mini-tts"
+    assert fake_client.captured["json"]["voice"] == "marin"
 
 
 @pytest.mark.asyncio

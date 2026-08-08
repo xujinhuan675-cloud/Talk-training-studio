@@ -409,44 +409,6 @@ class Settings(BaseSettings):
         default="drop_oldest",
         validation_alias=AliasChoices("REALTIME_WS_SEND_OVERFLOW_POLICY"),
     )
-    # Legacy direct OpenAI realtime fields are retained so old `.env` files do not
-    # fail pydantic extra="forbid"; callable realtime runtime now goes through Pipecat.
-    REALTIME_OPENAI_WS_URL: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("REALTIME_OPENAI_WS_URL")
-    )
-    REALTIME_OPENAI_API_KEY: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("REALTIME_OPENAI_API_KEY")
-    )
-    REALTIME_PROVIDER: str = Field(
-        default="openai", validation_alias=AliasChoices("REALTIME_PROVIDER")
-    )
-    REALTIME_API_KEY: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("REALTIME_API_KEY")
-    )
-    REALTIME_BASE_URL: Optional[str] = Field(
-        default="https://api.openai.com/v1/realtime/calls",
-        validation_alias=AliasChoices("REALTIME_BASE_URL"),
-    )
-    REALTIME_OPENAI_MODEL: str = Field(
-        default="gpt-realtime-2.1", validation_alias=AliasChoices("REALTIME_OPENAI_MODEL")
-    )
-    REALTIME_VOLCENGINE_MODEL: str = Field(
-        default="1.2.1.1", validation_alias=AliasChoices("REALTIME_VOLCENGINE_MODEL")
-    )
-    REALTIME_OPENAI_CALL_URL: str = Field(
-        default="https://api.openai.com/v1/realtime/calls",
-        validation_alias=AliasChoices("REALTIME_OPENAI_CALL_URL"),
-    )
-    REALTIME_OPENAI_VOICE: str = Field(
-        default="marin", validation_alias=AliasChoices("REALTIME_OPENAI_VOICE")
-    )
-    REALTIME_OPENAI_TRANSCRIPTION_MODEL: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("REALTIME_OPENAI_TRANSCRIPTION_MODEL")
-    )
-    REALTIME_OPENAI_INPUT_AUDIO_FORMAT: str = Field(
-        default="pcm16", validation_alias=AliasChoices("REALTIME_OPENAI_INPUT_AUDIO_FORMAT")
-    )
-
     # 分页配置（支持环境变量覆盖）
     DEFAULT_PAGE_SIZE: int = Field(default=20, validation_alias=AliasChoices("DEFAULT_PAGE_SIZE"))
     MAX_PAGE_SIZE: int = Field(default=100, validation_alias=AliasChoices("MAX_PAGE_SIZE"))
