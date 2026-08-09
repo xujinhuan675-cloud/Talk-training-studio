@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "routes": [
     {
       "id": "openai-cascade-standard",
@@ -8,14 +8,14 @@
       "mode": "cascade",
       "enabled": true,
       "default": true,
-      "revision": 1,
+      "revision": 2,
       "stt": {
         "provider": "openai",
         "model": "gpt-4o-mini-transcribe"
       },
       "llm": {
         "provider": "openai",
-        "model": "gpt-4.1-mini"
+        "model": "gpt-5.5"
       },
       "tts": {
         "provider": "openai",
@@ -46,5 +46,5 @@
       "costProfile": "configured"
     }
   ],
-  "updatedAt": "2026-08-07T00:00:00.000Z"
+  "updatedAt": "2026-08-09T03:29:22.953969+00:00"
 }
