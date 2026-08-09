@@ -1,13 +1,20 @@
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
 
-from api.routes.training_studio import _voice_route_snapshot_for_task
+from api.routes.training_studio import (
+    _training_opening_voice_id,
+    _voice_route_snapshot_for_task,
+)
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
 from application.services.training_studio.session_service import CreateTrainingSessionDTO
 from application.services.training_studio.voice_route_service import (
     JsonFileVoiceRouteStore,
     TrainingVoiceRouteService,
     VoiceRouteConfigDTO,
+    VoiceRouteDTO,
+    voice_route_catalog_readiness,
 )
 
 
@@ -55,6 +62,27 @@ def test_voice_route_service_increments_revision_when_a_route_changes(tmp_path) 
     assert unchanged.routes[0].revision == 1
     assert changed.routes[0].revision == 2
     assert changed.routes[0].llm.model == "gpt-4.1"
+
+
+def test_cascade_interaction_capability_is_explicit_not_inferred_from_mode() -> None:
+    route = VoiceRouteDTO.model_validate(
+        {**_cascade_route(), "interactionModes": ["turn_based"]}
+    )
+
+    assert route.supports_interaction_mode("turn_based") is True
+    assert route.supports_interaction_mode("realtime") is False
+    assert route.to_public_dict()["presetGroup"] == "cascade"
+
+
+def test_voice_route_rejects_a_preset_group_that_conflicts_with_its_contract() -> None:
+    with pytest.raises(ValueError, match="belong to curated_demo"):
+        VoiceRouteDTO.model_validate(
+            {
+                **_cascade_route(),
+                "adapterStatus": "inventory_only",
+                "presetGroup": "cascade",
+            }
+        )
 
 
 def _session_request(
@@ -138,4 +166,93 @@ def test_turn_based_voice_session_rejects_native_speech_to_speech_route(tmp_path
             service,
         )
 
+    assert exc_info.value.status_code == 422
+
+
+def test_default_catalog_contains_only_four_integrated_routes_and_curated_demos() -> None:
+    path = Path(__file__).resolve().parents[2] / "data" / "training_studio" / "voice_routes.json"
+    routes = TrainingVoiceRouteService(JsonFileVoiceRouteStore(path)).get_config().routes
+
+    curated_demo_ids = {
+        "pipecat-soniox-openai-gradium",
+        "pipecat-gradium-openai-gradium",
+        "pipecat-soniox-openai-cartesia",
+        "pipecat-aws-nova-sonic",
+        "pipecat-deepgram-gemini3-google-chirp3",
+        "pipecat-deepgram-google-google-chirp3",
+        "pipecat-speechmatics-nova-pro-elevenlabs",
+        "pipecat-gemini-live",
+    }
+
+    assert len(routes) == 12
+    assert {route.id for route in routes if route.adapter_status == "runtime_integrated"} == {
+        "openai-cascade-standard",
+        "openai-realtime-standard",
+        "doubao-realtime-standard",
+        "openai-llm-doubao-voice",
+    }
+    assert {
+        route.id for route in routes if route.adapter_status == "inventory_only"
+    } == curated_demo_ids
+    assert {
+        group: sum(route.resolved_preset_group() == group for route in routes)
+        for group in ("cascade", "native_voice", "curated_demo")
+    } == {"cascade": 2, "native_voice": 2, "curated_demo": 8}
+    assert {
+        route.id
+        for route in routes
+        if route.adapter_status == "inventory_only" and route.mode == "speech_to_speech"
+    } == {"pipecat-aws-nova-sonic", "pipecat-gemini-live"}
+    assert next(
+        route for route in routes if route.id == "openai-llm-doubao-voice"
+    ).resolved_interaction_modes() == ("turn_based",)
+    assert next(
+        route for route in routes if route.id == "openai-cascade-standard"
+    ).resolved_interaction_modes() == ("turn_based", "realtime")
+
+    default_route = next(route for route in routes if route.default)
+    assert default_route.id == "openai-llm-doubao-voice"
+    assert voice_route_catalog_readiness(default_route, environment={})["ready"] is True
+
+    for route in routes:
+        assert route.preset_group == route.resolved_preset_group()
+        assert route.to_public_dict()["presetGroup"] == route.resolved_preset_group()
+
+    for route_id in ("openai-realtime-standard", "doubao-realtime-standard"):
+        route = next(route for route in routes if route.id == route_id)
+        assert route.opening_tts is not None
+        assert route.realtime is not None
+        assert route.opening_tts.voice == route.realtime.voice
+        assert _training_opening_voice_id(route, {}) == route.realtime.voice
+
+
+def test_inventory_only_demo_is_published_but_cannot_start(tmp_path) -> None:
+    demo = {
+        "id": "pipecat-soniox-openai-gradium",
+        "name": "Soniox + OpenAI + Gradium",
+        "mode": "cascade",
+        "enabled": True,
+        "adapterStatus": "inventory_only",
+        "interactionModes": ["realtime"],
+        "credentialEnv": ["SONIOX_API_KEY", "GRADIUM_API_KEY"],
+        "stt": {"provider": "soniox", "model": "stt"},
+        "llm": {"provider": "openai", "model": "gpt"},
+        "tts": {"provider": "gradium", "model": "tts"},
+    }
+    service = TrainingVoiceRouteService(JsonFileVoiceRouteStore(tmp_path / "voice-routes.json"))
+    service.save_config({"routes": [demo]})
+    route = service.get_published(demo["id"])
+
+    readiness = voice_route_catalog_readiness(route, environment={})
+    assert readiness["ready"] is False
+    assert readiness["code"] == "VOICE_ROUTE_ADAPTER_NOT_INTEGRATED"
+    assert readiness["missingCredentials"] == ["SONIOX_API_KEY", "GRADIUM_API_KEY"]
+    configured_readiness = voice_route_catalog_readiness(
+        route,
+        environment={"SONIOX_API_KEY": "configured", "GRADIUM_API_KEY": "configured"},
+    )
+    assert configured_readiness["ready"] is False
+    assert configured_readiness["missingCredentials"] == []
+    with pytest.raises(HTTPException, match="not yet connected") as exc_info:
+        _voice_route_snapshot_for_task(_session_request(demo["id"]), service)
     assert exc_info.value.status_code == 422

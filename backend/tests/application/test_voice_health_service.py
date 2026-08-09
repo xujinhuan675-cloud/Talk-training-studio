@@ -82,3 +82,28 @@ def test_voice_health_blocks_when_no_route_is_enabled(tmp_path) -> None:
 
     assert report["status"] == "blocked"
     assert report["error"] == "No enabled voice route is configured"
+
+
+def test_voice_health_marks_curated_demo_as_adapter_blocked(tmp_path) -> None:
+    config = _voice_config()
+    config["routes"].append(
+        {
+            **config["routes"][0],
+            "id": "curated-demo",
+            "name": "Curated demo",
+            "default": False,
+            "adapterStatus": "inventory_only",
+        }
+    )
+    path = tmp_path / "voice_routes.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+
+    report = build_voice_health_report(
+        config_path=path,
+        pipecat_capability_loader=lambda **_: _capability(),
+    )
+
+    demo = next(route for route in report["routes"] if route["id"] == "curated-demo")
+    assert demo["adapterStatus"] == "inventory_only"
+    assert demo["ready"] is False
+    assert demo["missingDependencies"] == ["talkwise.runtime_adapter"]

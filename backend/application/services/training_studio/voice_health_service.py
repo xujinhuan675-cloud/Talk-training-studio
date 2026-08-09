@@ -91,7 +91,10 @@ def build_voice_health_report(
     for route in routes:
         provider = _route_provider(route)
         missing: list[str] = []
-        if provider == "volcengine.doubao_realtime":
+        if route.adapter_status == "inventory_only":
+            ready = False
+            missing.append("talkwise.runtime_adapter")
+        elif provider == "volcengine.doubao_realtime":
             ready = importlib.util.find_spec("websockets") is not None
             if not ready:
                 missing.append("websockets")
@@ -114,6 +117,7 @@ def build_voice_health_report(
                 "mode": route.mode,
                 "provider": provider,
                 "default": route.default,
+                "adapterStatus": route.adapter_status,
                 "ready": ready,
                 "missingDependencies": missing,
             }

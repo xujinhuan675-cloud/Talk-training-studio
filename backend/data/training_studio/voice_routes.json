@@ -1,14 +1,21 @@
 {
-  "version": 2,
+  "version": 5,
   "routes": [
     {
       "id": "openai-cascade-standard",
-      "name": "OpenAI Near Realtime",
-      "description": "Platform-managed STT, LLM, and TTS cascade for low-cost practice.",
+      "name": "OpenAI Cascade",
+      "description": "OpenAI transcription, gpt-5.5 reasoning, and OpenAI speech synthesis.",
       "mode": "cascade",
       "enabled": true,
-      "default": true,
-      "revision": 2,
+      "default": false,
+      "revision": 5,
+      "adapterStatus": "runtime_integrated",
+      "presetGroup": "cascade",
+      "interactionModes": [
+        "turn_based",
+        "realtime"
+      ],
+      "credentialEnv": [],
       "stt": {
         "provider": "openai",
         "model": "gpt-4o-mini-transcribe"
@@ -28,23 +35,363 @@
       "costProfile": "configured"
     },
     {
-      "id": "doubao-realtime-standard",
-      "name": "Doubao Realtime Standard",
-      "description": "Platform-managed native realtime voice route.",
+      "id": "openai-realtime-standard",
+      "name": "OpenAI Realtime",
+      "description": "OpenAI native speech-to-speech realtime conversation.",
       "mode": "speech_to_speech",
       "enabled": true,
       "default": false,
-      "revision": 1,
+      "revision": 2,
+      "adapterStatus": "runtime_integrated",
+      "presetGroup": "native_voice",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [],
+      "realtime": {
+        "provider": "openai",
+        "model": "gpt-realtime-2.1",
+        "voice": "marin"
+      },
+      "openingTts": {
+        "provider": "openai",
+        "model": "gpt-4o-mini-tts",
+        "voice": "marin"
+      },
+      "inputSampleRate": 24000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "configured"
+    },
+    {
+      "id": "doubao-realtime-standard",
+      "name": "Doubao Realtime",
+      "description": "Doubao native speech-to-speech realtime conversation.",
+      "mode": "speech_to_speech",
+      "enabled": true,
+      "default": false,
+      "revision": 3,
+      "adapterStatus": "runtime_integrated",
+      "presetGroup": "native_voice",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [],
       "realtime": {
         "provider": "volcengine.doubao_realtime",
         "model": "1.2.1.1",
+        "voice": "zh_female_vv_uranus_bigtts"
+      },
+      "openingTts": {
+        "provider": "volcengine.doubao",
+        "model": "seed-tts-2.0",
         "voice": "zh_female_vv_uranus_bigtts"
       },
       "inputSampleRate": 16000,
       "outputSampleRate": 24000,
       "latencyProfile": "true_realtime",
       "costProfile": "configured"
+    },
+    {
+      "id": "openai-llm-doubao-voice",
+      "name": "OpenAI LLM + Doubao Voice",
+      "description": "Doubao transcription and speech synthesis with gpt-5.5 reasoning.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": true,
+      "revision": 3,
+      "adapterStatus": "runtime_integrated",
+      "presetGroup": "cascade",
+      "interactionModes": [
+        "turn_based"
+      ],
+      "credentialEnv": [],
+      "stt": {
+        "provider": "volcengine.doubao",
+        "model": "volc.bigasr.sauc.duration"
+      },
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-5.5"
+      },
+      "tts": {
+        "provider": "volcengine.doubao",
+        "model": "seed-tts-2.0",
+        "voice": "zh_female_vv_uranus_bigtts"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "near_realtime",
+      "costProfile": "configured"
+    },
+    {
+      "id": "pipecat-soniox-openai-gradium",
+      "name": "Soniox + OpenAI + Gradium",
+      "description": "Pipecat selected demo using Soniox STT, OpenAI LLM, and Gradium TTS.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "SONIOX_API_KEY",
+        "OPENAI_API_KEY",
+        "GRADIUM_API_KEY"
+      ],
+      "stt": {
+        "provider": "soniox",
+        "model": "stt-rt-v4"
+      },
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini"
+      },
+      "tts": {
+        "provider": "gradium",
+        "model": "default",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
+    },
+    {
+      "id": "pipecat-gradium-openai-gradium",
+      "name": "Gradium + OpenAI + Gradium",
+      "description": "Pipecat selected demo using Gradium STT, OpenAI LLM, and Gradium TTS.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "GRADIUM_API_KEY",
+        "OPENAI_API_KEY"
+      ],
+      "stt": {
+        "provider": "gradium",
+        "model": "default"
+      },
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini"
+      },
+      "tts": {
+        "provider": "gradium",
+        "model": "default",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
+    },
+    {
+      "id": "pipecat-soniox-openai-cartesia",
+      "name": "Soniox + OpenAI + Cartesia",
+      "description": "Pipecat selected demo using Soniox STT, OpenAI LLM, and Cartesia TTS.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "SONIOX_API_KEY",
+        "OPENAI_API_KEY",
+        "CARTESIA_API_KEY"
+      ],
+      "stt": {
+        "provider": "soniox",
+        "model": "stt-rt-v4"
+      },
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini"
+      },
+      "tts": {
+        "provider": "cartesia",
+        "model": "sonic-3",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
+    },
+    {
+      "id": "pipecat-aws-nova-sonic",
+      "name": "AWS Nova Sonic",
+      "description": "Pipecat selected native realtime demo using AWS Nova Sonic.",
+      "mode": "speech_to_speech",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION"
+      ],
+      "realtime": {
+        "provider": "aws.nova_sonic",
+        "model": "amazon.nova-2-sonic-v1:0",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
+    },
+    {
+      "id": "pipecat-deepgram-gemini3-google-chirp3",
+      "name": "Deepgram + Gemini 3 Flash + Google TTS Chirp 3",
+      "description": "Pipecat selected demo using Deepgram STT, Gemini 3 Flash, and Google Chirp 3 TTS.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "DEEPGRAM_API_KEY",
+        "GOOGLE_API_KEY"
+      ],
+      "stt": {
+        "provider": "deepgram",
+        "model": "nova-3"
+      },
+      "llm": {
+        "provider": "google",
+        "model": "gemini-3-flash-preview"
+      },
+      "tts": {
+        "provider": "google",
+        "model": "chirp-3-hd",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
+    },
+    {
+      "id": "pipecat-deepgram-google-google-chirp3",
+      "name": "Deepgram + Google + Google TTS Chirp 3",
+      "description": "Pipecat selected demo using Deepgram STT, Google LLM, and Google Chirp 3 TTS.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "DEEPGRAM_API_KEY",
+        "GOOGLE_API_KEY"
+      ],
+      "stt": {
+        "provider": "deepgram",
+        "model": "nova-3"
+      },
+      "llm": {
+        "provider": "google",
+        "model": "gemini-2.5-flash"
+      },
+      "tts": {
+        "provider": "google",
+        "model": "chirp-3-hd",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
+    },
+    {
+      "id": "pipecat-speechmatics-nova-pro-elevenlabs",
+      "name": "Speechmatics + AWS Nova Pro + ElevenLabs",
+      "description": "Pipecat selected demo using Speechmatics STT, AWS Nova Pro, and ElevenLabs TTS.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "SPEECHMATICS_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "ELEVENLABS_API_KEY"
+      ],
+      "stt": {
+        "provider": "speechmatics",
+        "model": "enhanced"
+      },
+      "llm": {
+        "provider": "aws",
+        "model": "amazon.nova-pro-v1:0"
+      },
+      "tts": {
+        "provider": "elevenlabs",
+        "model": "eleven_flash_v2_5",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
+    },
+    {
+      "id": "pipecat-gemini-live",
+      "name": "Gemini Live",
+      "description": "Pipecat selected native realtime demo using Gemini Live.",
+      "mode": "speech_to_speech",
+      "enabled": true,
+      "default": false,
+      "revision": 2,
+      "adapterStatus": "inventory_only",
+      "presetGroup": "curated_demo",
+      "interactionModes": [
+        "realtime"
+      ],
+      "credentialEnv": [
+        "GOOGLE_API_KEY"
+      ],
+      "realtime": {
+        "provider": "google.gemini_live",
+        "model": "gemini-2.5-flash-native-audio-preview",
+        "voice": "default"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "true_realtime",
+      "costProfile": "requires_provider_keys"
     }
   ],
-  "updatedAt": "2026-08-09T03:29:22.953969+00:00"
+  "updatedAt": "2026-08-09T10:30:00.000Z"
 }
