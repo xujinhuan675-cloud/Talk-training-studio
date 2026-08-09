@@ -724,7 +724,7 @@ def get_training_realtime_pipeline_factory() -> RealtimePipelineFactory:
     def _factory(
         provider: str, route: VoiceRouteDTO | None = None
     ) -> RealtimePipelineAdapter | None:
-        if _uses_pipecat_realtime(provider):
+        if _uses_supported_realtime_provider(provider):
             try:
                 pipecat_adapter = _load_pipecat_realtime_adapter()
                 return pipecat_adapter.create_pipecat_realtime_pipeline()
@@ -738,33 +738,6 @@ def get_training_realtime_pipeline_factory() -> RealtimePipelineFactory:
                             "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
                             "phase": "pipeline_factory",
                             "code": "PIPECAT_PIPELINE_FACTORY_FAILED",
-                            "message": str(exc),
-                        }
-                    },
-                    exc_info=True,
-                )
-                return None
-        if _uses_volcengine_doubao_realtime(provider):
-            if route is None or route.realtime is None:
-                return None
-            try:
-                volcengine_adapter = _load_volcengine_doubao_realtime_adapter()
-                return volcengine_adapter.create_volcengine_doubao_realtime_adapter(
-                    api_key=(runtime_api_key() if user_billing_enabled() else None),
-                    base_url=user_relay_realtime_url(),
-                    model=route.realtime.model,
-                    voice=route.realtime.voice,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Volcengine Doubao realtime pipeline factory failed",
-                    extra={
-                        "realtime_error": {
-                            "provider": provider,
-                            "runtime": "realtime_voice",
-                            "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
-                            "phase": "pipeline_factory",
-                            "code": "VOLCENGINE_REALTIME_PIPELINE_FACTORY_FAILED",
                             "message": str(exc),
                         }
                     },
@@ -2545,9 +2518,9 @@ def _volcengine_doubao_realtime_pipeline_metadata(
 
     return {
         "transport": "websocket",
-        "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
-        "profile": "native_duplex",
-        "realtimeProfile": "native_duplex",
+        "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+        "profile": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+        "realtimeProfile": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
         "inputSampleRate": resolved_input_sample_rate,
         "outputSampleRate": 24000,
         "inputAudioFormat": "pcm16",
@@ -2562,7 +2535,7 @@ def _volcengine_doubao_realtime_pipeline_metadata(
         "readinessFeatures": profile_contract["readinessFeatures"],
         "realtimeLlm": realtime_llm,
         "context": {
-            "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
+            "provider": "pipecat",
             "realtimeServiceMode": True,
             "providerNativeRealtime": True,
         },
@@ -2574,7 +2547,7 @@ def _volcengine_doubao_realtime_pipeline_metadata(
             "roomId": binding[1],
             "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
             "runtime": "realtime_voice",
-            "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+            "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
             "transport": "websocket",
             "voiceRouteId": route.id,
             "voiceRouteRevision": route.revision,
@@ -2606,12 +2579,6 @@ def _load_pipecat_realtime_adapter() -> Any:
     from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
 
     return pipecat_adapter
-
-
-def _load_volcengine_doubao_realtime_adapter() -> Any:
-    from infrastructure.external.voice import volcengine_realtime
-
-    return volcengine_realtime
 
 
 def _pipecat_unavailable_capability_response(
@@ -2768,7 +2735,7 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
             "baseUrl": (user_relay_realtime_url()),
         },
         blocking_reasons=blocking_reasons,
-        runtime=REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+        runtime=REALTIME_RUNTIME_PIPECAT,
     ).to_dict()
     profile_contract = _volcengine_doubao_realtime_profile_contract()
     smoke = _provider_neutral_realtime_smoke_contract(
@@ -2840,7 +2807,7 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
         "providerNativeRuntime": True,
     }
     payload = {
-        "runtime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
+        "runtime": REALTIME_RUNTIME_PIPECAT,
         "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
         "available": bool(readiness["ready"]),
         "coreAvailable": websocket_available,
@@ -2852,9 +2819,9 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
         "openaiRealtimeLlmAvailable": False,
         "turnDetectionAvailable": True,
         "profiles": {
-            "default": "native_duplex",
-            "supported": ["native_duplex"],
-            "native_duplex": {
+            "default": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
+            "supported": [_PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH],
+            _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH: {
                 "contract": profile_contract,
                 "latencyProfile": "true_realtime",
                 "costProfile": "provider_metered",
@@ -2870,6 +2837,7 @@ def _volcengine_doubao_realtime_capability_response() -> dict[str, object]:
         "errors": readiness["blockingReasons"],
         "smoke": smoke,
     }
+    payload["smoke"] = _provider_neutral_realtime_smoke_contract(payload["smoke"])
     return payload
 
 
@@ -3273,8 +3241,8 @@ def _realtime_start_metadata(
         metadata: dict[str, object] = {
             "transport": "websocket",
             "provider": _VOLCENGINE_DOUBAO_REALTIME_PROVIDER,
-            "realtimeRuntime": REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
-            "realtimeProfile": "native_duplex",
+            "realtimeRuntime": REALTIME_RUNTIME_PIPECAT,
+            "realtimeProfile": _PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH,
             "inputSampleRate": input_sample_rate,
             "audioContract": _volcengine_doubao_realtime_audio_contract(
                 input_sample_rate=input_sample_rate,
@@ -5463,6 +5431,15 @@ async def realtime_training_session(
                 )
             elif event_type == "interrupted":
                 sink.discard_audio()
+                session.interrupt(_coerce_optional_text(_pipeline_event_value(payload, "reason")))
+                await _send_wire_event(
+                    websocket,
+                    event_type,
+                    session,
+                    _pipeline_realtime_event_payload(payload),
+                )
+            elif event_type == "assistant_speaking.stopped":
+                session.listen()
                 await _send_wire_event(
                     websocket,
                     event_type,
@@ -5747,12 +5724,17 @@ async def realtime_training_session(
                 pipeline_runner.raise_if_failed()
                 await _send_event(websocket, session.listen())
             elif event_type == "response.cancel":
+                reason = _coerce_optional_text(payload.get("reason")) or "client_cancel"
                 if pipeline_runner is not None:
-                    await pipeline_runner.cancel_response(
-                        _coerce_optional_text(payload.get("reason"))
-                    )
+                    await pipeline_runner.cancel_response(reason)
                     pipeline_runner.raise_if_failed()
-                await _send_event(websocket, session.listen())
+                session.interrupt(reason)
+                await _send_wire_event(
+                    websocket,
+                    "response.cancelled",
+                    session,
+                    {"reason": reason},
+                )
             elif event_type == "session.close":
                 await _send_event(websocket, session.close(payload.get("reason")))
                 await websocket.close()

@@ -54,6 +54,12 @@ REALTIME_PROVIDER_ERROR_TAXONOMY: tuple[dict[str, Any], ...] = (
         "fatal": True,
     },
     {
+        "errorCategory": "protocol_desync",
+        "code": "REALTIME_TURN_DESYNC",
+        "retryable": False,
+        "fatal": True,
+    },
+    {
         "errorCategory": "provider_error",
         "code": "REALTIME_PROVIDER_ERROR",
         "retryable": False,
@@ -316,6 +322,7 @@ class RealtimePipelineSessionRunner:
         self._events_task: asyncio.Task[None] | None = None
         self._events_error: BaseException | None = None
         self._telemetry = _RealtimePipelineTelemetry()
+        self._discard_cancelled_response = False
         self._closed = True
 
     @property
@@ -343,7 +350,9 @@ class RealtimePipelineSessionRunner:
             **self._telemetry.to_summary(),
         }
         if self._config is not None:
-            runtime = normalize_realtime_runtime(self._config.runtime, provider=self._config.provider)
+            runtime = normalize_realtime_runtime(
+                self._config.runtime, provider=self._config.provider
+            )
             payload["provider"] = _safe_telemetry_text(self._config.provider)
             payload["runtime"] = _safe_telemetry_text(runtime)
             payload["realtimeRuntime"] = _safe_telemetry_text(runtime)
@@ -402,6 +411,7 @@ class RealtimePipelineSessionRunner:
         self._realtime_session_id = realtime_session_id or str(uuid4())
         self._events_error = None
         self._telemetry = _RealtimePipelineTelemetry()
+        self._discard_cancelled_response = False
         try:
             await self._adapter.start(context, config)
         except Exception as exc:
@@ -440,10 +450,20 @@ class RealtimePipelineSessionRunner:
         self._require_open()
         cancel = getattr(self._adapter, "cancel_response", None)
         if not callable(cancel):
-            return
-        maybe_awaitable = cancel(reason)
-        if isinstance(maybe_awaitable, Awaitable):
-            await maybe_awaitable
+            raise RealtimePipelineRunnerStateError(
+                "Realtime pipeline adapter does not support response interruption",
+                code="REALTIME_INTERRUPTION_UNSUPPORTED",
+                phase="response_cancel",
+                provider=self._config.provider if self._config is not None else None,
+            )
+        self._discard_cancelled_response = True
+        try:
+            maybe_awaitable = cancel(reason)
+            if isinstance(maybe_awaitable, Awaitable):
+                await maybe_awaitable
+        except BaseException:
+            self._discard_cancelled_response = False
+            raise
 
     def raise_if_failed(self) -> None:
         self._raise_events_error()
@@ -456,6 +476,7 @@ class RealtimePipelineSessionRunner:
             await self._adapter.close()
         finally:
             await self._stop_events_task()
+            self._discard_cancelled_response = False
 
     async def _pump_events(self) -> None:
         context = self._context
@@ -473,18 +494,35 @@ class RealtimePipelineSessionRunner:
                         provider=config.provider,
                     )
                     self._telemetry.record_event(payload, provider_error=provider_error)
-                    if not provider_error.fatal:
-                        await self._forward_event(
-                            _provider_error_event(
-                                provider_error,
-                                context=context,
-                                config=config,
-                                realtime_session_id=realtime_session_id,
-                            )
+                    await self._forward_event(
+                        _provider_error_event(
+                            provider_error,
+                            context=context,
+                            config=config,
+                            realtime_session_id=realtime_session_id,
                         )
-                        continue
-                    raise provider_error
+                    )
+                    if provider_error.fatal:
+                        self._events_error = provider_error
+                        logger.warning(
+                            "Realtime pipeline event pump failed",
+                            extra={
+                                "realtime_error": _event_pump_error_payload(
+                                    provider_error,
+                                    context=context,
+                                    config=config,
+                                    realtime_session_id=realtime_session_id,
+                                    telemetry=self._telemetry.to_summary(),
+                                )
+                            },
+                        )
+                        return
+                    continue
                 self._telemetry.record_event(payload)
+                if _is_interruption_event(payload):
+                    self._discard_cancelled_response = True
+                if self._discard_cancelled_response and _is_assistant_response_event(payload):
+                    continue
                 persisted = await self._persist_final_transcript(
                     payload,
                     context,
@@ -492,6 +530,8 @@ class RealtimePipelineSessionRunner:
                     realtime_session_id,
                 )
                 if persisted is not None:
+                    if persisted.transcript.role == "user":
+                        self._discard_cancelled_response = False
                     await self._forward_event(
                         _live_guidance_trigger_event(
                             persisted,
@@ -664,7 +704,20 @@ def _is_turn_completed_event(payload: Mapping[str, Any]) -> bool:
 
 def _is_interruption_event(payload: Mapping[str, Any]) -> bool:
     event_type = _event_type(payload)
-    return any(token in event_type for token in ("interrupt", "interrupted", "interruption"))
+    return any(token in event_type for token in ("interrupt", "interrupted", "interruption")) or (
+        event_type in {"response.cancelled", "response.cancel.done", "response.cancelled.done"}
+    )
+
+
+def _is_assistant_response_event(payload: Mapping[str, Any]) -> bool:
+    event_type = _event_type(payload)
+    if _is_interruption_event(payload):
+        return False
+    return (
+        event_type == "audio.output"
+        or event_type.startswith("response.")
+        or event_type.startswith("assistant_speaking.")
+    )
 
 
 def _is_silence_event(payload: Mapping[str, Any]) -> bool:
@@ -697,7 +750,9 @@ def _extract_event_timestamp_ms(payload: Mapping[str, Any]) -> float | None:
     )
     if milliseconds is not None:
         return milliseconds
-    seconds = _numeric_telemetry_value(payload, ("timestampSeconds", "timestamp_seconds", "timestamp"))
+    seconds = _numeric_telemetry_value(
+        payload, ("timestampSeconds", "timestamp_seconds", "timestamp")
+    )
     if seconds is None:
         return None
     return seconds * 1000
@@ -877,7 +932,9 @@ def _provider_error_code(payload: Mapping[str, object]) -> str:
     return "PIPECAT_PROVIDER_ERROR"
 
 
-def _iter_provider_error_mappings(payload: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+def _iter_provider_error_mappings(
+    payload: Mapping[str, object]
+) -> tuple[Mapping[str, object], ...]:
     items: list[Mapping[str, object]] = []
     seen: set[int] = set()
 
@@ -914,16 +971,16 @@ def _provider_error_source_code(payload: Mapping[str, object]) -> str | None:
 
 
 def _provider_error_public_code(category: str) -> str:
-    item = _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY[
-        "provider_error"
-    ]
+    item = (
+        _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY["provider_error"]
+    )
     return str(item["code"])
 
 
 def _provider_error_retryable(category: str) -> bool:
-    item = _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY[
-        "provider_error"
-    ]
+    item = (
+        _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY["provider_error"]
+    )
     return bool(item["retryable"])
 
 
@@ -935,9 +992,9 @@ def _provider_error_fatal(category: str, payload: Mapping[str, object]) -> bool:
                 return value
             if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
                 return value.strip().lower() == "true"
-    item = _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY[
-        "provider_error"
-    ]
+    item = (
+        _ERROR_TAXONOMY_BY_CATEGORY.get(category) or _ERROR_TAXONOMY_BY_CATEGORY["provider_error"]
+    )
     return bool(item["fatal"])
 
 
@@ -956,6 +1013,9 @@ def _provider_error_category(payload: Mapping[str, object]) -> str:
     message = _provider_error_message(payload).lower()
     haystack = " ".join(part for part in (source_code, message) if part)
 
+    if source_code == "realtime_turn_desync":
+        return "protocol_desync"
+
     if status_code in {401, 403} or any(
         token in haystack
         for token in (
@@ -972,17 +1032,21 @@ def _provider_error_category(payload: Mapping[str, object]) -> str:
         token in haystack for token in ("quota", "rate limit", "rate_limit", "too many")
     ):
         return "rate_limit"
-    if status_code in {408, 409} or status_code >= 500 or any(
-        token in haystack
-        for token in (
-            "connection",
-            "connect",
-            "disconnect",
-            "overload",
-            "overloaded",
-            "temporarily",
-            "timeout",
-            "unavailable",
+    if (
+        status_code in {408, 409}
+        or status_code >= 500
+        or any(
+            token in haystack
+            for token in (
+                "connection",
+                "connect",
+                "disconnect",
+                "overload",
+                "overloaded",
+                "temporarily",
+                "timeout",
+                "unavailable",
+            )
         )
     ):
         return "provider_unavailable"

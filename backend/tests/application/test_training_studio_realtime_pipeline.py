@@ -739,6 +739,31 @@ def test_build_realtime_transcript_maps_response_events_to_assistant_role():
     assert metadata["realtime"]["roomId"] == 7
 
 
+def test_build_realtime_transcript_reads_response_identity_from_frame_metadata():
+    transcript = build_realtime_transcript(
+        {
+            "type": "response.audio_transcript.done",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "text": "The new reply is complete.",
+            "metadata": {
+                "responseId": "reply-2",
+                "providerResponseId": "reply-2",
+                "providerQuestionId": "question-2",
+            },
+        },
+        binding=RealtimeSessionBinding(training_session_id="training-2", room_id=7),
+        provider="volcengine.doubao_realtime",
+        realtime_session_id="rt-2",
+    )
+
+    assert transcript is not None
+    assert transcript.response_id == "reply-2"
+    metadata = transcript_to_message_metadata(transcript)
+    assert metadata["realtime"]["responseId"] == "reply-2"
+    assert transcript.metadata["realtime"]["providerResponseId"] == "reply-2"
+    assert transcript.metadata["realtime"]["providerQuestionId"] == "question-2"
+
+
 def test_build_realtime_transcript_maps_pipecat_user_id_to_sender_metadata():
     transcript = build_realtime_transcript(
         {

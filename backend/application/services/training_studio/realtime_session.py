@@ -64,6 +64,7 @@ class RealtimeSession:
         },
         RealtimeSessionStatus.LISTENING: {
             RealtimeSessionStatus.PROCESSING,
+            RealtimeSessionStatus.SPEAKING,
             RealtimeSessionStatus.CLOSED,
             RealtimeSessionStatus.ERROR,
         },
@@ -101,7 +102,12 @@ class RealtimeSession:
         return self._record(RealtimeEventType.STATUS_CHANGED)
 
     def receive_audio(self, data: bytes, mime_type: str | None = None) -> RealtimeEvent:
-        if self.status not in {RealtimeSessionStatus.PREPARING, RealtimeSessionStatus.LISTENING}:
+        if self.status not in {
+            RealtimeSessionStatus.PREPARING,
+            RealtimeSessionStatus.LISTENING,
+            RealtimeSessionStatus.PROCESSING,
+            RealtimeSessionStatus.SPEAKING,
+        }:
             raise RealtimeSessionStateError(f"Cannot receive audio while {self.status.value}")
         if self.status == RealtimeSessionStatus.PREPARING:
             self._transition(RealtimeSessionStatus.LISTENING)
@@ -130,7 +136,10 @@ class RealtimeSession:
         return self._record(RealtimeEventType.TRANSCRIPT_DONE, {"text": text})
 
     def send_audio(self, data: bytes, mime_type: str | None = None) -> RealtimeEvent:
-        if self.status == RealtimeSessionStatus.PROCESSING:
+        if self.status in {
+            RealtimeSessionStatus.LISTENING,
+            RealtimeSessionStatus.PROCESSING,
+        }:
             self._transition(RealtimeSessionStatus.SPEAKING)
         elif self.status != RealtimeSessionStatus.SPEAKING:
             raise RealtimeSessionStateError(f"Cannot send audio while {self.status.value}")
@@ -142,6 +151,15 @@ class RealtimeSession:
                 "mime_type": mime_type,
                 "sequence": self.output_sequence,
             },
+        )
+
+    def interrupt(self, reason: str | None = None) -> RealtimeEvent:
+        """Return to listening while keeping the realtime call open."""
+
+        self._transition(RealtimeSessionStatus.LISTENING)
+        return self._record(
+            RealtimeEventType.STATUS_CHANGED,
+            {"interrupted": True, "reason": reason or "barge_in"},
         )
 
     def close(self, reason: str | None = None) -> RealtimeEvent:

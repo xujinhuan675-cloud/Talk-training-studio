@@ -72,7 +72,9 @@ def realtime_runtime_for_provider(provider: object | None) -> str:
         "doubao_realtime",
         "doubao.realtime",
     }:
-        return REALTIME_RUNTIME_VOLCENGINE_DOUBAO
+        # Doubao is a Pipecat provider; its transport adapter is provider-specific,
+        # while media frames, turn handling and lifecycle remain Pipecat-owned.
+        return REALTIME_RUNTIME_PIPECAT
     if normalized in {"", "local", "talkwise", "talkwise_local"}:
         return REALTIME_RUNTIME_TALKWISE_LOCAL
     return normalized
@@ -486,6 +488,11 @@ class RealtimePipelineAdapter(Protocol):
         ...
 
     async def commit_audio(self) -> None:
+        ...
+
+    async def cancel_response(self, reason: str | None = None) -> None:
+        """Interrupt the active assistant response without closing the call."""
+
         ...
 
     def events(self) -> AsyncIterator[Mapping[str, Any]]:

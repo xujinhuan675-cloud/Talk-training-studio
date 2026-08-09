@@ -38,13 +38,19 @@ def test_realtime_session_audio_flow_records_ordered_events():
     ]
 
 
-def test_realtime_session_rejects_output_before_processing():
+def test_realtime_session_allows_full_duplex_audio_and_interruption():
     session = RealtimeSession()
     session.start()
     session.listen()
 
-    with pytest.raises(RealtimeSessionStateError, match="Cannot send audio"):
-        session.send_audio(b"voice")
+    output = session.send_audio(b"voice")
+    input_during_output = session.receive_audio(b"barge-in")
+    interrupted = session.interrupt("barge_in")
+
+    assert output.status == RealtimeSessionStatus.SPEAKING
+    assert input_during_output.status == RealtimeSessionStatus.SPEAKING
+    assert interrupted.status == RealtimeSessionStatus.LISTENING
+    assert interrupted.payload == {"interrupted": True, "reason": "barge_in"}
 
 
 def test_realtime_session_fail_then_close():

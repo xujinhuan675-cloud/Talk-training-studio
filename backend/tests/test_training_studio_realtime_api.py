@@ -199,6 +199,7 @@ class _FakeRealtimePipelineAdapter:
         self.started_config: RealtimePipelineConfig | None = None
         self.audio_chunks: list[RealtimeAudioChunk] = []
         self.commits = 0
+        self.cancel_reasons: list[str | None] = []
         self.closed = False
         self.start_error: Exception | None = None
         self.events_on_commit: list[Mapping[str, Any]] = []
@@ -217,6 +218,9 @@ class _FakeRealtimePipelineAdapter:
         self.commits += 1
         for event in self.events_on_commit:
             await self._events.put(event)
+
+    async def cancel_response(self, reason: str | None = None) -> None:
+        self.cancel_reasons.append(reason)
 
     async def events(self) -> AsyncIterator[Mapping[str, Any]]:
         while True:
@@ -502,6 +506,32 @@ def test_realtime_capabilities_reports_available_pipecat_only(monkeypatch) -> No
     )
     assert adapter.calls["require_websocket"] is True
     assert adapter.calls["openai_api_key_available"] is True
+
+
+def test_doubao_realtime_factory_and_wire_metadata_use_pipecat(monkeypatch) -> None:
+    adapter = object()
+    factory_module = SimpleNamespace(create_pipecat_realtime_pipeline=lambda: adapter)
+    monkeypatch.setattr(
+        training_studio_routes,
+        "_load_pipecat_realtime_adapter",
+        lambda: factory_module,
+    )
+
+    pipeline = get_training_realtime_pipeline_factory()(
+        "volcengine.doubao_realtime",
+        None,
+    )
+    metadata = training_studio_routes._realtime_start_metadata(
+        "volcengine.doubao_realtime",
+        ("training-1", 7),
+        profile="native_duplex",
+        input_sample_rate=16000,
+    )
+
+    assert pipeline is adapter
+    assert metadata["provider"] == "volcengine.doubao_realtime"
+    assert metadata["realtimeRuntime"] == REALTIME_RUNTIME_PIPECAT
+    assert metadata["realtimeProfile"] == "speech_to_speech"
 
 
 def test_realtime_capabilities_reports_missing_pipecat_without_error(monkeypatch) -> None:
@@ -850,6 +880,32 @@ def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
     finally:
         room_event_bus.unsubscribe(42, queue)
     assert adapter.closed is True
+
+
+def test_realtime_websocket_acknowledges_response_cancellation_without_closing_call() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider, _route: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "response.cancel", "reason": "barge_in"})
+        cancelled = ws.receive_json()
+        ws.send_json({"type": "session.close", "reason": "done"})
+        closed = ws.receive_json()
+
+    assert adapter.cancel_reasons == ["barge_in"]
+    assert cancelled["type"] == "response.cancelled"
+    assert cancelled["status"] == "listening"
+    assert cancelled["payload"] == {"reason": "barge_in"}
+    assert closed["type"] == "session.closed"
 
 
 def test_realtime_websocket_rejects_client_transcript_events() -> None:

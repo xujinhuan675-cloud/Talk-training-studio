@@ -36,12 +36,13 @@ def wire_value(payload: dict[str, object], *keys: str) -> object | None:
         value = payload.get(key)
         if value is not None:
             return value
-    nested = payload.get("payload")
-    if isinstance(nested, dict):
-        for key in keys:
-            value = nested.get(key)
-            if value is not None:
-                return value
+    for container_key in ("payload", "metadata"):
+        nested = payload.get(container_key)
+        if isinstance(nested, dict):
+            for key in keys:
+                value = nested.get(key)
+                if value is not None:
+                    return value
     return None
 
 
@@ -335,6 +336,18 @@ def _metadata_from_event(
             "translation_intent",
             "translationStrategy",
             "translationMode",
+        ),
+        "providerResponseId": (
+            "providerResponseId",
+            "provider_response_id",
+            "reply_id",
+            "replyId",
+        ),
+        "providerQuestionId": (
+            "providerQuestionId",
+            "provider_question_id",
+            "question_id",
+            "questionId",
         ),
     }.items():
         value = _metadata_scalar(_metadata_value(payload, *input_keys))

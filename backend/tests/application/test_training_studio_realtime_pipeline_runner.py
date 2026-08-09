@@ -28,6 +28,7 @@ class FakeRealtimePipelineAdapter:
         self.started_config: RealtimePipelineConfig | None = None
         self.appended_chunks: list[RealtimeAudioChunk] = []
         self.commit_count = 0
+        self.cancel_reasons: list[str | None] = []
         self.close_count = 0
         self.start_error: Exception | None = None
         self._events: asyncio.Queue[Mapping[str, Any] | None] = asyncio.Queue()
@@ -43,6 +44,9 @@ class FakeRealtimePipelineAdapter:
 
     async def commit_audio(self) -> None:
         self.commit_count += 1
+
+    async def cancel_response(self, reason: str | None = None) -> None:
+        self.cancel_reasons.append(reason)
 
     async def events(self) -> AsyncIterator[Mapping[str, Any]]:
         while True:
@@ -259,6 +263,36 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
             "messageId": 1,
         }
     ]
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_interrupts_adapter_and_drops_cancelled_assistant_tail():
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, sink = await _started_runner(event_sink=event_sink)
+
+    await runner.cancel_response("barge_in")
+    await adapter.emit({"type": "response.cancelled", "reason": "barge_in"})
+    await adapter.emit({"type": "audio.output", "audio": "stale-audio"})
+    await adapter.emit({"type": "response.audio_transcript.done", "text": "stale assistant tail"})
+    await event_sink.wait_for_events()
+
+    assert adapter.cancel_reasons == ["barge_in"]
+    assert event_sink.events == [{"type": "response.cancelled", "reason": "barge_in"}]
+    assert sink.persisted == []
+
+    await adapter.emit({"type": "transcript.done", "text": "new user turn"})
+    await sink.wait_for_persisted()
+    await event_sink.wait_for_events(2)
+    await adapter.emit({"type": "audio.output", "audio": "new assistant audio"})
+    await event_sink.wait_for_events(3)
+
+    assert [transcript.text for transcript in sink.persisted] == ["new user turn"]
+    assert event_sink.events[-1] == {
+        "type": "audio.output",
+        "audio": "new assistant audio",
+    }
 
     await runner.close()
 
@@ -516,6 +550,21 @@ async def test_runner_rejects_audio_commands_after_close():
             "REALTIME_PROVIDER_BAD_REQUEST",
             "bad_request",
         ),
+        (
+            {
+                "type": "error",
+                "error": {
+                    "message": "Realtime response identity became ambiguous",
+                    "code": "REALTIME_TURN_DESYNC",
+                    "errorCategory": "protocol_desync",
+                    "retryable": False,
+                    "fatal": True,
+                },
+            },
+            "Realtime response identity became ambiguous",
+            "REALTIME_TURN_DESYNC",
+            "protocol_desync",
+        ),
     ],
 )
 @pytest.mark.asyncio
@@ -535,6 +584,9 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
             await asyncio.sleep(0)
 
     await asyncio.wait_for(_wait_for_error(), timeout=1)
+    await event_sink.wait_for_events()
+    assert event_sink.events[0]["type"] == "error"
+    assert event_sink.events[0]["fatal"] is True
 
     with pytest.raises(RealtimePipelineRunnerStateError, match=expected_message) as exc_info:
         await runner.commit_audio()
@@ -551,7 +603,9 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
         assert exc_info.value.metadata["metadata"]["requestId"] == "req-volc-1"
         assert exc_info.value.metadata["metadata"]["statusCode"] == 400
     await runner.close()
-    assert event_sink.events == []
+    assert len(event_sink.events) == 1
+    assert event_sink.events[0]["type"] == "error"
+    assert event_sink.events[0]["fatal"] is True
 
 
 @pytest.mark.asyncio
