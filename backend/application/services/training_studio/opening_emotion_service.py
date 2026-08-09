@@ -1,4 +1,4 @@
-"""Model-backed emotion analysis for scenario opening messages."""
+"""Model-backed emotion analysis for training counterpart messages."""
 
 from __future__ import annotations
 
@@ -12,10 +12,12 @@ from application.ports.llm import LLMMessage, LLMPort
 
 logger = logging.getLogger(__name__)
 
-_JSON_FENCE_RE = re.compile(r"\x60\x60\x60(?:json)?\s*(.*?)\s*\x60\x60\x60", re.IGNORECASE | re.DOTALL)
+_JSON_FENCE_RE = re.compile(
+    r"\x60\x60\x60(?:json)?\s*(.*?)\s*\x60\x60\x60", re.IGNORECASE | re.DOTALL
+)
 
-_OPENING_EMOTION_SYSTEM_PROMPT = """You analyze the current emotional stance of an AI counterpart in a communication training scenario.
-Use only the supplied opening line and context. Return JSON only in this shape:
+_TRAINING_MESSAGE_EMOTION_SYSTEM_PROMPT = """You analyze the current emotional stance of an AI counterpart in a communication training scenario.
+Use only the supplied counterpart utterance and context. Return JSON only in this shape:
 {"score": -5, "label": "short label"}
 
 The score is an integer from -5 to 5, where lower means more resistant and higher means more receptive.
@@ -29,23 +31,38 @@ async def analyze_training_opening_emotion(
     content: str,
     context: Mapping[str, Any] | None = None,
 ) -> tuple[int, str | None] | None:
-    """Ask the configured model to annotate a scenario opening line.
+    """Backward-compatible entry point for scenario opening annotation."""
 
-    Analysis is best-effort: opening persistence must remain available when the
+    return await analyze_training_message_emotion(
+        llm,
+        content=content,
+        context=context,
+    )
+
+
+async def analyze_training_message_emotion(
+    llm: LLMPort,
+    *,
+    content: str,
+    context: Mapping[str, Any] | None = None,
+) -> tuple[int, str | None] | None:
+    """Ask the configured model to annotate a counterpart utterance.
+
+    Analysis is best-effort: message persistence must remain available when the
     optional model client is unavailable or returns an invalid response.
     """
 
-    opening = content.strip()
-    if not opening:
+    utterance = content.strip()
+    if not utterance:
         return None
     payload = {
-        "opening_line": opening,
+        "counterpart_utterance": utterance,
         "context": dict(context or {}),
     }
     try:
         response = await llm.generate(
             [
-                LLMMessage(role="system", content=_OPENING_EMOTION_SYSTEM_PROMPT),
+                LLMMessage(role="system", content=_TRAINING_MESSAGE_EMOTION_SYSTEM_PROMPT),
                 LLMMessage(
                     role="user",
                     content=json.dumps(payload, ensure_ascii=False, default=str),
@@ -55,7 +72,7 @@ async def analyze_training_opening_emotion(
             max_tokens=120,
         )
     except Exception:
-        logger.exception("Training opening emotion analysis failed")
+        logger.exception("Training message emotion analysis failed")
         return None
     return parse_training_opening_emotion(response.content)
 

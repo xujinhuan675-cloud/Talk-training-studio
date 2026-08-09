@@ -143,6 +143,7 @@ from application.services.training_studio.voice_route_service import (
     TrainingVoiceRouteService,
     VoiceRouteConfigDTO,
     VoiceRouteDTO,
+    voice_route_catalog_readiness,
     voice_route_snapshot_from_metadata,
 )
 from application.services.training_studio.session_service import (
@@ -169,6 +170,7 @@ from application.services.training_studio.message_tree_completion_service import
 )
 from application.services.training_studio.message_presentation import emotion_metadata
 from application.services.training_studio.opening_emotion_service import (
+    analyze_training_message_emotion,
     analyze_training_opening_emotion,
 )
 from application.services.training_studio.training_audio_service import (
@@ -441,6 +443,7 @@ _TEXT_MESSAGE_TREE_OPT_IN_VALUES = {
 _TRAINING_OPENING_LOCKS: dict[str, asyncio.Lock] = {}
 _TRAINING_OPENING_ENRICHMENT_TASKS: set[asyncio.Task[None]] = set()
 _TRAINING_OPENING_ENRICHMENT_SESSIONS: set[str] = set()
+_REALTIME_EMOTION_ENRICHMENT_TASKS: set[asyncio.Task[None]] = set()
 
 
 @dataclass(frozen=True)
@@ -927,6 +930,31 @@ def _training_voice_style(metadata: Mapping[str, object]) -> str | None:
     return "; ".join(parts) or None
 
 
+def _training_opening_voice_id(
+    voice_route: VoiceRouteDTO | None,
+    session_metadata: Mapping[str, object],
+) -> str | None:
+    """Resolve an opening voice that stays compatible with its synthesis runtime."""
+
+    if voice_route is not None:
+        opening_service = voice_route.opening_tts or voice_route.tts
+        configured = str(opening_service.voice or "").strip() if opening_service else ""
+        if configured:
+            return configured
+
+    if voice_route is not None and voice_route.realtime is not None:
+        configured = str(voice_route.realtime.voice or "").strip()
+        if configured:
+            try:
+                return normalize_training_voice_id(configured)
+            except ValueError:
+                # Native realtime voice IDs are not generally valid for the
+                # separate opening TTS runtime.
+                pass
+
+    return normalize_training_voice_id(str(session_metadata.get("trainingVoiceId") or ""))
+
+
 def _training_runtime_persona_content(persona: TrainingRuntimePersonaDTO) -> str:
     style = _required_runtime_persona_text(persona.style, "style")
     scenario_context = _required_runtime_persona_text(
@@ -1232,8 +1260,9 @@ async def _enrich_training_opening_message(
         try:
             session_metadata = session.task_config.metadata or {}
             voice_route = voice_route_snapshot_from_metadata(session_metadata)
-            tts_service = voice_route.tts if voice_route is not None else None
-            preset_voice = str(tts_service.voice or "").strip() if tts_service is not None else ""
+            tts_service = (
+                voice_route.opening_tts or voice_route.tts if voice_route is not None else None
+            )
             audio_message = await audio_service.synthesize_and_attach(
                 int(target.message_id),
                 context=TrainingAudioContext(
@@ -1243,12 +1272,7 @@ async def _enrich_training_opening_message(
                     team_id=current_user.team_id,
                     can_manage_team=current_user.can_manage_team,
                     training_mode=mode,
-                    voice_id=(
-                        preset_voice
-                        or normalize_training_voice_id(
-                            str(session_metadata.get("trainingVoiceId") or "")
-                        )
-                    ),
+                    voice_id=_training_opening_voice_id(voice_route, session_metadata),
                     voice_speed=_training_voice_number(
                         session_metadata,
                         "trainingVoiceSpeed",
@@ -1309,37 +1333,18 @@ async def _persist_training_opening_emotion(
     if target.runtime == "stakeholder_room":
         if target.room_id is None:
             return
-        async with uow_factory() as uow:
-            message = await uow.stakeholder_message_repository.get_by_id(
-                int(target.message_id),
-                room_id=target.room_id,
-            )
-            if message is None or "trainingEmotion" in (message.metadata or {}):
-                return
-            metadata = dict(message.metadata or {})
-            metadata["trainingEmotion"] = emotion
-            updated = await uow.stakeholder_message_repository.update_metadata(
-                int(target.message_id),
-                room_id=target.room_id,
-                metadata=metadata,
-            )
-            update_emotion = getattr(
-                uow.stakeholder_message_repository,
-                "update_emotion",
-                None,
-            )
-            if updated is not None and callable(update_emotion):
-                updated = await update_emotion(
-                    int(target.message_id),
-                    room_id=target.room_id,
-                    emotion_score=score,
-                    emotion_label=label,
-                )
+        updated = await _persist_room_message_emotion(
+            room_id=target.room_id,
+            message_id=int(target.message_id),
+            score=score,
+            label=label,
+            uow_factory=uow_factory,
+        )
         if updated is not None:
             await room_event_bus.publish(
                 target.room_id,
                 "message",
-                MessageDTO.model_validate(updated).model_dump(mode="json"),
+                updated.model_dump(mode="json"),
             )
         return
 
@@ -1362,6 +1367,93 @@ async def _persist_training_opening_emotion(
         metadata["trainingEmotion"] = emotion
         message.metadata = metadata
         await uow.message_repository.update(message)
+
+
+async def _persist_room_message_emotion(
+    *,
+    room_id: int,
+    message_id: int,
+    score: int,
+    label: str | None,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+) -> MessageDTO | None:
+    emotion = emotion_metadata(score, label)
+    async with uow_factory() as uow:
+        message = await uow.stakeholder_message_repository.get_by_id(
+            message_id,
+            room_id=room_id,
+        )
+        if message is None or "trainingEmotion" in (message.metadata or {}):
+            return None
+        metadata = dict(message.metadata or {})
+        metadata["trainingEmotion"] = emotion
+        updated = await uow.stakeholder_message_repository.update_metadata(
+            message_id,
+            room_id=room_id,
+            metadata=metadata,
+        )
+        update_emotion = getattr(
+            uow.stakeholder_message_repository,
+            "update_emotion",
+            None,
+        )
+        if updated is not None and callable(update_emotion):
+            updated = await update_emotion(
+                message_id,
+                room_id=room_id,
+                emotion_score=score,
+                emotion_label=label,
+            )
+    return MessageDTO.model_validate(updated) if updated is not None else None
+
+
+def _schedule_realtime_message_emotion_enrichment(
+    *,
+    room_id: int,
+    message_id: int,
+    content: str,
+    runtime: str,
+    provider: str,
+    llm: LLMPort | None,
+    uow_factory: Callable[..., AbstractUnitOfWork],
+) -> None:
+    if llm is None or not content.strip():
+        return
+
+    async def run() -> None:
+        try:
+            analyzed = await analyze_training_message_emotion(
+                llm,
+                content=content,
+                context={"runtime": runtime, "provider": provider},
+            )
+            if analyzed is None:
+                return
+            score, label = analyzed
+            updated = await _persist_room_message_emotion(
+                room_id=room_id,
+                message_id=message_id,
+                score=score,
+                label=label,
+                uow_factory=uow_factory,
+            )
+            if updated is not None:
+                await _publish_realtime_room_message(room_id, updated)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Realtime message emotion enrichment failed for message %s in room %s",
+                message_id,
+                room_id,
+            )
+
+    task = asyncio.create_task(
+        run(),
+        name=f"realtime-message-emotion:{room_id}:{message_id}",
+    )
+    _REALTIME_EMOTION_ENRICHMENT_TASKS.add(task)
+    task.add_done_callback(_REALTIME_EMOTION_ENRICHMENT_TASKS.discard)
 
 
 def _requests_message_tree_runtime(body: StartTrainingSessionDTO) -> bool:
@@ -2885,6 +2977,21 @@ def _voice_route_snapshot_for_task(
             status_code=422,
             detail="Turn-based voice sessions require a cascade voice route",
         )
+    requested_interaction_mode = "realtime" if is_realtime else "turn_based"
+    if not route.supports_interaction_mode(requested_interaction_mode):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"The selected voice route does not support "
+                f"{requested_interaction_mode} sessions"
+            ),
+        )
+    readiness = voice_route_catalog_readiness(route)
+    if not readiness["ready"]:
+        raise HTTPException(
+            status_code=422,
+            detail=str(readiness.get("reason") or "The selected voice route is not ready"),
+        )
     snapshot = route.to_public_dict()
     metadata.update(
         {
@@ -3443,6 +3550,7 @@ class _WebSocketTrainingTranscriptSink:
         access_scope: TrainingSessionAccessScope,
         audio_service: TrainingAudioService | None,
         audio_context: TrainingAudioContext,
+        llm: LLMPort | None = None,
     ) -> None:
         self._websocket = websocket
         self._session = session
@@ -3450,6 +3558,8 @@ class _WebSocketTrainingTranscriptSink:
         self._room_id = room_id
         self._audio_service = audio_service
         self._audio_context = audio_context
+        self._llm = llm
+        self._uow_factory = uow_factory
         self._pending_audio: list[TrainingAudioSegment] = []
         self._sink = RealtimeTranscriptPersistenceSink(
             uow_factory=uow_factory,
@@ -3520,6 +3630,16 @@ class _WebSocketTrainingTranscriptSink:
             await _publish_realtime_room_message(
                 self._room_id,
                 MessageDTO.model_validate(dict(message_payload)),
+            )
+        if transcript.role == "assistant" and persisted.message_id:
+            _schedule_realtime_message_emotion_enrichment(
+                room_id=self._room_id,
+                message_id=int(persisted.message_id),
+                content=transcript.text,
+                runtime=transcript.runtime,
+                provider=transcript.provider,
+                llm=self._llm,
+                uow_factory=self._uow_factory,
             )
         payload.setdefault("trainingSessionId", self._training_session_id)
         payload.setdefault("roomId", self._room_id)
@@ -5012,7 +5132,12 @@ async def list_training_voice_routes(
     svc: TrainingVoiceRouteService = Depends(get_training_voice_route_service),
     _current_user: CurrentUser = Depends(get_current_user),
 ):
-    return success_response(data=[route.to_public_dict() for route in svc.list_published()])
+    return success_response(
+        data=[
+            route.to_public_dict(readiness=voice_route_catalog_readiness(route))
+            for route in svc.list_published()
+        ]
+    )
 
 
 @router.get("/voice-route-config", summary="Get platform realtime voice route configuration")
@@ -5020,8 +5145,20 @@ async def get_training_voice_route_config(
     svc: TrainingVoiceRouteService = Depends(get_training_voice_route_service),
     _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
+    config = svc.get_config()
     return success_response(
-        data=svc.get_config().model_dump(mode="json", by_alias=True, exclude_none=True)
+        data={
+            **config.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude={"routes"},
+                exclude_none=True,
+            ),
+            "routes": [
+                route.to_public_dict(readiness=voice_route_catalog_readiness(route))
+                for route in config.routes
+            ],
+        }
     )
 
 
@@ -5035,7 +5172,20 @@ async def save_training_voice_route_config(
         state = svc.save_config(body)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return success_response(data=state.model_dump(mode="json", by_alias=True, exclude_none=True))
+    return success_response(
+        data={
+            **state.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude={"routes"},
+                exclude_none=True,
+            ),
+            "routes": [
+                route.to_public_dict(readiness=voice_route_catalog_readiness(route))
+                for route in state.routes
+            ],
+        }
+    )
 
 
 @router.get("/scenario-templates", summary="Get scenario training templates")
@@ -5374,6 +5524,7 @@ async def realtime_training_session(
     current_user: CurrentUser = Depends(get_current_user),
     pipeline_factory: RealtimePipelineFactory = Depends(get_training_realtime_pipeline_factory),
     training_audio: TrainingAudioService | None = Depends(get_optional_training_audio_service),
+    llm: LLMPort | None = Depends(get_stakeholder_llm_client),
 ):
     """Minimal bidirectional realtime session endpoint for audio event wiring."""
 
@@ -5418,6 +5569,7 @@ async def realtime_training_session(
                 can_manage_team=current_user.can_manage_team,
                 training_mode="realtime_voice",
             ),
+            llm=llm,
         )
 
         async def _relay_pipeline_event(payload: Mapping[str, Any]) -> None:

@@ -178,6 +178,42 @@ class _FakeMessageRepository:
     async def count_by_room_id(self, room_id: int) -> int:
         return sum(1 for message in self._state.messages if message.room_id == room_id)
 
+    async def get_by_id(self, message_id: int, *, room_id: int | None = None) -> Message | None:
+        return next(
+            (
+                message
+                for message in self._state.messages
+                if message.id == message_id and (room_id is None or message.room_id == room_id)
+            ),
+            None,
+        )
+
+    async def update_metadata(
+        self,
+        message_id: int,
+        *,
+        room_id: int,
+        metadata: dict[str, object],
+    ) -> Message | None:
+        message = await self.get_by_id(message_id, room_id=room_id)
+        if message is not None:
+            message.metadata = metadata
+        return message
+
+    async def update_emotion(
+        self,
+        message_id: int,
+        *,
+        room_id: int,
+        emotion_score: int,
+        emotion_label: str | None,
+    ) -> Message | None:
+        message = await self.get_by_id(message_id, room_id=room_id)
+        if message is not None:
+            message.emotion_score = emotion_score
+            message.emotion_label = emotion_label
+        return message
+
 
 class _FakeUoW:
     def __init__(self, state: _RealtimeRoomState, *, readonly: bool = False) -> None:
@@ -1355,6 +1391,59 @@ def test_realtime_websocket_pipecat_provider_persists_provider_neutral_assistant
     assert state.messages[0].metadata["realtime"]["provider"] == "pipecat"
     assert state.messages[0].metadata["realtime"]["role"] == "assistant"
     assert state.messages[0].metadata["realtime"]["responseId"] == "response_pipecat_1"
+
+
+def test_realtime_assistant_turn_is_enriched_with_emotion() -> None:
+    class EmotionLLM:
+        async def generate(self, messages, **kwargs):
+            return SimpleNamespace(content='{"score": -3, "label": "skeptical"}')
+
+    async def run() -> _RealtimeRoomState:
+        state = _RealtimeRoomState(
+            rooms={
+                42: ChatRoom(
+                    id=42,
+                    name="Training Room",
+                    type="battle_prep",
+                    persona_ids=["customer-1"],
+                )
+            },
+            messages=[
+                Message(
+                    id=1,
+                    room_id=42,
+                    sender_type="persona",
+                    sender_id="assistant",
+                    content="That still does not address my risk.",
+                )
+            ],
+        )
+
+        def uow_factory(**kwargs) -> _FakeUoW:
+            return _FakeUoW(state, **kwargs)
+
+        training_studio_routes._schedule_realtime_message_emotion_enrichment(
+            room_id=42,
+            message_id=1,
+            content=state.messages[0].content,
+            runtime=REALTIME_RUNTIME_PIPECAT,
+            provider="pipecat",
+            llm=EmotionLLM(),
+            uow_factory=uow_factory,
+        )
+        tasks = tuple(training_studio_routes._REALTIME_EMOTION_ENRICHMENT_TASKS)
+        await asyncio.gather(*tasks)
+        return state
+
+    state = asyncio.run(run())
+    assert state.messages[0].emotion_score == -3
+    assert state.messages[0].emotion_label == "skeptical"
+    assert state.messages[0].metadata["trainingEmotion"] == {
+        "score": -3,
+        "label": "skeptical",
+        "source": "model",
+        "version": 1,
+    }
 
 
 def test_realtime_websocket_pipecat_provider_relays_audio_output_and_persists_final_transcript() -> (

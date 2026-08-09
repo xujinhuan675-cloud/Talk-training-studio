@@ -640,7 +640,13 @@ async def test_voice_routes_expose_published_platform_presets(client: AsyncClien
 
     assert response.status_code == 200
     routes = response.json()["data"]
-    assert any(route["id"] == "openai-cascade-standard" for route in routes)
+    by_id = {route["id"]: route for route in routes}
+    assert len(routes) == 12
+    assert by_id["openai-cascade-standard"]["readiness"]["ready"] is True
+    assert by_id["openai-llm-doubao-voice"]["interactionModes"] == ["turn_based"]
+    assert by_id["pipecat-soniox-openai-gradium"]["readiness"]["code"] == (
+        "VOICE_ROUTE_ADAPTER_NOT_INTEGRATED"
+    )
     assert all("apiKey" not in json.dumps(route) for route in routes)
 
 
@@ -890,7 +896,7 @@ async def test_training_session_create_list_and_get(client: AsyncClient) -> None
     assert metadata["source"] == "api-test"
     assert metadata["voiceRouteId"] == "openai-cascade-standard"
     assert metadata["voiceRouteMode"] == "cascade"
-    assert metadata["llmModel"] == "gpt-4.1-mini"
+    assert metadata["llmModel"] == "gpt-5.5"
     assert round(sum(created["task_config"]["question_type_ratios"].values()), 5) == 1
 
     list_resp = await client.get("/api/v1/training-studio/sessions")
@@ -900,6 +906,79 @@ async def test_training_session_create_list_and_get(client: AsyncClient) -> None
     get_resp = await client.get("/api/v1/training-studio/sessions/session-1")
     assert get_resp.status_code == 200
     assert get_resp.json()["data"]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interaction_mode", ["turn_based", "realtime"])
+async def test_voice_session_uses_shared_modality_for_supported_interactions(
+    client: AsyncClient,
+    interaction_mode: str,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "voice",
+            metadata={
+                "voiceRouteId": "openai-cascade-standard",
+                "interactionMode": interaction_mode,
+            },
+        ),
+    )
+
+    assert create_resp.status_code == 201
+    created = create_resp.json()["data"]
+    assert created["mode"] == "voice"
+    metadata = created["task_config"]["metadata"]
+    assert metadata["interactionMode"] == interaction_mode
+    assert metadata["voiceRouteId"] == "openai-cascade-standard"
+    assert metadata["voiceRoute"]["id"] == "openai-cascade-standard"
+    assert metadata["voiceRoute"]["interactionModes"] == ["turn_based", "realtime"]
+
+    get_resp = await client.get(
+        f"/api/v1/training-studio/sessions/{created['session_id']}"
+    )
+
+    assert get_resp.status_code == 200
+    persisted = get_resp.json()["data"]["task_config"]["metadata"]
+    assert persisted["interactionMode"] == interaction_mode
+    assert persisted["voiceRoute"] == metadata["voiceRoute"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route_id", "interaction_mode", "error_detail"),
+    [
+        (
+            "openai-realtime-standard",
+            "turn_based",
+            "Turn-based voice sessions require a cascade voice route",
+        ),
+        (
+            "openai-llm-doubao-voice",
+            "realtime",
+            "The selected voice route does not support realtime sessions",
+        ),
+    ],
+)
+async def test_voice_session_rejects_route_incompatible_with_interaction(
+    client: AsyncClient,
+    route_id: str,
+    interaction_mode: str,
+    error_detail: str,
+) -> None:
+    response = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "voice",
+            metadata={
+                "voiceRouteId": route_id,
+                "interactionMode": interaction_mode,
+            },
+        ),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["message"] == error_detail
 
 
 @pytest.mark.asyncio
