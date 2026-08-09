@@ -12,6 +12,42 @@ from application.services.training_studio.training_audio_service import (
 from domain.stakeholder.entity import Message
 
 
+_HISTORICAL_AUDIO_RESYNTHESIS_NOTICE = (
+    "历史音频已按当前语音配置重新合成并保存，不是此前播放的原始音频。"
+)
+
+
+def test_normalize_segment_uses_container_magic_over_declared_pcm() -> None:
+    ogg_audio = b"OggS\x00\x02" + b"\x00" * 22 + b"OpusHead"
+
+    normalized = TrainingAudioService._normalize_segment(
+        TrainingAudioSegment(
+            data=ogg_audio,
+            mime_type="audio/pcm",
+            sample_rate=24000,
+            channels=1,
+        )
+    )
+
+    assert normalized.mime_type == "audio/ogg"
+    assert normalized.data == ogg_audio
+
+
+def test_normalize_segment_wraps_actual_raw_pcm_as_wav() -> None:
+    normalized = TrainingAudioService._normalize_segment(
+        TrainingAudioSegment(
+            data=b"\x00\x00\x01\x00",
+            mime_type="audio/pcm",
+            sample_rate=24000,
+            channels=1,
+        )
+    )
+
+    assert normalized.mime_type == "audio/wav"
+    assert normalized.data.startswith(b"RIFF")
+    assert normalized.data[8:12] == b"WAVE"
+
+
 class _MessageRepository:
     def __init__(self, message: Message) -> None:
         self.message = message
@@ -285,6 +321,7 @@ async def test_historical_server_resynthesis_is_persisted_but_never_marked_origi
     assert pipeline.configs[0].tts_provider == "openai"
     assert pipeline.configs[0].tts_model == "gpt-4o-mini-tts"
     assert pipeline.texts == ["Historical opening"]
+    assert _HISTORICAL_AUDIO_RESYNTHESIS_NOTICE not in pipeline.texts
 
 
 @pytest.mark.asyncio

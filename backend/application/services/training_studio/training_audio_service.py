@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Callable
 
+from application.audio_format import is_pcm_audio_mime_type, sniff_audio_mime_type
 from application.ports.storage import StoragePort
 from application.ports.turn_based_voice import (
     TurnBasedVoicePipelinePort,
@@ -26,7 +27,6 @@ from domain.conversation.repository import OwnedMetadataScope
 logger = logging.getLogger(__name__)
 
 _AUDIO_METADATA_KEY = "aiAudio"
-_PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/pcm16", "audio/s16le"}
 _SUPPORTED_TRAINING_MODES = {"realtime", "realtime_voice", "video", "voice"}
 
 
@@ -260,9 +260,7 @@ class TrainingAudioService:
         configured_voice_id = (
             context.voice_id
             or str(
-                metadata.get("trainingVoiceId")
-                or metadata.get("training_voice_id")
-                or ""
+                metadata.get("trainingVoiceId") or metadata.get("training_voice_id") or ""
             ).strip()
         )
         segments: list[TrainingAudioSegment] = []
@@ -415,8 +413,8 @@ class TrainingAudioService:
 
     @staticmethod
     def _normalize_segment(segment: TrainingAudioSegment) -> TrainingAudioSegment:
-        mime_type = (segment.mime_type or "application/octet-stream").split(";", 1)[0].lower()
-        if mime_type not in _PCM_MIME_TYPES:
+        mime_type = sniff_audio_mime_type(segment.data, segment.mime_type)
+        if not is_pcm_audio_mime_type(mime_type):
             return TrainingAudioSegment(
                 data=segment.data,
                 mime_type=mime_type,
@@ -490,6 +488,7 @@ def _optional_int(value: object) -> int | None:
 
 
 def _audio_extension(mime_type: str) -> str:
+    mime_type = mime_type.split(";", 1)[0].strip().lower()
     return {
         "audio/mpeg": ".mp3",
         "audio/mp4": ".m4a",
