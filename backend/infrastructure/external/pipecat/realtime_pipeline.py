@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -95,6 +95,7 @@ OPENROUTER_BASE_URL_ENV_KEYS = (
     "LLM__BASE_URL",
 )
 PIPECAT_SUPPORTED_LLM_PROVIDERS = {"openai", OPENROUTER_LLM_PROVIDER}
+VOLCENGINE_DOUBAO_REALTIME_PROVIDER = "volcengine.doubao_realtime"
 PIPECAT_REALTIME_PROFILE_CASCADE = "cascade"
 PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH = "speech_to_speech"
 PIPECAT_REALTIME_PROFILE_ALIASES = {
@@ -428,6 +429,9 @@ class PipecatRuntime:
     TTSAudioRawFrame: type
     FrameProcessor: type
     FrameDirection: type
+    StartFrame: type | None = None
+    CancelFrame: type | None = None
+    ErrorFrame: type | None = None
     InterimTranscriptionFrame: type | None = None
     InterruptionFrame: type | None = None
     UserStartedSpeakingFrame: type | None = None
@@ -1485,6 +1489,9 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         InputAudioRawFrame=_required_pipecat_symbol(
             frames_module, "pipecat.frames.frames", "InputAudioRawFrame"
         ),
+        StartFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "StartFrame"),
+        CancelFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "CancelFrame"),
+        ErrorFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "ErrorFrame"),
         EndFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "EndFrame"),
         TextFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "TextFrame"),
         TranscriptionFrame=_required_pipecat_symbol(
@@ -1670,6 +1677,7 @@ class PipecatRealtimePipelineAdapter:
         self._transport_params = transport_params
         self._runtime = runtime
         self._handle: PipecatPipelineHandle | None = None
+        self._voice_processors: tuple[Any, ...] = ()
         self._context: TrainingVoiceContext | None = None
         self._config: RealtimePipelineConfig | None = None
         self._closed = False
@@ -1702,15 +1710,16 @@ class PipecatRealtimePipelineAdapter:
             self._context = context
             self._config = config
             self._closed = False
+            self._voice_processors = (
+                *build_pipecat_voice_processors(runtime, config, context=context),
+                *self._processors,
+            )
             self._handle = build_pipecat_pipeline_handle(
                 runtime=runtime,
                 context=context,
                 config=config,
                 websocket=self._websocket,
-                processors=(
-                    *build_pipecat_voice_processors(runtime, config, context=context),
-                    *self._processors,
-                ),
+                processors=self._voice_processors,
                 serializer=self._serializer,
                 transport_params=self._transport_params,
             )
@@ -1718,6 +1727,7 @@ class PipecatRealtimePipelineAdapter:
             self._handle.run_task = asyncio.create_task(
                 self._handle.runner.run(), name="talkwise-pipecat-realtime"
             )
+            await self._wait_for_voice_processors()
         except PipecatRealtimePipelineError:
             raise
         except Exception as exc:
@@ -1750,9 +1760,27 @@ class PipecatRealtimePipelineAdapter:
 
     async def commit_audio(self) -> None:
         self._require_open()
+        for processor in self._voice_processors:
+            commit = getattr(processor, "commit_audio", None)
+            if callable(commit):
+                maybe_awaitable = commit()
+                if isinstance(maybe_awaitable, Awaitable):
+                    await maybe_awaitable
         handle = self._handle
         if handle is not None and hasattr(handle.worker, "flush_pipeline"):
             await handle.worker.flush_pipeline()
+
+    async def cancel_response(self, reason: str | None = None) -> None:
+        """Use Pipecat's native interruption frame to flush active bot output."""
+
+        self._require_open()
+        assert self._handle is not None
+        runtime = self._runtime or import_pipecat_runtime(
+            require_websocket=self._websocket is not None
+        )
+        if runtime.InterruptionFrame is None:
+            raise RuntimeError("Pipecat interruption frames are unavailable")
+        await self._handle.worker.queue_frame(runtime.InterruptionFrame())
 
     async def events(self) -> AsyncIterator[Mapping[str, Any]]:
         self._require_started()
@@ -1793,6 +1821,15 @@ class PipecatRealtimePipelineAdapter:
         self._require_started()
         if self._closed:
             raise RuntimeError("Pipecat realtime pipeline is closed")
+
+    async def _wait_for_voice_processors(self) -> None:
+        for processor in self._voice_processors:
+            wait_until_ready = getattr(processor, "wait_until_ready", None)
+            if not callable(wait_until_ready):
+                continue
+            maybe_awaitable = wait_until_ready()
+            if isinstance(maybe_awaitable, Awaitable):
+                await maybe_awaitable
 
 
 def _pipecat_start_error(
@@ -2284,11 +2321,20 @@ def build_pipecat_speech_to_speech_processors(
     config: RealtimePipelineConfig,
     *,
     context: TrainingVoiceContext | None = None,
-) -> tuple[Any, Any, Any]:
-    """Build Pipecat's OpenAI realtime speech-to-speech processor chain."""
+) -> tuple[Any, ...]:
+    """Build a Pipecat speech-to-speech chain for the selected provider."""
 
     metadata = dict(config.metadata)
     realtime_config = _realtime_llm_config(metadata)
+    provider = _realtime_llm_provider(metadata)
+    if provider == VOLCENGINE_DOUBAO_REALTIME_PROVIDER:
+        from infrastructure.external.pipecat.volcengine_realtime_service import (
+            create_volcengine_realtime_service,
+        )
+
+        if context is None:
+            raise ValueError("Volcengine Doubao realtime requires a bound training context")
+        return (create_volcengine_realtime_service(runtime, context=context, config=config),)
     _ensure_realtime_llm_runtime_available(runtime)
 
     api_key = _openai_api_key(metadata) or _metadata_text(
@@ -2848,6 +2894,28 @@ def _event_from_pipecat_frame(
     config: RealtimePipelineConfig,
     audio_sequence: int | None = None,
 ) -> Mapping[str, Any] | None:
+    if _is_pipecat_frame(frame, runtime.ErrorFrame):
+        error_payload: dict[str, Any] = {
+            "message": redact_realtime_secret_text(str(getattr(frame, "error", "") or "")),
+            "fatal": bool(getattr(frame, "fatal", False)),
+        }
+        exception = getattr(frame, "exception", None)
+        to_realtime_error = getattr(exception, "to_realtime_error", None)
+        if callable(to_realtime_error):
+            details = sanitize_realtime_public_value(to_realtime_error())
+            if isinstance(details, Mapping):
+                error_payload.update(details)
+        event = {
+            "type": "error",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "provider": config.provider,
+            "source": "pipecat",
+            "error": error_payload,
+        }
+        frame_metadata = getattr(frame, "metadata", None)
+        if isinstance(frame_metadata, Mapping) and frame_metadata:
+            return _with_frame_metadata(event, frame, config=config)
+        return event
     if isinstance(frame, runtime.TTSAudioRawFrame):
         return _tts_audio_event_from_pipecat_frame(
             frame,
@@ -3097,7 +3165,7 @@ def _tts_audio_event_from_pipecat_frame(
 
     sequence = _frame_audio_sequence(frame, fallback=audio_sequence)
     context_id = _json_safe_metadata(getattr(frame, "context_id", None))
-    return RealtimeOutputAudio(
+    event = RealtimeOutputAudio(
         data=audio,
         provider=config.provider,
         runtime=REALTIME_RUNTIME_PIPECAT,
@@ -3108,6 +3176,7 @@ def _tts_audio_event_from_pipecat_frame(
         context_id=str(context_id) if context_id is not None else None,
         metadata=_frame_config_metadata(frame, config=config),
     ).to_event()
+    return _with_frame_metadata(event, frame, config=config)
 
 
 def _bytes_from_audio_frame(frame: Any) -> bytes | None:
@@ -3221,7 +3290,38 @@ def _with_frame_metadata(
     metadata = _frame_config_metadata(frame, config=config)
     if metadata:
         event["metadata"] = metadata
+        _promote_frame_contract_metadata(event, metadata)
     return event
+
+
+def _promote_frame_contract_metadata(
+    event: dict[str, Any],
+    metadata: Mapping[str, Any],
+) -> None:
+    payload = event.get("payload")
+    for key in ("responseId", "providerResponseId", "providerQuestionId"):
+        value = metadata.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        event.setdefault(key, value.strip())
+        if isinstance(payload, dict):
+            payload.setdefault(key, value.strip())
+
+    provider_error = metadata.get("providerError")
+    error = event.get("error")
+    if isinstance(provider_error, Mapping) and isinstance(error, dict):
+        for key in (
+            "code",
+            "sourceCode",
+            "errorCategory",
+            "retryable",
+            "fatal",
+            "statusCode",
+            "phase",
+        ):
+            value = provider_error.get(key)
+            if isinstance(value, str | int | float | bool):
+                error[key] = value
 
 
 def _frame_config_metadata(
@@ -4385,6 +4485,18 @@ def _validate_pipecat_speech_to_speech_config(config: RealtimePipelineConfig) ->
     metadata = dict(config.metadata)
     realtime_config = _realtime_llm_config(metadata)
     provider = _realtime_llm_provider(metadata)
+    if provider == VOLCENGINE_DOUBAO_REALTIME_PROVIDER:
+        for value in (
+            _metadata_text(realtime_config, "inputAudioFormat", "input_audio_format")
+            or config.input_audio_format
+            or _metadata_text(metadata, "inputAudioFormat", "input_audio_format"),
+            _metadata_text(realtime_config, "outputAudioFormat", "output_audio_format")
+            or config.output_audio_format
+            or _metadata_text(metadata, "outputAudioFormat", "output_audio_format"),
+        ):
+            if value is not None and _normalize_openai_realtime_audio_format_name(value) != "pcm":
+                raise ValueError("Volcengine Doubao realtime audio format must be pcm16")
+        return
     if provider != "openai":
         raise ValueError(f"Unsupported Pipecat realtimeLlm provider '{provider}'; expected openai")
 

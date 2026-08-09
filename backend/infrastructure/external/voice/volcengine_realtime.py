@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from application.audio_format import is_pcm_audio_mime_type, sniff_audio_mime_type
 from application.ports.realtime import (
     REALTIME_EVENT_SCHEMA_VERSION,
     REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
@@ -34,9 +35,7 @@ from infrastructure.external.newapi_user_gateway import (
 logger = logging.getLogger(__name__)
 
 VOLCENGINE_DOUBAO_REALTIME_PROVIDER = "volcengine.doubao_realtime"
-DEFAULT_VOLCENGINE_REALTIME_URL = (
-    "ws://127.0.0.1:3000/pg/realtime"
-)
+DEFAULT_VOLCENGINE_REALTIME_URL = "ws://127.0.0.1:3000/pg/realtime"
 DEFAULT_VOLCENGINE_REALTIME_MODEL = "1.2.1.1"
 DEFAULT_VOLCENGINE_REALTIME_VOICE = "zh_female_vv_uranus_bigtts"
 DEFAULT_INPUT_AUDIO_FORMAT = "pcm16"
@@ -55,6 +54,7 @@ _VOLCENGINE_REALTIME_PLACEHOLDER_VOICES = {
     "your-volcengine-realtime-voice",
 }
 _CLOSED = object()
+_REALTIME_EVENT_QUEUE_MAXSIZE = 256
 
 
 class VolcengineRealtimeError(RuntimeError):
@@ -125,7 +125,9 @@ class VolcengineDoubaoRealtimeAdapter:
         self._timeout = timeout
         self._websocket_connector = websocket_connector or _connect_volcengine_realtime_websocket
         self._request_id_factory = request_id_factory or (lambda: str(uuid.uuid4()))
-        self._events: asyncio.Queue[Mapping[str, Any] | object] = asyncio.Queue()
+        self._events: asyncio.Queue[Mapping[str, Any] | object] = asyncio.Queue(
+            maxsize=_REALTIME_EVENT_QUEUE_MAXSIZE
+        )
         self._context: TrainingVoiceContext | None = None
         self._config: RealtimePipelineConfig | None = None
         self._request_id: str | None = None
@@ -146,6 +148,9 @@ class VolcengineDoubaoRealtimeAdapter:
 
         self._context = context
         self._config = _volcengine_config(config)
+        # A closed adapter's sentinel must never poison a subsequent session.
+        # The queue remains bounded for the lifetime of each session.
+        self._events = asyncio.Queue(maxsize=_REALTIME_EVENT_QUEUE_MAXSIZE)
         self._request_id = self._request_id_factory()
         self._audio_sequence = 0
         self._closed = False
@@ -164,12 +169,13 @@ class VolcengineDoubaoRealtimeAdapter:
         url = normalize_volcengine_realtime_url(
             user_relay_realtime_url()
             if user_billing_enabled()
-            else _metadata_text(self._config.metadata, "baseUrl", "base_url")
-            or self._base_url
+            else _metadata_text(self._config.metadata, "baseUrl", "base_url") or self._base_url
         )
         model = _config_model(self._config, fallback=self._model)
         url = _realtime_url_with_model(url, model)
-        voice = _config_voice(self._config, fallback=self._voice) or DEFAULT_VOLCENGINE_REALTIME_VOICE
+        voice = (
+            _config_voice(self._config, fallback=self._voice) or DEFAULT_VOLCENGINE_REALTIME_VOICE
+        )
         headers = (
             authorization_headers(api_key)
             if user_billing_enabled()
@@ -196,31 +202,7 @@ class VolcengineDoubaoRealtimeAdapter:
                     voice=voice,
                 ),
             )
-            await self._queue_event(
-                _base_event(
-                    "session.ready",
-                    self._config,
-                    payload={
-                        "requestId": self._request_id,
-                        "providerSessionId": self._request_id,
-                        "transport": "websocket",
-                    },
-                    context=context,
-                )
-            )
-            await self._queue_event(
-                _base_event(
-                    "session.configured",
-                    self._config,
-                    payload={
-                        "requestId": self._request_id,
-                        "providerSessionId": self._request_id,
-                        "model": model,
-                        "voice": voice,
-                    },
-                    context=context,
-                )
-            )
+            await self._wait_for_start_confirmation(model=model, voice=voice)
             self._receive_task = asyncio.create_task(
                 self._receive_loop(),
                 name=f"volcengine-doubao-realtime-{self._request_id}",
@@ -270,7 +252,12 @@ class VolcengineDoubaoRealtimeAdapter:
 
     async def cancel_response(self, reason: str | None = None) -> None:
         self._require_open()
-        await self._send_provider_event(_VOLCENGINE_EVENT_RESPONSE_CANCEL, {})
+        # The gateway handles this as a local tail gate. It deliberately does
+        # not map to Dialogue v3 CancelSession, which would end the whole call.
+        await self._send_provider_event(
+            _VOLCENGINE_EVENT_RESPONSE_CANCEL,
+            {},
+        )
 
     async def handle_client_event(self, payload: Mapping[str, Any]) -> None:
         event_type = _event_type(payload)
@@ -356,15 +343,103 @@ class VolcengineDoubaoRealtimeAdapter:
                     config,
                     payload={"reason": reason or "client_closed"},
                     context=context,
-                )
+                ),
+                critical=True,
             )
-        await self._events.put(_CLOSED)
+        self._force_queue_event(_CLOSED)
 
     async def _send_provider_event(self, event_type: str, payload: Mapping[str, Any]) -> None:
         self._require_open()
         assert self._websocket is not None
         frame = encode_volcengine_realtime_event(event_type, payload, event_id=str(uuid.uuid4()))
         await self._websocket.send(frame)
+
+    async def _wait_for_start_confirmation(self, *, model: str, voice: str) -> None:
+        assert self._websocket is not None
+        config = self._require_config()
+        context = self._context
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._timeout
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise VolcengineRealtimeError(
+                    "Volcengine Doubao realtime session start was not confirmed",
+                    code="VOLCENGINE_REALTIME_START_TIMEOUT",
+                    phase="session_start",
+                    provider=config.provider,
+                    error_category="provider_unavailable",
+                    retryable=True,
+                )
+            try:
+                raw = await asyncio.wait_for(self._websocket.recv(), timeout=remaining)
+            except TimeoutError as exc:
+                raise VolcengineRealtimeError(
+                    "Volcengine Doubao realtime session start was not confirmed",
+                    code="VOLCENGINE_REALTIME_START_TIMEOUT",
+                    phase="session_start",
+                    provider=config.provider,
+                    error_category="provider_unavailable",
+                    retryable=True,
+                ) from exc
+
+            for provider_event in iter_volcengine_realtime_events(raw):
+                event_type = _event_type(provider_event)
+                mapped_events = map_volcengine_realtime_event(
+                    provider_event,
+                    config=config,
+                    context=context,
+                )
+                for event in mapped_events:
+                    if _event_type(event) == "error":
+                        payload = event.get("payload")
+                        details = payload if isinstance(payload, Mapping) else event
+                        raise VolcengineRealtimeError(
+                            _provider_error_message(details),
+                            code=str(details.get("code") or "REALTIME_PROVIDER_ERROR"),
+                            phase="session_start",
+                            provider=config.provider,
+                            error_category=str(details.get("errorCategory") or "provider_error"),
+                            retryable=bool(details.get("retryable")),
+                            fatal=bool(details.get("fatal", True)),
+                            source_code=_clean_text(details.get("sourceCode")),
+                            metadata=_event_metadata(provider_event, context=context),
+                        )
+
+                if event_type in {
+                    "configured",
+                    "session.configure.done",
+                    "session.started",
+                    "session.updated",
+                }:
+                    confirmation_payload = {
+                        **dict(provider_event),
+                        "requestId": self._request_id,
+                        "providerSessionId": self._request_id,
+                        "model": model,
+                        "voice": voice,
+                        "transport": "websocket",
+                    }
+                    await self._queue_event(
+                        _base_event(
+                            "session.ready",
+                            config,
+                            payload=confirmation_payload,
+                            context=context,
+                        )
+                    )
+                    await self._queue_event(
+                        _base_event(
+                            "session.configured",
+                            config,
+                            payload=confirmation_payload,
+                            context=context,
+                        )
+                    )
+                    return
+
+                for event in mapped_events:
+                    await self._queue_event(event)
 
     async def _receive_loop(self) -> None:
         assert self._websocket is not None
@@ -385,22 +460,61 @@ class VolcengineDoubaoRealtimeAdapter:
         except Exception as exc:
             if self._closed:
                 return
+            self._closed = True
             error = _provider_exception_event(exc, config=config, context=context)
-            await self._queue_event(error)
-            await self._queue_event(
+            self._replace_pending_events(
+                error,
                 _base_event(
                     "session.closed",
                     config,
                     payload={"reason": "provider_disconnected"},
                     context=context,
-                )
+                ),
+                _CLOSED,
             )
-            await self._events.put(_CLOSED)
 
-    async def _queue_event(self, event: Mapping[str, Any]) -> None:
+    async def _queue_event(self, event: Mapping[str, Any], *, critical: bool = False) -> None:
         safe_event = sanitize_realtime_public_value(dict(event))
-        if isinstance(safe_event, Mapping):
-            await self._events.put(dict(safe_event))
+        if not isinstance(safe_event, Mapping):
+            return
+        if critical:
+            self._force_queue_event(dict(safe_event))
+            return
+        await self._events.put(dict(safe_event))
+
+    def _force_queue_event(self, event: Mapping[str, Any] | object) -> None:
+        """Enqueue terminal/error events without deadlocking on a slow consumer.
+
+        Normal provider events retain bounded-queue backpressure. Terminal events
+        must still be observable when the queue is full, so evict the oldest
+        queued item to make room rather than waiting forever during shutdown.
+        """
+
+        while True:
+            try:
+                self._events.put_nowait(event)
+                return
+            except asyncio.QueueFull:
+                with suppress(asyncio.QueueEmpty):
+                    self._events.get_nowait()
+
+    def _replace_pending_events(self, *events: Mapping[str, Any] | object) -> None:
+        """Discard stale media so a fatal provider failure is observed first."""
+
+        while True:
+            try:
+                self._events.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        for event in events:
+            safe_event: Mapping[str, Any] | object = event
+            if isinstance(event, Mapping):
+                sanitized = sanitize_realtime_public_value(dict(event))
+                if not isinstance(sanitized, Mapping):
+                    continue
+                safe_event = dict(sanitized)
+            self._events.put_nowait(safe_event)
 
     async def _cleanup_after_start_failure(self) -> None:
         self._closed = True
@@ -419,8 +533,10 @@ class VolcengineDoubaoRealtimeAdapter:
 
     def _require_open(self) -> None:
         if self._closed or self._websocket is None:
-            provider = self._config.provider if self._config is not None else (
-                VOLCENGINE_DOUBAO_REALTIME_PROVIDER
+            provider = (
+                self._config.provider
+                if self._config is not None
+                else (VOLCENGINE_DOUBAO_REALTIME_PROVIDER)
             )
             raise VolcengineRealtimeError(
                 "Volcengine Doubao realtime session is not open",
@@ -446,7 +562,9 @@ def normalize_volcengine_realtime_url(base_url: str | None = None) -> str:
     if not raw_url.startswith(("ws://", "wss://", "http://", "https://")):
         raw_url = f"wss://{raw_url}"
     parsed = urlparse(raw_url)
-    scheme = "wss" if parsed.scheme == "https" else "ws" if parsed.scheme == "http" else parsed.scheme
+    scheme = (
+        "wss" if parsed.scheme == "https" else "ws" if parsed.scheme == "http" else parsed.scheme
+    )
     path = parsed.path if parsed.path and parsed.path != "/" else "/pg/realtime"
     return urlunparse(parsed._replace(scheme=scheme, path=path))
 
@@ -553,7 +671,9 @@ def encode_volcengine_realtime_event(
     return json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
 
 
-def parse_volcengine_realtime_frame(raw: bytes | bytearray | str | Mapping[str, Any]) -> dict[str, Any]:
+def parse_volcengine_realtime_frame(
+    raw: bytes | bytearray | str | Mapping[str, Any]
+) -> dict[str, Any]:
     if isinstance(raw, Mapping):
         return dict(raw)
     if isinstance(raw, bytes | bytearray):
@@ -633,18 +753,51 @@ def map_volcengine_realtime_event(
         audio = _extract_audio_bytes(provider_event)
         if not audio:
             return ()
+        declared_mime_type = _metadata_text(
+            provider_event,
+            "mimeType",
+            "mime_type",
+            "audioFormat",
+            "audio_format",
+        )
+        detected_mime_type = sniff_audio_mime_type(audio, declared_mime_type)
+        if _expects_pcm_output(config) and _is_non_pcm_audio(
+            detected_mime_type,
+            declared_mime_type=declared_mime_type,
+        ):
+            return (
+                _provider_audio_format_error_event(
+                    provider_event,
+                    config=config,
+                    context=context,
+                    declared_mime_type=declared_mime_type,
+                    detected_mime_type=detected_mime_type,
+                ),
+            )
         event = RealtimeOutputAudio(
             data=audio,
             provider=config.provider,
             runtime=REALTIME_RUNTIME_VOLCENGINE_DOUBAO,
-            mime_type=_metadata_text(provider_event, "mimeType", "mime_type", "audio_format")
-            or _audio_mime_type(config.output_audio_format),
+            mime_type=(
+                "audio/pcm"
+                if _expects_pcm_output(config) and detected_mime_type == "application/octet-stream"
+                else detected_mime_type
+            ),
             sequence=_metadata_int(provider_event, "sequence", "audioSequence", "audio_sequence"),
             sample_rate=_metadata_int(provider_event, "sampleRate", "sample_rate")
             or _metadata_int(config.metadata, "outputSampleRate")
             or DEFAULT_OUTPUT_SAMPLE_RATE,
             channels=_metadata_int(provider_event, "channels", "numChannels") or 1,
-            context_id=_metadata_text(provider_event, "responseId", "response_id", "itemId"),
+            context_id=_metadata_text(
+                provider_event,
+                "responseId",
+                "response_id",
+                "providerResponseId",
+                "provider_response_id",
+                "reply_id",
+                "replyId",
+                "itemId",
+            ),
             metadata=_event_metadata(provider_event, context=context),
         ).to_event()
         event["runtime"] = REALTIME_RUNTIME_VOLCENGINE_DOUBAO
@@ -722,7 +875,7 @@ def map_volcengine_realtime_event(
     if _is_interruption_ended_provider_event(event_type):
         return (
             _interruption_event(
-                "interrupted",
+                "interruption.ended",
                 "ended",
                 config,
                 provider_event=provider_event,
@@ -734,7 +887,9 @@ def map_volcengine_realtime_event(
     return ()
 
 
-def classify_volcengine_realtime_error(payload: Mapping[str, Any] | BaseException) -> dict[str, Any]:
+def classify_volcengine_realtime_error(
+    payload: Mapping[str, Any] | BaseException
+) -> dict[str, Any]:
     if isinstance(payload, BaseException):
         message = str(payload)
         source_code = payload.__class__.__name__
@@ -743,13 +898,20 @@ def classify_volcengine_realtime_error(payload: Mapping[str, Any] | BaseExceptio
         message = _provider_error_message(payload)
         source_code = _provider_error_code(payload)
         status_code = _provider_error_status_code(payload)
+    if str(source_code or "").strip().upper() == "REALTIME_TURN_DESYNC":
+        return _error_taxonomy(
+            "protocol_desync",
+            source_code="REALTIME_TURN_DESYNC",
+            status_code=status_code,
+        )
     haystack = f"{source_code} {message}".lower()
     if status_code in {401, 403} or any(
-        token in haystack
-        for token in ("api key", "api_key", "auth", "forbidden", "unauthorized")
+        token in haystack for token in ("api key", "api_key", "auth", "forbidden", "unauthorized")
     ):
         return _error_taxonomy("authentication", source_code=source_code, status_code=status_code)
-    if status_code == 429 or any(token in haystack for token in ("quota", "rate limit", "rate_limit")):
+    if status_code == 429 or any(
+        token in haystack for token in ("quota", "rate limit", "rate_limit")
+    ):
         return _error_taxonomy("rate_limit", source_code=source_code, status_code=status_code)
     if status_code >= 500 or any(
         token in haystack
@@ -821,13 +983,16 @@ def _volcengine_config(config: RealtimePipelineConfig) -> RealtimePipelineConfig
 
 
 def _config_api_key(config: RealtimePipelineConfig, *, fallback: str | None = None) -> str | None:
-    return _metadata_text(
-        config.metadata,
-        "apiKey",
-        "api_key",
-        "realtimeApiKey",
-        "realtime_api_key",
-    ) or fallback
+    return (
+        _metadata_text(
+            config.metadata,
+            "apiKey",
+            "api_key",
+            "realtimeApiKey",
+            "realtime_api_key",
+        )
+        or fallback
+    )
 
 
 def _config_model(
@@ -913,6 +1078,38 @@ def _normalized_audio_format(value: str | None) -> str:
     return (value or "").strip().lower().replace("-", "_").replace("/", "_")
 
 
+def _expects_pcm_output(config: RealtimePipelineConfig) -> bool:
+    return _is_pcm_audio_format_value(config.output_audio_format or DEFAULT_OUTPUT_AUDIO_FORMAT)
+
+
+def _is_non_pcm_audio(
+    detected_mime_type: str,
+    *,
+    declared_mime_type: str | None,
+) -> bool:
+    if _is_pcm_audio_format_value(detected_mime_type):
+        return False
+    if detected_mime_type == "application/octet-stream" and not declared_mime_type:
+        return False
+    return True
+
+
+def _is_pcm_audio_format_value(value: str | None) -> bool:
+    if is_pcm_audio_mime_type(value):
+        return True
+    return _normalized_audio_format(value) in {
+        "pcm",
+        "pcm16",
+        "pcm_s16le",
+        "s16le",
+        "l16",
+        "audio_pcm",
+        "audio_pcm16",
+        "audio_s16le",
+        "audio_l16",
+    }
+
+
 def _merge_public_mappings(
     base: Mapping[str, Any],
     updates: Mapping[str, Any],
@@ -985,7 +1182,15 @@ def _transcript_event(
     for output_key, input_keys in {
         "event_id": ("event_id", "eventId"),
         "item_id": ("item_id", "itemId", "item"),
-        "response_id": ("response_id", "responseId", "response"),
+        "response_id": (
+            "response_id",
+            "responseId",
+            "provider_response_id",
+            "providerResponseId",
+            "reply_id",
+            "replyId",
+            "response",
+        ),
         "language": ("language", "lang"),
         "confidence": ("confidence",),
         "sender_id": ("sender_id", "senderId", "user_id", "userId"),
@@ -1092,6 +1297,34 @@ def _provider_error_event(
     return _base_event("error", config, payload=payload, context=context)
 
 
+def _provider_audio_format_error_event(
+    provider_event: Mapping[str, Any],
+    *,
+    config: RealtimePipelineConfig,
+    context: TrainingVoiceContext | None,
+    declared_mime_type: str | None,
+    detected_mime_type: str,
+) -> dict[str, Any]:
+    """Return a structured error instead of exposing container audio as PCM."""
+
+    return _provider_error_event(
+        {
+            "type": "error",
+            "code": "VOLCENGINE_REALTIME_AUDIO_FORMAT_UNSUPPORTED",
+            "message": "Volcengine Doubao realtime returned non-PCM audio for a PCM contract",
+            "status": 400,
+            "metadata": {
+                "declaredMimeType": declared_mime_type,
+                "detectedMimeType": detected_mime_type,
+                "expectedAudioFormat": config.output_audio_format or "pcm16",
+                "sourceEventType": _event_type(provider_event),
+            },
+        },
+        config=config,
+        context=context,
+    )
+
+
 def _connection_error(exc: BaseException, *, provider: str) -> VolcengineRealtimeError:
     classified = classify_volcengine_realtime_error(exc)
     return VolcengineRealtimeError(
@@ -1118,6 +1351,7 @@ def _error_taxonomy(
         "rate_limit": ("REALTIME_PROVIDER_RATE_LIMIT", True, False),
         "provider_unavailable": ("REALTIME_PROVIDER_UNAVAILABLE", True, True),
         "bad_request": ("REALTIME_PROVIDER_BAD_REQUEST", False, True),
+        "protocol_desync": ("REALTIME_TURN_DESYNC", False, True),
         "provider_error": ("REALTIME_PROVIDER_ERROR", False, True),
     }
     code, retryable, fatal = mapping.get(category, mapping["provider_error"])
@@ -1137,7 +1371,6 @@ def _error_taxonomy(
 def _normalized_provider_event_type(event: Mapping[str, Any]) -> str:
     value = _event_type(event)
     aliases = {
-        "session.created": "session.ready",
         "session.started": "session.ready",
         "ready": "session.ready",
         "configured": "session.configured",
@@ -1150,10 +1383,13 @@ def _normalized_provider_event_type(event: Mapping[str, Any]) -> str:
         "user.turn.ended": "user.turn.stopped",
         "assistant.speaking.started": "assistant.speaking.started",
         "assistant.speaking.stopped": "assistant.speaking.stopped",
+        "response.audio.done": "assistant.speaking.stopped",
+        "response.done": "assistant.speaking.stopped",
         "response.interrupted": "interrupted",
         "interrupted": "interrupted",
         "response.cancelled": "interrupted",
         "response.cancel.done": "interruption.ended",
+        "audio.muted": "interrupted",
         "input.audio.buffer.committed": "input.audio.buffer.committed",
         "input.audio.transcription.delta": "transcript.delta",
         "input.audio.transcription.completed": "transcript.done",
@@ -1165,7 +1401,6 @@ def _normalized_provider_event_type(event: Mapping[str, Any]) -> str:
         "response.output.text.done": "response.audio_transcript.done",
         "response.output.audio.delta": "audio.output",
         "response.audio.delta": "audio.output",
-        "response.audio.done": "audio.output",
     }
     return aliases.get(value, value)
 
@@ -1229,9 +1464,11 @@ def _is_interruption_ended_provider_event(event_type: str) -> bool:
 
 
 def _is_error_provider_event(event_type: str, event: Mapping[str, Any]) -> bool:
-    return event_type in {"error", "realtime.error", "pipeline.error"} or event_type.endswith(
-        ".error"
-    ) or isinstance(event.get("error"), Mapping)
+    return (
+        event_type in {"error", "realtime.error", "pipeline.error"}
+        or event_type.endswith(".error")
+        or isinstance(event.get("error"), Mapping)
+    )
 
 
 def _extract_audio_bytes(event: Mapping[str, Any]) -> bytes:
@@ -1327,6 +1564,33 @@ def _event_metadata(
         value = event.get(key)
         if isinstance(value, str | int | float | bool):
             metadata[key] = value
+    for output_key, input_keys in {
+        "responseId": (
+            "response_id",
+            "responseId",
+            "provider_response_id",
+            "providerResponseId",
+            "reply_id",
+            "replyId",
+        ),
+        "providerResponseId": (
+            "provider_response_id",
+            "providerResponseId",
+            "reply_id",
+            "replyId",
+            "response_id",
+            "responseId",
+        ),
+        "providerQuestionId": (
+            "provider_question_id",
+            "providerQuestionId",
+            "question_id",
+            "questionId",
+        ),
+    }.items():
+        value = _metadata_text(event, *input_keys)
+        if value is not None:
+            metadata[output_key] = value
     if context is not None:
         metadata["talkwise"] = {
             "trainingSessionId": context.binding.training_session_id,

@@ -106,6 +106,17 @@ class FakeInterruptionFrame:
 
 
 @dataclass
+class FakeErrorFrame:
+    error: str
+    fatal: bool = False
+    exception: Exception | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+    id: int = 509
+    name: str = "FakeErrorFrame"
+    pts: int | None = None
+
+
+@dataclass
 class FakeUserStartedSpeakingFrame:
     metadata: dict[str, object] = field(default_factory=dict)
     id: int = 502
@@ -356,6 +367,7 @@ def fake_runtime(websocket=True):
         FrameDirection=FakeFrameDirection,
         InterimTranscriptionFrame=FakeInterimTranscriptionFrame,
         InterruptionFrame=FakeInterruptionFrame,
+        ErrorFrame=FakeErrorFrame,
         UserStartedSpeakingFrame=FakeUserStartedSpeakingFrame,
         UserStoppedSpeakingFrame=FakeUserStoppedSpeakingFrame,
         VADUserStartedSpeakingFrame=FakeVADUserStartedSpeakingFrame,
@@ -898,6 +910,44 @@ def test_factory_returns_none_when_optional_pipecat_dependency_is_missing(monkey
     assert pipecat_adapter.create_pipecat_realtime_pipeline() is None
 
 
+def test_speech_to_speech_builder_selects_volcengine_pipecat_service(monkeypatch):
+    from infrastructure.external.pipecat import volcengine_realtime_service
+
+    sentinel = object()
+    captured = {}
+
+    def create_service(runtime, *, context, config):
+        captured.update(runtime=runtime, context=context, config=config)
+        return sentinel
+
+    monkeypatch.setattr(
+        volcengine_realtime_service,
+        "create_volcengine_realtime_service",
+        create_service,
+    )
+    runtime = fake_runtime(websocket=False)
+    context = voice_context()
+    config = RealtimePipelineConfig(
+        provider="volcengine.doubao_realtime",
+        runtime=REALTIME_RUNTIME_PIPECAT,
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+        metadata={
+            "profile": "speech_to_speech",
+            "realtimeLlm": {"provider": "volcengine.doubao_realtime"},
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(
+        runtime,
+        config,
+        context=context,
+    )
+
+    assert processors == (sentinel,)
+    assert captured == {"runtime": runtime, "context": context, "config": config}
+
+
 @pytest.mark.asyncio
 async def test_adapter_queues_pipecat_audio_frames_instead_of_owning_media_lifecycle():
     adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(runtime=fake_runtime(websocket=False))
@@ -922,6 +972,47 @@ async def test_adapter_queues_pipecat_audio_frames_instead_of_owning_media_lifec
     assert frame.sample_rate == 16000
     assert frame.num_channels == 1
     assert adapter.handle.worker.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_adapter_queues_native_pipecat_interruption_frame():
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(runtime=fake_runtime(websocket=False))
+
+    await adapter.start(voice_context(), realtime_config())
+    await adapter.cancel_response("barge_in")
+
+    assert adapter.handle is not None
+    assert isinstance(adapter.handle.worker.queued_frames[-1], FakeInterruptionFrame)
+
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_waits_for_and_commits_provider_processor_lifecycle():
+    class ProviderProcessor:
+        def __init__(self):
+            self.ready_waits = 0
+            self.commits = 0
+
+        async def wait_until_ready(self):
+            self.ready_waits += 1
+
+        async def commit_audio(self):
+            self.commits += 1
+
+    processor = ProviderProcessor()
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(
+        runtime=fake_runtime(websocket=False),
+        processors=(processor,),
+    )
+
+    await adapter.start(voice_context(), realtime_config())
+    await adapter.commit_audio()
+
+    assert processor.ready_waits == 1
+    assert processor.commits == 1
+
+    await adapter.close()
 
 
 @pytest.mark.asyncio
@@ -1727,7 +1818,11 @@ async def test_talkwise_event_processor_preserves_assistant_frame_metadata():
         FakeLLMContextAssistantTurnFrame(
             text="assistant final turn",
             timestamp="2026-07-16T00:00:01Z",
-            metadata={"responseId": "response-pipecat-1"},
+            metadata={
+                "responseId": "response-pipecat-1",
+                "providerResponseId": "reply-1",
+                "providerQuestionId": "question-1",
+            },
         ),
         FakeFrameDirection.DOWNSTREAM,
     )
@@ -1736,8 +1831,70 @@ async def test_talkwise_event_processor_preserves_assistant_frame_metadata():
     assert event["type"] == "response.audio_transcript.done"
     assert event["runtime"] == REALTIME_RUNTIME_PIPECAT
     assert event["text"] == "assistant final turn"
+    assert event["responseId"] == "response-pipecat-1"
+    assert event["providerResponseId"] == "reply-1"
+    assert event["providerQuestionId"] == "question-1"
     assert event["metadata"]["responseId"] == "response-pipecat-1"
     assert event["metadata"]["pipecatFrame"]["frameName"] == "FakeLLMContextAssistantTurnFrame"
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_forwards_provider_error_frames():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=RealtimePipelineConfig(provider="volcengine.doubao_realtime"),
+    )
+
+    await processor.process_frame(
+        FakeErrorFrame(error="provider disconnected", fatal=True),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+    assert event == {
+        "type": "error",
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "provider": "volcengine.doubao_realtime",
+        "source": "pipecat",
+        "error": {"message": "provider disconnected", "fatal": True},
+    }
+
+
+@pytest.mark.asyncio
+async def test_talkwise_event_processor_preserves_turn_desync_error_contract():
+    runtime = fake_runtime(websocket=False)
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_event_processor(
+        runtime,
+        queue,
+        config=RealtimePipelineConfig(provider="volcengine.doubao_realtime"),
+    )
+
+    await processor.process_frame(
+        FakeErrorFrame(
+            error="Realtime response identity became ambiguous",
+            fatal=True,
+            metadata={
+                "providerError": {
+                    "code": "REALTIME_TURN_DESYNC",
+                    "sourceCode": "REALTIME_TURN_DESYNC",
+                    "errorCategory": "protocol_desync",
+                    "retryable": False,
+                    "fatal": True,
+                }
+            },
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+
+    event = await queue.get()
+    assert event["error"]["code"] == "REALTIME_TURN_DESYNC"
+    assert event["error"]["errorCategory"] == "protocol_desync"
+    assert event["error"]["retryable"] is False
+    assert event["error"]["fatal"] is True
 
 
 @pytest.mark.asyncio
@@ -1848,7 +2005,13 @@ async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_eve
             num_channels=1,
             context_id="tts-context-1",
             pts=1234,
-            metadata={"voice": "alloy", "unsafe": object()},
+            metadata={
+                "voice": "alloy",
+                "responseId": "reply-2",
+                "providerResponseId": "reply-2",
+                "providerQuestionId": "question-2",
+                "unsafe": object(),
+            },
         ),
         FakeFrameDirection.DOWNSTREAM,
     )
@@ -1864,6 +2027,9 @@ async def test_talkwise_event_processor_maps_tts_audio_frame_to_audio_output_eve
     assert event["sampleRate"] == 24000
     assert event["channels"] == 1
     assert event["sequence"] == 1
+    assert event["responseId"] == "reply-2"
+    assert event["providerResponseId"] == "reply-2"
+    assert event["providerQuestionId"] == "question-2"
     assert event["bytes"] == len(audio)
     assert event["contextId"] == "tts-context-1"
     assert payload["audio"] == encoded
