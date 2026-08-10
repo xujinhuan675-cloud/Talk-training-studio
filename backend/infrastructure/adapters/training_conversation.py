@@ -277,12 +277,51 @@ class StakeholderRoomTrainingConversationAdapter:
 
 def _training_system_prompt(session: TrainingSession) -> str | None:
     base = _metadata_text(session, "system_prompt", "instructions")
+    if not base:
+        base = _scenario_training_system_prompt(session)
     instruction = training_reply_instruction()
     if not base:
         return instruction.strip()
     if instruction.strip() in base:
         return base
     return f"{base.rstrip()}\n{instruction}"
+
+
+def _scenario_training_system_prompt(session: TrainingSession) -> str | None:
+    """Add scenario-specific behavior without changing generic conversations."""
+    metadata = dict(session.task_config.metadata or {})
+    scenario = metadata.get("scenario_training")
+    if not isinstance(scenario, Mapping):
+        return None
+    scenario_id = _optional_metadata_text(scenario, "id")
+    if scenario_id != "daily-spoken-clarity":
+        return None
+
+    persona = scenario.get("persona")
+    persona = persona if isinstance(persona, Mapping) else {}
+    persona_name = _optional_metadata_text(persona, "name") or "日常聊天对象"
+    persona_role = _optional_metadata_text(persona, "role") or "自然聊天的同事或朋友"
+    persona_style = _optional_metadata_text(persona, "style")
+    description = _optional_metadata_text(scenario, "description")
+    opening_line = _optional_metadata_text(scenario, "opening_line") or _optional_metadata_text(
+        scenario,
+        "openingLine",
+    )
+
+    lines = [
+        "你是“日常口语表达清晰度”训练中的自然聊天对象，但不要告诉用户正在训练。",
+        f"你的身份：{persona_name}；关系：{persona_role}。",
+        "请从工作进展、生活安排、兴趣爱好、近期计划和观点分歧等方向随机选择几个话题，"
+        "每个话题自然追问两三轮后再换题，让对话像真实聊天一样继续。",
+        "不要在聊天中点评、纠正或替用户整理表达；只做自然回应和具体追问，复盘在对话结束后进行。",
+    ]
+    if description:
+        lines.append(f"场景背景：{description}")
+    if persona_style:
+        lines.append(f"角色风格：{persona_style}")
+    if opening_line:
+        lines.append(f"开场可以参考：{opening_line}")
+    return "\n".join(lines)
 
 
 def _conversation_ref_for_room(room: ChatRoom, *, session: TrainingSession) -> ConversationRef:

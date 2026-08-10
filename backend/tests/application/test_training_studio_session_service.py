@@ -69,6 +69,148 @@ async def test_session_service_create_start_complete_with_room_creator():
     assert await service.list_sessions(access_scope=_scope()) == [completed]
 
 
+def scenario_training_payload(*, profile: str = "standard") -> dict:
+    return {
+        **make_payload(),
+        "metadata": {
+            "source": "scenario_training",
+            "trainingPlan": {"length": {"profile": profile}},
+            "scenario_training": {
+                "training_points": ["conclusion", "facts"],
+                "dimension_weights": [
+                    {"dimensionId": "structure", "weight": 1},
+                ],
+            },
+        },
+    }
+
+
+async def test_session_service_records_one_finalized_learner_turn_and_progress():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(scenario_training_payload())
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+
+    updated = await service.record_finalized_learner_turn(
+        session.session_id,
+        access_scope=_scope(),
+    )
+
+    assert updated.message_count == 1
+    assert updated.task_config.metadata["trainingProgress"] == {
+        "state": "in_progress",
+        "learnerTurnCount": 1,
+        "minimumTurns": 5,
+        "targetTurns": 9,
+        "hardCapTurns": 12,
+        "objectives": {
+            "coveredCount": 0,
+            "totalCount": 3,
+            "coveredTrainingPoints": [],
+            "requiredTrainingPoints": ["conclusion", "facts"],
+            "coveredRubric": [],
+            "requiredRubric": ["structure"],
+        },
+        "evidence": {
+            "sufficient": None,
+            "coverageRatio": 0.0,
+            "evidenceCount": 0,
+        },
+        "canFinish": False,
+        "shouldFinish": False,
+        "reasonCodes": ["minimum_turns_not_reached"],
+    }
+
+
+async def test_session_service_keeps_record_turns_backward_compatible():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(scenario_training_payload())
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+
+    updated = await service.record_turns(
+        session.session_id,
+        count=3,
+        access_scope=_scope(),
+    )
+
+    assert updated.message_count == 3
+    assert updated.task_config.metadata["trainingProgress"]["state"] == "in_progress"
+    assert updated.task_config.metadata["trainingProgress"]["learnerTurnCount"] == 0
+
+
+async def test_session_service_reaches_target_without_external_evidence():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(scenario_training_payload())
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+
+    for _ in range(9):
+        session = await service.record_finalized_learner_turn(
+            session.session_id,
+            access_scope=_scope(),
+        )
+
+    progress = session.task_config.metadata["trainingProgress"]
+    assert progress["state"] == "ready_to_finish"
+    assert progress["learnerTurnCount"] == 9
+    assert progress["evidence"]["sufficient"] is None
+
+
+async def test_session_service_guards_and_records_the_hard_cap_once():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(scenario_training_payload(profile="quick"))
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+
+    for _ in range(8):
+        session = await service.record_finalized_learner_turn(
+            session.session_id,
+            evidence={},
+            access_scope=_scope(),
+        )
+
+    progress = session.task_config.metadata["trainingProgress"]
+    assert progress["learnerTurnCount"] == 8
+    assert progress["state"] == "hard_limit_reached"
+    assert session.message_count == 8
+
+    with pytest.raises(ValueError, match="hard limit"):
+        await service.guard_before_finalized_learner_turn(
+            session.session_id,
+            access_scope=_scope(),
+        )
+    with pytest.raises(ValueError, match="hard limit"):
+        await service.record_finalized_learner_turn(
+            session.session_id,
+            access_scope=_scope(),
+        )
+    assert session.message_count == 8
+
+
+async def test_session_service_marks_progress_completed_on_completion():
+    service = TrainingSessionService(id_factory=lambda: "session-1")
+    session = await service.create_session(scenario_training_payload())
+    await service.start_session(session.session_id, room_id="42", access_scope=_scope())
+    await service.record_finalized_learner_turn(
+        session.session_id,
+        access_scope=_scope(),
+    )
+
+    completed = await service.complete_session(
+        session.session_id,
+        access_scope=_scope(),
+    )
+
+    progress = completed.task_config.metadata["trainingProgress"]
+    assert progress["state"] == "completed"
+    assert progress["learnerTurnCount"] == 1
+    assert progress["canFinish"] is False
+    assert progress["shouldFinish"] is False
+    assert progress["reasonCodes"] == ["session_completed"]
+    with pytest.raises(ValueError, match="completed"):
+        await service.guard_before_finalized_learner_turn(
+            session.session_id,
+            access_scope=_scope(),
+        )
+
+
 async def test_session_service_fork_resets_lifecycle_and_runtime_owned_metadata():
     session_ids = iter(["session-source", "session-fork"])
     service = TrainingSessionService(id_factory=lambda: next(session_ids))
@@ -83,6 +225,7 @@ async def test_session_service_fork_resets_lifecycle_and_runtime_owned_metadata(
                 "ownerUserId": "forged-owner",
                 "trainingSessionId": "stale-session",
                 "selectedPath": {"tailMessageId": "msg-old"},
+                "trainingProgress": {"state": "ready_to_finish"},
                 "liveGuidanceHistory": [{"snapshotId": "guidance-old"}],
                 "liveGuidancePersistence": {"status": "ready"},
             },
@@ -126,6 +269,7 @@ async def test_session_service_fork_resets_lifecycle_and_runtime_owned_metadata(
         "ownerUserId",
         "trainingSessionId",
         "selectedPath",
+        "trainingProgress",
         "messageTreeSelection",
         "completionReport",
         "score",
@@ -1161,6 +1305,16 @@ async def test_session_service_requires_explicit_access_scope_for_reads_and_muta
         await service.fail_session(session.session_id, "blocked", access_scope=None)
     with pytest.raises(DomainValidationException):
         await service.record_turns(session.session_id, access_scope=None)
+    with pytest.raises(DomainValidationException):
+        await service.guard_before_finalized_learner_turn(
+            session.session_id,
+            access_scope=None,
+        )
+    with pytest.raises(DomainValidationException):
+        await service.record_finalized_learner_turn(
+            session.session_id,
+            access_scope=None,
+        )
     with pytest.raises(DomainValidationException):
         await service.delete_session(session.session_id, access_scope=None)
 

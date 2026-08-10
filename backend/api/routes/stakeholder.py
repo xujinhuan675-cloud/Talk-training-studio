@@ -99,6 +99,7 @@ from application.services.training_studio.training_audio_service import (
 from application.ports.turn_based_voice import TurnBasedVoicePipelinePort
 from application.ports.tts import TRAINING_VOICE_CATALOG, normalize_training_voice_id
 from core.response import success_response
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 from infrastructure.adapters.training_conversation import ConversationTrainingConversationAdapter
 from infrastructure.unit_of_work import SQLAlchemyUnitOfWork
 
@@ -126,9 +127,9 @@ def _stakeholder_room_scope_for_current_user(
     )
 
 
-def _training_session_access_scope_for_current_user(current_user: CurrentUser):
-    from domain.training_studio.session_repository import TrainingSessionAccessScope
-
+def _training_session_access_scope_for_current_user(
+    current_user: CurrentUser,
+) -> TrainingSessionAccessScope:
     return TrainingSessionAccessScope(
         user_id=current_user.user_id,
         team_id=current_user.team_id,
@@ -997,8 +998,25 @@ async def _ensure_room_accepts_user_message(
     room_id: int,
     chatroom_svc: ChatRoomApplicationService,
     access_scope: StakeholderRoomAccessScope,
+    *,
+    training_session_svc: TrainingSessionService | None = None,
+    training_access_scope: TrainingSessionAccessScope | None = None,
 ) -> None:
-    """Keep text and voice sends on the same battle-prep turn limit."""
+    """Apply shared scenario and legacy battle-prep input guards."""
+    training_session_id = access_scope.guarded_by_training_session_id
+    if (
+        training_session_id
+        and training_session_svc is not None
+        and training_access_scope is not None
+    ):
+        try:
+            await training_session_svc.guard_before_finalized_learner_turn(
+                training_session_id,
+                access_scope=training_access_scope,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     detail = await chatroom_svc.get_room_detail(
         room_id,
         message_limit=200,
@@ -1037,6 +1055,8 @@ async def send_message(
         room_id,
         chatroom_svc,
         access_scope,
+        training_session_svc=training_session_svc,
+        training_access_scope=_training_session_access_scope_for_current_user(current_user),
     )
     session_metadata = await _training_session_metadata_for_request(
         training_session_id=training_session_id,
@@ -1052,6 +1072,17 @@ async def send_message(
     msg = result.message
     room = result.room
     if result.created:
+        if training_session_id:
+            try:
+                await training_session_svc.record_finalized_learner_turn(
+                    training_session_id,
+                    access_scope=_training_session_access_scope_for_current_user(current_user),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to record learner progress for training session %s",
+                    training_session_id,
+                )
         background_tasks.add_task(
             _generate_replies_with_optional_audio,
             svc,
@@ -1457,6 +1488,10 @@ async def voice_ws(
                         room_id,
                         chatroom_svc,
                         access_scope,
+                        training_session_svc=training_session_svc,
+                        training_access_scope=(
+                            _training_session_access_scope_for_current_user(current_user)
+                        ),
                     )
                 except HTTPException as exc:
                     if not await send_voice_json({"type": "error", "message": str(exc.detail)}):
@@ -1508,6 +1543,21 @@ async def voice_ws(
                             text,
                             **send_kwargs,
                         )
+                        if training_session_id:
+                            try:
+                                await training_session_svc.record_finalized_learner_turn(
+                                    training_session_id,
+                                    access_scope=(
+                                        _training_session_access_scope_for_current_user(
+                                            current_user
+                                        )
+                                    ),
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Failed to record voice learner progress for session %s",
+                                    training_session_id,
+                                )
                         # Generate replies in background (TTS audio will come via SSE)
                         asyncio.create_task(
                             _generate_replies_with_optional_audio(

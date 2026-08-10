@@ -34,6 +34,9 @@ from domain.training_studio.session_repository import (
     training_session_matches_access_scope,
 )
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
+from application.services.training_studio.training_progress_service import (
+    evaluate_training_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,7 @@ _FORK_RESET_TASK_METADATA_TOKENS = {
     "trainingcompletedat",
     "trainingcompletion",
     "trainingcompletionstatus",
+    "trainingprogress",
     "trainingsessionid",
     "userid",
 }
@@ -358,6 +362,10 @@ class TrainingSessionService:
                 raise ValueError("room_creator is required when room_id is not provided")
             resolved_room_id = self._room_creator(session)
         _merge_task_config_metadata(session, metadata)
+        _persist_training_progress(
+            session,
+            _evaluate_session_training_progress(session),
+        )
         session.start(resolved_room_id)
         return await self._save(session)
 
@@ -391,6 +399,8 @@ class TrainingSessionService:
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
         _merge_task_config_metadata(session, metadata)
+        progress = _evaluate_session_training_progress(session, completed=True)
+        _persist_training_progress(session, progress)
         session.complete(report_id=report_id, score_id=score_id)
         return await self._save(session)
 
@@ -446,6 +456,73 @@ class TrainingSessionService:
     ) -> TrainingSession:
         session = await self._require_session(session_id, access_scope=access_scope)
         session.record_turn(count)
+        return await self._save(session)
+
+    async def guard_before_finalized_learner_turn(
+        self,
+        session_id: str,
+        *,
+        evidence: Mapping[str, object] | None = None,
+        user_requested_finish: bool = False,
+        access_scope: TrainingSessionAccessScope,
+    ) -> dict[str, object] | None:
+        """Reject a new finalized learner turn once the shared limit is closed."""
+
+        session = await self._require_session(session_id, access_scope=access_scope)
+        _require_active_for_finalized_learner_turn(session)
+        progress = _evaluate_session_training_progress(
+            session,
+            evidence=evidence,
+            user_requested_finish=user_requested_finish,
+        )
+        _raise_if_training_input_locked(progress)
+        return progress
+
+    async def guard_finalized_learner_turn(
+        self,
+        session_id: str,
+        *,
+        evidence: Mapping[str, object] | None = None,
+        user_requested_finish: bool = False,
+        access_scope: TrainingSessionAccessScope,
+    ) -> dict[str, object] | None:
+        """Backward-compatible short name for the finalized-turn guard."""
+
+        return await self.guard_before_finalized_learner_turn(
+            session_id,
+            evidence=evidence,
+            user_requested_finish=user_requested_finish,
+            access_scope=access_scope,
+        )
+
+    async def record_finalized_learner_turn(
+        self,
+        session_id: str,
+        *,
+        evidence: Mapping[str, object] | None = None,
+        user_requested_finish: bool = False,
+        access_scope: TrainingSessionAccessScope,
+    ) -> TrainingSession:
+        """Record one finalized learner turn and persist its progress snapshot."""
+
+        session = await self._require_session(session_id, access_scope=access_scope)
+        _require_active_for_finalized_learner_turn(session)
+        current = _evaluate_session_training_progress(
+            session,
+            evidence=evidence,
+            user_requested_finish=user_requested_finish,
+        )
+        _raise_if_training_input_locked(current)
+
+        session.record_turn()
+        if current is not None:
+            progress = evaluate_training_progress(
+                session.task_config.metadata,
+                finalized_learner_turns=_progress_learner_turn_count(current) + 1,
+                evidence=_resolved_training_evidence(session, evidence),
+                user_requested_finish=user_requested_finish,
+            )
+            _persist_training_progress(session, progress)
         return await self._save(session)
 
     async def get_session(
@@ -1122,6 +1199,113 @@ def _merge_task_config_metadata(
         if text_key:
             merged[text_key] = deepcopy(value)
     session.task_config.metadata = merged
+
+
+def _evaluate_session_training_progress(
+    session: TrainingSession,
+    *,
+    evidence: Mapping[str, object] | None = None,
+    user_requested_finish: bool = False,
+    completed: bool = False,
+) -> dict[str, object] | None:
+    existing = _training_progress_metadata(session)
+    learner_turn_count = _progress_learner_turn_count(existing)
+    return evaluate_training_progress(
+        session.task_config.metadata,
+        finalized_learner_turns=learner_turn_count,
+        evidence=_resolved_training_evidence(session, evidence),
+        user_requested_finish=user_requested_finish,
+        completed=completed,
+    )
+
+
+def _training_progress_metadata(
+    session: TrainingSession,
+) -> Mapping[str, object] | None:
+    metadata = session.task_config.metadata or {}
+    progress = metadata.get("trainingProgress") or metadata.get("training_progress")
+    return progress if isinstance(progress, Mapping) else None
+
+
+def _progress_learner_turn_count(progress: Mapping[str, object] | None) -> int:
+    if progress is None:
+        return 0
+    value = progress.get("learnerTurnCount")
+    if value is None:
+        value = progress.get("learner_turn_count")
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = int(value.strip())
+        except ValueError:
+            return 0
+        return max(0, parsed)
+    return 0
+
+
+def _resolved_training_evidence(
+    session: TrainingSession,
+    evidence: Mapping[str, object] | None,
+) -> Mapping[str, object] | None:
+    if evidence is not None:
+        return evidence
+    progress = _training_progress_metadata(session)
+    stored = progress.get("evidence") if progress is not None else None
+    if not isinstance(stored, Mapping):
+        return None
+    if (
+        stored.get("sufficient") is None
+        and not stored.get("evidenceCount")
+        and not stored.get("coverageRatio")
+        and not any(
+            stored.get(key)
+            for key in (
+                "coveredTrainingPoints",
+                "covered_training_points",
+                "coveredRubric",
+                "covered_rubric",
+            )
+        )
+    ):
+        return None
+    resolved = dict(stored)
+    objectives = progress.get("objectives") if progress is not None else None
+    if isinstance(objectives, Mapping):
+        for key in ("coveredTrainingPoints", "coveredRubric"):
+            if key in objectives:
+                resolved[key] = deepcopy(objectives[key])
+    return resolved
+
+
+def _persist_training_progress(
+    session: TrainingSession,
+    progress: Mapping[str, object] | None,
+) -> None:
+    if progress is None:
+        return
+    _merge_task_config_metadata(session, {"trainingProgress": progress})
+
+
+def _raise_if_training_input_locked(
+    progress: Mapping[str, object] | None,
+) -> None:
+    if progress is None:
+        return
+    state = progress.get("state")
+    if state == "hard_limit_reached":
+        raise ValueError("Cannot record finalized learner turn after hard limit")
+    if state == "completed":
+        raise ValueError("Cannot record finalized learner turn after completion")
+
+
+def _require_active_for_finalized_learner_turn(session: TrainingSession) -> None:
+    if session.status != TrainingSessionStatus.ACTIVE:
+        raise ValueError(
+            f"Cannot record finalized learner turn while {session.status.value}"
+        )
 
 
 def _normalize_history_datetime(value: datetime | None, field_name: str) -> datetime | None:

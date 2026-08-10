@@ -338,6 +338,33 @@ def _session_payload(mode: str = "text") -> CreateTrainingSessionDTO:
     )
 
 
+def _clarity_session_payload(mode: str = "text") -> CreateTrainingSessionDTO:
+    base_task_config = _task_config()
+    return CreateTrainingSessionDTO(
+        task_config=base_task_config.model_copy(
+            update={
+                "metadata": {
+                    **base_task_config.metadata,
+                    "scenario_training": {
+                        "id": "daily-spoken-clarity",
+                        "title": "日常口语表达清晰度",
+                        "description": "通过自然对话练习清楚表达。",
+                        "opening_line": "最近有什么事情让你比较有感受？",
+                        "persona": {
+                            "name": "日常聊天对象",
+                            "role": "自然聊天的同事或朋友",
+                            "style": "随机选择几个话题，每个话题聊两三轮后自然换题。",
+                        },
+                    },
+                }
+            }
+        ),
+        mode=mode,
+        user_id="user-sales-001",
+        team_id="team-revenue",
+    )
+
+
 def _session_scope() -> TrainingSessionAccessScope:
     return TrainingSessionAccessScope(
         user_id="user-sales-001",
@@ -560,6 +587,24 @@ async def test_conversation_adapter_binds_training_core_to_message_tree_runtime(
         call["metadata_scope"].allow_unscoped is False
         for call in state.conversation_update_calls
     )
+
+
+@pytest.mark.asyncio
+async def test_conversation_adapter_applies_clarity_scenario_prompt_to_message_tree() -> None:
+    state = _ConversationState()
+    adapter = ConversationTrainingConversationAdapter(
+        lambda **kwargs: _ConversationUnitOfWork(state, **kwargs),
+        default_model="gpt-training",
+    )
+    session_service = TrainingSessionService(id_factory=lambda: "training-text-clarity")
+
+    session = await session_service.create_session(_clarity_session_payload())
+    conversation = await adapter.create_conversation(session)
+
+    prompt = state.conversations[int(conversation.conversation_id)].system_prompt or ""
+    assert "日常口语表达清晰度" in prompt
+    assert "随机选择几个话题" in prompt
+    assert "不要在聊天中点评、纠正" in prompt
 
 
 @pytest.mark.asyncio

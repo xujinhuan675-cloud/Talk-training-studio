@@ -213,6 +213,22 @@ async def client(session_factory, monkeypatch):
                 room_id=session_id.removeprefix(prefix),
             )
 
+        async def guard_before_finalized_learner_turn(
+            self,
+            session_id,
+            *,
+            access_scope,
+        ):
+            return None
+
+        async def record_finalized_learner_turn(
+            self,
+            session_id,
+            *,
+            access_scope,
+        ):
+            return None
+
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router, prefix="/api/v1")

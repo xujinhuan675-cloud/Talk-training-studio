@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from api.dependencies import get_chat_service, get_conversation_service
-from api.routes.chat import router as chat_router
+from api.routes.chat import get_chat_training_session_service, router as chat_router
 from api.routes.conversations import router as conversation_router
 from application.dto import AgentConfigDTO, ConversationDTO
 
@@ -296,16 +296,50 @@ class _FakeChatService:
 
     async def send_message_sync(self, conversation_id: int, payload, **kwargs):
         self.sync_call = (conversation_id, payload, kwargs)
+        callback = kwargs.get("on_user_message_persisted")
+        if callback is not None:
+            await callback(object())
         return {"message_id": 1, "content": "ok"}
 
     async def send_message_stream(self, conversation_id: int, payload, **kwargs):
         self.stream_call = (conversation_id, payload, kwargs)
+        callback = kwargs.get("on_user_message_persisted")
+        if callback is not None:
+            await callback(object())
         yield "event: done\ndata: {}\n\n"
+
+
+class _FakeTrainingSessionService:
+    def __init__(self, *, guard_error: ValueError | None = None) -> None:
+        self.guard_error = guard_error
+        self.guard_calls = []
+        self.record_calls = []
+
+    async def guard_before_finalized_learner_turn(
+        self,
+        session_id: str,
+        *,
+        access_scope,
+    ):
+        self.guard_calls.append((session_id, access_scope))
+        if self.guard_error is not None:
+            raise self.guard_error
+        return None
+
+    async def record_finalized_learner_turn(
+        self,
+        session_id: str,
+        *,
+        access_scope,
+    ):
+        self.record_calls.append((session_id, access_scope))
+        return None
 
 
 def _client(
     conversation_service: _FakeConversationService,
     chat_service: _FakeChatService | None = None,
+    training_session_service: _FakeTrainingSessionService | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(conversation_router, prefix="/api/v1")
@@ -313,6 +347,10 @@ def _client(
     app.dependency_overrides[get_conversation_service] = lambda: conversation_service
     if chat_service is not None:
         app.dependency_overrides[get_chat_service] = lambda: chat_service
+    if training_session_service is not None:
+        app.dependency_overrides[get_chat_training_session_service] = (
+            lambda: training_session_service
+        )
     return TestClient(app)
 
 
@@ -1016,6 +1054,68 @@ def test_chat_stream_route_passes_current_user_scope_to_chat_service() -> None:
     assert scope.team_id == "team-revenue"
     assert scope.include_team_scope is False
     assert scope.allow_unscoped is False
+
+
+def test_training_chat_guards_and_records_one_persisted_learner_turn() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                    "trainingSessionId": "training-1",
+                    "source": "scenario_training",
+                },
+            )
+        }
+    )
+    chat_service = _FakeChatService()
+    training_session_service = _FakeTrainingSessionService()
+    response = _client(
+        conversation_service,
+        chat_service,
+        training_session_service,
+    ).post(
+        "/api/v1/conversations/7/chat",
+        headers={"X-Mock-User": "sales"},
+        json={"message": "hello", "stream": False},
+    )
+
+    assert response.status_code == 200
+    assert [call[0] for call in training_session_service.guard_calls] == ["training-1"]
+    assert [call[0] for call in training_session_service.record_calls] == ["training-1"]
+
+
+def test_training_chat_rejects_the_server_hard_cap_before_persisting() -> None:
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "user-sales-001",
+                    "teamId": "team-revenue",
+                    "trainingSessionId": "training-1",
+                },
+            )
+        }
+    )
+    chat_service = _FakeChatService()
+    training_session_service = _FakeTrainingSessionService(
+        guard_error=ValueError("Cannot record finalized learner turn after hard limit")
+    )
+    response = _client(
+        conversation_service,
+        chat_service,
+        training_session_service,
+    ).post(
+        "/api/v1/conversations/7/chat",
+        headers={"X-Mock-User": "sales"},
+        json={"message": "hello", "stream": False},
+    )
+
+    assert response.status_code == 422
+    assert chat_service.sync_call is None
 
 
 def test_agent_config_routes_reject_unsupported_system_roles_before_service_call() -> None:

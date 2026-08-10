@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence as SequenceABC
+from collections.abc import Awaitable, Callable, Mapping, Sequence as SequenceABC
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import AsyncIterator, Callable, Optional
+from typing import AsyncIterator, Optional
 
 from application.dto import (
     ChatRequestDTO,
@@ -260,6 +260,7 @@ class ChatApplicationService:
         dto: ChatRequestDTO,
         *,
         metadata_scope: OwnedMetadataScope,
+        on_user_message_persisted: Callable[[Message], Awaitable[None]] | None = None,
     ) -> AsyncIterator[str]:
         """Send a user message and stream the assistant response as SSE events.
 
@@ -297,6 +298,9 @@ class ChatApplicationService:
         run_id = run.id
         user_msg_id = user_msg.id
         training_conversation = _is_training_conversation(conv.metadata)
+
+        if on_user_message_persisted is not None:
+            await on_user_message_persisted(user_msg)
 
         # Build LLM messages
         llm_messages: list[LLMMessage] = []
@@ -452,6 +456,7 @@ class ChatApplicationService:
         dto: ChatRequestDTO,
         *,
         metadata_scope: OwnedMetadataScope,
+        on_user_message_persisted: Callable[[Message], Awaitable[None]] | None = None,
     ) -> dict:
         """Send a user message and return the full assistant response (non-streaming)."""
         scope = _require_mutation_metadata_scope(
@@ -484,6 +489,9 @@ class ChatApplicationService:
 
         run_id = run.id
         training_conversation = _is_training_conversation(conv.metadata)
+
+        if on_user_message_persisted is not None:
+            await on_user_message_persisted(user_msg)
 
         llm_messages: list[LLMMessage] = []
         if conv.system_prompt:

@@ -434,6 +434,7 @@ async def test_scenario_templates_expose_business_training_cards(client: AsyncCl
     by_id = {item["id"]: item for item in data}
     assert {
         "daily-upward-results-report",
+        "daily-spoken-clarity",
         "budget-freeze-expansion",
         "cross-team-roadmap-tradeoff",
         "project-scope-creep-boundary",
@@ -451,6 +452,12 @@ async def test_scenario_templates_expose_business_training_cards(client: AsyncCl
     assert "voice_speed" in new_customer["persona"]
     assert len(new_customer["training_points"]) >= 1
     assert sum(item["weight"] for item in new_customer["dimension_weights"]) == pytest.approx(100)
+
+    clarity = by_id["daily-spoken-clarity"]
+    assert clarity["category"] == "workplace"
+    assert clarity["opening_line"]
+    assert "随机" in clarity["description"]
+    assert any("口头填充词" in point for point in clarity["training_points"])
 
     assert any(item["category"] == "customer_service" for item in data)
     assert by_id["renewal-price-negotiation"]["difficulty"] == "expert"
@@ -643,7 +650,11 @@ async def test_voice_routes_expose_published_platform_presets(client: AsyncClien
     by_id = {route["id"]: route for route in routes}
     assert len(routes) == 12
     assert by_id["openai-cascade-standard"]["readiness"]["ready"] is True
-    assert by_id["openai-llm-doubao-voice"]["interactionModes"] == ["turn_based"]
+    assert by_id["openai-llm-doubao-voice"]["interactionModes"] == [
+        "turn_based",
+        "realtime",
+    ]
+    assert {route["presetGroup"] for route in routes} == {"cascade", "realtime"}
     assert by_id["pipecat-soniox-openai-gradium"]["readiness"]["code"] == (
         "VOICE_ROUTE_ADAPTER_NOT_INTEGRATED"
     )
@@ -945,40 +956,57 @@ async def test_voice_session_uses_shared_modality_for_supported_interactions(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("route_id", "interaction_mode", "error_detail"),
-    [
-        (
-            "openai-realtime-standard",
-            "turn_based",
-            "Turn-based voice sessions require a cascade voice route",
-        ),
-        (
-            "openai-llm-doubao-voice",
-            "realtime",
-            "The selected voice route does not support realtime sessions",
-        ),
-    ],
-)
 async def test_voice_session_rejects_route_incompatible_with_interaction(
     client: AsyncClient,
-    route_id: str,
-    interaction_mode: str,
-    error_detail: str,
 ) -> None:
     response = await client.post(
         "/api/v1/training-studio/sessions",
         json=session_payload(
             "voice",
             metadata={
-                "voiceRouteId": route_id,
-                "interactionMode": interaction_mode,
+                "voiceRouteId": "openai-realtime-standard",
+                "interactionMode": "turn_based",
             },
         ),
     )
 
     assert response.status_code == 422
-    assert response.json()["message"] == error_detail
+    assert response.json()["message"] == (
+        "Turn-based voice sessions require a cascade voice route"
+    )
+
+
+@pytest.mark.asyncio
+async def test_doubao_cascade_realtime_session_persists_interaction_and_route_snapshot(
+    client: AsyncClient,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "voice",
+            metadata={
+                "voiceRouteId": "openai-llm-doubao-voice",
+                "interactionMode": "realtime",
+            },
+        ),
+    )
+
+    assert create_resp.status_code == 201
+    created = create_resp.json()["data"]
+    assert created["mode"] == "voice"
+    metadata = created["task_config"]["metadata"]
+    assert metadata["interactionMode"] == "realtime"
+    assert metadata["voiceRouteId"] == "openai-llm-doubao-voice"
+    assert metadata["voiceRoute"]["stt"]["provider"] == "volcengine.doubao"
+    assert metadata["voiceRoute"]["tts"]["provider"] == "volcengine.doubao"
+
+    get_resp = await client.get(
+        f"/api/v1/training-studio/sessions/{created['session_id']}"
+    )
+    assert get_resp.status_code == 200
+    persisted = get_resp.json()["data"]["task_config"]["metadata"]
+    assert persisted["interactionMode"] == "realtime"
+    assert persisted["voiceRoute"] == metadata["voiceRoute"]
 
 
 @pytest.mark.asyncio

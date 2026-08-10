@@ -391,7 +391,6 @@ def test_message_tree_completion_uses_server_path_and_reuses_report_pipeline() -
             },
         }
     ]
-
     report_response = client.get(_report_path(), headers={"X-Mock-User": "sales"})
     assert report_response.status_code == 200
     assert report_response.json()["data"]["id"] == 501
@@ -407,6 +406,26 @@ def test_message_tree_completion_uses_server_path_and_reuses_report_pipeline() -
     assert repeated.json()["data"]["report_id"] == "501"
     assert len(analysis.calls) == 1
     assert len(sessions.complete_calls) == 1
+
+
+def test_message_tree_completion_marks_clarity_scenario_for_specialized_review() -> None:
+    client, sessions, _conversations, projections, _analysis, _reader, _growth = _client()
+    sessions.session.task_config.metadata["scenario_training"] = {
+        "id": "daily-spoken-clarity",
+        "training_points": ["Review filler words"],
+    }
+
+    response = client.post(
+        _complete_path(),
+        headers={"X-Mock-User": "sales"},
+        json={"selected_tail_message_id": "msg-tail"},
+    )
+
+    assert response.status_code == 200
+    assert all(
+        message.metadata["scenarioTrainingId"] == "daily-spoken-clarity"
+        for message in projections.messages
+    )
 
 
 def test_message_tree_completion_failure_keeps_session_active_and_retryable() -> None:
