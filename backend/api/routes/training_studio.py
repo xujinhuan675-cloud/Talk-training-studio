@@ -2449,7 +2449,19 @@ def _pipecat_cascade_pipeline_metadata(
         "context": {"provider": "pipecat", "realtimeServiceMode": False},
         "tts": tts,
         "vad": {"provider": "silero", "source": "pipecat", "sampleRate": 16000},
-        "turnDetection": {"provider": "pipecat", "source": "pipecat"},
+        "turnDetection": {
+            "provider": "pipecat",
+            "source": "pipecat",
+            "strategy": "filter_incomplete",
+            "filterIncompleteUserTurns": True,
+            "baseStopStrategy": "speech_timeout",
+            "userSpeechTimeout": 2.0,
+            "userTurnStopTimeout": 12.0,
+            "userTurnCompletionConfig": {
+                "incompleteShortTimeout": 4.0,
+                "incompleteLongTimeout": 8.0,
+            },
+        },
         "talkwise": {
             "trainingSessionId": binding[0],
             "roomId": binding[1],
@@ -3610,6 +3622,8 @@ class _WebSocketTrainingTranscriptSink:
             )
         persisted = await self._sink.persist(transcript)
         payload = dict(persisted.payload)
+        if payload.get("duplicate") is True:
+            return persisted
         if transcript.role == "assistant" and self._pending_audio and persisted.message_id:
             segments, self._pending_audio = self._pending_audio, []
             attached = (

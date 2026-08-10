@@ -118,9 +118,13 @@ def test_real_pipecat_runtime_constructs_native_voice_processors():
 
     processors = build_pipecat_voice_processors(runtime, config, context=context)
 
+    assert runtime.SpeechTimeoutUserTurnStopStrategy is not None
     assert [type(processor).__name__ for processor in processors] == [
         "VADProcessor",
         "OpenAIRealtimeSTTService",
+        "_TalkWiseTranscriptPreviewSpec",
+        "_TalkWiseUserTurnObserverSpec",
+        "_TalkWiseSTTInputBoundarySpec",
         "LLMUserAggregator",
         "OpenAILLMService",
         "OpenAITTSService",

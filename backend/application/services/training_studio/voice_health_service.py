@@ -27,10 +27,27 @@ def _pipecat_route_readiness(
         "pipecat.websocket": bool(capability.websocket_available),
     }
     if route.mode == "cascade":
+        doubao_adapter_available = all(
+            importlib.util.find_spec(module) is not None
+            for module in (
+                "httpx",
+                "infrastructure.external.pipecat.volcengine_doubao_services",
+            )
+        )
+        stt_provider = route.stt.provider if route.stt is not None else None
+        tts_provider = route.tts.provider if route.tts is not None else None
         required.update(
             {
-                "pipecat.stt": bool(capability.stt_available),
-                "pipecat.tts": bool(capability.tts_available),
+                f"pipecat.stt:{stt_provider}": (
+                    doubao_adapter_available
+                    if stt_provider == "volcengine.doubao"
+                    else bool(capability.stt_available)
+                ),
+                f"pipecat.tts:{tts_provider}": (
+                    doubao_adapter_available
+                    if tts_provider == "volcengine.doubao"
+                    else bool(capability.tts_available)
+                ),
                 "pipecat.llm": bool(capability.llm_available),
             }
         )

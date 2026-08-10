@@ -239,6 +239,7 @@ def _fake_pipecat_runtime() -> pipecat_adapter.PipecatRuntime:
         WorkerRunner=object,
         InputAudioRawFrame=object,
         EndFrame=object,
+        PipelineFlushFrame=object,
         TextFrame=object,
         TranscriptionFrame=object,
         LLMContextAssistantTurnFrame=object,
@@ -338,6 +339,9 @@ def test_pipecat_voice_processors_build_openrouter_llm_with_openai_stt_tts():
     assert [type(processor) for processor in processors] == [
         _FakeVADProcessor,
         _FakeOpenAIRealtimeSTTService,
+        pipecat_adapter._TalkWiseTranscriptPreviewSpec,
+        pipecat_adapter._TalkWiseUserTurnObserverSpec,
+        pipecat_adapter._TalkWiseSTTInputBoundarySpec,
         _FakeLLMUserAggregator,
         _FakeOpenRouterLLMService,
         _FakeOpenAITTSService,
@@ -345,9 +349,11 @@ def test_pipecat_voice_processors_build_openrouter_llm_with_openai_stt_tts():
     ]
     assert not any(isinstance(processor, _FakeUserTurnProcessor) for processor in processors)
     assert processors[1].kwargs["api_key"] == "sk-openai-test"
-    assert processors[4].kwargs["api_key"] == "sk-openai-test"
+    assert processors[7].kwargs["api_key"] == "sk-openai-test"
+    assert processors[2].state is processors[3].preview_state
+    assert processors[3].aggregator is processors[5]
 
-    llm = processors[3]
+    llm = processors[6]
     assert llm.kwargs["api_key"] == "sk-openrouter-test"
     assert llm.kwargs["base_url"] == pipecat_adapter.OPENROUTER_LLM_BASE_URL
     llm_settings = llm.kwargs["settings"].kwargs
@@ -355,7 +361,7 @@ def test_pipecat_voice_processors_build_openrouter_llm_with_openai_stt_tts():
     assert llm_settings["temperature"] == 0.4
     assert "Stay in role as the counterpart." in llm_settings["system_instruction"]
     assert "Practice renewal risk discovery." in llm_settings["system_instruction"]
-    assert processors[2].context.messages == [
+    assert processors[5].context.messages == [
         {"role": "user", "content": "Can we discuss renewal risk?"}
     ]
 
@@ -389,6 +395,7 @@ def test_pipecat_voice_processors_build_speech_to_speech_without_stt_tts_vad():
     )
 
     assert [type(processor) for processor in processors] == [
+        pipecat_adapter._TalkWiseUserTurnObserverSpec,
         _FakeLLMUserAggregator,
         _FakeOpenAIRealtimeLLMService,
         _FakeLLMAssistantAggregator,
@@ -400,11 +407,13 @@ def test_pipecat_voice_processors_build_speech_to_speech_without_stt_tts_vad():
         )
         for processor in processors
     )
-    assert processors[0].context.messages == [
+    assert processors[0].event_name == "on_user_turn_message_added"
+    assert processors[0].aggregator is processors[1]
+    assert processors[1].context.messages == [
         {"role": "user", "content": "Can we discuss renewal risk?"}
     ]
 
-    llm = processors[1]
+    llm = processors[2]
     assert llm.kwargs["api_key"] == "sk-openai-test"
     llm_settings = llm.kwargs["settings"].kwargs
     assert llm_settings["model"] == "gpt-realtime-test"
@@ -423,7 +432,7 @@ def test_pipecat_voice_processors_build_speech_to_speech_without_stt_tts_vad():
     assert audio_input.kwargs["noise_reduction"].kwargs["type"] == "near_field"
     assert audio_input.kwargs["transcription"].kwargs["model"] == "gpt-4o-mini-transcribe"
     assert audio_output.kwargs["voice"] == "alloy"
-    assert processors[0].params.kwargs == {}
+    assert processors[1].params.kwargs == {}
 
 
 def test_pipecat_voice_config_rejects_openrouter_llm_for_speech_to_speech_profile():
@@ -857,7 +866,7 @@ async def test_transcript_sink_persists_without_transport_dependency():
 
 
 @pytest.mark.asyncio
-async def test_persistence_sink_writes_room_message_publishes_and_records_turn():
+async def test_persistence_sink_writes_assistant_message_without_recording_learner_turn():
     room = ChatRoom(id=12, name="Realtime room", type="battle_prep")
     messages = _MessageRepository()
     recorder = _TrainingSessionRecorder(room_id="12")
@@ -898,7 +907,45 @@ async def test_persistence_sink_writes_room_message_publishes_and_records_turn()
     assert room.last_message_at == messages.messages[0].timestamp
     assert published[0][0] == 12
     assert published[0][1].content == "We can define the pilot metric first."
-    assert recorder.calls == [("get:training-6", 1), ("training-6", 1)]
+    assert recorder.calls == [("get:training-6", 1)]
+
+
+@pytest.mark.asyncio
+async def test_persistence_sink_records_one_final_user_turn_and_deduplicates_event():
+    room = ChatRoom(id=12, name="Realtime room", type="battle_prep")
+    messages = _MessageRepository()
+    recorder = _TrainingSessionRecorder(room_id="12")
+    transcript = build_realtime_transcript(
+        {
+            "type": "input_audio_transcription.completed",
+            "transcript": "I recommend a two-week pilot.",
+            "event_id": "event-user-1",
+            "item_id": "item-user-1",
+        },
+        binding=RealtimeSessionBinding(training_session_id="training-6", room_id=12),
+        provider="pipecat",
+        realtime_session_id="rt-6",
+    )
+    assert transcript is not None
+
+    sink = RealtimeTranscriptPersistenceSink(
+        uow_factory=lambda **_kwargs: _RealtimePersistenceUoW(room, messages),
+        session_service=recorder,
+        access_scope=_scope(),
+    )
+
+    first = await sink.persist(transcript)
+    duplicate = await sink.persist(transcript)
+
+    assert first.message_id == 1
+    assert duplicate.message_id is None
+    assert duplicate.payload == {"duplicate": True}
+    assert len(messages.messages) == 1
+    assert messages.messages[0].sender_type == "user"
+    assert recorder.calls == [
+        ("get:training-6", 1),
+        ("training-6", 1),
+    ]
 
 
 @pytest.mark.asyncio

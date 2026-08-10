@@ -1,7 +1,8 @@
 import asyncio
 import base64
 import json
-from dataclasses import dataclass, field
+from contextlib import suppress
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,10 @@ from application.ports.realtime import (
 )
 from core.config import settings
 from infrastructure.external.pipecat import realtime_pipeline as pipecat_adapter
+from infrastructure.external.pipecat.volcengine_doubao_services import (
+    VolcengineDoubaoSTTService,
+    VolcengineDoubaoTTSService,
+)
 
 
 class FakeFrameProcessor:
@@ -60,6 +65,11 @@ class FakeTTSAudioRawFrame(FakeOutputAudioRawFrame):
 
 class FakeEndFrame:
     pass
+
+
+@dataclass
+class FakePipelineFlushFrame:
+    event: asyncio.Event | None = None
 
 
 @dataclass
@@ -224,6 +234,20 @@ class FakeOpenAILLMService:
         self.kwargs = kwargs
 
 
+class FakeOpenAIRealtimeLLMService:
+    class Settings:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeRealtimeConfigValue:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
 class FakeLLMContext:
     def __init__(self, messages=None, **kwargs):
         self.messages = messages or []
@@ -244,6 +268,14 @@ class FakeLLMUserAggregator:
     def __init__(self, context, params):
         self.context = context
         self.params = params
+        self.event_handlers = {}
+
+    def add_event_handler(self, event_name, handler):
+        self.event_handlers.setdefault(event_name, []).append(handler)
+
+    async def emit_event(self, event_name, *args):
+        for handler in self.event_handlers.get(event_name, []):
+            await handler(self, *args)
 
 
 class FakeLLMAssistantAggregator:
@@ -278,7 +310,8 @@ class FakeUserTurnProcessor:
 
 
 class FakeUserTurnStrategies:
-    pass
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
 
 
 class FakeExternalUserTurnStrategies:
@@ -291,6 +324,11 @@ class FakeFilterIncompleteUserTurnStrategies:
 
 
 class FakeUserTurnCompletionConfig:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class FakeSpeechTimeoutUserTurnStopStrategy:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
@@ -311,9 +349,15 @@ class FakePipelineWorker:
         self.kwargs = kwargs
         self.queued_frames = []
         self.flushed = False
+        self.flush_count = 0
 
     async def queue_frame(self, frame):
         self.queued_frames.append(frame)
+        if isinstance(frame, FakePipelineFlushFrame):
+            self.flushed = True
+            self.flush_count += 1
+            if frame.event is not None:
+                frame.event.set()
 
     async def flush_pipeline(self):
         self.flushed = True
@@ -359,6 +403,7 @@ def fake_runtime(websocket=True):
         WorkerRunner=FakeWorkerRunner,
         InputAudioRawFrame=FakeInputAudioRawFrame,
         EndFrame=FakeEndFrame,
+        PipelineFlushFrame=FakePipelineFlushFrame,
         TextFrame=FakeTextFrame,
         TranscriptionFrame=FakeTranscriptionFrame,
         LLMContextAssistantTurnFrame=FakeLLMContextAssistantTurnFrame,
@@ -392,6 +437,7 @@ def fake_runtime(websocket=True):
         ExternalUserTurnStrategies=FakeExternalUserTurnStrategies,
         FilterIncompleteUserTurnStrategies=FakeFilterIncompleteUserTurnStrategies,
         UserTurnCompletionConfig=FakeUserTurnCompletionConfig,
+        SpeechTimeoutUserTurnStopStrategy=FakeSpeechTimeoutUserTurnStopStrategy,
     )
 
 
@@ -949,6 +995,76 @@ def test_speech_to_speech_builder_selects_volcengine_pipecat_service(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_openai_speech_to_speech_observes_finalized_user_turn_without_reordering(
+    monkeypatch,
+):
+    monkeypatch.setattr(pipecat_adapter, "user_billing_enabled", lambda: False)
+    runtime = replace(
+        fake_runtime(websocket=False),
+        OpenAIRealtimeLLMService=FakeOpenAIRealtimeLLMService,
+        SessionProperties=FakeRealtimeConfigValue,
+        AudioConfiguration=FakeRealtimeConfigValue,
+        AudioInput=FakeRealtimeConfigValue,
+        AudioOutput=FakeRealtimeConfigValue,
+        InputAudioTranscription=FakeRealtimeConfigValue,
+        InputAudioNoiseReduction=FakeRealtimeConfigValue,
+        SemanticTurnDetection=FakeRealtimeConfigValue,
+        TurnDetection=FakeRealtimeConfigValue,
+        PCMAudioFormat=FakeRealtimeConfigValue,
+        PCMUAudioFormat=FakeRealtimeConfigValue,
+        PCMAAudioFormat=FakeRealtimeConfigValue,
+    )
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        model="gpt-realtime",
+        voice="marin",
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+        metadata={
+            "profile": "speech_to_speech",
+            "realtimeLlm": {"provider": "openai"},
+            "openaiApiKey": "test-key",
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(
+        runtime,
+        config,
+        context=voice_context(),
+    )
+    observer, user_aggregator, llm, assistant_aggregator = processors
+    assert isinstance(observer, pipecat_adapter._TalkWiseUserTurnObserverSpec)
+    assert observer.aggregator is user_aggregator
+    assert observer.event_name == "on_user_turn_message_added"
+
+    handle = pipecat_adapter.build_pipecat_pipeline_handle(
+        runtime=runtime,
+        context=voice_context(),
+        config=config,
+        processors=processors,
+    )
+    assert handle.pipeline.processors == [
+        user_aggregator,
+        llm,
+        assistant_aggregator,
+        handle.event_processor,
+    ]
+
+    await user_aggregator.emit_event(
+        "on_user_turn_message_added",
+        SimpleNamespace(
+            content="finalized realtime turn",
+            user_id="browser",
+            timestamp="2026-08-10T00:00:00Z",
+        ),
+    )
+    event = await handle.event_queue.get()
+    assert event["type"] == "transcript.done"
+    assert event["text"] == "finalized realtime turn"
+    assert handle.event_queue.empty()
+
+
+@pytest.mark.asyncio
 async def test_adapter_queues_pipecat_audio_frames_instead_of_owning_media_lifecycle():
     adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(runtime=fake_runtime(websocket=False))
 
@@ -972,6 +1088,28 @@ async def test_adapter_queues_pipecat_audio_frames_instead_of_owning_media_lifec
     assert frame.sample_rate == 16000
     assert frame.num_channels == 1
     assert adapter.handle.worker.flushed is True
+    assert adapter.handle.worker.flush_count == 2
+
+
+@pytest.mark.asyncio
+async def test_adapter_surfaces_an_unexpected_pipecat_worker_failure():
+    class FailingWorkerRunner(FakeWorkerRunner):
+        async def run(self):
+            raise RuntimeError("worker boom")
+
+    runtime = pipecat_adapter.PipecatRuntime(
+        **{
+            **fake_runtime(websocket=False).__dict__,
+            "WorkerRunner": FailingWorkerRunner,
+        }
+    )
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(runtime=runtime)
+
+    await adapter.start(voice_context(), realtime_config())
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError, match="pipeline worker failed"):
+        await adapter.events().__anext__()
 
 
 @pytest.mark.asyncio
@@ -1013,6 +1151,233 @@ async def test_adapter_waits_for_and_commits_provider_processor_lifecycle():
     assert processor.commits == 1
 
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_commit_settlement_waits_for_prior_events_to_be_consumed():
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(
+        runtime=fake_runtime(websocket=False)
+    )
+    await adapter.start(voice_context(), realtime_config())
+    assert adapter.handle is not None
+
+    event_received = asyncio.Event()
+    release_consumer = asyncio.Event()
+    consumed: list[dict[str, object]] = []
+
+    async def consume_events() -> None:
+        async for event in adapter.events():
+            consumed.append(dict(event))
+            event_received.set()
+            await release_consumer.wait()
+
+    consumer_task = asyncio.create_task(consume_events())
+    await adapter.handle.event_queue.put(
+        {"type": "transcript.done", "text": "committed turn"}
+    )
+    await event_received.wait()
+    await adapter.commit_audio()
+
+    settlement_task = asyncio.create_task(adapter.wait_for_commit_settled())
+    await asyncio.sleep(0)
+    assert settlement_task.done() is False
+
+    release_consumer.set()
+    await settlement_task
+    assert consumed == [{"type": "transcript.done", "text": "committed turn"}]
+
+    consumer_task.cancel()
+    with suppress(asyncio.CancelledError, RuntimeError):
+        await consumer_task
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_real_pipecat_pipeline_surfaces_doubao_empty_transcript_before_commit_settles():
+    async def transcribe(_audio: bytes, _model: str, _language: str) -> str:
+        return ""
+
+    service = VolcengineDoubaoSTTService(
+        api_key="gateway-token",
+        base_url="http://newapi.test/pg",
+        model="volc.bigasr.sauc.duration",
+        transcribe_request=transcribe,
+    )
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(
+        runtime=pipecat_adapter.import_pipecat_runtime(),
+        processors=(service, pipecat_adapter._TalkWiseSTTInputBoundarySpec()),
+    )
+    await adapter.start(
+        voice_context(),
+        RealtimePipelineConfig(
+            provider="pipecat",
+            input_audio_format="pcm16",
+            metadata={"inputSampleRate": 16000},
+        ),
+    )
+
+    events: list[dict[str, object]] = []
+
+    async def consume_events() -> None:
+        async for event in adapter.events():
+            events.append(dict(event))
+
+    consumer_task = asyncio.create_task(consume_events())
+    await adapter.append_audio(
+        RealtimeAudioChunk(
+            data=b"\x01\x00" * 8000,
+            mime_type="audio/pcm",
+            metadata={"sampleRate": 16000, "channels": 1},
+        )
+    )
+    await adapter.commit_audio()
+    await adapter.wait_for_commit_settled()
+    try:
+        assert len(events) == 1
+        assert events[0]["type"] == "error"
+        assert events[0]["error"] == {
+            "message": (
+                "No clear speech was recognized. Move closer to the microphone and try again."
+            ),
+            "fatal": False,
+            "code": "DOUBAO_VOICE_TRANSCRIPT_EMPTY",
+            "phase": "provider_response",
+            "errorCategory": "input_audio",
+            "retryable": True,
+        }
+    finally:
+        await adapter.close()
+        await consumer_task
+
+
+@pytest.mark.asyncio
+async def test_real_pipecat_pipeline_surfaces_doubao_transcript_before_commit_settles():
+    async def transcribe(_audio: bytes, _model: str, _language: str) -> str:
+        return "我们先从一个小范围试点开始。"
+
+    service = VolcengineDoubaoSTTService(
+        api_key="gateway-token",
+        base_url="http://newapi.test/pg",
+        model="volc.bigasr.sauc.duration",
+        transcribe_request=transcribe,
+    )
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(
+        runtime=pipecat_adapter.import_pipecat_runtime(),
+        processors=(service, pipecat_adapter._TalkWiseSTTInputBoundarySpec()),
+    )
+    await adapter.start(
+        voice_context(),
+        RealtimePipelineConfig(
+            provider="pipecat",
+            input_audio_format="pcm16",
+            metadata={"inputSampleRate": 16000},
+        ),
+    )
+
+    events: list[dict[str, object]] = []
+
+    async def consume_events() -> None:
+        async for event in adapter.events():
+            events.append(dict(event))
+
+    consumer_task = asyncio.create_task(consume_events())
+    await adapter.append_audio(
+        RealtimeAudioChunk(
+            data=b"\x01\x00" * 8000,
+            mime_type="audio/pcm",
+            metadata={"sampleRate": 16000, "channels": 1},
+        )
+    )
+    await adapter.commit_audio()
+    await adapter.wait_for_commit_settled()
+    try:
+        transcripts = [event for event in events if event["type"] == "transcript.done"]
+        assert len(transcripts) == 1
+        assert transcripts[0]["text"] == "我们先从一个小范围试点开始。"
+    finally:
+        await adapter.close()
+        await consumer_task
+
+
+@pytest.mark.asyncio
+async def test_stt_boundary_commit_does_not_wait_for_blocking_downstream_llm():
+    from pipecat.frames.frames import LLMContextFrame
+
+    async def transcribe(_audio: bytes, _model: str, _language: str) -> str:
+        return "boundary transcript"
+
+    runtime = pipecat_adapter.import_pipecat_runtime()
+    downstream_release = asyncio.Event()
+    downstream_blocked = asyncio.Event()
+
+    class UserAggregator(runtime.FrameProcessor):  # type: ignore[misc, valid-type]
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, runtime.TranscriptionFrame):
+                context = runtime.LLMContext(
+                    messages=[{"role": "user", "content": frame.text}]
+                )
+                await self.push_frame(LLMContextFrame(context=context), direction)
+                return
+            await self.push_frame(frame, direction)
+
+    class BlockingLLM(runtime.FrameProcessor):  # type: ignore[misc, valid-type]
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, LLMContextFrame):
+                downstream_blocked.set()
+                await downstream_release.wait()
+            await self.push_frame(frame, direction)
+
+    service = VolcengineDoubaoSTTService(
+        api_key="gateway-token",
+        base_url="http://newapi.test/pg",
+        model="volc.bigasr.sauc.duration",
+        transcribe_request=transcribe,
+    )
+    adapter = pipecat_adapter.PipecatRealtimePipelineAdapter(
+        runtime=runtime,
+        processors=(
+            service,
+            pipecat_adapter._TalkWiseSTTInputBoundarySpec(),
+            UserAggregator(name="UserAggregator"),
+            BlockingLLM(name="BlockingLLM"),
+        ),
+    )
+    await adapter.start(
+        voice_context(),
+        RealtimePipelineConfig(
+            provider="pipecat",
+            input_audio_format="pcm16",
+            metadata={"inputSampleRate": 16000},
+        ),
+    )
+
+    events: list[dict[str, object]] = []
+
+    async def consume_events() -> None:
+        async for event in adapter.events():
+            events.append(dict(event))
+
+    consumer_task = asyncio.create_task(consume_events())
+    try:
+        await adapter.append_audio(
+            RealtimeAudioChunk(
+                data=b"\x01\x00" * 8000,
+                mime_type="audio/pcm",
+                metadata={"sampleRate": 16000, "channels": 1},
+            )
+        )
+        await asyncio.wait_for(adapter.commit_audio(), timeout=1.0)
+        await asyncio.wait_for(adapter.wait_for_commit_settled(), timeout=1.0)
+
+        assert downstream_blocked.is_set()
+        assert [event["type"] for event in events] == ["transcript.done"]
+        assert events[0]["text"] == "boundary transcript"
+    finally:
+        downstream_release.set()
+        await adapter.close()
+        await consumer_task
 
 
 @pytest.mark.asyncio
@@ -1110,6 +1475,131 @@ def test_pipeline_handle_uses_pipecat_websocket_transport_as_pipeline_boundary()
     ]
 
 
+@pytest.mark.asyncio
+async def test_pipeline_publishes_one_transcript_for_a_semantic_user_turn():
+    runtime = fake_runtime(websocket=False)
+    stt = object()
+    user_aggregator = FakeLLMUserAggregator(
+        FakeLLMContext(),
+        FakeLLMUserAggregatorParams(),
+    )
+    handle = pipecat_adapter.build_pipecat_pipeline_handle(
+        runtime=runtime,
+        context=voice_context(),
+        config=realtime_config(),
+        processors=[
+            stt,
+            pipecat_adapter._TalkWiseUserTurnObserverSpec(user_aggregator),
+            user_aggregator,
+        ],
+    )
+
+    assert handle.pipeline.processors[0] is stt
+    assert handle.pipeline.processors[1] is user_aggregator
+    assert handle.pipeline.processors[2] is handle.event_processor
+    assert set(user_aggregator.event_handlers) == {"on_user_turn_stopped"}
+
+    for raw_text in ("partial smart turn", "final STT segment"):
+        await handle.event_processor.process_frame(
+            FakeTranscriptionFrame(
+                text=raw_text,
+                user_id="browser",
+                timestamp="2026-08-10T00:00:00Z",
+            ),
+            FakeFrameDirection.DOWNSTREAM,
+        )
+    assert handle.event_queue.empty()
+
+    text = (
+        "\u6211\u4eec\u53ef\u4ee5\u5148\u4ece\u4e00\u4e2a\u5c0f\u8303\u56f4"
+        "\u8bd5\u70b9\u5f00\u59cb\uff0c\u4e09\u5341\u5929\u540e\u518d\u51b3\u5b9a"
+        "\u662f\u5426\u7ee7\u7eed\u3002"
+    )
+    await user_aggregator.emit_event(
+        "on_user_turn_stopped",
+        object(),
+        SimpleNamespace(
+            content=text,
+            user_id="browser",
+            timestamp="2026-08-10T00:00:00Z",
+        ),
+    )
+
+    transcript = await handle.event_queue.get()
+    assert transcript == {
+        "type": "transcript.done",
+        "runtime": "pipecat",
+        "text": text,
+        "provider": "pipecat",
+        "source": "pipecat",
+        "timestamp": "2026-08-10T00:00:00Z",
+        "metadata": {"aggregation": "pipecat_user_turn"},
+        "user_id": "browser",
+        "sender_id": "browser",
+    }
+    assert handle.event_queue.empty()
+
+    await handle.event_processor.process_frame(
+        FakeErrorFrame(error="provider failed", fatal=False),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+    error = await handle.event_queue.get()
+    assert error["type"] == "error"
+    assert error["error"] == {"message": "provider failed", "fatal": False}
+
+
+@pytest.mark.asyncio
+async def test_transcript_preview_updates_without_persisting_each_stt_segment():
+    runtime = fake_runtime(websocket=False)
+    state = pipecat_adapter._TalkWiseTranscriptPreviewState()
+    queue = asyncio.Queue()
+    processor = pipecat_adapter.create_talkwise_transcript_preview_processor(
+        runtime,
+        queue,
+        config=realtime_config(),
+        state=state,
+    )
+
+    await processor.process_frame(
+        FakeInterimTranscriptionFrame(
+            text="为了降低风险",
+            user_id="browser",
+            timestamp="2026-08-10T00:00:00Z",
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+    first = await queue.get()
+    assert first["type"] == "transcript.delta"
+    assert first["text"] == "为了降低风险"
+    assert first["metadata"]["preview"] is True
+    assert first["metadata"]["replace"] is True
+
+    await processor.process_frame(
+        FakeTranscriptionFrame(
+            text="我们可以分成两个阶段",
+            user_id="browser",
+            timestamp="2026-08-10T00:00:01Z",
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+    second = await queue.get()
+    assert second["type"] == "transcript.delta"
+    assert second["text"] == "为了降低风险我们可以分成两个阶段"
+    assert second["metadata"]["aggregation"] == "pipecat_user_turn_preview"
+
+    await processor.process_frame(
+        FakeInterimTranscriptionFrame(
+            text="第一阶段验证转化率",
+            user_id="browser",
+            timestamp="2026-08-10T00:00:02Z",
+        ),
+        FakeFrameDirection.DOWNSTREAM,
+    )
+    third = await queue.get()
+    assert third["text"] == "为了降低风险我们可以分成两个阶段第一阶段验证转化率"
+    assert state.text == third["text"]
+
+
 def test_pipeline_start_metadata_strips_secret_config_values():
     handle = pipecat_adapter.build_pipecat_pipeline_handle(
         runtime=fake_runtime(websocket=False),
@@ -1183,6 +1673,7 @@ def test_build_pipecat_voice_processors_uses_pipecat_stt_tts_and_turn_processors
     assert [type(processor) for processor in processors] == [
         FakeVADProcessor,
         FakeOpenAIRealtimeSTTService,
+        pipecat_adapter._TalkWiseSTTInputBoundarySpec,
         FakeUserTurnProcessor,
         FakeOpenAITTSService,
     ]
@@ -1193,14 +1684,112 @@ def test_build_pipecat_voice_processors_uses_pipecat_stt_tts_and_turn_processors
     assert processors[1].kwargs["turn_detection"] is False
     assert processors[1].kwargs["should_interrupt"] is True
     assert processors[1].kwargs["settings"].kwargs == {"model": "gpt-realtime-whisper"}
-    assert processors[3].kwargs["api_key"] == "sk-test"
-    assert processors[3].kwargs["base_url"] is None
-    assert processors[3].kwargs["sample_rate"] == 24000
-    assert processors[3].kwargs["settings"].kwargs == {
+    assert processors[4].kwargs["api_key"] == "sk-test"
+    assert processors[4].kwargs["base_url"] is None
+    assert processors[4].kwargs["sample_rate"] == 24000
+    assert processors[4].kwargs["settings"].kwargs == {
         "model": "gpt-4o-mini-tts",
         "voice": "alloy",
         "instructions": "Speak concisely.",
     }
+
+
+@pytest.mark.asyncio
+async def test_build_pipecat_voice_processors_creates_doubao_stt_and_tts_services(
+    monkeypatch,
+):
+    monkeypatch.setattr(pipecat_adapter, "user_billing_enabled", lambda: False)
+    monkeypatch.setattr(settings.llm, "api_key", "gateway-token")
+    monkeypatch.setattr(settings.llm, "base_url", "http://newapi.test/pg")
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        voice="zh_female_vv_uranus_bigtts",
+        metadata={
+            "stt": {
+                "provider": "volcengine.doubao",
+                "model": "volc.bigasr.sauc.duration",
+            },
+            "tts": {
+                "provider": "volcengine.doubao",
+                "model": "seed-tts-2.0",
+            },
+            "vad": "silero",
+            "turnDetection": {
+                "provider": "pipecat",
+                "userSpeechTimeout": 2.0,
+            },
+            "inputSampleRate": 16000,
+            "outputSampleRate": 24000,
+        },
+    )
+
+    processors = pipecat_adapter.build_pipecat_voice_processors(fake_runtime(False), config)
+
+    assert [type(processor) for processor in processors] == [
+        FakeVADProcessor,
+        VolcengineDoubaoSTTService,
+        pipecat_adapter._TalkWiseSTTInputBoundarySpec,
+        FakeUserTurnProcessor,
+        VolcengineDoubaoTTSService,
+    ]
+    assert processors[1]._transcriptions_url == "http://newapi.test/pg/audio/transcriptions"
+    assert processors[1]._init_sample_rate == 16000
+    assert processors[1]._vad_segment_settle_seconds == 2.0
+    assert processors[4]._speech_url == "http://newapi.test/pg/audio/speech"
+    assert processors[4]._init_sample_rate == 24000
+
+    await processors[1].cleanup()
+    await processors[4].cleanup()
+
+
+def test_doubao_pipeline_readiness_distinguishes_missing_and_invalid_configuration(
+    monkeypatch,
+):
+    monkeypatch.setattr(pipecat_adapter, "user_billing_enabled", lambda: False)
+    monkeypatch.setattr(settings.llm, "api_key", None)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings.llm, "base_url", "http://newapi.test/pg")
+    config = RealtimePipelineConfig(
+        provider="pipecat",
+        model="gpt-5.5",
+        voice="zh_female_vv_uranus_bigtts",
+        input_audio_format="pcm16",
+        output_audio_format="pcm16",
+        metadata={
+            "stt": {
+                "provider": "volcengine.doubao",
+                "model": "volc.bigasr.sauc.duration",
+            },
+            "tts": {
+                "provider": "volcengine.doubao",
+                "model": "seed-tts-2.0",
+            },
+            "inputSampleRate": 16000,
+            "outputSampleRate": 24000,
+        },
+    )
+
+    missing = pipecat_adapter.pipecat_pipeline_capability(
+        runtime=fake_runtime(False),
+        config=config,
+    ).readiness_payload()
+    assert "MISSING_DOUBAO_VOICE_CREDENTIAL" in {
+        item["code"] for item in missing["blockingReasons"]
+    }
+
+    monkeypatch.setattr(settings.llm, "api_key", "gateway-token")
+    monkeypatch.setattr(settings.llm, "base_url", "invalid-relay")
+    invalid = pipecat_adapter.pipecat_pipeline_capability(
+        runtime=fake_runtime(False),
+        config=config,
+    ).readiness_payload()
+    invalid_error = next(
+        item
+        for item in invalid["blockingReasons"]
+        if item["code"] == "DOUBAO_VOICE_CONFIG_INVALID"
+    )
+    assert invalid_error["provider"] == "volcengine.doubao"
+    assert invalid_error["metadata"]["errorCategory"] == "configuration"
 
 
 def test_build_pipecat_voice_processors_supports_nested_feature_config():
@@ -1250,6 +1839,7 @@ def test_build_pipecat_voice_processors_supports_nested_feature_config():
     assert [type(processor) for processor in processors] == [
         FakeVADProcessor,
         FakeOpenAIRealtimeSTTService,
+        pipecat_adapter._TalkWiseSTTInputBoundarySpec,
         FakeUserTurnProcessor,
         FakeOpenAITTSService,
     ]
@@ -1272,12 +1862,12 @@ def test_build_pipecat_voice_processors_supports_nested_feature_config():
         "prompt": "Sales coaching vocabulary.",
         "noise_reduction": "near_field",
     }
-    assert processors[2].kwargs == {
+    assert processors[3].kwargs == {
         "user_turn_stop_timeout": 3.0,
         "user_idle_timeout": 10.0,
     }
-    assert processors[3].kwargs["sample_rate"] == 24000
-    assert processors[3].kwargs["settings"].kwargs == {
+    assert processors[4].kwargs["sample_rate"] == 24000
+    assert processors[4].kwargs["settings"].kwargs == {
         "model": "gpt-4o-mini-tts",
         "voice": "fallback",
         "instructions": "Warm and concise.",
@@ -1313,6 +1903,8 @@ def test_build_pipecat_voice_processors_supports_filter_incomplete_strategy_meta
             "turnDetection": {
                 "provider": "pipecat",
                 "userTurnStrategies": "filterIncomplete",
+                "baseStopStrategy": "speech_timeout",
+                "userSpeechTimeout": 2.0,
                 "userTurnCompletionConfig": {
                     "instructions": "Decide whether the trainee finished.",
                     "incompleteShortTimeout": 1.5,
@@ -1328,6 +1920,9 @@ def test_build_pipecat_voice_processors_supports_filter_incomplete_strategy_meta
 
     strategies = processors[0].kwargs["user_turn_strategies"]
     assert isinstance(strategies, FakeFilterIncompleteUserTurnStrategies)
+    stop_strategy = strategies.kwargs["stop"][0]
+    assert isinstance(stop_strategy, FakeSpeechTimeoutUserTurnStopStrategy)
+    assert stop_strategy.kwargs == {"user_speech_timeout": 2.0}
     completion_config = strategies.kwargs["config"]
     assert isinstance(completion_config, FakeUserTurnCompletionConfig)
     assert completion_config.kwargs == {
@@ -1474,7 +2069,7 @@ def test_build_pipecat_voice_processors_uses_settings_key_without_metadata(monke
     )
 
     assert processors[0].kwargs["api_key"] == "sk-settings-realtime"
-    assert processors[1].kwargs["api_key"] == "sk-settings-realtime"
+    assert processors[2].kwargs["api_key"] == "sk-settings-realtime"
 
 
 def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
@@ -1514,9 +2109,16 @@ def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
             "vad": "silero",
             "turnDetection": {
                 "provider": "pipecat",
-                "userTurnStopTimeout": 2.5,
+                "strategy": "filter_incomplete",
+                "baseStopStrategy": "speech_timeout",
+                "userSpeechTimeout": 2.0,
+                "userTurnStopTimeout": 12.0,
                 "userIdleTimeout": 8.0,
                 "filterIncompleteUserTurns": True,
+                "userTurnCompletionConfig": {
+                    "incompleteShortTimeout": 4.0,
+                    "incompleteLongTimeout": 8.0,
+                },
             },
             "context": {"provider": "pipecat", "realtimeServiceMode": False},
             "openaiApiKey": "sk-test",
@@ -1532,22 +2134,38 @@ def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
     assert [type(processor) for processor in processors] == [
         FakeVADProcessor,
         FakeOpenAIRealtimeSTTService,
+        pipecat_adapter._TalkWiseTranscriptPreviewSpec,
+        pipecat_adapter._TalkWiseUserTurnObserverSpec,
+        pipecat_adapter._TalkWiseSTTInputBoundarySpec,
         FakeLLMUserAggregator,
         FakeOpenAILLMService,
         FakeOpenAITTSService,
         FakeLLMAssistantAggregator,
     ]
     assert not any(isinstance(processor, FakeUserTurnProcessor) for processor in processors)
-    user_aggregator = processors[2]
-    assert user_aggregator.params.kwargs["user_turn_stop_timeout"] == 2.5
+    assert processors[2].state is processors[3].preview_state
+    assert processors[3].aggregator is processors[5]
+    assert processors[3].event_name == "on_user_turn_stopped"
+    user_aggregator = processors[5]
+    assert user_aggregator.params.kwargs["user_turn_stop_timeout"] == 12.0
     assert user_aggregator.params.kwargs["user_idle_timeout"] == 8.0
     assert user_aggregator.params.kwargs["filter_incomplete_user_turns"] is True
+    strategies = user_aggregator.params.kwargs["user_turn_strategies"]
+    assert isinstance(strategies, FakeFilterIncompleteUserTurnStrategies)
+    stop_strategy = strategies.kwargs["stop"][0]
+    assert isinstance(stop_strategy, FakeSpeechTimeoutUserTurnStopStrategy)
+    assert stop_strategy.kwargs == {"user_speech_timeout": 2.0}
+    completion_config = user_aggregator.params.kwargs["user_turn_completion_config"]
+    assert completion_config.kwargs == {
+        "incomplete_short_timeout": 4.0,
+        "incomplete_long_timeout": 8.0,
+    }
     assert user_aggregator.context.messages == [
         {"role": "user", "content": "Can we discuss renewal risk?"},
         {"role": "assistant", "content": "Yes, what risk is most urgent?"},
     ]
 
-    llm = processors[3]
+    llm = processors[6]
     assert llm.kwargs["api_key"] == "sk-test"
     assert llm.kwargs["base_url"] == "https://llm.example.test/v1"
     llm_settings = llm.kwargs["settings"].kwargs

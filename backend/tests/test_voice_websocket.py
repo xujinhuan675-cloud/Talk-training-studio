@@ -125,6 +125,8 @@ class _FakeTrainingSessionService:
         self.metadata = metadata or {}
         self.mode = mode
         self.access_scopes: list[Any] = []
+        self.progress_guard_calls: list[str] = []
+        self.progress_record_calls: list[str] = []
 
     async def get_session(self, session_id: str, *, access_scope: Any) -> SimpleNamespace:
         self.access_scopes.append(access_scope)
@@ -136,6 +138,22 @@ class _FakeTrainingSessionService:
             mode=self.mode,
             task_config=SimpleNamespace(metadata=self.metadata),
         )
+
+    async def guard_before_finalized_learner_turn(
+        self,
+        session_id: str,
+        *,
+        access_scope: Any,
+    ) -> None:
+        self.progress_guard_calls.append(session_id)
+
+    async def record_finalized_learner_turn(
+        self,
+        session_id: str,
+        *,
+        access_scope: Any,
+    ) -> None:
+        self.progress_record_calls.append(session_id)
 
 
 def test_training_audio_context_prefers_saved_session_voice() -> None:
@@ -477,6 +495,8 @@ def test_voice_websocket_uses_the_session_voice_route_stt_model(monkeypatch) -> 
         ws.receive_json()
 
     assert fake_stt.calls[0]["model"] == "stt-session"
+    assert training_sessions.progress_guard_calls == ["session-1"]
+    assert training_sessions.progress_record_calls == ["session-1"]
 
 
 def test_voice_websocket_uses_newapi_bearer_identity_for_session_and_room_scope(

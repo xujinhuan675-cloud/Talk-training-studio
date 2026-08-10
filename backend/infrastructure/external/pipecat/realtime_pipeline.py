@@ -16,7 +16,7 @@ import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -69,11 +69,15 @@ OPENAI_LLM_PIPECAT_MODULE = "pipecat.services.openai.llm"
 OPENAI_REALTIME_LLM_PIPECAT_MODULE = "pipecat.services.openai.realtime.llm"
 OPENAI_REALTIME_EVENTS_PIPECAT_MODULE = "pipecat.services.openai.realtime.events"
 OPENROUTER_LLM_PIPECAT_MODULE = "pipecat.services.openrouter.llm"
+DOUBAO_VOICE_PIPECAT_MODULE = (
+    "infrastructure.external.pipecat.volcengine_doubao_services"
+)
 LLM_CONTEXT_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_context"
 LLM_RESPONSE_PIPECAT_MODULE = "pipecat.processors.aggregators.llm_response_universal"
 USER_TURN_PROCESSOR_PIPECAT_MODULE = "pipecat.turns.user_turn_processor"
 USER_TURN_STRATEGIES_PIPECAT_MODULE = "pipecat.turns.user_turn_strategies"
 USER_TURN_COMPLETION_PIPECAT_MODULE = "pipecat.turns.user_turn_completion_mixin"
+USER_TURN_STOP_PIPECAT_MODULE = "pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy"
 OPENAI_API_KEY_ENV_KEYS = OPENAI_REALTIME_API_KEY_ENV_KEYS
 _OPENAI_RUNTIME_VALUE_UNSET = object()
 OPENROUTER_LLM_PROVIDER = "openrouter"
@@ -89,13 +93,19 @@ OPENROUTER_API_KEY_ENV_KEYS = (
     "OPENROUTER_API_KEY",
     "LLM__API_KEY",
 )
+_PIPELINE_COMMIT_FLUSH_TIMEOUT_SECONDS = 5.0
+_TALKWISE_STT_INPUT_BARRIER_ATTR = "_talkwise_stt_input_barrier"
+_TALKWISE_STT_BOUNDARY_MIRRORED_ATTR = "_talkwise_stt_boundary_mirrored"
 OPENROUTER_BASE_URL_ENV_KEYS = (
     "REALTIME_OPENROUTER_BASE_URL",
     "OPENROUTER_BASE_URL",
     "LLM__BASE_URL",
 )
 PIPECAT_SUPPORTED_LLM_PROVIDERS = {"openai", OPENROUTER_LLM_PROVIDER}
+VOLCENGINE_DOUBAO_PROVIDER = "volcengine.doubao"
 VOLCENGINE_DOUBAO_REALTIME_PROVIDER = "volcengine.doubao_realtime"
+PIPECAT_SUPPORTED_STT_PROVIDERS = {"openai", VOLCENGINE_DOUBAO_PROVIDER}
+PIPECAT_SUPPORTED_TTS_PROVIDERS = {"openai", VOLCENGINE_DOUBAO_PROVIDER}
 PIPECAT_REALTIME_PROFILE_CASCADE = "cascade"
 PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH = "speech_to_speech"
 PIPECAT_REALTIME_PROFILE_ALIASES = {
@@ -269,6 +279,20 @@ PIPECAT_OPENROUTER_LLM_FEATURE_REQUIREMENT = {
         LLM_RESPONSE_PIPECAT_MODULE,
     ),
 }
+PIPECAT_DOUBAO_VOICE_FEATURE_REQUIREMENTS = {
+    "stt": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": f"stt:{VOLCENGINE_DOUBAO_PROVIDER}",
+        "message": "The Pipecat Doubao STT adapter is required before starting realtime calls",
+        "modules": (DOUBAO_VOICE_PIPECAT_MODULE, "httpx"),
+    },
+    "tts": {
+        "code": "PIPECAT_FEATURE_UNAVAILABLE",
+        "feature": f"tts:{VOLCENGINE_DOUBAO_PROVIDER}",
+        "message": "The Pipecat Doubao TTS adapter is required before starting realtime calls",
+        "modules": (DOUBAO_VOICE_PIPECAT_MODULE, "httpx"),
+    },
+}
 PIPECAT_FEATURE_MODULE_HINTS = {
     "stt": (OPENAI_STT_PIPECAT_MODULE, "websockets"),
     "tts": (OPENAI_TTS_PIPECAT_MODULE, "openai"),
@@ -423,6 +447,7 @@ class PipecatRuntime:
     WorkerRunner: type
     InputAudioRawFrame: type
     EndFrame: type
+    PipelineFlushFrame: type
     TextFrame: type
     TranscriptionFrame: type
     LLMContextAssistantTurnFrame: type
@@ -471,6 +496,7 @@ class PipecatRuntime:
     ExternalUserTurnStrategies: type | None = None
     FilterIncompleteUserTurnStrategies: type | None = None
     UserTurnCompletionConfig: type | None = None
+    SpeechTimeoutUserTurnStopStrategy: type | None = None
 
     @property
     def websocket_available(self) -> bool:
@@ -486,10 +512,72 @@ class PipecatPipelineHandle:
     pipeline: Any
     worker: Any
     runner: Any
-    event_queue: asyncio.Queue[Mapping[str, Any]]
+    event_queue: asyncio.Queue[Any]
     transport: Any | None = None
     event_processor: Any | None = None
+    stt_input_boundary: Any | None = None
     run_task: asyncio.Task | None = None
+
+
+@dataclass(frozen=True)
+class _PipecatCommitSettlement:
+    completed: asyncio.Event
+
+
+@dataclass(frozen=True)
+class _TalkWiseUserTurnObserverSpec:
+    """Pipeline marker for observing Pipecat's finalized user turns."""
+
+    aggregator: Any
+    event_name: str = "on_user_turn_stopped"
+    preview_state: "_TalkWiseTranscriptPreviewState | None" = None
+
+
+@dataclass
+class _TalkWiseTranscriptPreviewState:
+    """State shared by the preview tap and the semantic turn observer."""
+
+    finalized_parts: list[str] = field(default_factory=list)
+    interim_text: str = ""
+
+    def reset(self) -> None:
+        self.finalized_parts.clear()
+        self.interim_text = ""
+
+    def add_finalized(self, text: str) -> str:
+        normalized = text.strip()
+        if normalized:
+            interim = self.interim_text
+            if interim and not (
+                normalized == interim or normalized.startswith(interim)
+            ):
+                self.finalized_parts.append(interim)
+            self.finalized_parts.append(normalized)
+        self.interim_text = ""
+        return self.text
+
+    def set_interim(self, text: str) -> str:
+        self.interim_text = text.strip()
+        return self.text
+
+    @property
+    def text(self) -> str:
+        parts = [part for part in self.finalized_parts if part]
+        if self.interim_text:
+            parts.append(self.interim_text)
+        return _join_transcript_preview_parts(parts)
+
+
+@dataclass(frozen=True)
+class _TalkWiseTranscriptPreviewSpec:
+    """Pipeline marker for a non-persisted transcript preview tap."""
+
+    state: _TalkWiseTranscriptPreviewState
+
+
+@dataclass(frozen=True)
+class _TalkWiseSTTInputBoundarySpec:
+    """Pipeline marker for the commit barrier immediately after STT observation."""
 
 
 class PipecatRealtimePipelineError(RuntimeError):
@@ -1112,6 +1200,8 @@ def _pipecat_feature_missing_modules(
     hints = (
         (OPENROUTER_LLM_PIPECAT_MODULE,)
         if feature == "llm" and provider == OPENROUTER_LLM_PROVIDER
+        else tuple(requirement["modules"])
+        if provider == VOLCENGINE_DOUBAO_PROVIDER and requirement is not None
         else PIPECAT_FEATURE_MODULE_HINTS[feature]
     )
     missing = tuple(
@@ -1132,6 +1222,8 @@ def _pipecat_feature_requirement(
 ) -> Mapping[str, object] | None:
     if feature_name == "llm" and provider == OPENROUTER_LLM_PROVIDER:
         return PIPECAT_OPENROUTER_LLM_FEATURE_REQUIREMENT
+    if provider == VOLCENGINE_DOUBAO_PROVIDER:
+        return PIPECAT_DOUBAO_VOICE_FEATURE_REQUIREMENTS.get(feature_name)
     return PIPECAT_REALTIME_FEATURE_REQUIREMENTS.get(
         "turnDetection" if feature_name == "turnDetection" else feature_name
     )
@@ -1468,6 +1560,9 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
     filter_incomplete_user_turn_strategies = _optional_pipecat_symbol(
         USER_TURN_STRATEGIES_PIPECAT_MODULE, "FilterIncompleteUserTurnStrategies"
     )
+    speech_timeout_user_turn_stop_strategy = _optional_pipecat_symbol(
+        USER_TURN_STOP_PIPECAT_MODULE, "SpeechTimeoutUserTurnStopStrategy"
+    )
     user_turn_completion_config = _optional_pipecat_symbol(
         USER_TURN_COMPLETION_PIPECAT_MODULE, "UserTurnCompletionConfig"
     )
@@ -1493,6 +1588,9 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         CancelFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "CancelFrame"),
         ErrorFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "ErrorFrame"),
         EndFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "EndFrame"),
+        PipelineFlushFrame=_required_pipecat_symbol(
+            frames_module, "pipecat.frames.frames", "PipelineFlushFrame"
+        ),
         TextFrame=_required_pipecat_symbol(frames_module, "pipecat.frames.frames", "TextFrame"),
         TranscriptionFrame=_required_pipecat_symbol(
             frames_module, "pipecat.frames.frames", "TranscriptionFrame"
@@ -1548,6 +1646,7 @@ def import_pipecat_runtime(*, require_websocket: bool = False) -> PipecatRuntime
         ExternalUserTurnStrategies=external_user_turn_strategies,
         FilterIncompleteUserTurnStrategies=filter_incomplete_user_turn_strategies,
         UserTurnCompletionConfig=user_turn_completion_config,
+        SpeechTimeoutUserTurnStopStrategy=speech_timeout_user_turn_stop_strategy,
     )
 
 
@@ -1681,6 +1780,7 @@ class PipecatRealtimePipelineAdapter:
         self._context: TrainingVoiceContext | None = None
         self._config: RealtimePipelineConfig | None = None
         self._closed = False
+        self._last_commit_settlement: asyncio.Event | None = None
 
     @property
     def handle(self) -> PipecatPipelineHandle | None:
@@ -1710,6 +1810,7 @@ class PipecatRealtimePipelineAdapter:
             self._context = context
             self._config = config
             self._closed = False
+            self._last_commit_settlement = None
             self._voice_processors = (
                 *build_pipecat_voice_processors(runtime, config, context=context),
                 *self._processors,
@@ -1760,15 +1861,40 @@ class PipecatRealtimePipelineAdapter:
 
     async def commit_audio(self) -> None:
         self._require_open()
+        assert self._handle is not None
+        use_stt_boundary = self._handle.stt_input_boundary is not None
+        flush = (
+            self._flush_stt_input_frames
+            if use_stt_boundary
+            else self._flush_queued_frames
+        )
+        await flush()
         for processor in self._voice_processors:
             commit = getattr(processor, "commit_audio", None)
             if callable(commit):
                 maybe_awaitable = commit()
                 if isinstance(maybe_awaitable, Awaitable):
                     await maybe_awaitable
-        handle = self._handle
-        if handle is not None and hasattr(handle.worker, "flush_pipeline"):
-            await handle.worker.flush_pipeline()
+        await flush()
+        settlement = asyncio.Event()
+        self._last_commit_settlement = settlement
+        await self._handle.event_queue.put(_PipecatCommitSettlement(settlement))
+
+    async def wait_for_commit_settled(self) -> None:
+        """Wait until the event consumer handled everything before the commit barrier."""
+
+        settlement = self._last_commit_settlement
+        if settlement is None:
+            return
+        try:
+            await asyncio.wait_for(
+                settlement.wait(),
+                timeout=_PIPELINE_COMMIT_FLUSH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise RuntimeError(
+                "Pipecat realtime audio commit timed out while settling provider events"
+            ) from exc
 
     async def cancel_response(self, reason: str | None = None) -> None:
         """Use Pipecat's native interruption frame to flush active bot output."""
@@ -1786,10 +1912,92 @@ class PipecatRealtimePipelineAdapter:
         self._require_started()
         assert self._handle is not None
         while True:
-            event = await self._handle.event_queue.get()
+            if not self._handle.event_queue.empty():
+                event = await self._handle.event_queue.get()
+                if isinstance(event, _PipecatCommitSettlement):
+                    event.completed.set()
+                    continue
+                if event.get("type") == "talkwise.pipecat.closed":
+                    break
+                yield event
+                continue
+
+            run_task = self._handle.run_task
+            if run_task is not None and run_task.done():
+                if self._closed:
+                    break
+                self._raise_pipeline_task_failure(run_task)
+
+            event_task = asyncio.create_task(self._handle.event_queue.get())
+            waiters: set[asyncio.Task[Any]] = {event_task}
+            if run_task is not None:
+                waiters.add(run_task)
+            done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+            if event_task not in done:
+                event_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await event_task
+                if self._closed:
+                    break
+                assert run_task is not None
+                self._raise_pipeline_task_failure(run_task)
+                continue
+
+            event = event_task.result()
+            if isinstance(event, _PipecatCommitSettlement):
+                event.completed.set()
+                continue
             if event.get("type") == "talkwise.pipecat.closed":
                 break
             yield event
+
+    async def _flush_queued_frames(self) -> None:
+        assert self._handle is not None
+        runtime = self._runtime or import_pipecat_runtime(
+            require_websocket=self._websocket is not None
+        )
+        drained = asyncio.Event()
+        await self._handle.worker.queue_frame(runtime.PipelineFlushFrame(event=drained))
+        try:
+            await asyncio.wait_for(
+                drained.wait(),
+                timeout=_PIPELINE_COMMIT_FLUSH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise RuntimeError(
+                "Pipecat realtime audio commit timed out while draining queued frames"
+            ) from exc
+
+    async def _flush_stt_input_frames(self) -> None:
+        """Drain audio through STT without waiting for downstream LLM work."""
+
+        assert self._handle is not None
+        assert self._handle.stt_input_boundary is not None
+        runtime = self._runtime or import_pipecat_runtime(
+            require_websocket=self._websocket is not None
+        )
+        drained = asyncio.Event()
+        barrier = runtime.PipelineFlushFrame(event=drained)
+        setattr(barrier, _TALKWISE_STT_INPUT_BARRIER_ATTR, True)
+        await self._handle.worker.queue_frame(barrier)
+        try:
+            await asyncio.wait_for(
+                drained.wait(),
+                timeout=_PIPELINE_COMMIT_FLUSH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise RuntimeError(
+                "Pipecat realtime audio commit timed out while draining STT input frames"
+            ) from exc
+
+    @staticmethod
+    def _raise_pipeline_task_failure(run_task: asyncio.Task[Any]) -> None:
+        if run_task.cancelled():
+            raise RuntimeError("Pipecat realtime pipeline worker was cancelled unexpectedly")
+        failure = run_task.exception()
+        if failure is not None:
+            raise RuntimeError("Pipecat realtime pipeline worker failed") from failure
+        raise RuntimeError("Pipecat realtime pipeline worker stopped unexpectedly")
 
     async def close(self) -> None:
         if self._handle is None or self._closed:
@@ -1846,6 +2054,18 @@ def _pipecat_start_error(
         "roomId": context.binding.room_id,
         "requestedFeatures": _requested_feature_metadata(config),
     }
+    to_realtime_error = getattr(exc, "to_realtime_error", None)
+    if callable(to_realtime_error):
+        details = sanitize_realtime_public_value(to_realtime_error())
+        if isinstance(details, Mapping):
+            metadata["providerError"] = dict(details)
+            return PipecatRealtimePipelineError(
+                str(details.get("message") or message),
+                code=str(details.get("code") or "PIPECAT_PIPELINE_START_FAILED"),
+                phase=str(details.get("phase") or "configuration"),
+                feature=_clean_text(details.get("feature")),
+                metadata=metadata,
+            )
     if isinstance(exc, ImportError):
         return PipecatRealtimePipelineError(
             message,
@@ -2074,11 +2294,20 @@ def build_pipecat_pipeline_handle(
 ) -> PipecatPipelineHandle:
     """Build Pipecat pipeline objects without starting their lifecycle."""
 
-    event_queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue()
-    event_processor = create_talkwise_event_processor(runtime, event_queue, config=config)
+    event_queue: asyncio.Queue[Any] = asyncio.Queue()
+    has_user_turn_observer = any(
+        isinstance(processor, _TalkWiseUserTurnObserverSpec) for processor in processors
+    )
+    event_processor = create_talkwise_event_processor(
+        runtime,
+        event_queue,
+        config=config,
+        mirror_transcripts=not has_user_turn_observer,
+    )
 
     transport = None
     pipecat_processors = []
+    stt_input_boundary = None
     if websocket is not None:
         if not runtime.websocket_available:
             raise PipecatRealtimePipelineError(
@@ -2091,7 +2320,43 @@ def build_pipecat_pipeline_handle(
         transport = runtime.FastAPIWebsocketTransport(websocket=websocket, params=params)
         pipecat_processors.append(transport.input())
 
-    pipecat_processors.extend(processors)
+    for processor in processors:
+        if isinstance(processor, _TalkWiseUserTurnObserverSpec):
+            register_talkwise_user_turn_observer(
+                processor.aggregator,
+                event_queue,
+                config=config,
+                event_name=processor.event_name,
+                preview_state=processor.preview_state,
+            )
+            continue
+        if isinstance(processor, _TalkWiseTranscriptPreviewSpec):
+            pipecat_processors.append(
+                create_talkwise_transcript_preview_processor(
+                    runtime,
+                    event_queue,
+                    config=config,
+                    state=processor.state,
+                )
+            )
+            continue
+        if isinstance(processor, _TalkWiseSTTInputBoundarySpec):
+            if stt_input_boundary is not None:
+                raise PipecatRealtimePipelineError(
+                    "Pipecat pipeline declares more than one STT input boundary",
+                    code="PIPECAT_STT_INPUT_BOUNDARY_INVALID",
+                    phase="pipeline_build",
+                    feature="stt",
+                )
+            stt_input_boundary = create_talkwise_stt_input_boundary_processor(
+                runtime,
+                event_queue,
+                config=config,
+                mirror_transcripts=not has_user_turn_observer,
+            )
+            pipecat_processors.append(stt_input_boundary)
+            continue
+        pipecat_processors.append(processor)
     pipecat_processors.append(event_processor)
 
     if transport is not None:
@@ -2113,6 +2378,7 @@ def build_pipecat_pipeline_handle(
         event_queue=event_queue,
         transport=transport,
         event_processor=event_processor,
+        stt_input_boundary=stt_input_boundary,
     )
 
 
@@ -2131,6 +2397,7 @@ def build_pipecat_voice_processors(
         return build_pipecat_speech_to_speech_processors(runtime, config, context=context)
 
     llm_provider = _feature_provider(metadata, "llm")
+    has_stt_processor = False
 
     if _feature_provider(metadata, "vad") == "silero":
         if runtime.SileroVADAnalyzer is None or runtime.VADProcessor is None:
@@ -2226,6 +2493,44 @@ def build_pipecat_voice_processors(
                 ),
             )
         )
+        has_stt_processor = True
+    elif stt_provider == VOLCENGINE_DOUBAO_PROVIDER:
+        from infrastructure.external.pipecat.volcengine_doubao_services import (
+            create_volcengine_doubao_stt_service,
+        )
+
+        stt_config = _feature_config(metadata, "stt")
+        turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
+        processors.append(
+            create_volcengine_doubao_stt_service(
+                api_key=_doubao_api_key(),
+                base_url=_doubao_base_url(stt_config),
+                model=(
+                    _metadata_text(stt_config, "model")
+                    or _metadata_text(metadata, "sttModel", "stt_model")
+                    or ""
+                ),
+                language=_metadata_text(stt_config, "language") or "zh",
+                vad_segment_settle_seconds=(
+                    _metadata_float(
+                        turn_config,
+                        "userSpeechTimeout",
+                        "user_speech_timeout",
+                        default=0.0,
+                    )
+                    or 0.0
+                ),
+                sample_rate=(
+                    _metadata_int(stt_config, "sampleRate", "sample_rate")
+                    or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
+                    or 16000
+                ),
+            )
+        )
+        has_stt_processor = True
+
+    if has_stt_processor and llm_provider not in PIPECAT_SUPPORTED_LLM_PROVIDERS:
+        processors.append(_TalkWiseSTTInputBoundarySpec())
 
     if (
         _feature_provider(metadata, "turnDetection", "turn_detection") == "pipecat"
@@ -2264,6 +2569,16 @@ def build_pipecat_voice_processors(
             config,
             context=context,
         )
+        if stt_provider is not None:
+            preview_state = _TalkWiseTranscriptPreviewState()
+            processors.append(_TalkWiseTranscriptPreviewSpec(preview_state))
+            processors.append(
+                _TalkWiseUserTurnObserverSpec(
+                    user_aggregator,
+                    preview_state=preview_state,
+                )
+            )
+            processors.append(_TalkWiseSTTInputBoundarySpec())
         processors.append(user_aggregator)
         processors.append(llm)
 
@@ -2307,6 +2622,35 @@ def build_pipecat_voice_processors(
                     _entrypoint(OPENAI_TTS_PIPECAT_MODULE, "OpenAITTSService"),
                     tts_settings_kwargs,
                 ),
+            )
+        )
+    elif tts_provider == VOLCENGINE_DOUBAO_PROVIDER:
+        from infrastructure.external.pipecat.volcengine_doubao_services import (
+            create_volcengine_doubao_tts_service,
+        )
+
+        tts_config = _feature_config(metadata, "tts")
+        processors.append(
+            create_volcengine_doubao_tts_service(
+                api_key=_doubao_api_key(),
+                base_url=_doubao_base_url(tts_config),
+                model=(
+                    _metadata_text(tts_config, "model")
+                    or _metadata_text(metadata, "ttsModel", "tts_model")
+                    or ""
+                ),
+                voice=(
+                    config.voice
+                    or _metadata_text(tts_config, "voice")
+                    or _metadata_text(metadata, "voice")
+                    or ""
+                ),
+                sample_rate=(
+                    _metadata_int(tts_config, "sampleRate", "sample_rate")
+                    or _metadata_int(metadata, "outputSampleRate", "output_sample_rate")
+                    or 24000
+                ),
+                speed=_metadata_float(tts_config, "speed", default=1.0),
             )
         )
 
@@ -2431,7 +2775,15 @@ def build_pipecat_speech_to_speech_processors(
         assistant_params=runtime.LLMAssistantAggregatorParams(),
         realtime_service_mode=True,
     )
-    return user_aggregator, llm, assistant_aggregator
+    return (
+        _TalkWiseUserTurnObserverSpec(
+            user_aggregator,
+            event_name="on_user_turn_message_added",
+        ),
+        user_aggregator,
+        llm,
+        assistant_aggregator,
+    )
 
 
 def build_pipecat_llm_processors(
@@ -2557,8 +2909,18 @@ def pipecat_pipeline_capability(
     else:
         if _feature_provider(metadata, "stt") == "openai" and not capability.stt_available:
             missing.append("stt:openai")
+        if (
+            _feature_provider(metadata, "stt") == VOLCENGINE_DOUBAO_PROVIDER
+            and not _doubao_voice_adapter_available()
+        ):
+            missing.append(f"stt:{VOLCENGINE_DOUBAO_PROVIDER}")
         if _feature_provider(metadata, "tts") == "openai" and not capability.tts_available:
             missing.append("tts:openai")
+        if (
+            _feature_provider(metadata, "tts") == VOLCENGINE_DOUBAO_PROVIDER
+            and not _doubao_voice_adapter_available()
+        ):
+            missing.append(f"tts:{VOLCENGINE_DOUBAO_PROVIDER}")
         if llm_provider == "openai" and not capability.llm_available:
             missing.append("llm:openai")
         if llm_provider == OPENROUTER_LLM_PROVIDER and not capability.openrouter_llm_available:
@@ -2630,6 +2992,7 @@ def pipecat_pipeline_capability(
             "openrouterLlmAvailable": capability.openrouter_llm_available,
             "vadAvailable": capability.vad_available,
             "turnDetectionAvailable": capability.turn_detection_available,
+            "doubaoVoiceAvailable": _doubao_voice_adapter_available(),
             "profile": profile,
             "profileContract": pipecat_realtime_profile_contracts()[profile],
             "profiles": _pipecat_realtime_profile_payload(capability),
@@ -2645,14 +3008,38 @@ def pipecat_pipeline_capability(
             "optionalMissingModules": capability.optional_missing_modules,
             "runtimeLoaded": runtime is not None,
             "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
-            "sttEntrypoint": OPENAI_STT_PIPECAT_MODULE,
-            "ttsEntrypoint": OPENAI_TTS_PIPECAT_MODULE,
+            "sttEntrypoint": (
+                "infrastructure.external.pipecat.volcengine_doubao_services"
+                if requested_features.get("stt") == VOLCENGINE_DOUBAO_PROVIDER
+                else OPENAI_STT_PIPECAT_MODULE
+            ),
+            "ttsEntrypoint": (
+                "infrastructure.external.pipecat.volcengine_doubao_services"
+                if requested_features.get("tts") == VOLCENGINE_DOUBAO_PROVIDER
+                else OPENAI_TTS_PIPECAT_MODULE
+            ),
             "llmEntrypoint": OPENAI_LLM_PIPECAT_MODULE,
             "realtimeLlmEntrypoint": OPENAI_REALTIME_LLM_PIPECAT_MODULE,
             "realtimeEventsEntrypoint": OPENAI_REALTIME_EVENTS_PIPECAT_MODULE,
             "llmService": _llm_service_metadata(metadata),
             "turnDetectionEntrypoint": USER_TURN_PROCESSOR_PIPECAT_MODULE,
         },
+    )
+
+
+def _doubao_voice_adapter_available() -> bool:
+    try:
+        module = importlib.import_module(
+            "infrastructure.external.pipecat.volcengine_doubao_services"
+        )
+    except Exception:
+        return False
+    return all(
+        callable(getattr(module, name, None))
+        for name in (
+            "create_volcengine_doubao_stt_service",
+            "create_volcengine_doubao_tts_service",
+        )
     )
 
 
@@ -2688,6 +3075,27 @@ def _pipecat_pipeline_readiness(
             )
         )
 
+    supported_providers = {
+        "stt": PIPECAT_SUPPORTED_STT_PROVIDERS,
+        "tts": PIPECAT_SUPPORTED_TTS_PROVIDERS,
+        "llm": PIPECAT_SUPPORTED_LLM_PROVIDERS,
+        "vad": {"silero"},
+        "turnDetection": {"pipecat"},
+    }
+    for feature, supported in supported_providers.items():
+        provider = requested_features.get(feature)
+        if provider is None or provider in supported:
+            continue
+        blockers.append(
+            RealtimeReadinessIssue(
+                code="PIPECAT_PROVIDER_UNSUPPORTED",
+                message=f"Pipecat does not support provider '{provider}' for {feature}",
+                phase="capability_check",
+                provider=provider,
+                feature=f"{feature}:{provider}",
+            )
+        )
+
     optional_missing_modules = tuple(str(module) for module in capability.optional_missing_modules)
     for feature in missing_features:
         feature_name, _, provider = feature.partition(":")
@@ -2720,6 +3128,10 @@ def _pipecat_pipeline_readiness(
         for feature in ("stt", "tts", "llm", "realtimeLlm")
     )
     uses_openrouter_key = requested_features.get("llm") == OPENROUTER_LLM_PROVIDER
+    uses_doubao_voice = any(
+        requested_features.get(feature) == VOLCENGINE_DOUBAO_PROVIDER
+        for feature in ("stt", "tts")
+    )
     if uses_openai_key and not _openai_api_key(metadata):
         blockers.append(
             RealtimeReadinessIssue(
@@ -2748,6 +3160,65 @@ def _pipecat_pipeline_readiness(
                 missing_env=OPENROUTER_API_KEY_ENV_KEYS,
             )
         )
+    if uses_doubao_voice:
+        from infrastructure.external.pipecat.volcengine_doubao_services import (
+            DoubaoVoiceServiceError,
+            validate_doubao_service_config,
+        )
+
+        stt_config = _feature_config(metadata, "stt")
+        tts_config = _feature_config(metadata, "tts")
+        try:
+            validate_doubao_service_config(
+                api_key=_doubao_api_key(),
+                base_url=_doubao_base_url(stt_config or tts_config),
+                stt_model=(
+                    _metadata_text(stt_config, "model")
+                    if requested_features.get("stt") == VOLCENGINE_DOUBAO_PROVIDER
+                    else None
+                ),
+                tts_model=(
+                    _metadata_text(tts_config, "model")
+                    if requested_features.get("tts") == VOLCENGINE_DOUBAO_PROVIDER
+                    else None
+                ),
+                voice=(
+                    config.voice
+                    or _metadata_text(tts_config, "voice")
+                    or _metadata_text(metadata, "voice")
+                ),
+                input_sample_rate=(
+                    _metadata_int(stt_config, "sampleRate", "sample_rate")
+                    or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
+                    or 16000
+                ),
+                output_sample_rate=(
+                    _metadata_int(tts_config, "sampleRate", "sample_rate")
+                    or _metadata_int(metadata, "outputSampleRate", "output_sample_rate")
+                    or 24000
+                ),
+            )
+        except DoubaoVoiceServiceError as exc:
+            details = exc.to_realtime_error()
+            blockers.append(
+                RealtimeReadinessIssue(
+                    code=exc.code,
+                    message=str(exc),
+                    phase=exc.phase,
+                    provider=VOLCENGINE_DOUBAO_PROVIDER,
+                    feature=exc.feature,
+                    metadata={
+                        "errorCategory": exc.category,
+                        "retryable": exc.retryable,
+                        "fatal": exc.fatal,
+                        **(
+                            {"statusCode": details["statusCode"]}
+                            if "statusCode" in details
+                            else {}
+                        ),
+                    },
+                )
+            )
     if not openai_requirements.get("model"):
         blockers.append(
             RealtimeReadinessIssue(
@@ -2802,6 +3273,7 @@ def create_talkwise_event_processor(
     event_queue: asyncio.Queue[Mapping[str, Any]],
     *,
     config: RealtimePipelineConfig,
+    mirror_transcripts: bool = True,
 ) -> Any:
     """Create a small Pipecat processor that mirrors transcript and TTS audio frames."""
 
@@ -2822,12 +3294,16 @@ def create_talkwise_event_processor(
             if isinstance(frame, runtime.TTSAudioRawFrame):
                 self._audio_output_sequence += 1
                 audio_sequence = self._audio_output_sequence
-            event = _event_from_pipecat_frame(
-                runtime,
-                frame,
-                config=config,
-                audio_sequence=audio_sequence,
-            )
+            if getattr(frame, _TALKWISE_STT_BOUNDARY_MIRRORED_ATTR, False):
+                event = None
+            else:
+                event = _event_from_pipecat_frame(
+                    runtime,
+                    frame,
+                    config=config,
+                    audio_sequence=audio_sequence,
+                    include_transcripts=mirror_transcripts,
+                )
             if event is not None:
                 self._enrich_realtime_metrics(event, observed_at=observed_at)
                 await event_queue.put(event)
@@ -2887,12 +3363,230 @@ def create_talkwise_event_processor(
     return TalkWiseEventProcessor(name="TalkWiseEventProcessor")
 
 
+def create_talkwise_transcript_preview_processor(
+    runtime: PipecatRuntime,
+    event_queue: asyncio.Queue[Mapping[str, Any]],
+    *,
+    config: RealtimePipelineConfig,
+    state: _TalkWiseTranscriptPreviewState,
+) -> Any:
+    """Expose Pipecat transcription frames without treating them as messages."""
+
+    class TalkWiseTranscriptPreviewProcessor(runtime.FrameProcessor):  # type: ignore[misc, valid-type]
+        async def process_frame(self, frame: Any, direction: Any) -> None:
+            await super().process_frame(frame, direction)
+            event: dict[str, Any] | None = None
+            if runtime.InterimTranscriptionFrame is not None and isinstance(
+                frame, runtime.InterimTranscriptionFrame
+            ):
+                text = state.set_interim(str(getattr(frame, "text", "") or ""))
+                event = _preview_transcript_event(
+                    frame,
+                    text,
+                    config=config,
+                    state=state,
+                )
+            elif isinstance(frame, runtime.TranscriptionFrame):
+                text = state.add_finalized(str(getattr(frame, "text", "") or ""))
+                event = _preview_transcript_event(
+                    frame,
+                    text,
+                    config=config,
+                    state=state,
+                )
+            if event is not None and event["text"]:
+                await event_queue.put(event)
+            await self.push_frame(frame, direction)
+
+    return TalkWiseTranscriptPreviewProcessor(name="TalkWiseTranscriptPreviewProcessor")
+
+
+def create_talkwise_stt_input_boundary_processor(
+    runtime: PipecatRuntime,
+    event_queue: asyncio.Queue[Mapping[str, Any]],
+    *,
+    config: RealtimePipelineConfig,
+    mirror_transcripts: bool,
+) -> Any:
+    """Settle queued STT input before frames enter aggregators or the LLM.
+
+    The boundary mirrors provider results that would otherwise be hidden behind
+    a downstream aggregator. The marked flush frame is deliberately consumed
+    here, so a commit cannot wait for synchronous downstream LLM processing.
+    """
+
+    class TalkWiseSTTInputBoundaryProcessor(  # type: ignore[misc, valid-type]
+        runtime.FrameProcessor
+    ):
+        async def process_frame(self, frame: Any, direction: Any) -> None:
+            await super().process_frame(frame, direction)
+            if (
+                isinstance(frame, runtime.PipelineFlushFrame)
+                and getattr(frame, _TALKWISE_STT_INPUT_BARRIER_ATTR, False)
+            ):
+                event = getattr(frame, "event", None)
+                if event is not None:
+                    event.set()
+                return
+
+            event: Mapping[str, Any] | None = None
+            if _is_pipecat_frame(frame, runtime.ErrorFrame):
+                event = _event_from_pipecat_frame(
+                    runtime,
+                    frame,
+                    config=config,
+                    include_transcripts=False,
+                )
+            elif mirror_transcripts:
+                event = _transcript_event_from_pipecat_frame(
+                    runtime,
+                    frame,
+                    config=config,
+                )
+            if event is not None:
+                await event_queue.put(event)
+                setattr(frame, _TALKWISE_STT_BOUNDARY_MIRRORED_ATTR, True)
+            await self.push_frame(frame, direction)
+
+    return TalkWiseSTTInputBoundaryProcessor(name="TalkWiseSTTInputBoundaryProcessor")
+
+
+def _preview_transcript_event(
+    frame: Any,
+    text: str,
+    *,
+    config: RealtimePipelineConfig,
+    state: _TalkWiseTranscriptPreviewState,
+) -> dict[str, Any]:
+    user_id = getattr(frame, "user_id", None)
+    event: dict[str, Any] = {
+        "type": "transcript.delta",
+        "runtime": REALTIME_RUNTIME_PIPECAT,
+        "text": text,
+        "delta": text,
+        "provider": config.provider,
+        "source": "pipecat",
+        "user_id": user_id,
+        "sender_id": user_id,
+        "language": str(getattr(frame, "language", "") or "") or None,
+        "timestamp": getattr(frame, "timestamp", None),
+        "metadata": {
+            "aggregation": "pipecat_user_turn_preview",
+            "preview": True,
+            "replace": True,
+        },
+    }
+    event = _with_frame_metadata(event, frame, config=config)
+    event_metadata = event.setdefault("metadata", {})
+    if isinstance(event_metadata, dict):
+        event_metadata.update(
+            {
+                "aggregation": "pipecat_user_turn_preview",
+                "preview": True,
+                "replace": True,
+            }
+        )
+    return event
+
+
+def _join_transcript_preview_parts(parts: Sequence[str]) -> str:
+    result = ""
+    for part in parts:
+        text = part.strip()
+        if not text:
+            continue
+        if not result:
+            result = text
+            continue
+        if result[-1].isspace() or text[0].isspace():
+            result += text
+        elif _is_cjk_transcript_char(result[-1]) or _is_cjk_transcript_char(text[0]):
+            result += text
+        else:
+            result += f" {text}"
+    return result
+
+
+def _is_cjk_transcript_char(value: str) -> bool:
+    codepoint = ord(value)
+    return (
+        0x2E80 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0xAC00 <= codepoint <= 0xD7AF
+    )
+
+
+def register_talkwise_user_turn_observer(
+    aggregator: Any,
+    event_queue: asyncio.Queue[Mapping[str, Any]],
+    *,
+    config: RealtimePipelineConfig,
+    event_name: str,
+    preview_state: _TalkWiseTranscriptPreviewState | None = None,
+) -> None:
+    """Publish one TalkWise transcript after Pipecat finalizes a semantic user turn."""
+
+    add_event_handler = getattr(aggregator, "add_event_handler", None)
+    if not callable(add_event_handler):
+        raise PipecatRealtimePipelineError(
+            "Pipecat user turn aggregation events are unavailable",
+            code="PIPECAT_USER_TURN_OBSERVER_UNAVAILABLE",
+            phase="pipeline_build",
+            feature="transcript",
+        )
+
+    async def publish(message: Any) -> None:
+        text = str(getattr(message, "content", "") or "").strip()
+        if not text:
+            return
+        user_id = getattr(message, "user_id", None)
+        event: dict[str, Any] = {
+            "type": "transcript.done",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "text": text,
+            "provider": config.provider,
+            "source": "pipecat",
+            "timestamp": getattr(message, "timestamp", None),
+            "metadata": {"aggregation": "pipecat_user_turn"},
+        }
+        if user_id is not None:
+            event["user_id"] = user_id
+            event["sender_id"] = user_id
+        await event_queue.put(event)
+        if preview_state is not None:
+            preview_state.reset()
+
+    async def on_user_turn_stopped(
+        _aggregator: Any,
+        _strategy: Any,
+        message: Any,
+    ) -> None:
+        await publish(message)
+
+    async def on_user_turn_message_added(
+        _aggregator: Any,
+        message: Any,
+    ) -> None:
+        await publish(message)
+
+    handlers = {
+        "on_user_turn_stopped": on_user_turn_stopped,
+        "on_user_turn_message_added": on_user_turn_message_added,
+    }
+    try:
+        handler = handlers[event_name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported Pipecat user turn event: {event_name}") from exc
+    add_event_handler(event_name, handler)
+
+
 def _event_from_pipecat_frame(
     runtime: PipecatRuntime,
     frame: Any,
     *,
     config: RealtimePipelineConfig,
     audio_sequence: int | None = None,
+    include_transcripts: bool = True,
 ) -> Mapping[str, Any] | None:
     if _is_pipecat_frame(frame, runtime.ErrorFrame):
         error_payload: dict[str, Any] = {
@@ -2924,6 +3618,29 @@ def _event_from_pipecat_frame(
         )
     if event := _talkwise_turn_event_from_pipecat_frame(runtime, frame, config=config):
         return event
+    if include_transcripts:
+        event = _transcript_event_from_pipecat_frame(runtime, frame, config=config)
+        if event is not None:
+            return event
+    if isinstance(frame, runtime.LLMContextAssistantTurnFrame):
+        event = {
+            "type": "response.audio_transcript.done",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "text": frame.text,
+            "provider": config.provider,
+            "source": "pipecat",
+            "timestamp": getattr(frame, "timestamp", None),
+        }
+        return _with_frame_metadata(event, frame, config=config)
+    return None
+
+
+def _transcript_event_from_pipecat_frame(
+    runtime: PipecatRuntime,
+    frame: Any,
+    *,
+    config: RealtimePipelineConfig,
+) -> Mapping[str, Any] | None:
     if runtime.InterimTranscriptionFrame is not None and isinstance(
         frame, runtime.InterimTranscriptionFrame
     ):
@@ -2953,16 +3670,6 @@ def _event_from_pipecat_frame(
             "user_id": user_id,
             "sender_id": user_id,
             "language": str(getattr(frame, "language", "") or "") or None,
-            "timestamp": getattr(frame, "timestamp", None),
-        }
-        return _with_frame_metadata(event, frame, config=config)
-    if isinstance(frame, runtime.LLMContextAssistantTurnFrame):
-        event = {
-            "type": "response.audio_transcript.done",
-            "runtime": REALTIME_RUNTIME_PIPECAT,
-            "text": frame.text,
-            "provider": config.provider,
-            "source": "pipecat",
             "timestamp": getattr(frame, "timestamp", None),
         }
         return _with_frame_metadata(event, frame, config=config)
@@ -4030,6 +4737,30 @@ def _openai_api_key(metadata: Mapping[str, Any]) -> str | None:
     )
 
 
+def _doubao_api_key() -> str | None:
+    if user_billing_enabled():
+        return current_user_access_token() or runtime_api_key()
+    return _settings_llm_value("api_key")
+
+
+def _doubao_base_url(config: Mapping[str, Any]) -> str | None:
+    if user_billing_enabled():
+        return user_relay_base_url()
+    return _metadata_text(config, "baseUrl", "base_url") or _settings_llm_value("base_url")
+
+
+def _settings_llm_value(attr: str) -> str | None:
+    try:
+        from core.config import settings as app_settings
+    except Exception:
+        return None
+    llm_settings = getattr(app_settings, "llm", None)
+    value = getattr(llm_settings, attr, None) if llm_settings is not None else None
+    if attr == "api_key" and not value:
+        value = getattr(app_settings, "OPENAI_API_KEY", None)
+    return _clean_text(value)
+
+
 def _openrouter_api_key(metadata: Mapping[str, Any]) -> str | None:
     if user_billing_enabled():
         return require_user_access_token()
@@ -4283,12 +5014,56 @@ def _user_turn_strategies(runtime: PipecatRuntime, metadata: Mapping[str, Any]) 
             raise RuntimeError("Pipecat external user turn strategies are unavailable")
         return runtime.ExternalUserTurnStrategies()
 
+    stop_strategy = _user_turn_stop_strategy(runtime, metadata)
+    if strategy == "speech_timeout":
+        if runtime.UserTurnStrategies is None:
+            raise RuntimeError("Pipecat user turn strategies are unavailable")
+        assert stop_strategy is not None
+        return runtime.UserTurnStrategies(stop=[stop_strategy])
+
     if runtime.FilterIncompleteUserTurnStrategies is None:
         raise RuntimeError("Pipecat filter-incomplete user turn strategies are unavailable")
     completion_config = _user_turn_completion_config(runtime, metadata)
-    if completion_config is None:
-        return runtime.FilterIncompleteUserTurnStrategies()
-    return runtime.FilterIncompleteUserTurnStrategies(config=completion_config)
+    kwargs: dict[str, Any] = {}
+    if completion_config is not None:
+        kwargs["config"] = completion_config
+    if stop_strategy is not None:
+        kwargs["stop"] = [stop_strategy]
+    return runtime.FilterIncompleteUserTurnStrategies(**kwargs)
+
+
+def _user_turn_stop_strategy(
+    runtime: PipecatRuntime,
+    metadata: Mapping[str, Any],
+) -> Any | None:
+    selected = _metadata_text(
+        metadata,
+        "baseStopStrategy",
+        "base_stop_strategy",
+        "stopStrategy",
+        "stop_strategy",
+    )
+    if selected is None and _user_turn_strategy_name(metadata) == "speech_timeout":
+        selected = "speech_timeout"
+    if selected is None:
+        return None
+
+    normalized = selected.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized.replace("_", "") not in {"speechtimeout", "speechtimeoutuserturnstop"}:
+        raise ValueError(
+            f"Unsupported Pipecat user turn stop strategy '{selected}'; "
+            "expected speech_timeout"
+        )
+    if runtime.SpeechTimeoutUserTurnStopStrategy is None:
+        raise RuntimeError("Pipecat speech-timeout user turn strategy is unavailable")
+    return runtime.SpeechTimeoutUserTurnStopStrategy(
+        user_speech_timeout=_metadata_float(
+            metadata,
+            "userSpeechTimeout",
+            "user_speech_timeout",
+            default=0.6,
+        )
+    )
 
 
 def _user_turn_strategy_name(metadata: Mapping[str, Any]) -> str | None:
@@ -4323,9 +5098,16 @@ def _user_turn_strategy_name(metadata: Mapping[str, Any]) -> str | None:
         "filterincompleteuserturnstrategies",
     }:
         return "filter_incomplete"
+    if compact in {
+        "speechtimeout",
+        "speechtimeoutuserturn",
+        "speechtimeoutuserturnstop",
+        "speechtimeoutuserturnstopstrategy",
+    }:
+        return "speech_timeout"
     raise ValueError(
         "Unsupported Pipecat user turn strategy "
-        f"'{selected}'; expected external or filter_incomplete"
+        f"'{selected}'; expected external, filter_incomplete, or speech_timeout"
     )
 
 
@@ -4414,8 +5196,8 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
         _validate_pipecat_speech_to_speech_config(config)
         return
 
-    _validate_provider(metadata, "stt", supported={"openai"})
-    _validate_provider(metadata, "tts", supported={"openai"})
+    _validate_provider(metadata, "stt", supported=PIPECAT_SUPPORTED_STT_PROVIDERS)
+    _validate_provider(metadata, "tts", supported=PIPECAT_SUPPORTED_TTS_PROVIDERS)
     _validate_provider(metadata, "llm", supported=PIPECAT_SUPPORTED_LLM_PROVIDERS)
     _validate_provider(metadata, "vad", supported={"silero"})
     _validate_provider(metadata, "turnDetection", "turn_detection", supported={"pipecat"})
@@ -4446,8 +5228,46 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
         "noiseReduction",
         "noise_reduction",
     ) or _metadata_text(metadata, "noiseReduction", "noise_reduction")
-    if noise_reduction is not None and noise_reduction not in {"near_field", "far_field"}:
+    if (
+        stt_provider == "openai"
+        and noise_reduction is not None
+        and noise_reduction not in {"near_field", "far_field"}
+    ):
         raise ValueError("OpenAI realtime STT noise reduction must be near_field or far_field")
+
+    if stt_provider == VOLCENGINE_DOUBAO_PROVIDER:
+        stt_config = _feature_config(metadata, "stt")
+        if not (
+            _metadata_text(stt_config, "model")
+            or _metadata_text(metadata, "sttModel", "stt_model")
+        ):
+            raise ValueError("Doubao STT model is required")
+        stt_sample_rate = _metadata_int(
+            stt_config,
+            "sampleRate",
+            "sample_rate",
+        ) or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
+        if stt_sample_rate not in {None, 16000}:
+            raise ValueError("Doubao STT input sample rate must be 16000")
+
+    tts_provider = _feature_provider(metadata, "tts")
+    if tts_provider == VOLCENGINE_DOUBAO_PROVIDER:
+        tts_config = _feature_config(metadata, "tts")
+        tts_sample_rate = _metadata_int(tts_config, "sampleRate", "sample_rate") or _metadata_int(
+            metadata,
+            "outputSampleRate",
+            "output_sample_rate",
+        )
+        if tts_sample_rate not in {None, 24000}:
+            raise ValueError("Doubao TTS output sample rate must be 24000")
+        if not _metadata_text(tts_config, "model"):
+            raise ValueError("Doubao TTS model is required")
+        if not (
+            config.voice
+            or _metadata_text(tts_config, "voice")
+            or _metadata_text(metadata, "voice")
+        ):
+            raise ValueError("Doubao TTS voice is required")
 
     tts_speed = _metadata_float(_feature_config(metadata, "tts"), "speed")
     if tts_speed is not None and not 0.25 <= tts_speed <= 4.0:

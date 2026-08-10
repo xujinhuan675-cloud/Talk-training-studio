@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -58,6 +59,12 @@ REALTIME_PROVIDER_ERROR_TAXONOMY: tuple[dict[str, Any], ...] = (
         "code": "REALTIME_TURN_DESYNC",
         "retryable": False,
         "fatal": True,
+    },
+    {
+        "errorCategory": "input_audio",
+        "code": "REALTIME_INPUT_AUDIO_UNRECOGNIZED",
+        "retryable": True,
+        "fatal": False,
     },
     {
         "errorCategory": "provider_error",
@@ -442,6 +449,31 @@ class RealtimePipelineSessionRunner:
     async def commit(self) -> None:
         self._require_open()
         await self._adapter.commit_audio()
+        wait_for_commit_settled = getattr(self._adapter, "wait_for_commit_settled", None)
+        if not callable(wait_for_commit_settled):
+            return
+
+        settlement_task = asyncio.create_task(wait_for_commit_settled())
+        events_task = self._events_task
+        try:
+            if events_task is not None and not events_task.done():
+                done, _ = await asyncio.wait(
+                    {settlement_task, events_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if events_task in done and settlement_task not in done:
+                    settlement_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await settlement_task
+                    self._raise_events_error()
+                    raise RealtimePipelineRunnerStateError(
+                        "Realtime pipeline event pump stopped before audio commit settled"
+                    )
+            await settlement_task
+        except BaseException:
+            self._raise_events_error()
+            raise
+        self._raise_events_error()
 
     async def commit_audio(self) -> None:
         await self.commit()
@@ -530,6 +562,8 @@ class RealtimePipelineSessionRunner:
                     realtime_session_id,
                 )
                 if persisted is not None:
+                    if persisted.payload.get("duplicate") is True:
+                        continue
                     if persisted.transcript.role == "user":
                         self._discard_cancelled_response = False
                     await self._forward_event(
@@ -578,6 +612,17 @@ class RealtimePipelineSessionRunner:
         )
         if transcript is None:
             return None
+        authoritative_metadata = dict(transcript.metadata)
+        for key in (
+            "interactionMode",
+            "voiceRouteId",
+            "voiceRouteRevision",
+            "voiceRoute",
+        ):
+            value = context.metadata.get(key)
+            if value is not None:
+                authoritative_metadata[key] = value
+        transcript = replace(transcript, metadata=authoritative_metadata)
         return await self._transcript_sink.persist(transcript)
 
     async def _forward_event(self, payload: Mapping[str, Any]) -> None:
@@ -1008,6 +1053,13 @@ def _provider_error_processor(payload: Mapping[str, object]) -> str | None:
 
 
 def _provider_error_category(payload: Mapping[str, object]) -> str:
+    for item in _iter_provider_error_mappings(payload):
+        value = item.get("errorCategory") or item.get("error_category")
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in _ERROR_TAXONOMY_BY_CATEGORY:
+                return normalized
+
     source_code = _provider_error_code(payload).lower()
     status_code = _provider_error_status_code(payload)
     message = _provider_error_message(payload).lower()

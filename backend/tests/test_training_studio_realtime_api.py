@@ -74,6 +74,7 @@ def _session_payload(
             "metadata": {
                 "voiceRouteId": selected_route["id"],
                 "voiceRoute": selected_route,
+                "interactionMode": "realtime",
                 "realtimeProfile": selected_route["mode"],
                 "realtimeProvider": "pipecat",
             },
@@ -84,6 +85,34 @@ def _session_payload(
     if team_id is not None:
         payload["team_id"] = team_id
     return payload
+
+
+def _doubao_cascade_route() -> dict:
+    return {
+        "id": "openai-llm-doubao-voice",
+        "name": "OpenAI LLM + Doubao Voice",
+        "description": "test route",
+        "mode": "cascade",
+        "enabled": True,
+        "default": True,
+        "revision": 4,
+        "presetGroup": "cascade",
+        "interactionModes": ["turn_based", "realtime"],
+        "stt": {
+            "provider": "volcengine.doubao",
+            "model": "volc.bigasr.sauc.duration",
+        },
+        "llm": {"provider": "openai", "model": "gpt-5.5"},
+        "tts": {
+            "provider": "volcengine.doubao",
+            "model": "seed-tts-2.0",
+            "voice": "zh_female_vv_uranus_bigtts",
+        },
+        "inputSampleRate": 16000,
+        "outputSampleRate": 24000,
+        "latencyProfile": "near_realtime",
+        "costProfile": "configured",
+    }
 
 
 def _session_scope_from_payload(payload: dict) -> TrainingSessionAccessScope:
@@ -858,7 +887,14 @@ def test_realtime_websocket_defaults_to_pipecat_and_requires_binding_before_audi
 
 
 def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
-    app, state = _make_bound_app()
+    app, state = _make_bound_app(
+        session_payload=_session_payload(
+            "voice",
+            user_id="user-admin-001",
+            team_id="team-ops",
+            voice_route=_doubao_cascade_route(),
+        )
+    )
     adapter = _FakeRealtimePipelineAdapter()
     adapter.events_on_commit.append(
         {
@@ -905,6 +941,15 @@ def test_realtime_websocket_query_binding_persists_final_transcript() -> None:
             assert state.messages[0].metadata["source"] == "pipecat"
             assert state.messages[0].metadata["trainingMode"] == "voice"
             assert state.messages[0].metadata["interactionMode"] == "realtime"
+            assert state.messages[0].metadata["voiceRouteId"] == (
+                "openai-llm-doubao-voice"
+            )
+            assert state.messages[0].metadata["voiceRoute"]["stt"]["provider"] == (
+                "volcengine.doubao"
+            )
+            assert state.messages[0].metadata["voiceRoute"]["tts"]["provider"] == (
+                "volcengine.doubao"
+            )
             assert state.messages[0].metadata["realtime"]["trainingSessionId"] == "session-1"
 
             event, data = queue.get_nowait()
@@ -1685,6 +1730,15 @@ def test_realtime_websocket_pipecat_provider_forwards_audio_to_pipeline(monkeypa
     assert adapter.started_config.metadata["turnDetection"] == {
         "provider": "pipecat",
         "source": "pipecat",
+        "strategy": "filter_incomplete",
+        "filterIncompleteUserTurns": True,
+        "baseStopStrategy": "speech_timeout",
+        "userSpeechTimeout": 2.0,
+        "userTurnStopTimeout": 12.0,
+        "userTurnCompletionConfig": {
+            "incompleteShortTimeout": 4.0,
+            "incompleteLongTimeout": 8.0,
+        },
     }
     assert adapter.started_config.metadata["talkwise"] == {
         "trainingSessionId": "session-1",
@@ -1853,6 +1907,52 @@ def test_realtime_websocket_pipecat_provider_forwards_nonfatal_provider_error() 
     assert "sk-should-not-leak" not in str(error)
     assert listening["type"] == "status.changed"
     assert listening["status"] == "listening"
+    assert closed["type"] == "session.closed"
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_pipecat_provider_surfaces_empty_transcript_hint() -> None:
+    app, _state = _make_bound_app()
+    adapter = _FakeRealtimePipelineAdapter()
+    adapter.events_on_commit.append(
+        {
+            "type": "error",
+            "error": {
+                "code": "DOUBAO_VOICE_TRANSCRIPT_EMPTY",
+                "message": "No clear speech was recognized.",
+                "errorCategory": "input_audio",
+                "retryable": True,
+                "fatal": False,
+            },
+        }
+    )
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider, _route: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "audio.commit"})
+        committed = ws.receive_json()
+        error = ws.receive_json()
+        listening = ws.receive_json()
+
+        ws.send_json({"type": "session.close", "reason": "empty-transcript"})
+        closed = ws.receive_json()
+
+    assert committed["status"] == "processing"
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "REALTIME_INPUT_AUDIO_UNRECOGNIZED"
+    assert error["payload"]["sourceCode"] == "DOUBAO_VOICE_TRANSCRIPT_EMPTY"
+    assert error["payload"]["errorCategory"] == "input_audio"
+    assert error["payload"]["retryable"] is True
+    assert error["payload"]["fatal"] is False
+    assert listening["type"] == "status.changed"
     assert closed["type"] == "session.closed"
     assert adapter.closed is True
 

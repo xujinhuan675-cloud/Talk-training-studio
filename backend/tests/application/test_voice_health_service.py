@@ -69,7 +69,33 @@ def test_voice_health_blocks_when_default_route_dependency_is_missing(tmp_path) 
 
     assert report["status"] == "blocked"
     assert report["ready"] is False
-    assert report["routes"][0]["missingDependencies"] == ["pipecat.tts"]
+    assert report["routes"][0]["missingDependencies"] == ["pipecat.tts:openai"]
+
+
+def test_voice_health_uses_doubao_adapters_instead_of_openai_stt_tts_flags(tmp_path) -> None:
+    config = _voice_config()
+    config["routes"][0]["stt"] = {
+        "provider": "volcengine.doubao",
+        "model": "volc.bigasr.sauc.duration",
+    }
+    config["routes"][0]["tts"] = {
+        "provider": "volcengine.doubao",
+        "model": "seed-tts-2.0",
+        "voice": "zh_female_vv_uranus_bigtts",
+    }
+    path = tmp_path / "voice_routes.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+
+    report = build_voice_health_report(
+        config_path=path,
+        pipecat_capability_loader=lambda **_: _capability(
+            stt_available=False,
+            tts_available=False,
+        ),
+    )
+
+    assert report["status"] == "ready"
+    assert report["routes"][0]["missingDependencies"] == []
 
 
 def test_voice_health_blocks_when_no_route_is_enabled(tmp_path) -> None:

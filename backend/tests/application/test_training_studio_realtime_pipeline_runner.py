@@ -220,6 +220,30 @@ async def test_runner_commit_flushes_adapter_audio():
 
 
 @pytest.mark.asyncio
+async def test_runner_commit_waits_for_optional_adapter_event_settlement():
+    class SettlingAdapter(FakeRealtimePipelineAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.commit_settled = asyncio.Event()
+
+        async def wait_for_commit_settled(self) -> None:
+            await self.commit_settled.wait()
+
+    adapter = SettlingAdapter()
+    runner, _adapter, _sink = await _started_runner(adapter=adapter)
+
+    commit_task = asyncio.create_task(runner.commit())
+    await asyncio.sleep(0)
+    assert commit_task.done() is False
+
+    adapter.commit_settled.set()
+    await commit_task
+    assert adapter.commit_count == 1
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_runner_persists_final_transcripts_from_adapter_events():
     event_sink = FakeRealtimeEventSink()
     runner, adapter, sink = await _started_runner(event_sink=event_sink)
@@ -606,6 +630,50 @@ async def test_runner_surfaces_provider_error_events_to_later_commands(
     assert len(event_sink.events) == 1
     assert event_sink.events[0]["type"] == "error"
     assert event_sink.events[0]["fatal"] is True
+
+
+@pytest.mark.asyncio
+async def test_runner_preserves_retryable_input_audio_errors() -> None:
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, _sink = await _started_runner(event_sink=event_sink)
+
+    await adapter.emit(
+        {
+            "type": "error",
+            "error": {
+                "code": "DOUBAO_VOICE_TRANSCRIPT_EMPTY",
+                "message": "No clear speech was recognized.",
+                "errorCategory": "input_audio",
+                "retryable": True,
+                "fatal": False,
+            },
+        }
+    )
+    await event_sink.wait_for_events()
+
+    assert runner.events_error is None
+    assert event_sink.events == [
+        {
+            "type": "error",
+            "schemaVersion": 1,
+            "source": "realtime_pipeline",
+            "code": "REALTIME_INPUT_AUDIO_UNRECOGNIZED",
+            "message": "No clear speech was recognized.",
+            "phase": "provider_event",
+            "provider": "pipecat",
+            "eventType": "error",
+            "errorCategory": "input_audio",
+            "retryable": True,
+            "fatal": False,
+            "sourceCode": "DOUBAO_VOICE_TRANSCRIPT_EMPTY",
+            "runtime": "pipecat",
+            "realtimeRuntime": "pipecat",
+            "trainingSessionId": "training-1",
+            "roomId": 42,
+            "realtimeSessionId": runner.realtime_session_id,
+        }
+    ]
+    await runner.close()
 
 
 @pytest.mark.asyncio

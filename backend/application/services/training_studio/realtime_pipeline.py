@@ -195,12 +195,22 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
         self._publish_message = publish_message
         self._access_scope = access_scope
         self._record_training_turns = record_training_turns
+        self._seen_transcript_keys: set[str] = set()
 
     async def persist(self, transcript: RealtimeTranscript) -> PersistedRealtimeTranscript:
+        dedupe_key = _realtime_transcript_dedupe_key(transcript)
+        if dedupe_key is not None and dedupe_key in self._seen_transcript_keys:
+            return PersistedRealtimeTranscript(
+                transcript=transcript,
+                payload={"duplicate": True},
+            )
+
         metadata = transcript_to_message_metadata(transcript)
         sender_type, sender_id = _sender_for_transcript(transcript)
         room_id = transcript.binding.room_id
         await self._require_matching_training_session(transcript)
+        if transcript.role == "user":
+            await self._guard_learner_turn(transcript)
 
         async with self._uow_factory() as uow:
             room = await uow.chat_room_repository.get_by_id(room_id)
@@ -222,17 +232,27 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
         if self._publish_message is not None:
             await self._publish_message(room_id, message)
 
-        if self._record_training_turns and self._session_service is not None:
-            await self._session_service.record_turns(
-                transcript.binding.training_session_id,
-                access_scope=self._require_access_scope(),
-            )
+        recorded_session = None
+        if transcript.role == "user":
+            recorded_session = await self._record_learner_turn(transcript)
+
+        if dedupe_key is not None:
+            self._seen_transcript_keys.add(dedupe_key)
 
         payload = {
             "trainingSessionId": transcript.binding.training_session_id,
             "roomId": room_id,
             "message": message.model_dump(mode="json"),
         }
+        recorded_metadata = getattr(
+            getattr(recorded_session, "task_config", None),
+            "metadata",
+            None,
+        )
+        if isinstance(recorded_metadata, dict):
+            progress = recorded_metadata.get("trainingProgress")
+            if isinstance(progress, dict):
+                payload["trainingProgress"] = dict(progress)
         return PersistedRealtimeTranscript(
             transcript=transcript,
             message_id=message.id,
@@ -256,6 +276,39 @@ class RealtimeTranscriptPersistenceSink(TrainingTranscriptSink):
     def _require_access_scope(self) -> TrainingSessionAccessScope:
         return self._access_scope
 
+    async def _guard_learner_turn(self, transcript: RealtimeTranscript) -> None:
+        if not self._record_training_turns or self._session_service is None:
+            return
+        guard = getattr(
+            self._session_service,
+            "guard_before_finalized_learner_turn",
+            None,
+        )
+        if callable(guard):
+            await guard(
+                transcript.binding.training_session_id,
+                access_scope=self._require_access_scope(),
+            )
+
+    async def _record_learner_turn(self, transcript: RealtimeTranscript):
+        if not self._record_training_turns or self._session_service is None:
+            return None
+        recorder = getattr(
+            self._session_service,
+            "record_finalized_learner_turn",
+            None,
+        )
+        if callable(recorder):
+            return await recorder(
+                transcript.binding.training_session_id,
+                access_scope=self._require_access_scope(),
+            )
+        await self._session_service.record_turns(
+            transcript.binding.training_session_id,
+            access_scope=self._require_access_scope(),
+        )
+        return None
+
 
 def _sender_for_transcript(transcript: RealtimeTranscript) -> tuple[str, str]:
     metadata = dict(transcript.metadata or {})
@@ -265,6 +318,19 @@ def _sender_for_transcript(transcript: RealtimeTranscript) -> tuple[str, str]:
     if transcript.role == "system":
         return "system", str(sender_id or "training_coach")
     return "user", str(sender_id or "user")
+
+
+def _realtime_transcript_dedupe_key(transcript: RealtimeTranscript) -> str | None:
+    identity = transcript.item_id or transcript.event_id
+    if not identity:
+        return None
+    return ":".join(
+        (
+            transcript.realtime_session_id,
+            transcript.role,
+            identity,
+        )
+    )
 
 
 def _metadata_text(payload: dict[str, object], *keys: str) -> str | None:
