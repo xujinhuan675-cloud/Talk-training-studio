@@ -380,6 +380,29 @@ SCENARIO_TRAINING_TEMPLATES: tuple[ScenarioTrainingTemplate, ...] = (
         framework=ExpressionFramework.SCQA,
         training_points=["先承认影响和责任", "给出具体恢复计划", "用后续机制重建信任"],
     ),
+    ScenarioTrainingTemplate(
+        id="daily-spoken-clarity",
+        title="日常口语表达清晰度",
+        description="通过自然对话练习清楚表达。每次由 AI 从工作进展、生活安排、兴趣爱好、近期计划和观点分歧等话题中随机选择几个，逐步聊下去，不需要提前准备稿子。",
+        customer_profile="一个自然聊天的同事或朋友，会追问具体细节、自然转换话题，但不会替你组织答案。",
+        difficulty="medium",
+        category="workplace",
+        required=False,
+        status="not_started",
+        opening_line="我们就像平时聊天一样开始。最近有什么事情让你比较有感受？我会在聊天中自然聊几个不同的话题。",
+        persona=ScenarioTrainingPersona(
+            name="日常聊天对象",
+            role="自然聊天的同事或朋友",
+            style="友好、自然、简短。每次从工作进展、生活安排、兴趣爱好、近期计划和一次小分歧或观点中随机选择几个话题，每个话题聊两三轮后自然换题。不要告诉用户正在训练，也不要纠正用户；保持真实聊天节奏，适时追问具体细节。",
+        ),
+        learner_role="Talker",
+        framework=ExpressionFramework.PYRAMID,
+        training_points=[
+            "自然回答，不提前准备完整稿子",
+            "让对方容易听懂重点和表达顺序",
+            "结束后复盘口头填充词、重复起句和不清楚的地方",
+        ],
+    ),
 )
 
 

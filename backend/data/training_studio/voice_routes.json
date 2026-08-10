@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 7,
   "routes": [
     {
       "id": "openai-cascade-standard",
@@ -41,9 +41,9 @@
       "mode": "speech_to_speech",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 3,
       "adapterStatus": "runtime_integrated",
-      "presetGroup": "native_voice",
+      "presetGroup": "realtime",
       "interactionModes": [
         "realtime"
       ],
@@ -70,9 +70,9 @@
       "mode": "speech_to_speech",
       "enabled": true,
       "default": false,
-      "revision": 3,
+      "revision": 4,
       "adapterStatus": "runtime_integrated",
-      "presetGroup": "native_voice",
+      "presetGroup": "realtime",
       "interactionModes": [
         "realtime"
       ],
@@ -94,16 +94,17 @@
     },
     {
       "id": "openai-llm-doubao-voice",
-      "name": "OpenAI LLM + Doubao Voice",
-      "description": "Doubao transcription and speech synthesis with gpt-5.5 reasoning.",
+      "name": "Doubao Cascade Voice",
+      "description": "Doubao transcription and speech synthesis with a low-latency conversational model.",
       "mode": "cascade",
       "enabled": true,
       "default": true,
-      "revision": 3,
+      "revision": 5,
       "adapterStatus": "runtime_integrated",
       "presetGroup": "cascade",
       "interactionModes": [
-        "turn_based"
+        "turn_based",
+        "realtime"
       ],
       "credentialEnv": [],
       "stt": {
@@ -112,7 +113,7 @@
       },
       "llm": {
         "provider": "openai",
-        "model": "gpt-5.5"
+        "model": "doubao-seed-2-0-mini-260428"
       },
       "tts": {
         "provider": "volcengine.doubao",
@@ -131,9 +132,9 @@
       "mode": "cascade",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 4,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "cascade",
       "interactionModes": [
         "realtime"
       ],
@@ -167,9 +168,9 @@
       "mode": "cascade",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 4,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "cascade",
       "interactionModes": [
         "realtime"
       ],
@@ -202,9 +203,9 @@
       "mode": "cascade",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 4,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "cascade",
       "interactionModes": [
         "realtime"
       ],
@@ -238,9 +239,9 @@
       "mode": "speech_to_speech",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 3,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "realtime",
       "interactionModes": [
         "realtime"
       ],
@@ -266,9 +267,9 @@
       "mode": "cascade",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 4,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "cascade",
       "interactionModes": [
         "realtime"
       ],
@@ -301,9 +302,9 @@
       "mode": "cascade",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 4,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "cascade",
       "interactionModes": [
         "realtime"
       ],
@@ -336,9 +337,9 @@
       "mode": "cascade",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 4,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "cascade",
       "interactionModes": [
         "realtime"
       ],
@@ -373,9 +374,9 @@
       "mode": "speech_to_speech",
       "enabled": true,
       "default": false,
-      "revision": 2,
+      "revision": 3,
       "adapterStatus": "inventory_only",
-      "presetGroup": "curated_demo",
+      "presetGroup": "realtime",
       "interactionModes": [
         "realtime"
       ],
@@ -393,5 +394,5 @@
       "costProfile": "requires_provider_keys"
     }
   ],
-  "updatedAt": "2026-08-09T10:30:00.000Z"
+  "updatedAt": "2026-08-09T12:00:00.000Z"
 }

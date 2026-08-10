@@ -44,6 +44,7 @@ def test_catalog_service_returns_catalog_options_and_default_weights():
         "cross-team-roadmap-tradeoff",
         "project-scope-creep-boundary",
         "service-apology-retention",
+        "daily-spoken-clarity",
     }
 
 

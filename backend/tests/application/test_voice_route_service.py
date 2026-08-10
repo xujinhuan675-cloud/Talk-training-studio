@@ -75,12 +75,12 @@ def test_cascade_interaction_capability_is_explicit_not_inferred_from_mode() -> 
 
 
 def test_voice_route_rejects_a_preset_group_that_conflicts_with_its_contract() -> None:
-    with pytest.raises(ValueError, match="belong to curated_demo"):
+    with pytest.raises(ValueError, match="belong to cascade"):
         VoiceRouteDTO.model_validate(
             {
                 **_cascade_route(),
                 "adapterStatus": "inventory_only",
-                "presetGroup": "cascade",
+                "presetGroup": "realtime",
             }
         )
 
@@ -88,11 +88,10 @@ def test_voice_route_rejects_a_preset_group_that_conflicts_with_its_contract() -
 def _session_request(
     voice_route_id: str | None,
     *,
-    mode: str = "realtime",
+    mode: str = "voice",
+    interaction_mode: str = "realtime",
 ) -> CreateTrainingSessionDTO:
-    metadata: dict[str, object] = {
-        "interactionMode": "realtime" if mode == "realtime" else "turn_based"
-    }
+    metadata: dict[str, object] = {"interactionMode": interaction_mode}
     if voice_route_id is not None:
         metadata["voiceRouteId"] = voice_route_id
     return CreateTrainingSessionDTO(
@@ -122,6 +121,20 @@ def test_realtime_session_snapshots_the_published_voice_route(tmp_path) -> None:
     assert request.task_config.metadata["realtimeProfile"] == "cascade"
 
 
+def test_legacy_realtime_mode_still_reads_and_snapshots_a_supported_route(tmp_path) -> None:
+    service = TrainingVoiceRouteService(JsonFileVoiceRouteStore(tmp_path / "voice-routes.json"))
+    service.save_config({"routes": [_cascade_route()]})
+
+    request = _voice_route_snapshot_for_task(
+        _session_request("standard-cascade", mode="realtime"),
+        service,
+    )
+
+    assert request.mode == "realtime"
+    assert request.task_config.metadata["interactionMode"] == "realtime"
+    assert request.task_config.metadata["voiceRoute"]["id"] == "standard-cascade"
+
+
 def test_realtime_session_rejects_missing_voice_route() -> None:
     with pytest.raises(HTTPException, match="voiceRouteId is required") as exc_info:
         _voice_route_snapshot_for_task(_session_request(None), TrainingVoiceRouteService())
@@ -134,7 +147,7 @@ def test_turn_based_voice_session_snapshots_the_complete_cascade(tmp_path) -> No
     service.save_config({"routes": [_cascade_route()]})
 
     request = _voice_route_snapshot_for_task(
-        _session_request("standard-cascade", mode="voice"),
+        _session_request("standard-cascade", interaction_mode="turn_based"),
         service,
     )
 
@@ -162,7 +175,7 @@ def test_turn_based_voice_session_rejects_native_speech_to_speech_route(tmp_path
 
     with pytest.raises(HTTPException, match="require a cascade voice route") as exc_info:
         _voice_route_snapshot_for_task(
-            _session_request("native-realtime", mode="voice"),
+            _session_request("native-realtime", interaction_mode="turn_based"),
             service,
         )
 
@@ -196,8 +209,20 @@ def test_default_catalog_contains_only_four_integrated_routes_and_curated_demos(
     } == curated_demo_ids
     assert {
         group: sum(route.resolved_preset_group() == group for route in routes)
-        for group in ("cascade", "native_voice", "curated_demo")
-    } == {"cascade": 2, "native_voice": 2, "curated_demo": 8}
+        for group in ("cascade", "realtime")
+    } == {"cascade": 8, "realtime": 4}
+    assert {
+        route.id
+        for route in routes
+        if route.adapter_status == "inventory_only" and route.mode == "cascade"
+    } == {
+        "pipecat-soniox-openai-gradium",
+        "pipecat-gradium-openai-gradium",
+        "pipecat-soniox-openai-cartesia",
+        "pipecat-deepgram-gemini3-google-chirp3",
+        "pipecat-deepgram-google-google-chirp3",
+        "pipecat-speechmatics-nova-pro-elevenlabs",
+    }
     assert {
         route.id
         for route in routes
@@ -205,13 +230,16 @@ def test_default_catalog_contains_only_four_integrated_routes_and_curated_demos(
     } == {"pipecat-aws-nova-sonic", "pipecat-gemini-live"}
     assert next(
         route for route in routes if route.id == "openai-llm-doubao-voice"
-    ).resolved_interaction_modes() == ("turn_based",)
+    ).resolved_interaction_modes() == ("turn_based", "realtime")
     assert next(
         route for route in routes if route.id == "openai-cascade-standard"
     ).resolved_interaction_modes() == ("turn_based", "realtime")
 
     default_route = next(route for route in routes if route.default)
     assert default_route.id == "openai-llm-doubao-voice"
+    assert default_route.revision == 5
+    assert default_route.llm is not None
+    assert default_route.llm.model == "doubao-seed-2-0-mini-260428"
     assert voice_route_catalog_readiness(default_route, environment={})["ready"] is True
 
     for route in routes:

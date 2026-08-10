@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 VoiceRouteMode = Literal["cascade", "speech_to_speech"]
 VoiceRouteAdapterStatus = Literal["runtime_integrated", "inventory_only"]
 VoiceRouteInteractionMode = Literal["turn_based", "realtime"]
-VoiceRoutePresetGroup = Literal["cascade", "native_voice", "curated_demo"]
+VoiceRoutePresetGroup = Literal["cascade", "realtime"]
 
 _RUNTIME_CASCADE_STT_PROVIDERS = {"openai", "volcengine.doubao"}
 _RUNTIME_CASCADE_LLM_PROVIDERS = {"openai", "openrouter"}
@@ -105,9 +105,7 @@ class VoiceRouteDTO(BaseModel):
         return mode in self.resolved_interaction_modes()
 
     def resolved_preset_group(self) -> VoiceRoutePresetGroup:
-        if self.adapter_status == "inventory_only":
-            return "curated_demo"
-        return "cascade" if self.mode == "cascade" else "native_voice"
+        return "cascade" if self.mode == "cascade" else "realtime"
 
     def to_public_dict(
         self,

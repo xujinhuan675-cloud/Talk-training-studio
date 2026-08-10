@@ -152,6 +152,10 @@ def training_core_metadata_for_session(
         "liveGuidance": _copy_metadata_value(
             source.get("live_guidance") or source.get("guidance")
         ),
+        "interactionMode": _copy_metadata_value(source.get("interactionMode")),
+        "voiceRouteId": _copy_metadata_value(source.get("voiceRouteId")),
+        "voiceRouteRevision": _copy_metadata_value(source.get("voiceRouteRevision")),
+        "voiceRoute": _copy_metadata_value(source.get("voiceRoute")),
     }
     for key, value in dict(extra or {}).items():
         if key not in metadata and key not in _TRAINING_SEMANTIC_EXTRA_RESERVED_KEYS:
