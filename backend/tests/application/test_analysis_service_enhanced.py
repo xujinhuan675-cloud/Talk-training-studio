@@ -232,6 +232,21 @@ async def test_generate_report_adds_anchors_and_enhanced_sections():
 
 
 @pytest.mark.asyncio
+async def test_clarity_scenario_adds_speech_specific_review_instructions():
+    state = _state()
+    state.messages[0].metadata["scenarioTrainingId"] = "daily-spoken-clarity"
+    llm = _FakeLLM(json.dumps({"summary": "done"}))
+    service = AnalysisService(_uow_factory(state), llm=llm, persona_loader=_PersonaLoader())
+
+    await service.generate_report(1, access_scope=unrestricted_stakeholder_room_scope())
+
+    prompt = llm.messages[0].content
+    assert "日常口语表达清晰度专项复盘" in prompt
+    assert "口头填充词" in prompt
+    assert "不要编造口头问题" in prompt
+
+
+@pytest.mark.asyncio
 async def test_generate_report_keeps_legacy_fields_when_enhanced_fields_missing():
     state = _state()
     llm = _FakeLLM(

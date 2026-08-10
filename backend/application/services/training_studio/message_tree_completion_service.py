@@ -591,6 +591,23 @@ def _projected_message(
     else:
         sender_type = "system"
         sender_id = "training_system"
+    scenario_metadata = session.task_config.metadata.get("scenario_training")
+    scenario_id = (
+        scenario_metadata.get("id")
+        if isinstance(scenario_metadata, Mapping)
+        else None
+    )
+    projection_metadata = {
+        "source": "message_tree_evaluation_projection",
+        "sourceConversationId": source.conversation_id,
+        "sourceMessageId": source.public_id,
+        "sourceParentMessageId": source.parent_message_id,
+        "sourceBranchId": source.branch_id,
+        "trainingSessionId": session.session_id,
+    }
+    if str(scenario_id or "").strip() == "daily-spoken-clarity":
+        projection_metadata["scenarioTrainingId"] = "daily-spoken-clarity"
+
     return Message(
         id=None,
         room_id=room_id,
@@ -598,14 +615,7 @@ def _projected_message(
         sender_id=sender_id,
         content=source.content,
         timestamp=source.created_at,
-        metadata={
-            "source": "message_tree_evaluation_projection",
-            "sourceConversationId": source.conversation_id,
-            "sourceMessageId": source.public_id,
-            "sourceParentMessageId": source.parent_message_id,
-            "sourceBranchId": source.branch_id,
-            "trainingSessionId": session.session_id,
-        },
+        metadata=projection_metadata,
     )
 
 

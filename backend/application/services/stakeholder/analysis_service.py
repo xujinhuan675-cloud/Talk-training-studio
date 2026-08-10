@@ -1,6 +1,6 @@
 # input: AbstractUnitOfWork, LLMPort, PersonaLoader
 # output: AnalysisService 对话分析报告生成服务, AnalysisReaderService 只读报告查询服务
-# output-update: Training Studio video-answer markers are sanitized into report input with content/camera review placeholders.
+# output-update: Training Studio video-answer markers are sanitized into report input with content/camera placeholders, and clarity scenarios receive transcript-grounded speech review guidance.
 # owner: wanhua.gu
 # pos: 应用层服务 - 利益相关者对话分析（AnalysisService=LLM 生成, AnalysisReaderService=只读查询）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Application service for generating stakeholder conversation analysis reports.
@@ -144,6 +144,18 @@ _ANCHOR_SECTION_FIELDS = {
 
 _TRAINING_DIMENSION_FIELDS = {"content_delivery", "camera_presence"}
 _VIDEO_ANSWER_MARKER = "[video-answer]"
+_CLARITY_SCENARIO_ID = "daily-spoken-clarity"
+
+_CLARITY_ANALYSIS_ENHANCEMENT_PROMPT = """
+
+## 日常口语表达清晰度专项复盘
+
+当前对话属于“日常口语表达清晰度”训练。除常规沟通分析外，只分析用户的实际发言：
+- 观察影响理解的口头填充词、重复起句、反复改口和没有说完的表达；不要把自然的承接语或一次正常停顿直接判为问题。
+- 每个观察都必须引用实际存在的 [#N] 用户消息，不要根据转写之外的音频细节猜测语速、音高或停顿时长。
+- 把最重要的发现写入 communication_suggestions、evidence_reviews 或 micro_drills，并给出一条下一轮可以立即尝试的练习建议。
+- 如果文本证据不足，明确说明“仅凭本次转写无法判断”，不要编造口头问题，也不要改写或删除原始发言。
+"""
 
 
 def _split_video_answer_content(content: str) -> tuple[str, dict[str, Any] | None]:
@@ -474,6 +486,21 @@ def _has_video_answers(history: list[dict]) -> bool:
     )
 
 
+def _has_clarity_training_scenario(history: list[dict]) -> bool:
+    for message in history:
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        scenario_id = str(
+            metadata.get("scenarioTrainingId")
+            or metadata.get("scenario_training_id")
+            or ""
+        ).strip()
+        if scenario_id == _CLARITY_SCENARIO_ID:
+            return True
+    return False
+
+
 def _build_persona_profiles(persona_ids: list[str], persona_loader, org_context: str = "") -> str:
     """Build persona profile summaries for the analysis prompt."""
     profiles: list[str] = []
@@ -550,6 +577,7 @@ class AnalysisService:
         conversation_text, message_id_map = _build_conversation_text(history, self._persona_loader)
         anchor_map = _build_message_anchors(history, self._persona_loader)
         has_video_answers = _has_video_answers(history)
+        has_clarity_training_scenario = _has_clarity_training_scenario(history)
 
         # Build org context for analysis if any persona belongs to an org
         org_ctx = ""
@@ -587,6 +615,8 @@ class AnalysisService:
             persona_profiles=persona_profiles,
             conversation=conversation_text,
         ) + _ANALYSIS_ENHANCEMENT_PROMPT
+        if has_clarity_training_scenario:
+            system_prompt += _CLARITY_ANALYSIS_ENHANCEMENT_PROMPT
 
         # 3. Call LLM
         llm_messages = [LLMMessage(role="user", content=system_prompt)]

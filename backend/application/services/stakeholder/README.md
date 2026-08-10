@@ -13,7 +13,7 @@
 | `prompt_builder.py` | build_llm_messages() — 构建 LLM 对话 prompt |
 | `sse.py` | RoomEventBus — SSE 事件总线 + format_sse 格式化 |
 | `dispatcher.py` | Dispatcher — 群聊调度器，decide_responders() + check_followup()；首轮调度为空时兜底选择首位角色避免冷场 |
-| `analysis_service.py` | AnalysisService — LLM 智能对话分析报告生成（阻力排名 + 有效论点 + 沟通建议；会清洗视频回答 marker 并生成复盘占位维度） |
+| `analysis_service.py` | AnalysisService — LLM 智能对话分析报告生成（阻力排名 + 有效论点 + 沟通建议；会清洗视频回答 marker、生成复盘占位维度，并为日常口语清晰度场景追加基于转写证据的专项建议） |
 | `growth_service.py` | GrowthService — 成长看板聚合不强依赖 LLM；评估、洞察、沟通力名片在配置 Stakeholder LLM 后生成 |
 | `compression_service.py` | CompressionService — 后台对话历史语义压缩（异步增量摘要，不阻塞聊天） |
 | `default_config_service.py` | 默认配置 seed — 幂等预置角色 markdown、组织/团队和对话场景，不覆盖用户已有配置 |

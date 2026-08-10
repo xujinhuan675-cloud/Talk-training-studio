@@ -39,6 +39,7 @@ _SCENARIO_DEFAULT_VOICE_IDS = {
     "cross-team-roadmap-tradeoff": REFINED_MALE_TRAINING_VOICE_ID,
     "project-scope-creep-boundary": REFINED_MALE_TRAINING_VOICE_ID,
     "service-apology-retention": WARM_FEMALE_TRAINING_VOICE_ID,
+    "daily-spoken-clarity": DEFAULT_TRAINING_VOICE_ID,
 }
 _DIMENSION_LABELS: dict[str, tuple[str, str]] = {
     RubricDimension.SUBSTANCE.value: (
