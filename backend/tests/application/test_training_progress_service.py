@@ -45,15 +45,22 @@ def test_counts_only_finalized_learner_turns() -> None:
     ) == 2
 
 
-def test_non_scenario_training_does_not_enable_policy() -> None:
-    assert (
-        evaluate_training_progress(
-            _metadata(source="battle_prep"),
-            finalized_learner_turns=9,
-            evidence=_complete_evidence(),
-        )
-        is None
+def test_battle_prep_uses_the_shared_training_progress_policy() -> None:
+    progress = evaluate_training_progress(
+        _metadata(source="battle_prep"),
+        finalized_learner_turns=9,
+        evidence=_complete_evidence(),
     )
+
+    assert progress is not None
+    assert progress["state"] == "ready_to_finish"
+
+
+def test_unrelated_sources_do_not_enable_training_progress() -> None:
+    assert evaluate_training_progress(
+        _metadata(source="generic_chat"),
+        finalized_learner_turns=9,
+    ) is None
 
 
 def test_length_profiles_use_configurable_default_limits() -> None:

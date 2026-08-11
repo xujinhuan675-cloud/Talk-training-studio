@@ -1,4 +1,4 @@
-"""Deterministic completion policy shared by scenario-training runtimes.
+"""Deterministic completion policy shared by training runtimes.
 
 The service deliberately does not inspect an LLM decision.  Callers provide
 only finalized learner-turn counts and structured evidence coverage collected
@@ -13,7 +13,7 @@ from math import ceil
 from numbers import Real
 from typing import Any
 
-_SCENARIO_SOURCE = "scenario_training"
+_TRAINING_SOURCES = {"scenario_training", "battle_prep"}
 _PROFILE_LIMITS = {
     "quick": {"minimum": 3, "target": 6, "hard_cap": 8},
     "standard": {"minimum": 5, "target": 9, "hard_cap": 12},
@@ -62,7 +62,7 @@ def evaluate_training_progress(
     user_requested_finish: bool = False,
     completed: bool = False,
 ) -> dict[str, Any] | None:
-    """Return persistable progress metadata for a scenario-training session.
+    """Return persistable progress metadata for a supported training session.
 
     ``evidence`` is intentionally structured rather than free-form.  Accepted
     fields are ``coveredTrainingPoints``/``covered_training_points``,
@@ -72,15 +72,14 @@ def evaluate_training_progress(
     expose ``trainingPoints``/``training_points`` and ``rubric`` or
     ``dimensionWeights``/``dimension_weights`` as the required criteria.
 
-    ``None`` means the policy is disabled (anything other than
-    ``metadata.source == 'scenario_training'``).  The returned object is the
+    ``None`` means the policy is disabled for the metadata source. The returned object is the
     shared ``trainingProgress`` metadata contract.  A target turn count is
     enough to become ready even when no evaluator has supplied evidence;
     structured sufficient evidence can make a session ready after the
     minimum.  The hard cap is always actionable.
     """
 
-    if not _is_scenario_training(metadata):
+    if not _is_supported_training(metadata):
         return None
 
     turn_count = _non_negative_int(finalized_learner_turns, "finalized_learner_turns")
@@ -178,7 +177,7 @@ def evaluate_training_progress(
     }
 
 
-def _is_scenario_training(metadata: Mapping[str, Any] | None) -> bool:
+def _is_supported_training(metadata: Mapping[str, Any] | None) -> bool:
     if not isinstance(metadata, Mapping):
         return False
     return (
@@ -187,7 +186,7 @@ def _is_scenario_training(metadata: Mapping[str, Any] | None) -> bool:
             or metadata.get("trainingSource")
             or metadata.get("training_source")
         )
-        == _SCENARIO_SOURCE
+        in _TRAINING_SOURCES
     )
 
 
