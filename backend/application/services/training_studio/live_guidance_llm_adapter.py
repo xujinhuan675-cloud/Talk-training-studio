@@ -15,18 +15,23 @@ from application.services.training_studio.live_guidance_service import (
     GuideSeverity,
     TranscriptTurn,
 )
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    localized_guidance_text,
+)
 
 logger = logging.getLogger(__name__)
 
 _GUIDANCE_SYSTEM_PROMPT = """You are a concise live communication coach.
 Read the bounded Training Studio transcript state and return only extra guidance
-that is useful right now. Do not repeat obvious rule-based hints.
+that is useful right now. This output is a separate structured side event and
+must never be written as the scenario counterpart's visible reply.
 
 Return JSON in this shape:
 {
   "events": [
     {
-      "event_type": "next_reply|risk|omission|ask_back|delivery_nudge",
+      "event_type": "next_reply|risk|omission|ask_back|delivery_nudge|correction",
       "severity": "info|warning|critical",
       "title": "short label",
       "message": "why this matters now",
@@ -37,6 +42,12 @@ Return JSON in this shape:
 }
 
 Return {"events": []} when no extra guidance is needed. Keep events short."""
+
+_DRILL_SYSTEM_PROMPT = """The feedback mode is drill. Return only one correction
+event for the learner's latest turn. Its event_type must be "correction". Put a
+brief diagnosis in message and a concrete improved version in suggested_text.
+Do not answer as the counterpart, continue the role-play, score the learner, or
+include the correction in any visible counterpart reply."""
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 _MAX_TEXT_EVENT_CHARS = 500
@@ -72,8 +83,23 @@ class LiveGuidanceLLMAdapter:
         return self.parse_response(response.content, state)
 
     def build_messages(self, state: GuidanceState) -> list[LLMMessage]:
+        mode_instruction = (
+            _DRILL_SYSTEM_PROMPT
+            if state.feedback_mode == TrainingFeedbackMode.DRILL
+            else "The feedback mode is assisted. Return optional side guidance, not corrections."
+        )
+        language_instruction = (
+            f"Write title, message, and suggested_text in {state.language}. "
+            "Quoted learner wording may remain in its original language."
+        )
         return [
-            LLMMessage(role="system", content=_GUIDANCE_SYSTEM_PROMPT),
+            LLMMessage(
+                role="system",
+                content=(
+                    f"{_GUIDANCE_SYSTEM_PROMPT}\n\n{mode_instruction}\n\n"
+                    f"{language_instruction}"
+                ),
+            ),
             LLMMessage(
                 role="user",
                 content=json.dumps(self._state_payload(state), ensure_ascii=False, default=str),
@@ -109,7 +135,11 @@ class LiveGuidanceLLMAdapter:
         if not message and not suggested_text:
             return None
         if not message:
-            message = "LLM supplied a suggested next move."
+            message = localized_guidance_text(
+                state.language,
+                english="LLM supplied a suggested next move.",
+                chinese="模型生成了一条下一步表达建议。",
+            )
 
         metadata = item.get("metadata")
         clean_metadata = dict(metadata) if isinstance(metadata, dict) else {}
@@ -117,10 +147,19 @@ class LiveGuidanceLLMAdapter:
         clean_metadata.setdefault("training_session_id", state.training_session_id)
 
         event_type = _coerce_event_type(item.get("event_type") or item.get("type"))
+        if state.feedback_mode == TrainingFeedbackMode.DRILL:
+            latest_user_turn = state.user_turns[-1] if state.user_turns else None
+            clean_metadata.setdefault("feedbackMode", TrainingFeedbackMode.DRILL.value)
+            clean_metadata.setdefault("language", state.language)
+            clean_metadata.setdefault("channel", "side_event")
+            clean_metadata.setdefault(
+                "targetTurnId",
+                latest_user_turn.turn_id if latest_user_turn else None,
+            )
         return GuideEvent(
             event_type=event_type,
             severity=_coerce_severity(item.get("severity")),
-            title=_first_text(item, "title") or _default_title(event_type),
+            title=_first_text(item, "title") or _default_title(event_type, state.language),
             message=message,
             suggested_text=suggested_text or None,
             metadata=clean_metadata,
@@ -128,11 +167,47 @@ class LiveGuidanceLLMAdapter:
 
     def _text_fallback_event(self, text: str, state: GuidanceState) -> GuideEvent:
         compact_text = _compact_text(text)
+        if state.feedback_mode == TrainingFeedbackMode.DRILL:
+            latest_user_turn = state.user_turns[-1] if state.user_turns else None
+            return GuideEvent(
+                event_type=GuideEventType.CORRECTION,
+                severity=GuideSeverity.INFO,
+                title=localized_guidance_text(
+                    state.language,
+                    english="Correction",
+                    chinese="逐句纠正",
+                ),
+                message=localized_guidance_text(
+                    state.language,
+                    english="A structured rewrite for the learner's latest answer.",
+                    chinese="针对学员上一句回答的结构化改写。",
+                ),
+                suggested_text=compact_text,
+                metadata={
+                    "source": "llm",
+                    "format": "text",
+                    "feedbackMode": TrainingFeedbackMode.DRILL.value,
+                    "language": state.language,
+                    "targetTurnId": latest_user_turn.turn_id if latest_user_turn else None,
+                    "channel": "side_event",
+                    "training_session_id": state.training_session_id,
+                },
+            )
         return GuideEvent(
             event_type=GuideEventType.NEXT_REPLY,
             severity=GuideSeverity.INFO,
-            title="LLM guidance",
-            message="LLM returned unstructured guidance; surfaced as a next reply candidate.",
+            title=localized_guidance_text(
+                state.language,
+                english="LLM guidance",
+                chinese="模型建议",
+            ),
+            message=localized_guidance_text(
+                state.language,
+                english=(
+                    "LLM returned unstructured guidance; surfaced as a next reply candidate."
+                ),
+                chinese="模型返回了非结构化建议，已作为下一句候选展示。",
+            ),
             suggested_text=compact_text,
             metadata={
                 "source": "llm",
@@ -149,6 +224,8 @@ class LiveGuidanceLLMAdapter:
             "rubric": state.rubric,
             "window_size": state.window_size,
             "total_turn_count": state.total_turn_count,
+            "feedback_mode": state.feedback_mode.value,
+            "language": state.language,
             "recent_turns": [_turn_payload(turn) for turn in state.recent_turns],
         }
 
@@ -240,6 +317,9 @@ def _coerce_event_type(value: Any) -> GuideEventType:
         "question": GuideEventType.ASK_BACK,
         "delivery": GuideEventType.DELIVERY_NUDGE,
         "delivery_nudge": GuideEventType.DELIVERY_NUDGE,
+        "correction": GuideEventType.CORRECTION,
+        "correct": GuideEventType.CORRECTION,
+        "rewrite": GuideEventType.CORRECTION,
     }
     return aliases.get(raw, GuideEventType.NEXT_REPLY)
 
@@ -259,15 +339,28 @@ def _coerce_severity(value: Any) -> GuideSeverity:
     return aliases.get(raw, GuideSeverity.INFO)
 
 
-def _default_title(event_type: GuideEventType) -> str:
+def _default_title(event_type: GuideEventType, language: str = "en-US") -> str:
     titles = {
         GuideEventType.NEXT_REPLY: "Next reply candidate",
         GuideEventType.RISK: "Risk surfaced",
         GuideEventType.OMISSION: "Discovery gap",
         GuideEventType.ASK_BACK: "Ask a calibration question",
         GuideEventType.DELIVERY_NUDGE: "Delivery nudge",
+        GuideEventType.CORRECTION: "Correction",
     }
-    return titles[event_type]
+    chinese_titles = {
+        GuideEventType.NEXT_REPLY: "下一句建议",
+        GuideEventType.RISK: "风险提示",
+        GuideEventType.OMISSION: "信息缺口",
+        GuideEventType.ASK_BACK: "追问建议",
+        GuideEventType.DELIVERY_NUDGE: "表达提示",
+        GuideEventType.CORRECTION: "逐句纠正",
+    }
+    return localized_guidance_text(
+        language,
+        english=titles[event_type],
+        chinese=chinese_titles[event_type],
+    )
 
 
 def _compact_text(text: str) -> str:

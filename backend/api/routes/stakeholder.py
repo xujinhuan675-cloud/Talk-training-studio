@@ -54,6 +54,10 @@ from application.services.stakeholder.room_access_policy import (
     legacy_training_session_room_scope,
 )
 from application.services.training_studio.session_service import TrainingSessionService
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    resolve_training_feedback_contract,
+)
 from application.services.training_studio.voice_route_service import (
     voice_route_snapshot_from_metadata,
 )
@@ -1010,12 +1014,14 @@ async def _ensure_room_accepts_user_message(
         and training_access_scope is not None
     ):
         try:
-            await training_session_svc.guard_before_finalized_learner_turn(
+            progress = await training_session_svc.guard_before_finalized_learner_turn(
                 training_session_id,
                 access_scope=training_access_scope,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if progress is not None:
+            return
 
     detail = await chatroom_svc.get_room_detail(
         room_id,
@@ -1374,6 +1380,7 @@ async def voice_ws(
         training_session_svc=training_session_svc,
         current_user=current_user,
     )
+    feedback = resolve_training_feedback_contract(session_metadata)
     await websocket.accept(subprotocol="talkwise.voice")
 
     import base64
@@ -1528,11 +1535,18 @@ async def voice_ws(
                         {"type": "transcription", "text": text, "is_final": True}
                     )
 
-                    # Auto-send as text message if transcription is not empty.
-                    # The chat turn must not depend on best-effort websocket ACKs:
-                    # the frontend may close immediately after final transcription.
+                    # Drill mode keeps the recognized answer as a draft until the
+                    # learner explicitly accepts it from the correction gate.
                     message_ack_sent = True
-                    if text:
+                    if text and feedback.mode == TrainingFeedbackMode.DRILL:
+                        message_ack_sent = await send_voice_json(
+                            {
+                                "type": "training.drill.draft",
+                                "text": text,
+                                "persisted": False,
+                            }
+                        )
+                    elif text:
                         metadata = raw.get("metadata")
                         message_metadata = metadata if isinstance(metadata, dict) else None
                         send_kwargs = {"access_scope": access_scope}

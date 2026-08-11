@@ -16,12 +16,17 @@ from application.ports.realtime import (
     RealtimePipelineAdapter,
     RealtimePipelineConfig,
     RealtimeSessionBinding,
+    RealtimeTranscript,
     TrainingTranscriptSink,
     TrainingVoiceContext,
     classify_realtime_pipeline_start_error_message,
     normalize_realtime_runtime,
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
+)
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    resolve_training_feedback_contract,
 )
 from application.services.training_studio.realtime_pipeline import build_realtime_transcript
 
@@ -330,6 +335,7 @@ class RealtimePipelineSessionRunner:
         self._events_error: BaseException | None = None
         self._telemetry = _RealtimePipelineTelemetry()
         self._discard_cancelled_response = False
+        self._drill_transcripts: list[RealtimeTranscript] = []
         self._closed = True
 
     @property
@@ -419,6 +425,7 @@ class RealtimePipelineSessionRunner:
         self._events_error = None
         self._telemetry = _RealtimePipelineTelemetry()
         self._discard_cancelled_response = False
+        self._drill_transcripts.clear()
         try:
             await self._adapter.start(context, config)
         except Exception as exc:
@@ -451,6 +458,7 @@ class RealtimePipelineSessionRunner:
         await self._adapter.commit_audio()
         wait_for_commit_settled = getattr(self._adapter, "wait_for_commit_settled", None)
         if not callable(wait_for_commit_settled):
+            await self._flush_drill_draft()
             return
 
         settlement_task = asyncio.create_task(wait_for_commit_settled())
@@ -474,6 +482,7 @@ class RealtimePipelineSessionRunner:
             self._raise_events_error()
             raise
         self._raise_events_error()
+        await self._flush_drill_draft()
 
     async def commit_audio(self) -> None:
         await self.commit()
@@ -555,13 +564,22 @@ class RealtimePipelineSessionRunner:
                     self._discard_cancelled_response = True
                 if self._discard_cancelled_response and _is_assistant_response_event(payload):
                     continue
-                persisted = await self._persist_final_transcript(
+                transcript = self._final_transcript(
                     payload,
                     context,
                     config,
                     realtime_session_id,
                 )
-                if persisted is not None:
+                if (
+                    transcript is not None
+                    and transcript.role == "user"
+                    and resolve_training_feedback_contract(context.metadata).mode
+                    == TrainingFeedbackMode.DRILL
+                ):
+                    self._drill_transcripts.append(transcript)
+                    continue
+                if transcript is not None:
+                    persisted = await self._transcript_sink.persist(transcript)
                     if persisted.payload.get("duplicate") is True:
                         continue
                     if persisted.transcript.role == "user":
@@ -575,6 +593,8 @@ class RealtimePipelineSessionRunner:
                         )
                     )
                     continue
+                if _is_semantic_user_turn_stopped_event(payload):
+                    await self._flush_drill_draft()
                 if not _is_transcript_event(payload):
                     await self._forward_event(payload)
         except asyncio.CancelledError:
@@ -596,13 +616,13 @@ class RealtimePipelineSessionRunner:
             )
             raise
 
-    async def _persist_final_transcript(
+    def _final_transcript(
         self,
         payload: dict[str, Any],
         context: TrainingVoiceContext,
         config: RealtimePipelineConfig,
         realtime_session_id: str,
-    ) -> PersistedRealtimeTranscript | None:
+    ) -> RealtimeTranscript | None:
         transcript = build_realtime_transcript(
             payload,
             binding=context.binding,
@@ -623,7 +643,7 @@ class RealtimePipelineSessionRunner:
             if value is not None:
                 authoritative_metadata[key] = value
         transcript = replace(transcript, metadata=authoritative_metadata)
-        return await self._transcript_sink.persist(transcript)
+        return transcript
 
     async def _forward_event(self, payload: Mapping[str, Any]) -> None:
         if self._event_sink is None:
@@ -631,6 +651,30 @@ class RealtimePipelineSessionRunner:
         maybe_awaitable = self._event_sink(dict(payload))
         if maybe_awaitable is not None:
             await maybe_awaitable
+
+    async def _flush_drill_draft(self) -> None:
+        if not self._drill_transcripts:
+            return
+        context = self._context
+        config = self._config
+        realtime_session_id = self._realtime_session_id
+        if context is None or config is None or realtime_session_id is None:
+            self._drill_transcripts.clear()
+            return
+        transcripts = self._drill_transcripts
+        self._drill_transcripts = []
+        transcript = replace(
+            transcripts[-1],
+            text=_merge_drill_transcript_texts(transcripts),
+        )
+        await self._forward_event(
+            _drill_draft_event(
+                transcript,
+                context=context,
+                config=config,
+                realtime_session_id=realtime_session_id,
+            )
+        )
 
     async def _stop_events_task(self) -> None:
         task = self._events_task
@@ -947,9 +991,82 @@ def _live_guidance_trigger_event(
     return event
 
 
+def _drill_draft_event(
+    transcript: RealtimeTranscript,
+    *,
+    context: TrainingVoiceContext,
+    config: RealtimePipelineConfig,
+    realtime_session_id: str,
+) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "type": "training.drill.draft",
+        "schemaVersion": 1,
+        "source": "realtime_voice",
+        "runtime": normalize_realtime_runtime(config.runtime, provider=config.provider),
+        "provider": config.provider,
+        "trainingSessionId": context.binding.training_session_id,
+        "roomId": context.binding.room_id,
+        "realtimeSessionId": realtime_session_id,
+        "text": transcript.text,
+        "role": transcript.role,
+        "persisted": False,
+    }
+    for output_key, value in {
+        "eventId": transcript.event_id,
+        "itemId": transcript.item_id,
+        "responseId": transcript.response_id,
+    }.items():
+        if value is not None:
+            event[output_key] = value
+    return event
+
+
+def _merge_drill_transcript_texts(
+    transcripts: Sequence[RealtimeTranscript],
+) -> str:
+    parts: list[str] = []
+    for transcript in transcripts:
+        text = transcript.text.strip()
+        if not text:
+            continue
+        if not parts:
+            parts.append(text)
+            continue
+        previous = parts[-1]
+        if text == previous or previous.startswith(text):
+            continue
+        if text.startswith(previous):
+            parts[-1] = text
+            continue
+        separator = (
+            " "
+            if previous[-1:].isascii()
+            and previous[-1:].isalnum()
+            and text[:1].isascii()
+            and text[:1].isalnum()
+            else ""
+        )
+        parts[-1] = f"{previous}{separator}{text}"
+    return parts[-1] if parts else ""
+
+
 def _is_transcript_event(payload: Mapping[str, object]) -> bool:
     event_type = str(payload.get("type") or "").lower()
     return "transcript" in event_type or "transcription" in event_type
+
+
+def _is_semantic_user_turn_stopped_event(
+    payload: Mapping[str, object],
+) -> bool:
+    """Separate Pipecat's semantic turn boundary from a raw VAD pause."""
+
+    if str(payload.get("type") or "").strip().lower() != "user_turn.stopped":
+        return False
+    signal = payload.get("signal")
+    nested = payload.get("payload")
+    if signal is None and isinstance(nested, Mapping):
+        signal = nested.get("signal")
+    return str(signal or "").strip().lower() == "user_turn"
 
 
 def _provider_error_message(payload: Mapping[str, object]) -> str:

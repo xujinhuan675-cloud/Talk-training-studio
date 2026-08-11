@@ -356,6 +356,9 @@ def _clarity_session_payload(mode: str = "text") -> CreateTrainingSessionDTO:
                             "style": "随机选择几个话题，每个话题聊两三轮后自然换题。",
                         },
                     },
+                    "feedbackMode": "drill",
+                    "feedbackPolicy": {"version": 1, "mode": "drill"},
+                    "trainingReplyLanguage": "zh-CN",
                 }
             }
         ),
@@ -605,6 +608,11 @@ async def test_conversation_adapter_applies_clarity_scenario_prompt_to_message_t
     assert "日常口语表达清晰度" in prompt
     assert "随机选择几个话题" in prompt
     assert "不要在聊天中点评、纠正" in prompt
+    assert "separate structured data" in prompt
+    assert "never put coaching labels" in prompt.lower()
+    assert "zh-CN" in prompt
+    assert conversation.metadata["feedbackMode"] == "drill"
+    assert conversation.metadata["replyLanguage"] == "zh-CN"
 
 
 @pytest.mark.asyncio

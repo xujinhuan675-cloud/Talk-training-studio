@@ -6,6 +6,12 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from application.services.training_studio.live_guidance_service import TranscriptSpeaker
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    counterpart_feedback_instruction,
+    reply_language_instruction,
+    resolve_training_feedback_contract,
+)
 from application.services.training_studio.training_core import (
     ConversationRef,
     TrainingTurn,
@@ -279,12 +285,20 @@ def _training_system_prompt(session: TrainingSession) -> str | None:
     base = _metadata_text(session, "system_prompt", "instructions")
     if not base:
         base = _scenario_training_system_prompt(session)
+    contract = resolve_training_feedback_contract(
+        session.task_config.metadata,
+        default_mode=TrainingFeedbackMode.SIMULATION,
+    )
+    feedback_instruction = counterpart_feedback_instruction(contract.mode)
+    language_instruction = reply_language_instruction(contract.reply_language)
     instruction = training_reply_instruction()
-    if not base:
-        return instruction.strip()
-    if instruction.strip() in base:
-        return base
-    return f"{base.rstrip()}\n{instruction}"
+    parts = [base, feedback_instruction, language_instruction, instruction]
+    normalized_parts: list[str] = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text and text not in normalized_parts:
+            normalized_parts.append(text)
+    return "\n\n".join(normalized_parts) or None
 
 
 def _scenario_training_system_prompt(session: TrainingSession) -> str | None:

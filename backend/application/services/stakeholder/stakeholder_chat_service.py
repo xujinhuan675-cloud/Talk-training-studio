@@ -1,5 +1,5 @@
 # input: AbstractUnitOfWork, LLMPort, PersonaLoader, Dispatcher, CompressionService, prompt_builder, RoomEventBus
-# output: StakeholderChatService 私聊 + 群聊消息发送与 AI 流式回复编排 + SSE 事件推送（含 streaming_delta）+ 后台历史压缩, _extract_mentions() @提及解析 + Story 2.8 v1/v2 prompt 分流
+# output: StakeholderChatService 私聊 + 群聊消息发送与 AI 流式回复编排 + SSE 事件推送（含 streaming_delta）+ 训练反馈模式角色正文隔离 + 后台历史压缩
 # owner: wanhua.gu
 # pos: 应用层服务 - 利益相关者消息用例编排（私聊 + 群聊多轮调度 + 三区压缩上下文）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Application service for stakeholder chat messaging with SSE events.
@@ -52,6 +52,11 @@ from application.services.training_studio.message_presentation import (
     split_visible_stream_delta,
     strip_parenthetical_cues_for_speech,
     strip_emotion_markers,
+)
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    counterpart_feedback_instruction,
+    resolve_training_feedback_contract,
 )
 from domain.common.unit_of_work import AbstractUnitOfWork
 from domain.stakeholder.entity import ChatRoom, Message
@@ -172,14 +177,33 @@ def _metadata_reply_language(metadata: dict[str, object]) -> str | None:
 
 
 def _selected_reply_language_from_history(history: list[dict[str, object]]) -> str | None:
-    """Read runtime reply language from the latest user turn metadata."""
+    """Read the latest persisted training/conversation language selection."""
     for item in reversed(history):
-        if item.get("sender_type") != "user":
-            continue
         metadata = item.get("metadata")
         if not isinstance(metadata, dict):
-            return None
-        return _metadata_reply_language(metadata)
+            continue
+        if language := _metadata_reply_language(metadata):
+            return language
+    return None
+
+
+def _training_feedback_metadata_from_history(
+    history: list[dict[str, object]],
+) -> dict[str, object] | None:
+    """Find server-persisted mode metadata without treating ordinary rooms as training."""
+
+    feedback_keys = {
+        "feedbackMode",
+        "feedback_mode",
+        "trainingFeedbackMode",
+        "training_feedback_mode",
+        "feedbackPolicy",
+        "feedback_policy",
+    }
+    for item in reversed(history):
+        metadata = item.get("metadata")
+        if isinstance(metadata, dict) and feedback_keys.intersection(metadata):
+            return metadata
     return None
 
 
@@ -472,6 +496,7 @@ class StakeholderChatService:
                     ]
                 selected_model = _selected_llm_model_from_history(history)
                 selected_reply_language = _selected_reply_language_from_history(history)
+                feedback_metadata = _training_feedback_metadata_from_history(history)
 
                 # Load room for compression state
                 room = await uow.chat_room_repository.get_by_id(room_id)
@@ -504,6 +529,15 @@ class StakeholderChatService:
                     system_prompt,
                     selected_reply_language,
                 )
+                if feedback_metadata is not None:
+                    feedback = resolve_training_feedback_contract(
+                        feedback_metadata,
+                        default_mode=TrainingFeedbackMode.SIMULATION,
+                    )
+                    system_prompt = (
+                        f"{system_prompt}\n\n## Training feedback boundary (must follow)\n"
+                        f"{counterpart_feedback_instruction(feedback.mode)}"
+                    )
 
                 # Stream LLM response, pushing incremental deltas via SSE
                 reply_content = None

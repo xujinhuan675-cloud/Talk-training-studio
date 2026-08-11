@@ -1911,6 +1911,65 @@ def test_realtime_websocket_pipecat_provider_forwards_nonfatal_provider_error() 
     assert adapter.closed is True
 
 
+def test_realtime_websocket_drill_cascade_starts_stt_only_preflight_pipeline() -> None:
+    payload = _session_payload()
+    payload["task_config"]["metadata"]["feedbackMode"] = "drill"
+    app, _state = _make_bound_app(session_payload=payload)
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider, _route: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        started = ws.receive_json()
+        listening = ws.receive_json()
+        assert started["type"] == "session.started"
+        assert listening["status"] == "listening"
+
+        ws.send_json({"type": "session.close", "reason": "drill-preflight"})
+        assert ws.receive_json()["type"] == "session.closed"
+
+    assert adapter.started_context is not None
+    assert adapter.started_context.metadata["feedbackMode"] == "drill"
+    assert adapter.started_config is not None
+    assert "llm" not in adapter.started_config.metadata
+    assert "tts" not in adapter.started_config.metadata
+    assert "realtimeLlm" not in adapter.started_config.metadata
+    assert adapter.started_config.metadata["talkwise"]["drillPreflight"] is True
+    assert adapter.started_config.metadata["drillPreflight"] == {
+        "enabled": True,
+        "persistence": "after_learner_acceptance",
+        "response": "room_roleplay_after_acceptance",
+    }
+    assert adapter.closed is True
+
+
+def test_realtime_websocket_drill_rejects_native_speech_to_speech_route() -> None:
+    payload = _session_payload(voice_route=_speech_to_speech_route())
+    payload["task_config"]["metadata"]["feedbackMode"] = "drill"
+    app, state = _make_bound_app(session_payload=payload)
+    adapter = _FakeRealtimePipelineAdapter()
+    app.dependency_overrides[get_training_realtime_pipeline_factory] = (
+        lambda: lambda _provider, _route: adapter
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(
+        "/api/v1/training-studio/realtime?session_id=session-1&room_id=42&provider=pipecat"
+    ) as ws:
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "BINDING_ERROR"
+    assert error["payload"]["phase"] == "binding"
+    assert "requires the cascade realtime voice route" in error["payload"]["message"]
+    assert adapter.started_context is None
+    assert state.messages == []
+
+
 def test_realtime_websocket_pipecat_provider_surfaces_empty_transcript_hint() -> None:
     app, _state = _make_bound_app()
     adapter = _FakeRealtimePipelineAdapter()

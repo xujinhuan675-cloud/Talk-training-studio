@@ -109,6 +109,7 @@ async def _started_runner(
     adapter: FakeRealtimePipelineAdapter | None = None,
     sink: FakeTrainingTranscriptSink | None = None,
     event_sink: FakeRealtimeEventSink | None = None,
+    context_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[RealtimePipelineSessionRunner, FakeRealtimePipelineAdapter, FakeTrainingTranscriptSink]:
     fake_adapter = adapter or FakeRealtimePipelineAdapter()
     fake_sink = sink or FakeTrainingTranscriptSink()
@@ -124,7 +125,9 @@ async def _started_runner(
         task_goal="Practice discovery",
         rubric={"clarity": 0.6},
         recent_turns=[{"speaker": "user", "text": "What is the priority?"}],
-        context_metadata={"scenario": "sales"},
+        context_metadata=(
+            context_metadata if context_metadata is not None else {"scenario": "sales"}
+        ),
         model="test-model",
         voice="alloy",
         input_audio_format="pcm16",
@@ -285,6 +288,120 @@ async def test_runner_persists_final_transcripts_from_adapter_events():
                 "eventId": "evt-1",
             },
             "messageId": 1,
+        }
+    ]
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_waits_for_semantic_turn_completion_before_emitting_drill_draft():
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, sink = await _started_runner(
+        event_sink=event_sink,
+        context_metadata={"scenario": "sales", "feedbackMode": "drill"},
+    )
+
+    await adapter.emit(
+        {
+            "type": "transcript.done",
+            "event_id": "evt-drill-1",
+            "text": "  Let me try  ",
+        }
+    )
+    await adapter.emit(
+        {
+            "type": "transcript.done",
+            "event_id": "evt-drill-2",
+            "text": "that answer.",
+        }
+    )
+    await asyncio.sleep(0)
+
+    assert event_sink.events == []
+
+    vad_stop = {
+        "type": "user_turn.stopped",
+        "signal": "vad",
+        "payload": {"signal": "vad"},
+    }
+    await adapter.emit(vad_stop)
+    await event_sink.wait_for_events()
+
+    assert sink.persisted == []
+    assert event_sink.events == [vad_stop]
+
+    semantic_stop = {
+        "type": "user_turn.stopped",
+        "signal": "user_turn",
+        "payload": {"signal": "user_turn"},
+    }
+    await adapter.emit(semantic_stop)
+    await adapter.emit(semantic_stop)
+    await event_sink.wait_for_events(4)
+
+    assert sink.persisted == []
+    assert event_sink.events == [
+        vad_stop,
+        {
+            "type": "training.drill.draft",
+            "schemaVersion": 1,
+            "source": "realtime_voice",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "provider": "pipecat",
+            "trainingSessionId": "training-1",
+            "roomId": 42,
+            "realtimeSessionId": "rt-1",
+            "text": "Let me try that answer.",
+            "role": "user",
+            "persisted": False,
+            "eventId": "evt-drill-2",
+        },
+        semantic_stop,
+        semantic_stop,
+    ]
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_explicit_audio_commit_as_drill_draft_fallback():
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, sink = await _started_runner(
+        event_sink=event_sink,
+        context_metadata={"scenario": "sales", "feedbackMode": "drill"},
+    )
+
+    await adapter.emit(
+        {
+            "type": "transcript.done",
+            "event_id": "evt-drill-commit",
+            "text": "Use commit when semantic turn detection is unavailable.",
+        }
+    )
+    await asyncio.sleep(0)
+
+    assert event_sink.events == []
+    assert sink.persisted == []
+
+    await runner.commit_audio()
+
+    assert adapter.commit_count == 1
+    assert sink.persisted == []
+    assert event_sink.events == [
+        {
+            "type": "training.drill.draft",
+            "schemaVersion": 1,
+            "source": "realtime_voice",
+            "runtime": REALTIME_RUNTIME_PIPECAT,
+            "provider": "pipecat",
+            "trainingSessionId": "training-1",
+            "roomId": 42,
+            "realtimeSessionId": "rt-1",
+            "text": "Use commit when semantic turn detection is unavailable.",
+            "role": "user",
+            "persisted": False,
+            "eventId": "evt-drill-commit",
         }
     ]
 

@@ -648,7 +648,7 @@ async def test_voice_routes_expose_published_platform_presets(client: AsyncClien
     assert response.status_code == 200
     routes = response.json()["data"]
     by_id = {route["id"]: route for route in routes}
-    assert len(routes) == 12
+    assert len(routes) == 13
     assert by_id["openai-cascade-standard"]["readiness"]["ready"] is True
     assert by_id["openai-llm-doubao-voice"]["interactionModes"] == [
         "turn_based",
@@ -1630,7 +1630,14 @@ async def test_training_session_start_persists_runtime_persona_opening_message(
 ) -> None:
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",
-        json=session_payload("voice", scenario_template_id="new-customer-discount"),
+        json=session_payload(
+            "voice",
+            metadata={
+                "feedbackMode": "drill",
+                "trainingReplyLanguage": "zh-CN",
+            },
+            scenario_template_id="new-customer-discount",
+        ),
     )
     session_id = create_resp.json()["data"]["session_id"]
 
@@ -1652,6 +1659,8 @@ async def test_training_session_start_persists_runtime_persona_opening_message(
                 "metadata": {
                     "source": "scenario_training_opening",
                     "scenarioTrainingId": "new-customer-discount",
+                    "feedbackMode": "simulation",
+                    "replyLanguage": "en-US",
                 },
             },
         },
@@ -1668,6 +1677,9 @@ async def test_training_session_start_persists_runtime_persona_opening_message(
     assert opening.metadata["source"] == "scenario_training_opening"
     assert opening.metadata["eventKind"] == "scenario_opening"
     assert opening.metadata["trainingSessionId"] == session_id
+    assert opening.metadata["feedbackMode"] == "drill"
+    assert opening.metadata["feedbackPolicy"]["mode"] == "drill"
+    assert opening.metadata["replyLanguage"] == "zh-CN"
     assert app.state.training_runtime_state.last_message_updates[0][0] == 701
 
     repeated_start = await client.post(
@@ -2398,6 +2410,43 @@ async def test_training_session_guidance_accepts_request_turns(client: AsyncClie
     data = resp.json()["data"]
     assert data["source"] == "request"
     assert any(event["event_type"] == "delivery_nudge" for event in data["events"])
+
+
+@pytest.mark.asyncio
+async def test_simulation_feedback_mode_suppresses_process_guidance(
+    client: AsyncClient,
+) -> None:
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=session_payload(
+            "text",
+            metadata={
+                "source": "scenario_training",
+                "feedbackMode": "simulation",
+                "trainingReplyLanguage": "zh-CN",
+            },
+        ),
+    )
+    session_id = create_resp.json()["data"]["session_id"]
+    await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json={"room_id": 42},
+    )
+
+    resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/guidance",
+        json={
+            "recent_turns": [
+                {"speaker": "user", "text": "这是一个需要训练的较长回答。"},
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["events"] == []
+    assert data["feedback_mode"] == "simulation"
+    assert data["language"] == "zh-CN"
 
 
 @pytest.mark.asyncio

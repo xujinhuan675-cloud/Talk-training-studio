@@ -10,9 +10,15 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
+
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    localized_guidance_text,
+    resolve_training_feedback_contract,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +36,7 @@ class GuideEventType(StrEnum):
     OMISSION = "omission"
     ASK_BACK = "ask_back"
     DELIVERY_NUDGE = "delivery_nudge"
+    CORRECTION = "correction"
 
 
 class GuideSeverity(StrEnum):
@@ -86,6 +93,8 @@ class GuidanceState:
     recent_turns: tuple[TranscriptTurn, ...]
     window_size: int
     total_turn_count: int
+    feedback_mode: TrainingFeedbackMode = TrainingFeedbackMode.ASSISTED
+    language: str = "en-US"
 
     @property
     def user_turns(self) -> tuple[TranscriptTurn, ...]:
@@ -121,6 +130,14 @@ class TrainingLiveGuidanceService:
         re.I,
     )
     _WORD_RE = re.compile(r"\b[\w'-]+\b", re.UNICODE)
+    _FILLER_PREFIX_RE = re.compile(
+        r"^\s*(?P<filler>(?:嗯+|呃+|啊+|um+|uh+|erm+))(?:[，,、.。\s]*)",
+        re.IGNORECASE,
+    )
+    _LEADING_SPOKEN_FILLER_RE = re.compile(
+        r"^\s*(?:(?:嗯+|啊+|呃+|额+|就是|然后|那个|其实|um+|uh+)\s*[,，、]?\s*)+",
+        re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -148,8 +165,14 @@ class TrainingLiveGuidanceService:
         task_goal: str,
         rubric: dict[str, object] | None,
         recent_turns: Iterable[TranscriptTurn | dict[str, object]],
+        feedback_mode: TrainingFeedbackMode | str = TrainingFeedbackMode.ASSISTED,
+        language: str = "en-US",
     ) -> GuidanceState:
         turns = tuple(self._coerce_turn(turn) for turn in recent_turns)
+        contract = resolve_training_feedback_contract(
+            {"feedbackMode": str(feedback_mode), "replyLanguage": language},
+            default_mode=TrainingFeedbackMode.ASSISTED,
+        )
         return GuidanceState(
             training_session_id=training_session_id,
             task_goal=task_goal,
@@ -157,6 +180,8 @@ class TrainingLiveGuidanceService:
             recent_turns=turns[-self.window_size :],
             window_size=self.window_size,
             total_turn_count=len(turns),
+            feedback_mode=contract.mode,
+            language=contract.reply_language,
         )
 
     def generate_guidance(
@@ -166,17 +191,23 @@ class TrainingLiveGuidanceService:
         task_goal: str,
         rubric: dict[str, object] | None = None,
         recent_turns: Iterable[TranscriptTurn | dict[str, object]] = (),
+        feedback_mode: TrainingFeedbackMode | str = TrainingFeedbackMode.ASSISTED,
+        language: str = "en-US",
     ) -> list[GuideEvent]:
         state = self.build_state(
             training_session_id=training_session_id,
             task_goal=task_goal,
             rubric=rubric,
             recent_turns=recent_turns,
+            feedback_mode=feedback_mode,
+            language=language,
         )
+        if state.feedback_mode == TrainingFeedbackMode.SIMULATION:
+            return []
         events = self._deterministic_events(state)
         if self.llm_callback is not None:
             events.extend(self._coerce_event(event) for event in self.llm_callback(state))
-        return events[: self.max_events]
+        return self._events_for_mode(state, events)[: self.max_events]
 
     async def generate_guidance_async(
         self,
@@ -185,13 +216,19 @@ class TrainingLiveGuidanceService:
         task_goal: str,
         rubric: dict[str, object] | None = None,
         recent_turns: Iterable[TranscriptTurn | dict[str, object]] = (),
+        feedback_mode: TrainingFeedbackMode | str = TrainingFeedbackMode.ASSISTED,
+        language: str = "en-US",
     ) -> list[GuideEvent]:
         state = self.build_state(
             training_session_id=training_session_id,
             task_goal=task_goal,
             rubric=rubric,
             recent_turns=recent_turns,
+            feedback_mode=feedback_mode,
+            language=language,
         )
+        if state.feedback_mode == TrainingFeedbackMode.SIMULATION:
+            return []
         events = self._deterministic_events(state)
         if self.llm_callback is not None:
             events.extend(self._coerce_event(event) for event in self.llm_callback(state))
@@ -202,15 +239,126 @@ class TrainingLiveGuidanceService:
                 logger.exception("Training live guidance LLM callback failed")
             else:
                 events.extend(self._coerce_event(event) for event in llm_events)
-        return events[: self.max_events]
+        return self._events_for_mode(state, events)[: self.max_events]
 
     def _deterministic_events(self, state: GuidanceState) -> list[GuideEvent]:
+        if state.feedback_mode == TrainingFeedbackMode.SIMULATION:
+            return []
+        if state.feedback_mode == TrainingFeedbackMode.DRILL:
+            return self._build_drill_correction(state)
         return [
+            *self._detect_filler_opening(state),
             *self._detect_objection(state),
             *self._detect_delivery_nudge(state),
             *self._detect_missing_question(state),
             *self._build_next_reply(state),
         ]
+
+    def _detect_filler_opening(self, state: GuidanceState) -> list[GuideEvent]:
+        latest_user_turn = self._latest_turn(state.user_turns)
+        if latest_user_turn is None:
+            return []
+        match = self._FILLER_PREFIX_RE.match(latest_user_turn.text)
+        if match is None:
+            return []
+        revised = latest_user_turn.text[match.end() :].strip()
+        if not revised:
+            return []
+        return [
+            GuideEvent(
+                event_type=GuideEventType.DELIVERY_NUDGE,
+                severity=GuideSeverity.INFO,
+                title=localized_guidance_text(
+                    state.language,
+                    english="Remove the filler opening",
+                    chinese="去掉开头的口头填充词",
+                ),
+                message=localized_guidance_text(
+                    state.language,
+                    english="Remove the opening filler and state the core message directly.",
+                    chinese="删掉开头的口头填充词，直接说出核心信息。",
+                ),
+                suggested_text=revised,
+                metadata={
+                    "training_session_id": state.training_session_id,
+                    "targetTurnId": latest_user_turn.turn_id,
+                    "matchedFiller": match.group("filler"),
+                    "rule": "leading_filler",
+                },
+            )
+        ]
+
+    def _build_drill_correction(self, state: GuidanceState) -> list[GuideEvent]:
+        latest_user_turn = self._latest_turn(state.user_turns)
+        if latest_user_turn is None:
+            return []
+        compact_answer = self._LEADING_SPOKEN_FILLER_RE.sub("", latest_user_turn.text).strip()
+        removed_fillers = bool(compact_answer and compact_answer != latest_user_turn.text.strip())
+        return [
+            GuideEvent(
+                event_type=GuideEventType.CORRECTION,
+                severity=GuideSeverity.INFO,
+                title=localized_guidance_text(
+                    state.language,
+                    english="Review the last answer",
+                    chinese="纠正上一句表达",
+                ),
+                message=localized_guidance_text(
+                    state.language,
+                    english=(
+                        "Remove the opening filler and lead with the main point."
+                        if removed_fillers
+                        else "Lead with the main point, then add one concrete reason or example."
+                    ),
+                    chinese=(
+                        "删掉开头的口头填充词，直接说出核心信息。"
+                        if removed_fillers
+                        else "先说核心信息，再补充一个具体原因或例子。"
+                    ),
+                ),
+                suggested_text=compact_answer if removed_fillers else None,
+                metadata={
+                    "training_session_id": state.training_session_id,
+                    "feedbackMode": TrainingFeedbackMode.DRILL.value,
+                    "language": state.language,
+                    "targetTurnId": latest_user_turn.turn_id,
+                    "channel": "side_event",
+                    "requiresRetry": False,
+                    "source": "deterministic_fallback",
+                },
+            )
+        ]
+
+    def _events_for_mode(
+        self,
+        state: GuidanceState,
+        events: Sequence[GuideEvent],
+    ) -> list[GuideEvent]:
+        if state.feedback_mode == TrainingFeedbackMode.SIMULATION:
+            return []
+        if state.feedback_mode == TrainingFeedbackMode.ASSISTED:
+            return [
+                self._with_contract_metadata(event, state)
+                for event in events
+                if self._event_type(event) != "correction"
+            ]
+
+        corrections = [event for event in events if self._event_type(event) == "correction"]
+        llm_corrections = [
+            event for event in corrections if event.metadata.get("source") == "llm"
+        ]
+        return [
+            self._with_contract_metadata(event, state)
+            for event in (llm_corrections or corrections)
+        ]
+
+    @staticmethod
+    def _with_contract_metadata(event: GuideEvent, state: GuidanceState) -> GuideEvent:
+        metadata = dict(event.metadata)
+        metadata.setdefault("feedbackMode", state.feedback_mode.value)
+        metadata.setdefault("language", state.language)
+        metadata.setdefault("channel", "side_event")
+        return replace(event, metadata=metadata)
 
     def _detect_delivery_nudge(self, state: GuidanceState) -> list[GuideEvent]:
         latest_user_turn = self._latest_turn(state.user_turns)
@@ -223,9 +371,24 @@ class TrainingLiveGuidanceService:
             GuideEvent(
                 event_type=GuideEventType.DELIVERY_NUDGE,
                 severity=GuideSeverity.WARNING,
-                title="Tighten the delivery",
-                message="Your last answer is running long. Land the point, pause, and invite the other side in.",
-                suggested_text="Let me pause there. Which part would you like me to go deeper on?",
+                title=localized_guidance_text(
+                    state.language,
+                    english="Tighten the delivery",
+                    chinese="收紧表达",
+                ),
+                message=localized_guidance_text(
+                    state.language,
+                    english=(
+                        "Your last answer is running long. Land the point, pause, "
+                        "and invite the other side in."
+                    ),
+                    chinese="上一句偏长。先落到重点，停一下，再邀请对方回应。",
+                ),
+                suggested_text=localized_guidance_text(
+                    state.language,
+                    english="Let me pause there. Which part would you like me to go deeper on?",
+                    chinese="我先说到这里。你希望我重点展开哪一部分？",
+                ),
                 metadata={
                     "training_session_id": state.training_session_id,
                     "word_count": word_count,
@@ -242,9 +405,24 @@ class TrainingLiveGuidanceService:
         ask_back = GuideEvent(
             event_type=GuideEventType.ASK_BACK,
             severity=GuideSeverity.INFO,
-            title="Ask a calibration question",
-            message="You have not asked a question in the recent window. Pull out the counterpart's priority before continuing.",
-            suggested_text="Before I go further, what matters most to you in this situation?",
+            title=localized_guidance_text(
+                state.language,
+                english="Ask a calibration question",
+                chinese="先问一个校准问题",
+            ),
+            message=localized_guidance_text(
+                state.language,
+                english=(
+                    "You have not asked a question in the recent window. Pull out the "
+                    "counterpart's priority before continuing."
+                ),
+                chinese="最近几轮还没有提问。继续表达前，先确认对方最在意的重点。",
+            ),
+            suggested_text=localized_guidance_text(
+                state.language,
+                english="Before I go further, what matters most to you in this situation?",
+                chinese="在我继续之前，我想先确认一下，这件事里你最看重什么？",
+            ),
             metadata={
                 "training_session_id": state.training_session_id,
                 "window_size": state.window_size,
@@ -254,9 +432,24 @@ class TrainingLiveGuidanceService:
         omission = GuideEvent(
             event_type=GuideEventType.OMISSION,
             severity=GuideSeverity.WARNING,
-            title="Discovery gap",
-            message="The recent exchange is light on discovery. Add one focused question before pitching or defending.",
-            suggested_text="What constraint or success metric should I optimize for?",
+            title=localized_guidance_text(
+                state.language,
+                english="Discovery gap",
+                chinese="信息探索不足",
+            ),
+            message=localized_guidance_text(
+                state.language,
+                english=(
+                    "The recent exchange is light on discovery. Add one focused question "
+                    "before pitching or defending."
+                ),
+                chinese="最近的交流缺少信息探索。提出方案或辩护前，先补一个聚焦问题。",
+            ),
+            suggested_text=localized_guidance_text(
+                state.language,
+                english="What constraint or success metric should I optimize for?",
+                chinese="我应该优先满足哪个约束或成功指标？",
+            ),
             metadata={
                 "training_session_id": state.training_session_id,
                 "task_goal": state.task_goal,
@@ -276,9 +469,27 @@ class TrainingLiveGuidanceService:
             GuideEvent(
                 event_type=GuideEventType.RISK,
                 severity=GuideSeverity.WARNING,
-                title="Objection surfaced",
-                message="The counterpart just signaled resistance. Acknowledge it before adding more evidence.",
-                suggested_text="That concern makes sense. Can I check whether the main issue is impact, cost, or timing?",
+                title=localized_guidance_text(
+                    state.language,
+                    english="Objection surfaced",
+                    chinese="对方提出了异议",
+                ),
+                message=localized_guidance_text(
+                    state.language,
+                    english=(
+                        "The counterpart just signaled resistance. Acknowledge it before "
+                        "adding more evidence."
+                    ),
+                    chinese="对方刚刚表达了阻力。先接住异议，再补充证据。",
+                ),
+                suggested_text=localized_guidance_text(
+                    state.language,
+                    english=(
+                        "That concern makes sense. Can I check whether the main issue is "
+                        "impact, cost, or timing?"
+                    ),
+                    chinese="这个顾虑可以理解。我确认一下，主要问题是影响、成本还是时间？",
+                ),
                 metadata={
                     "training_session_id": state.training_session_id,
                     "risk_type": "objection",
@@ -289,18 +500,43 @@ class TrainingLiveGuidanceService:
 
     def _build_next_reply(self, state: GuidanceState) -> list[GuideEvent]:
         if not state.recent_turns:
-            suggested = "Start by clarifying the goal and asking what the other side cares about most."
+            suggested = localized_guidance_text(
+                state.language,
+                english=(
+                    "Start by clarifying the goal and asking what the other side cares about most."
+                ),
+                chinese="先确认目标，再询问对方最关心什么。",
+            )
         elif self._latest_turn(state.counterpart_turns) is not None:
-            suggested = "Acknowledge their point, ask one clarifying question, then give a concise answer."
+            suggested = localized_guidance_text(
+                state.language,
+                english=(
+                    "Acknowledge their point, ask one clarifying question, then give a "
+                    "concise answer."
+                ),
+                chinese="先回应对方的观点，追问一个澄清问题，再给出简洁回答。",
+            )
         else:
-            suggested = "Give the short answer first, support it with one example, then pause."
+            suggested = localized_guidance_text(
+                state.language,
+                english="Give the short answer first, support it with one example, then pause.",
+                chinese="先给简短答案，再用一个例子支撑，然后停下来。",
+            )
 
         return [
             GuideEvent(
                 event_type=GuideEventType.NEXT_REPLY,
                 severity=GuideSeverity.INFO,
-                title="Next reply candidate",
-                message="A compact next move based on the current bounded transcript window.",
+                title=localized_guidance_text(
+                    state.language,
+                    english="Next reply candidate",
+                    chinese="下一句建议",
+                ),
+                message=localized_guidance_text(
+                    state.language,
+                    english="A compact next move based on the current bounded transcript window.",
+                    chinese="根据当前有限对话窗口生成的简短下一步建议。",
+                ),
                 suggested_text=suggested,
                 metadata={
                     "training_session_id": state.training_session_id,
@@ -338,3 +574,9 @@ class TrainingLiveGuidanceService:
 
     def _latest_turn(self, turns: Sequence[TranscriptTurn]) -> TranscriptTurn | None:
         return turns[-1] if turns else None
+
+    @staticmethod
+    def _event_type(event: GuideEvent) -> str:
+        if isinstance(event.event_type, GuideEventType):
+            return event.event_type.value
+        return str(event.event_type).strip().lower()

@@ -261,6 +261,55 @@ def test_voice_websocket_transcription_auto_sends_chat_message(monkeypatch) -> N
     assert message_sent["message"]["content"] == "Here is my spoken answer."
 
 
+def test_voice_websocket_drill_transcription_stays_unpersisted_until_acceptance(
+    monkeypatch,
+) -> None:
+    fake_stt = _FakeSTT("Let me answer that more clearly.")
+    fake_chat = _FakeStakeholderChatService()
+    training_sessions = _FakeTrainingSessionService(
+        room_id=7,
+        owner_user_id="admin",
+        metadata={"feedbackMode": "drill"},
+    )
+
+    import infrastructure.external.voice as voice_module
+
+    monkeypatch.setattr(voice_module, "get_stt_client", lambda: fake_stt)
+    client = _make_client(
+        fake_chat,
+        training_session_service=training_sessions,
+    )
+
+    with client.websocket_connect(
+        "/api/v1/stakeholder/rooms/7/voice?trainingSessionId=session-1"
+    ) as ws:
+        ws.send_json(
+            {
+                "type": "audio_chunk",
+                "data": base64.b64encode(b"voice-bytes").decode("ascii"),
+            }
+        )
+        ws.send_json({"type": "speech_end", "format": "webm"})
+        transcription = ws.receive_json()
+        draft = ws.receive_json()
+
+    assert transcription == {
+        "type": "transcription",
+        "text": "Let me answer that more clearly.",
+        "is_final": True,
+    }
+    assert draft == {
+        "type": "training.drill.draft",
+        "text": "Let me answer that more clearly.",
+        "persisted": False,
+    }
+    assert fake_chat.sent_messages == []
+    assert fake_chat.sent_metadata == []
+    assert fake_chat.reply_jobs == []
+    assert training_sessions.progress_guard_calls == ["session-1"]
+    assert training_sessions.progress_record_calls == []
+
+
 def test_voice_websocket_reports_missing_stt_configuration(monkeypatch) -> None:
     fake_chat = _FakeStakeholderChatService()
 

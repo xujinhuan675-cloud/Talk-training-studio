@@ -57,6 +57,61 @@ def test_long_monologue_triggers_delivery_nudge():
     assert delivery.metadata["word_count"] >= 20
 
 
+def test_simulation_mode_has_no_in_conversation_guidance_events():
+    service = TrainingLiveGuidanceService(monologue_word_threshold=1)
+
+    events = service.generate_guidance(
+        training_session_id="training-simulation",
+        task_goal="Run the role-play",
+        recent_turns=[TranscriptTurn(speaker=TranscriptSpeaker.USER, text="A long answer")],
+        feedback_mode="simulation",
+    )
+
+    assert events == []
+
+
+def test_drill_mode_emits_only_structured_correction_event_in_session_language():
+    service = TrainingLiveGuidanceService()
+
+    events = service.generate_guidance(
+        training_session_id="training-drill",
+        task_goal="Practice a concise answer",
+        recent_turns=[
+            TranscriptTurn(
+                speaker=TranscriptSpeaker.USER,
+                text="嗯我觉得这个方案大概就是这样",
+                turn_id="turn-3",
+            ),
+        ],
+        feedback_mode="drill",
+        language="zh-CN",
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == GuideEventType.CORRECTION
+    assert events[0].metadata["targetTurnId"] == "turn-3"
+    assert events[0].metadata["feedbackMode"] == "drill"
+    assert events[0].title == "纠正上一句表达"
+    assert events[0].message == "删掉开头的口头填充词，直接说出核心信息。"
+    assert events[0].suggested_text == "我觉得这个方案大概就是这样"
+
+
+def test_assisted_mode_localizes_side_guidance_from_session_language():
+    service = TrainingLiveGuidanceService()
+
+    events = service.generate_guidance(
+        training_session_id="training-assisted-zh",
+        task_goal="练习提问",
+        recent_turns=[{"speaker": "user", "text": "嗯我觉得这个方案大概就是这样"}],
+        feedback_mode="assisted",
+        language="zh-CN",
+    )
+
+    next_reply = next(event for event in events if event.event_type == GuideEventType.NEXT_REPLY)
+    assert next_reply.title == "下一句建议"
+    assert next_reply.message == "根据当前有限对话窗口生成的简短下一步建议。"
+
+
 def test_missing_question_triggers_ask_back_and_omission():
     service = TrainingLiveGuidanceService()
 
@@ -160,7 +215,12 @@ def test_llm_callback_can_add_sse_ready_event_without_network_dependency():
 
     payload = events[-1].to_sse_payload()
     assert payload["event_type"] == "omission"
-    assert payload["metadata"] == {"source": "test_callback"}
+    assert payload["metadata"] == {
+        "source": "test_callback",
+        "feedbackMode": "assisted",
+        "language": "en-US",
+        "channel": "side_event",
+    }
 
 
 @pytest.mark.asyncio
@@ -258,6 +318,69 @@ async def test_llm_adapter_text_response_degrades_to_next_reply_event():
     assert llm_event.severity == GuideSeverity.INFO
     assert llm_event.suggested_text == text
     assert llm_event.metadata["format"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_drill_llm_adapter_returns_correction_in_requested_language():
+    llm = _FakeLLM(
+        json.dumps(
+            {
+                "events": [
+                    {
+                        "event_type": "correction",
+                        "severity": "info",
+                        "message": "先说结论，再补充原因。",
+                        "suggested_text": "我的结论是先保留方案，原因是风险可控。",
+                    },
+                    {
+                        "event_type": "next_reply",
+                        "message": "This must be filtered in drill mode.",
+                    },
+                ]
+            }
+        )
+    )
+    service = TrainingLiveGuidanceService(async_llm_callback=LiveGuidanceLLMAdapter(llm))
+
+    events = await service.generate_guidance_async(
+        training_session_id="training-drill-llm",
+        task_goal="Practice a concise answer",
+        recent_turns=[
+            {"speaker": "user", "text": "我觉得可以这样做", "turn_id": "turn-4"}
+        ],
+        feedback_mode="drill",
+        language="zh-CN",
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == GuideEventType.CORRECTION
+    assert events[0].suggested_text == "我的结论是先保留方案，原因是风险可控。"
+    assert events[0].metadata["targetTurnId"] == "turn-4"
+    assert "drill" in llm.messages[0].content
+    assert "zh-CN" in llm.messages[0].content
+
+
+def test_llm_adapter_localizes_suggestion_only_fallback_fields():
+    state = TrainingLiveGuidanceService().build_state(
+        training_session_id="training-guidance-zh",
+        task_goal="练习表达",
+        rubric=None,
+        recent_turns=[{"speaker": "user", "text": "我想先说明结论。"}],
+        feedback_mode="assisted",
+        language="zh-CN",
+    )
+    adapter = LiveGuidanceLLMAdapter(_FakeLLM("unused"))
+
+    structured = adapter.parse_response(
+        json.dumps({"events": [{"event_type": "risk", "suggested_text": "先确认风险。"}]}),
+        state,
+    )
+    unstructured = adapter.parse_response("先说结论，再补充原因。", state)
+
+    assert structured[0].title == "风险提示"
+    assert structured[0].message == "模型生成了一条下一步表达建议。"
+    assert unstructured[0].title == "模型建议"
+    assert unstructured[0].message == "模型返回了非结构化建议，已作为下一句候选展示。"
 
 
 @pytest.mark.asyncio

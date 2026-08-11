@@ -11,6 +11,10 @@ from domain.training_studio.session import TrainingSession
 from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 from application.services.training_studio.catalog_service import TrainingTaskConfigDTO
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    resolve_training_feedback_contract,
+)
 from application.services.training_studio.live_guidance_service import (
     GuideEvent,
     TrainingLiveGuidanceService,
@@ -46,6 +50,9 @@ _TRAINING_SEMANTIC_EXTRA_RESERVED_KEYS = {
     "liveGuidance",
     "live_guidance",
     "guidance",
+    "feedbackMode",
+    "feedbackPolicy",
+    "replyLanguage",
 }
 
 
@@ -132,6 +139,39 @@ def training_core_metadata_for_session(
     """Build the TalkWise-owned training semantic metadata shared by adapters."""
 
     source = dict(session.task_config.metadata or {})
+    feedback = resolve_training_feedback_contract(
+        source,
+        default_mode=TrainingFeedbackMode.SIMULATION,
+    )
+    feedback_policy = source.get("feedbackPolicy") or source.get("feedback_policy")
+    has_feedback_mode = any(
+        key in source
+        for key in (
+            "feedbackMode",
+            "feedback_mode",
+            "trainingFeedbackMode",
+            "training_feedback_mode",
+            "feedbackPolicy",
+            "feedback_policy",
+        )
+    )
+    language_metadata = source.get("language")
+    has_reply_language = any(
+        key in source
+        for key in (
+            "replyLanguage",
+            "reply_language",
+            "trainingReplyLanguage",
+            "training_reply_language",
+            "locale",
+        )
+    ) or (
+        isinstance(language_metadata, Mapping)
+        and any(
+            key in language_metadata
+            for key in ("replyLanguage", "reply_language", "locale")
+        )
+    )
     metadata: dict[str, object] = {
         "runtime": _normalize_required_text(runtime, "runtime"),
         "trainingSessionId": session.session_id,
@@ -152,6 +192,18 @@ def training_core_metadata_for_session(
         "liveGuidance": _copy_metadata_value(
             source.get("live_guidance") or source.get("guidance")
         ),
+        "feedbackMode": feedback.mode.value if has_feedback_mode else None,
+        "feedbackPolicy": (
+            _copy_metadata_value(feedback_policy)
+            or {
+                "version": 1,
+                "mode": feedback.mode.value,
+                "channelAgnostic": True,
+            }
+            if has_feedback_mode
+            else None
+        ),
+        "replyLanguage": feedback.reply_language if has_reply_language else None,
         "interactionMode": _copy_metadata_value(source.get("interactionMode")),
         "voiceRouteId": _copy_metadata_value(source.get("voiceRouteId")),
         "voiceRouteRevision": _copy_metadata_value(source.get("voiceRouteRevision")),
@@ -332,6 +384,15 @@ class TrainingCoreOrchestrator:
             conversation,
             limit=limit or self._guidance_service.window_size,
         )
+        feedback = resolve_training_feedback_contract(
+            conversation.metadata,
+            default_mode=(
+                TrainingFeedbackMode.SIMULATION
+                if conversation.metadata.get("scenarioTemplateId")
+                or conversation.metadata.get("source") == "scenario_training"
+                else TrainingFeedbackMode.ASSISTED
+            ),
+        )
         return await self._guidance_service.generate_guidance_async(
             training_session_id=session_id,
             task_goal=task_goal,
@@ -339,6 +400,8 @@ class TrainingCoreOrchestrator:
             recent_turns=[
                 _require_training_turn(turn).to_transcript_turn() for turn in recent_turns
             ],
+            feedback_mode=feedback.mode,
+            language=feedback.reply_language,
         )
 
 

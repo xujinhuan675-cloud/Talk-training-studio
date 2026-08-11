@@ -104,6 +104,10 @@ from application.services.training_studio.catalog_service import (
     TrainingTaskConfigDTO,
 )
 from application.services.training_studio.live_guidance_llm_adapter import LiveGuidanceLLMAdapter
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    resolve_training_feedback_contract,
+)
 from application.services.training_studio.live_guidance_service import (
     TrainingLiveGuidanceService,
     TranscriptSpeaker,
@@ -167,6 +171,7 @@ from application.services.training_studio.message_tree_completion_service import
     MessageTreeTrainingCompletionService,
     message_tree_analysis_room_id,
     message_tree_completion_report_metadata,
+    training_completion_context,
 )
 from application.services.training_studio.message_presentation import emotion_metadata
 from application.services.training_studio.opening_emotion_service import (
@@ -463,7 +468,11 @@ def _openai_realtime_api_key() -> str | None:
     return settings.llm.api_key or settings.OPENAI_API_KEY
 
 
-def _completion_report_failure_metadata(exc: Exception) -> dict[str, object]:
+def _completion_report_failure_metadata(
+    exc: Exception,
+    *,
+    completion_context: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     raw_message = getattr(exc, "message", None) or str(exc)
     message = redact_realtime_secret_text(str(raw_message or "").strip())
     if len(message) > 500:
@@ -474,16 +483,21 @@ def _completion_report_failure_metadata(exc: Exception) -> dict[str, object]:
         "errorType": type(exc).__name__,
         "message": message or "Report generation failed",
         "completedWithoutReport": True,
+        **dict(completion_context or {}),
         "recordedAt": datetime.now(UTC).isoformat(),
     }
 
 
-def _completion_report_pending_metadata() -> dict[str, object]:
+def _completion_report_pending_metadata(
+    *,
+    completion_context: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     return {
         "status": "pending",
         "phase": "generate_report",
         "generation": "background",
         "completedWithoutReport": False,
+        **dict(completion_context or {}),
         "requestedAt": datetime.now(UTC).isoformat(),
     }
 
@@ -492,6 +506,7 @@ def _completion_report_ready_metadata(
     report_id: int | str,
     *,
     generation: str = "background",
+    completion_context: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "status": "ready",
@@ -499,6 +514,22 @@ def _completion_report_ready_metadata(
         "generation": generation,
         "reportId": str(report_id),
         "completedWithoutReport": False,
+        **dict(completion_context or {}),
+        "recordedAt": datetime.now(UTC).isoformat(),
+    }
+
+
+def _completion_report_skipped_metadata(
+    *,
+    completion_context: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "status": "skipped",
+        "phase": "complete",
+        "generation": "none",
+        "completedWithoutReport": True,
+        "skipReason": "user_requested",
+        **dict(completion_context or {}),
         "recordedAt": datetime.now(UTC).isoformat(),
     }
 
@@ -1026,11 +1057,23 @@ def _training_opening_turn(
     opening_message: TrainingOpeningMessageDTO,
     *,
     session_id: str,
+    session_metadata: Mapping[str, object] | None = None,
 ) -> TrainingTurn:
     metadata = dict(opening_message.metadata)
+    feedback = resolve_training_feedback_contract(
+        session_metadata,
+        default_mode=TrainingFeedbackMode.SIMULATION,
+    )
     metadata.setdefault("source", "training_opening_message")
     metadata["eventKind"] = "scenario_opening"
     metadata["trainingSessionId"] = session_id
+    metadata["feedbackMode"] = feedback.mode.value
+    metadata["feedbackPolicy"] = {
+        "version": 1,
+        "mode": feedback.mode.value,
+        "channelAgnostic": True,
+    }
+    metadata["replyLanguage"] = feedback.reply_language
     if opening_message.sender_id:
         metadata["sender_id"] = opening_message.sender_id.strip()
     return TrainingTurn(
@@ -1112,6 +1155,7 @@ async def _ensure_training_opening_message(
         opening_turn = _training_opening_turn(
             opening_message,
             session_id=session.session_id,
+            session_metadata=session.task_config.metadata,
         )
         try:
             if str(session.room_id or "").startswith(
@@ -1671,6 +1715,7 @@ async def _generate_training_completion_report_background(
     svc: TrainingSessionService,
     analysis_svc: AnalysisService,
     growth_svc,
+    completion_context: Mapping[str, object],
 ) -> None:
     try:
         report = await analysis_svc.generate_report(
@@ -1691,6 +1736,7 @@ async def _generate_training_completion_report_background(
             exc=exc,
             svc=svc,
             access_scope=session_access_scope,
+            completion_context=completion_context,
         )
         return
     except Exception as exc:
@@ -1703,6 +1749,7 @@ async def _generate_training_completion_report_background(
             exc=exc,
             svc=svc,
             access_scope=session_access_scope,
+            completion_context=completion_context,
         )
         return
 
@@ -1710,7 +1757,12 @@ async def _generate_training_completion_report_background(
         await svc.record_completion_report(
             session_id,
             report_id=str(report.id),
-            metadata={"completionReport": _completion_report_ready_metadata(report.id)},
+            metadata={
+                "completionReport": _completion_report_ready_metadata(
+                    report.id,
+                    completion_context=completion_context,
+                )
+            },
             access_scope=session_access_scope,
         )
     except Exception:
@@ -1735,11 +1787,17 @@ async def _record_training_completion_report_failure(
     exc: Exception,
     svc: TrainingSessionService,
     access_scope: TrainingSessionAccessScope,
+    completion_context: Mapping[str, object],
 ) -> None:
     try:
         await svc.record_completion_report(
             session_id,
-            metadata={"completionReport": _completion_report_failure_metadata(exc)},
+            metadata={
+                "completionReport": _completion_report_failure_metadata(
+                    exc,
+                    completion_context=completion_context,
+                )
+            },
             access_scope=access_scope,
         )
     except Exception:
@@ -2212,17 +2270,31 @@ async def _generate_training_guidance(
         task_goal = body.task_goal or task_goal
         rubric = body.rubric or rubric
 
+    session_metadata = session.task_config.metadata
+    feedback = resolve_training_feedback_contract(
+        session_metadata,
+        default_mode=(
+            TrainingFeedbackMode.SIMULATION
+            if session.scenario_template_id
+            or str(session_metadata.get("source") or "").strip() == "scenario_training"
+            else TrainingFeedbackMode.ASSISTED
+        ),
+    )
     state = guidance_svc.build_state(
         training_session_id=session_id,
         task_goal=task_goal,
         rubric=rubric,
         recent_turns=recent_turns,
+        feedback_mode=feedback.mode,
+        language=feedback.reply_language,
     )
     events = await guidance_svc.generate_guidance_async(
         training_session_id=session_id,
         task_goal=state.task_goal,
         rubric=state.rubric,
         recent_turns=recent_turns,
+        feedback_mode=state.feedback_mode,
+        language=state.language,
     )
     return {
         "session_id": session_id,
@@ -2231,6 +2303,8 @@ async def _generate_training_guidance(
         "source": source,
         "window_size": state.window_size,
         "total_turn_count": state.total_turn_count,
+        "feedback_mode": state.feedback_mode.value,
+        "language": state.language,
         "context_runtime": runtime,
         "context_selection": (
             "selected_path"
@@ -2411,7 +2485,22 @@ def _pipecat_cascade_pipeline_metadata(
         "model": route.stt.model,
         "turnDetection": "disabled",
     }
-    stt["baseUrl"] = user_relay_base_url()
+    stt_transport = str(route.stt.transport or "batch_http").strip().lower()
+    streaming_stt = stt_transport in {"websocket", "websocket_streaming", "streaming"}
+    if route.stt.transport:
+        stt["transport"] = route.stt.transport
+    if route.stt.protocol:
+        stt["protocol"] = route.stt.protocol
+    if route.stt.resource_id:
+        stt["resourceId"] = route.stt.resource_id
+    if route.stt.fallback_transport:
+        stt["fallbackTransport"] = route.stt.fallback_transport
+    if route.stt.fallback_protocol:
+        stt["fallbackProtocol"] = route.stt.fallback_protocol
+    if streaming_stt:
+        stt["websocketUrl"] = route.stt.websocket_url or user_relay_realtime_url()
+    else:
+        stt["baseUrl"] = user_relay_base_url()
     llm: dict[str, object] = {
         "provider": route.llm.provider,
         "model": route.llm.model,
@@ -2424,6 +2513,29 @@ def _pipecat_cascade_pipeline_metadata(
     }
     if route.tts.voice:
         tts["voice"] = route.tts.voice
+
+    turn_detection: dict[str, object]
+    if streaming_stt:
+        turn_detection = {
+            "provider": "pipecat",
+            "source": "pipecat",
+            "strategy": "default",
+            "analyzer": "LocalSmartTurnAnalyzerV3",
+        }
+    else:
+        turn_detection = {
+            "provider": "pipecat",
+            "source": "pipecat",
+            "strategy": "filter_incomplete",
+            "filterIncompleteUserTurns": True,
+            "baseStopStrategy": "speech_timeout",
+            "userSpeechTimeout": 2.0,
+            "userTurnStopTimeout": 12.0,
+            "userTurnCompletionConfig": {
+                "incompleteShortTimeout": 4.0,
+                "incompleteLongTimeout": 8.0,
+            },
+        }
 
     return {
         "transport": "websocket",
@@ -2449,19 +2561,7 @@ def _pipecat_cascade_pipeline_metadata(
         "context": {"provider": "pipecat", "realtimeServiceMode": False},
         "tts": tts,
         "vad": {"provider": "silero", "source": "pipecat", "sampleRate": 16000},
-        "turnDetection": {
-            "provider": "pipecat",
-            "source": "pipecat",
-            "strategy": "filter_incomplete",
-            "filterIncompleteUserTurns": True,
-            "baseStopStrategy": "speech_timeout",
-            "userSpeechTimeout": 2.0,
-            "userTurnStopTimeout": 12.0,
-            "userTurnCompletionConfig": {
-                "incompleteShortTimeout": 4.0,
-                "incompleteLongTimeout": 8.0,
-            },
-        },
+        "turnDetection": turn_detection,
         "talkwise": {
             "trainingSessionId": binding[0],
             "roomId": binding[1],
@@ -2677,6 +2777,27 @@ def _realtime_pipeline_metadata(
         route=route,
         input_sample_rate=input_sample_rate,
     )
+
+
+def _drill_preflight_pipeline_metadata(
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Keep realtime STT active while holding the draft outside roleplay."""
+
+    result = dict(metadata)
+    result.pop("llm", None)
+    result.pop("tts", None)
+    result.pop("realtimeLlm", None)
+    talkwise = result.get("talkwise")
+    talkwise_metadata = dict(talkwise) if isinstance(talkwise, Mapping) else {}
+    talkwise_metadata["drillPreflight"] = True
+    result["talkwise"] = talkwise_metadata
+    result["drillPreflight"] = {
+        "enabled": True,
+        "persistence": "after_learner_acceptance",
+        "response": "room_roleplay_after_acceptance",
+    }
+    return result
 
 
 def _load_pipecat_realtime_adapter() -> Any:
@@ -4532,6 +4653,7 @@ async def complete_training_session(
     )
     session_access_scope = _training_session_access_scope_for_current_user(current_user)
     completion_metadata: dict[str, object] = dict(body.metadata or {})
+    completion_context = training_completion_context(session)
 
     if str(session.room_id or "").startswith(
         f"{ConversationTrainingConversationAdapter.provider}:"
@@ -4614,6 +4736,9 @@ async def complete_training_session(
             detail="selected_tail_message_id is only available for message-tree sessions",
         )
 
+    if session.status == TrainingSessionStatus.COMPLETED:
+        return success_response(data=_session_to_dict(session))
+
     report_id = str(body.report_id).strip() if body.report_id is not None else ""
     report_generation = body.report_generation.strip().lower()
     background_report_room_id: int | None = None
@@ -4636,7 +4761,9 @@ async def complete_training_session(
             operation="generate_report",
         )
         if report_generation == "background":
-            completion_metadata["completionReport"] = _completion_report_pending_metadata()
+            completion_metadata["completionReport"] = _completion_report_pending_metadata(
+                completion_context=completion_context,
+            )
             background_report_room_id = room_id
             background_report_access_scope = report_access_scope
         else:
@@ -4654,18 +4781,25 @@ async def complete_training_session(
                         "error_type": type(exc).__name__,
                     },
                 )
-                completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
+                completion_metadata["completionReport"] = _completion_report_failure_metadata(
+                    exc,
+                    completion_context=completion_context,
+                )
             except Exception as exc:
                 logger.exception(
                     "training_session_completion_report_failed",
                     extra={"session_id": session_id, "room_id": session.room_id},
                 )
-                completion_metadata["completionReport"] = _completion_report_failure_metadata(exc)
+                completion_metadata["completionReport"] = _completion_report_failure_metadata(
+                    exc,
+                    completion_context=completion_context,
+                )
             else:
                 report_id = str(report.id)
                 completion_metadata["completionReport"] = _completion_report_ready_metadata(
                     report.id,
                     generation="sync",
+                    completion_context=completion_context,
                 )
                 background_tasks.add_task(growth_svc.evaluate_competency, report.id)
     elif report_id:
@@ -4678,6 +4812,11 @@ async def complete_training_session(
         completion_metadata["completionReport"] = _completion_report_ready_metadata(
             report_id,
             generation="explicit",
+            completion_context=completion_context,
+        )
+    else:
+        completion_metadata["completionReport"] = _completion_report_skipped_metadata(
+            completion_context=completion_context,
         )
 
     score_id = str(body.score_id).strip() if body.score_id is not None else None
@@ -4703,6 +4842,7 @@ async def complete_training_session(
             svc=svc,
             analysis_svc=analysis_svc,
             growth_svc=growth_svc,
+            completion_context=completion_context,
         )
     return success_response(data=_session_to_dict(completed))
 
@@ -4806,7 +4946,9 @@ async def get_training_session_report(
     )
     if report is None or str(report.room_id) != str(room_lookup_id):
         raise HTTPException(status_code=404, detail="Training session report not found")
-    return success_response(data=report.model_dump(mode="json"))
+    report_payload = report.model_dump(mode="json")
+    report_payload["trainingContext"] = training_completion_context(session)
+    return success_response(data=report_payload)
 
 
 @router.get("/realtime/capabilities", summary="Get realtime provider capabilities")
@@ -5560,12 +5702,6 @@ async def realtime_training_session(
             raise HTTPException(
                 status_code=409, detail="Realtime session has no voice route snapshot"
             )
-        adapter = pipeline_factory(provider, voice_route)
-        if adapter is None:
-            raise HTTPException(
-                status_code=503,
-                detail=_realtime_pipeline_unavailable_detail(provider),
-            )
         sink = _WebSocketTrainingTranscriptSink(
             websocket=websocket,
             session=session,
@@ -5627,11 +5763,6 @@ async def realtime_training_session(
                     _pipeline_realtime_event_payload(payload),
                 )
 
-        runner = RealtimePipelineSessionRunner(
-            adapter=adapter,
-            transcript_sink=sink,
-            event_sink=_relay_pipeline_event,
-        )
         voice_context = await _build_realtime_voice_context(
             active_binding,
             provider=provider,
@@ -5645,6 +5776,28 @@ async def realtime_training_session(
             active_binding,
             route=voice_route,
             input_sample_rate=input_sample_rate,
+        )
+        feedback = resolve_training_feedback_contract(voice_context["metadata"])
+        if feedback.mode == TrainingFeedbackMode.DRILL:
+            if voice_route.mode != _PIPECAT_REALTIME_PROFILE_CASCADE:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Drill correction requires the cascade realtime voice route "
+                        "so the learner draft can be reviewed before roleplay"
+                    ),
+                )
+            pipeline_metadata = _drill_preflight_pipeline_metadata(pipeline_metadata)
+        adapter = pipeline_factory(provider, voice_route)
+        if adapter is None:
+            raise HTTPException(
+                status_code=503,
+                detail=_realtime_pipeline_unavailable_detail(provider),
+            )
+        runner = RealtimePipelineSessionRunner(
+            adapter=adapter,
+            transcript_sink=sink,
+            event_sink=_relay_pipeline_event,
         )
         route_model = (
             voice_route.realtime.model
