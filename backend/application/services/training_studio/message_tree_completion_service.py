@@ -26,6 +26,7 @@ from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 _MESSAGE_TREE_ROOM_PREFIX = "talkwise-conversation:"
 _GUIDANCE_MESSAGE_SOURCE = "training_live_guidance"
+_FEEDBACK_MODES = {"assisted", "drill", "simulation"}
 _MAX_PATH_MESSAGES = 200
 _MAX_EVIDENCE_CONTENT_LENGTH = 2_000
 
@@ -107,6 +108,7 @@ class MessageTreeTrainingCompletionService:
             statuses=["active"],
             metadata_scope=conversation_metadata_scope,
         )
+        completion_context = training_completion_context(session, path=path)
         evaluation_path = _evaluation_messages(path)
         _validate_evaluation_path(evaluation_path, tail_id=tail_id)
 
@@ -138,6 +140,7 @@ class MessageTreeTrainingCompletionService:
             path=evaluation_path,
             evaluation=evaluation,
             evaluation_metadata=evaluation_metadata,
+            completion_context=completion_context,
         )
         score_id = _optional_text(evaluation.id if evaluation is not None else None)
 
@@ -184,12 +187,14 @@ class MessageTreeTrainingCompletionService:
             statuses=["active"],
             metadata_scope=conversation_metadata_scope,
         )
+        completion_context = training_completion_context(session, path=path)
         selected_path = _evaluation_messages(path)
         _validate_selected_path(selected_path, tail_id=tail_id)
         completion_metadata = _completion_skipped_metadata(
             conversation_id=conversation_id,
             selected_tail_message_id=tail_id,
             path=selected_path,
+            completion_context=completion_context,
         )
         try:
             completed = await self._session_service.complete_session(
@@ -326,6 +331,10 @@ class MessageTreeTrainingCompletionService:
             phase=phase,
             conversation_id=conversation_id,
             selected_tail_message_id=tail_id,
+            completion_context=await self._completion_context(
+                session_id,
+                access_scope=access_scope,
+            ),
         )
         await self._record_attempt_metadata(
             session_id,
@@ -336,6 +345,21 @@ class MessageTreeTrainingCompletionService:
             str(failure_metadata["message"]),
             metadata=failure_metadata,
         ) from exc
+
+    async def _completion_context(
+        self,
+        session_id: str,
+        *,
+        access_scope: TrainingSessionAccessScope,
+    ) -> dict[str, object]:
+        try:
+            session = await self._session_service.get_session(
+                session_id,
+                access_scope=access_scope,
+            )
+        except Exception:
+            return _default_training_completion_context()
+        return training_completion_context(session)
 
     async def _create_evaluation_projection(
         self,
@@ -507,6 +531,80 @@ def message_tree_completion_report_metadata(session: TrainingSession) -> dict[st
     return dict(_completion_report_metadata(session))
 
 
+def training_completion_context(
+    session: TrainingSession,
+    *,
+    path: Sequence[MessageDTO_Agent] | None = None,
+) -> dict[str, object]:
+    """Describe one shared post-session review across feedback modes."""
+
+    metadata = session.task_config.metadata or {}
+    scenario = metadata.get("scenario_training")
+    scenario = scenario if isinstance(scenario, Mapping) else {}
+    policy = metadata.get("feedbackPolicy")
+    policy = policy if isinstance(policy, Mapping) else {}
+    mode = _optional_text(
+        metadata.get("feedbackMode")
+        or metadata.get("trainingFeedbackMode")
+        or scenario.get("feedbackMode")
+        or policy.get("mode")
+    )
+    feedback_mode = mode if mode in _FEEDBACK_MODES else "simulation"
+
+    intervention_sources: set[str] = set()
+    guidance_history = metadata.get("liveGuidanceHistory")
+    if isinstance(guidance_history, Sequence) and not isinstance(
+        guidance_history,
+        (str, bytes, bytearray),
+    ):
+        if any(_guidance_snapshot_has_events(item) for item in guidance_history):
+            intervention_sources.add("live_guidance")
+
+    live_assist = metadata.get("liveAssist")
+    live_assist = live_assist if isinstance(live_assist, Mapping) else {}
+    assist_turns = live_assist.get("turns")
+    if isinstance(assist_turns, Sequence) and not isinstance(
+        assist_turns,
+        (str, bytes, bytearray),
+    ) and any(isinstance(item, Mapping) for item in assist_turns):
+        intervention_sources.add("live_assist")
+
+    if path and any(
+        (message.metadata or {}).get("source") == _GUIDANCE_MESSAGE_SOURCE
+        for message in path
+    ):
+        intervention_sources.add("live_guidance")
+
+    return {
+        "feedbackMode": feedback_mode,
+        "reviewScope": "full_session",
+        "reviewTiming": "post_session",
+        "inSessionInterventionSources": sorted(intervention_sources),
+    }
+
+
+def _default_training_completion_context() -> dict[str, object]:
+    return {
+        "feedbackMode": "simulation",
+        "reviewScope": "full_session",
+        "reviewTiming": "post_session",
+        "inSessionInterventionSources": [],
+    }
+
+
+def _guidance_snapshot_has_events(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    event_count = value.get("eventCount")
+    if isinstance(event_count, int) and not isinstance(event_count, bool):
+        return event_count > 0
+    events = value.get("events")
+    return isinstance(events, Sequence) and not isinstance(
+        events,
+        (str, bytes, bytearray),
+    ) and any(isinstance(item, Mapping) for item in events)
+
+
 def _message_tree_conversation_id(session: TrainingSession) -> int:
     room_id = _required_text(session.room_id, "room_id")
     if not room_id.startswith(_MESSAGE_TREE_ROOM_PREFIX):
@@ -628,6 +726,7 @@ def _completion_ready_metadata(
     path: Sequence[MessageDTO_Agent],
     evaluation: object | None,
     evaluation_metadata: Mapping[str, object],
+    completion_context: Mapping[str, object],
 ) -> dict[str, object]:
     evidence_path = [_path_evidence(message) for message in path]
     selected_message_ids = [
@@ -654,6 +753,7 @@ def _completion_ready_metadata(
             "conversationId": str(conversation_id),
             "selectedTailMessageId": selected_tail_message_id,
             "completedWithoutReport": False,
+            **dict(completion_context),
             "evidence": {
                 "source": "server_selected_root_to_tail",
                 "conversationId": str(conversation_id),
@@ -690,6 +790,7 @@ def _completion_skipped_metadata(
     conversation_id: int,
     selected_tail_message_id: str,
     path: Sequence[MessageDTO_Agent],
+    completion_context: Mapping[str, object],
 ) -> dict[str, object]:
     selected_message_ids = [
         message.public_id for message in path if _optional_text(message.public_id)
@@ -714,6 +815,7 @@ def _completion_skipped_metadata(
             "selectedTailMessageId": selected_tail_message_id,
             "completedWithoutReport": True,
             "skipReason": "user_requested",
+            **dict(completion_context),
             "capabilities": {
                 "reportRead": False,
                 "evaluation": False,
@@ -736,6 +838,7 @@ def _completion_failure_metadata(
     phase: str,
     conversation_id: int,
     selected_tail_message_id: str,
+    completion_context: Mapping[str, object],
 ) -> dict[str, object]:
     return {
         "status": "failed",
@@ -747,6 +850,7 @@ def _completion_failure_metadata(
         "completedWithoutReport": False,
         "conversationId": str(conversation_id),
         "selectedTailMessageId": selected_tail_message_id,
+        **dict(completion_context),
         "capabilities": {
             "reportRead": False,
             "evaluation": False,

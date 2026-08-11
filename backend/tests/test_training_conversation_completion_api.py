@@ -346,6 +346,9 @@ def test_message_tree_completion_uses_server_path_and_reuses_report_pipeline() -
     assert report_state["reportId"] == "501"
     assert report_state["analysisRoomId"] == 900
     assert report_state["selectedTailMessageId"] == "msg-tail"
+    assert report_state["feedbackMode"] == "simulation"
+    assert report_state["reviewScope"] == "full_session"
+    assert report_state["reviewTiming"] == "post_session"
     assert report_state["evaluation"]["status"] == "ready"
     assert report_state["evaluation"]["assessment"]["rubric_version"] == (
         "communication-core-v1"
@@ -414,6 +417,7 @@ def test_message_tree_completion_marks_clarity_scenario_for_specialized_review()
         "id": "daily-spoken-clarity",
         "training_points": ["Review filler words"],
     }
+    sessions.session.task_config.metadata["feedbackMode"] = "drill"
 
     response = client.post(
         _complete_path(),
@@ -422,6 +426,11 @@ def test_message_tree_completion_marks_clarity_scenario_for_specialized_review()
     )
 
     assert response.status_code == 200
+    completion_report = response.json()["data"]["task_config"]["metadata"][
+        "completionReport"
+    ]
+    assert completion_report["feedbackMode"] == "drill"
+    assert completion_report["reviewScope"] == "full_session"
     assert all(
         message.metadata["scenarioTrainingId"] == "daily-spoken-clarity"
         for message in projections.messages
