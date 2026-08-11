@@ -182,7 +182,7 @@ def test_turn_based_voice_session_rejects_native_speech_to_speech_route(tmp_path
     assert exc_info.value.status_code == 422
 
 
-def test_default_catalog_contains_only_four_integrated_routes_and_curated_demos() -> None:
+def test_default_catalog_contains_integrated_routes_and_curated_demos() -> None:
     path = Path(__file__).resolve().parents[2] / "data" / "training_studio" / "voice_routes.json"
     routes = TrainingVoiceRouteService(JsonFileVoiceRouteStore(path)).get_config().routes
 
@@ -197,12 +197,13 @@ def test_default_catalog_contains_only_four_integrated_routes_and_curated_demos(
         "pipecat-gemini-live",
     }
 
-    assert len(routes) == 12
+    assert len(routes) == 13
     assert {route.id for route in routes if route.adapter_status == "runtime_integrated"} == {
         "openai-cascade-standard",
         "openai-realtime-standard",
         "doubao-realtime-standard",
         "openai-llm-doubao-voice",
+        "openai-llm-doubao-voice-batch",
     }
     assert {
         route.id for route in routes if route.adapter_status == "inventory_only"
@@ -210,7 +211,16 @@ def test_default_catalog_contains_only_four_integrated_routes_and_curated_demos(
     assert {
         group: sum(route.resolved_preset_group() == group for route in routes)
         for group in ("cascade", "realtime")
-    } == {"cascade": 8, "realtime": 4}
+    } == {"cascade": 9, "realtime": 4}
+    assert {
+        route.id: route.name
+        for route in routes
+        if route.adapter_status == "runtime_integrated" and route.mode == "cascade"
+    } == {
+        "openai-cascade-standard": "OpenAI + OpenAI + OpenAI",
+        "openai-llm-doubao-voice": "Doubao + OpenAI + Doubao",
+        "openai-llm-doubao-voice-batch": "Doubao + OpenAI + Doubao (Batch fallback)",
+    }
     assert {
         route.id
         for route in routes
@@ -237,9 +247,9 @@ def test_default_catalog_contains_only_four_integrated_routes_and_curated_demos(
 
     default_route = next(route for route in routes if route.default)
     assert default_route.id == "openai-llm-doubao-voice"
-    assert default_route.revision == 5
+    assert default_route.revision == 6
     assert default_route.llm is not None
-    assert default_route.llm.model == "doubao-seed-2-0-mini-260428"
+    assert default_route.llm.model == "gpt-5.5"
     assert voice_route_catalog_readiness(default_route, environment={})["ready"] is True
 
     for route in routes:

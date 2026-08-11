@@ -1,14 +1,14 @@
 {
-  "version": 7,
+  "version": 8,
   "routes": [
     {
       "id": "openai-cascade-standard",
-      "name": "OpenAI Cascade",
+      "name": "OpenAI + OpenAI + OpenAI",
       "description": "OpenAI transcription, gpt-5.5 reasoning, and OpenAI speech synthesis.",
       "mode": "cascade",
       "enabled": true,
       "default": false,
-      "revision": 5,
+      "revision": 6,
       "adapterStatus": "runtime_integrated",
       "presetGroup": "cascade",
       "interactionModes": [
@@ -94,12 +94,12 @@
     },
     {
       "id": "openai-llm-doubao-voice",
-      "name": "Doubao Cascade Voice",
-      "description": "Doubao transcription and speech synthesis with a low-latency conversational model.",
+      "name": "Doubao + OpenAI + Doubao",
+      "description": "Doubao transcription and speech synthesis with gpt-5.5 reasoning.",
       "mode": "cascade",
       "enabled": true,
       "default": true,
-      "revision": 5,
+      "revision": 6,
       "adapterStatus": "runtime_integrated",
       "presetGroup": "cascade",
       "interactionModes": [
@@ -109,11 +109,50 @@
       "credentialEnv": [],
       "stt": {
         "provider": "volcengine.doubao",
-        "model": "volc.bigasr.sauc.duration"
+        "model": "volc.bigasr.sauc.duration",
+        "transport": "websocket",
+        "protocol": "newapi.doubao_stt.stream.v1",
+        "fallbackTransport": "batch_http",
+        "fallbackProtocol": "newapi.audio_transcriptions.v1"
       },
       "llm": {
         "provider": "openai",
-        "model": "doubao-seed-2-0-mini-260428"
+        "model": "gpt-5.5"
+      },
+      "tts": {
+        "provider": "volcengine.doubao",
+        "model": "seed-tts-2.0",
+        "voice": "zh_female_vv_uranus_bigtts"
+      },
+      "inputSampleRate": 16000,
+      "outputSampleRate": 24000,
+      "latencyProfile": "near_realtime",
+      "costProfile": "configured"
+    },
+    {
+      "id": "openai-llm-doubao-voice-batch",
+      "name": "Doubao + OpenAI + Doubao (Batch fallback)",
+      "description": "Batch transcription fallback through the authenticated NewAPI relay.",
+      "mode": "cascade",
+      "enabled": true,
+      "default": false,
+      "revision": 1,
+      "adapterStatus": "runtime_integrated",
+      "presetGroup": "cascade",
+      "interactionModes": [
+        "turn_based",
+        "realtime"
+      ],
+      "credentialEnv": [],
+      "stt": {
+        "provider": "volcengine.doubao",
+        "model": "volc.bigasr.sauc.duration",
+        "transport": "batch_http",
+        "protocol": "newapi.audio_transcriptions.v1"
+      },
+      "llm": {
+        "provider": "openai",
+        "model": "gpt-5.5"
       },
       "tts": {
         "provider": "volcengine.doubao",
@@ -394,5 +433,5 @@
       "costProfile": "requires_provider_keys"
     }
   ],
-  "updatedAt": "2026-08-09T12:00:00.000Z"
+  "updatedAt": "2026-08-10T14:45:00.000Z"
 }

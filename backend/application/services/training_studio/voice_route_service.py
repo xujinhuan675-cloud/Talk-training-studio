@@ -28,6 +28,20 @@ class VoiceRouteServiceDTO(BaseModel):
     provider: str = Field(min_length=1, max_length=80)
     model: str = Field(min_length=1, max_length=160)
     voice: str | None = Field(default=None, max_length=160)
+    transport: str | None = Field(default=None, max_length=80)
+    protocol: str | None = Field(default=None, max_length=160)
+    websocket_url: str | None = Field(default=None, alias="websocketUrl", max_length=1000)
+    resource_id: str | None = Field(default=None, alias="resourceId", max_length=160)
+    fallback_transport: str | None = Field(
+        default=None,
+        alias="fallbackTransport",
+        max_length=80,
+    )
+    fallback_protocol: str | None = Field(
+        default=None,
+        alias="fallbackProtocol",
+        max_length=160,
+    )
 
 
 class VoiceRouteDTO(BaseModel):
