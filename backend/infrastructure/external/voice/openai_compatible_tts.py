@@ -56,6 +56,7 @@ class OpenAICompatibleTTSProvider:
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout, connect=10.0),
             follow_redirects=True,
+            trust_env=False,
         )
 
     async def synthesize_stream(

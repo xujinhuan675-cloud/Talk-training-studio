@@ -98,6 +98,32 @@ def test_normalize_transcriptions_url(base_url: str, expected: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_voice_clients_ignore_environment_proxies(monkeypatch) -> None:
+    client_kwargs: list[dict[str, object]] = []
+
+    def create_client(**kwargs) -> _FakeAsyncClient:
+        client_kwargs.append(kwargs)
+        return _FakeAsyncClient()
+
+    monkeypatch.setattr(httpx, "AsyncClient", create_client)
+    tts = OpenAICompatibleTTSProvider(
+        api_key="newapi-user-session",
+        model="seed-tts-2.0",
+        base_url="http://127.0.0.1:18080/pg",
+    )
+    stt = OpenAICompatibleSTTProvider(
+        api_key="newapi-user-session",
+        base_url="http://127.0.0.1:18080/pg",
+        model="volc.bigasr.sauc.duration",
+    )
+
+    await tts.close()
+    await stt.close()
+
+    assert [kwargs["trust_env"] for kwargs in client_kwargs] == [False, False]
+
+
+@pytest.mark.asyncio
 async def test_stt_posts_to_newapi_with_current_user_token(monkeypatch) -> None:
     monkeypatch.setattr(settings, "NEWAPI_USER_BILLING_ENABLED", True)
     context_token = bind_user_access_token("dashboard-user-token")

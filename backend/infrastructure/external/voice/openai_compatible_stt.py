@@ -61,6 +61,7 @@ class OpenAICompatibleSTTProvider:
         self._model = model
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout, connect=10.0),
+            trust_env=False,
         )
 
     async def transcribe(
