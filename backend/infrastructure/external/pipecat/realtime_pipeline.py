@@ -37,6 +37,12 @@ from application.ports.realtime import (
     redact_realtime_secret_text,
     sanitize_realtime_public_value,
 )
+from application.services.training_studio.feedback_policy import (
+    TrainingFeedbackMode,
+    counterpart_feedback_instruction,
+    reply_language_instruction,
+    resolve_training_feedback_contract,
+)
 from infrastructure.external.newapi_user_gateway import (
     current_user_access_token,
     require_user_access_token,
@@ -2495,22 +2501,74 @@ def build_pipecat_voice_processors(
         )
         has_stt_processor = True
     elif stt_provider == VOLCENGINE_DOUBAO_PROVIDER:
-        from infrastructure.external.pipecat.volcengine_doubao_services import (
-            create_volcengine_doubao_stt_service,
-        )
-
         stt_config = _feature_config(metadata, "stt")
         turn_config = _feature_config(metadata, "turnDetection", "turn_detection")
-        processors.append(
-            create_volcengine_doubao_stt_service(
+        sample_rate = (
+            _metadata_int(stt_config, "sampleRate", "sample_rate")
+            or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
+            or 16000
+        )
+        model = (
+            _metadata_text(stt_config, "model")
+            or _metadata_text(metadata, "sttModel", "stt_model")
+            or ""
+        )
+        language = _metadata_text(stt_config, "language") or "zh"
+        if _doubao_stt_transport(stt_config) == "websocket":
+            try:
+                from infrastructure.external.pipecat.volcengine_doubao_streaming_stt import (
+                    create_volcengine_doubao_streaming_stt_service,
+                )
+            except ImportError:
+                create_volcengine_doubao_streaming_stt_service = None
+            if callable(create_volcengine_doubao_streaming_stt_service):
+                stt_service = create_volcengine_doubao_streaming_stt_service(
+                    api_key=_doubao_api_key(),
+                    app_key=None,
+                    resource_id=None,
+                    ws_url=_doubao_streaming_stt_url(stt_config),
+                    model=model,
+                    language=language,
+                    sample_rate=sample_rate,
+                )
+            elif _doubao_batch_fallback_enabled(stt_config):
+                logger.warning(
+                    "doubao_streaming_stt_capability_fallback",
+                    extra={
+                        "provider": VOLCENGINE_DOUBAO_PROVIDER,
+                        "requestedTransport": "websocket",
+                        "fallbackTransport": "batch_http",
+                        "reasonCode": "DOUBAO_STREAMING_STT_ADAPTER_UNAVAILABLE",
+                    },
+                )
+                stt_service = _create_doubao_batch_stt_service(
+                    api_key=_doubao_api_key(),
+                    base_url=_doubao_base_url(stt_config),
+                    model=model,
+                    language=language,
+                    vad_segment_settle_seconds=(
+                        _metadata_float(
+                            turn_config,
+                            "userSpeechTimeout",
+                            "user_speech_timeout",
+                            default=0.0,
+                        )
+                        or 0.0
+                    ),
+                    sample_rate=sample_rate,
+                )
+            else:
+                raise _pipecat_feature_unavailable_error(
+                    "The Pipecat Doubao streaming STT adapter is unavailable",
+                    feature=f"stt:{VOLCENGINE_DOUBAO_PROVIDER}",
+                    modules=(DOUBAO_VOICE_PIPECAT_MODULE, "websockets"),
+                )
+        else:
+            stt_service = _create_doubao_batch_stt_service(
                 api_key=_doubao_api_key(),
                 base_url=_doubao_base_url(stt_config),
-                model=(
-                    _metadata_text(stt_config, "model")
-                    or _metadata_text(metadata, "sttModel", "stt_model")
-                    or ""
-                ),
-                language=_metadata_text(stt_config, "language") or "zh",
+                model=model,
+                language=language,
                 vad_segment_settle_seconds=(
                     _metadata_float(
                         turn_config,
@@ -2520,13 +2578,9 @@ def build_pipecat_voice_processors(
                     )
                     or 0.0
                 ),
-                sample_rate=(
-                    _metadata_int(stt_config, "sampleRate", "sample_rate")
-                    or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
-                    or 16000
-                ),
+                sample_rate=sample_rate,
             )
-        )
+        processors.append(stt_service)
         has_stt_processor = True
 
     if has_stt_processor and llm_provider not in PIPECAT_SUPPORTED_LLM_PROVIDERS:
@@ -2894,6 +2948,14 @@ def pipecat_pipeline_capability(
     )
     missing: list[str] = []
     llm_provider = _feature_provider(metadata, "llm")
+    stt_config = _feature_config(metadata, "stt")
+    doubao_streaming_stt = (
+        _feature_provider(metadata, "stt") == VOLCENGINE_DOUBAO_PROVIDER
+        and _doubao_stt_transport(stt_config) == "websocket"
+    )
+    doubao_batch_fallback = (
+        doubao_streaming_stt and _doubao_batch_fallback_enabled(stt_config)
+    )
     if profile == PIPECAT_REALTIME_PROFILE_SPEECH_TO_SPEECH:
         if (
             _realtime_llm_provider(metadata) == "openai"
@@ -2911,7 +2973,14 @@ def pipecat_pipeline_capability(
             missing.append("stt:openai")
         if (
             _feature_provider(metadata, "stt") == VOLCENGINE_DOUBAO_PROVIDER
-            and not _doubao_voice_adapter_available()
+            and (
+                not _doubao_voice_adapter_available()
+                or (
+                    doubao_streaming_stt
+                    and not _doubao_streaming_stt_adapter_available()
+                    and not doubao_batch_fallback
+                )
+            )
         ):
             missing.append(f"stt:{VOLCENGINE_DOUBAO_PROVIDER}")
         if _feature_provider(metadata, "tts") == "openai" and not capability.tts_available:
@@ -2993,6 +3062,15 @@ def pipecat_pipeline_capability(
             "vadAvailable": capability.vad_available,
             "turnDetectionAvailable": capability.turn_detection_available,
             "doubaoVoiceAvailable": _doubao_voice_adapter_available(),
+            "doubaoStreamingSttAvailable": _doubao_streaming_stt_adapter_available(),
+            "doubaoSttTransport": (
+                _doubao_stt_transport(stt_config)
+                if requested_features.get("stt") == VOLCENGINE_DOUBAO_PROVIDER
+                else None
+            ),
+            "doubaoSttFallbackTransport": (
+                "batch_http" if doubao_batch_fallback else None
+            ),
             "profile": profile,
             "profileContract": pipecat_realtime_profile_contracts()[profile],
             "profiles": _pipecat_realtime_profile_payload(capability),
@@ -3009,7 +3087,11 @@ def pipecat_pipeline_capability(
             "runtimeLoaded": runtime is not None,
             "vadEntrypoint": SILERO_VAD_PIPECAT_MODULE,
             "sttEntrypoint": (
-                "infrastructure.external.pipecat.volcengine_doubao_services"
+                (
+                    "infrastructure.external.pipecat.volcengine_doubao_streaming_stt"
+                    if doubao_streaming_stt
+                    else "infrastructure.external.pipecat.volcengine_doubao_services"
+                )
                 if requested_features.get("stt") == VOLCENGINE_DOUBAO_PROVIDER
                 else OPENAI_STT_PIPECAT_MODULE
             ),
@@ -3040,6 +3122,18 @@ def _doubao_voice_adapter_available() -> bool:
             "create_volcengine_doubao_stt_service",
             "create_volcengine_doubao_tts_service",
         )
+    )
+
+
+def _doubao_streaming_stt_adapter_available() -> bool:
+    try:
+        module = importlib.import_module(
+            "infrastructure.external.pipecat.volcengine_doubao_streaming_stt"
+        )
+    except Exception:
+        return False
+    return callable(
+        getattr(module, "create_volcengine_doubao_streaming_stt_service", None)
     )
 
 
@@ -3168,57 +3262,84 @@ def _pipecat_pipeline_readiness(
 
         stt_config = _feature_config(metadata, "stt")
         tts_config = _feature_config(metadata, "tts")
-        try:
-            validate_doubao_service_config(
-                api_key=_doubao_api_key(),
-                base_url=_doubao_base_url(stt_config or tts_config),
-                stt_model=(
-                    _metadata_text(stt_config, "model")
-                    if requested_features.get("stt") == VOLCENGINE_DOUBAO_PROVIDER
-                    else None
-                ),
-                tts_model=(
-                    _metadata_text(tts_config, "model")
-                    if requested_features.get("tts") == VOLCENGINE_DOUBAO_PROVIDER
-                    else None
-                ),
-                voice=(
-                    config.voice
-                    or _metadata_text(tts_config, "voice")
-                    or _metadata_text(metadata, "voice")
-                ),
-                input_sample_rate=(
-                    _metadata_int(stt_config, "sampleRate", "sample_rate")
-                    or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
-                    or 16000
-                ),
-                output_sample_rate=(
-                    _metadata_int(tts_config, "sampleRate", "sample_rate")
-                    or _metadata_int(metadata, "outputSampleRate", "output_sample_rate")
-                    or 24000
-                ),
-            )
-        except DoubaoVoiceServiceError as exc:
-            details = exc.to_realtime_error()
+        streaming_stt = (
+            requested_features.get("stt") == VOLCENGINE_DOUBAO_PROVIDER
+            and _doubao_stt_transport(stt_config) == "websocket"
+        )
+        streaming_adapter_available = _doubao_streaming_stt_adapter_available()
+        batch_fallback_active = (
+            streaming_stt
+            and not streaming_adapter_available
+            and _doubao_batch_fallback_enabled(stt_config)
+        )
+        needs_batch_relay = (
+            requested_features.get("stt") == VOLCENGINE_DOUBAO_PROVIDER
+            and (not streaming_stt or batch_fallback_active)
+        )
+        needs_http_relay = (
+            needs_batch_relay
+            or requested_features.get("tts") == VOLCENGINE_DOUBAO_PROVIDER
+        )
+        if streaming_stt and not _doubao_api_key():
             blockers.append(
                 RealtimeReadinessIssue(
-                    code=exc.code,
-                    message=str(exc),
-                    phase=exc.phase,
+                    code="MISSING_DOUBAO_VOICE_CREDENTIAL",
+                    message="Doubao streaming STT requires the current NewAPI user credential",
+                    phase="configuration",
                     provider=VOLCENGINE_DOUBAO_PROVIDER,
-                    feature=exc.feature,
-                    metadata={
-                        "errorCategory": exc.category,
-                        "retryable": exc.retryable,
-                        "fatal": exc.fatal,
-                        **(
-                            {"statusCode": details["statusCode"]}
-                            if "statusCode" in details
-                            else {}
-                        ),
-                    },
+                    feature=f"stt:{VOLCENGINE_DOUBAO_PROVIDER}",
                 )
             )
+        if needs_http_relay:
+            try:
+                validate_doubao_service_config(
+                    api_key=_doubao_api_key(),
+                    base_url=_doubao_base_url(stt_config if needs_batch_relay else tts_config),
+                    stt_model=(
+                        _metadata_text(stt_config, "model") if needs_batch_relay else None
+                    ),
+                    tts_model=(
+                        _metadata_text(tts_config, "model")
+                        if requested_features.get("tts") == VOLCENGINE_DOUBAO_PROVIDER
+                        else None
+                    ),
+                    voice=(
+                        config.voice
+                        or _metadata_text(tts_config, "voice")
+                        or _metadata_text(metadata, "voice")
+                    ),
+                    input_sample_rate=(
+                        _metadata_int(stt_config, "sampleRate", "sample_rate")
+                        or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
+                        or 16000
+                    ),
+                    output_sample_rate=(
+                        _metadata_int(tts_config, "sampleRate", "sample_rate")
+                        or _metadata_int(metadata, "outputSampleRate", "output_sample_rate")
+                        or 24000
+                    ),
+                )
+            except DoubaoVoiceServiceError as exc:
+                details = exc.to_realtime_error()
+                blockers.append(
+                    RealtimeReadinessIssue(
+                        code=exc.code,
+                        message=str(exc),
+                        phase=exc.phase,
+                        provider=VOLCENGINE_DOUBAO_PROVIDER,
+                        feature=exc.feature,
+                        metadata={
+                            "errorCategory": exc.category,
+                            "retryable": exc.retryable,
+                            "fatal": exc.fatal,
+                            **(
+                                {"statusCode": details["statusCode"]}
+                                if "statusCode" in details
+                                else {}
+                            ),
+                        },
+                    )
+                )
     if not openai_requirements.get("model"):
         blockers.append(
             RealtimeReadinessIssue(
@@ -4086,6 +4207,13 @@ def _llm_system_instruction(
             if rubric:
                 parts.append(f"Rubric: {rubric}")
         metadata = dict(context.metadata)
+        feedback = resolve_training_feedback_contract(
+            metadata,
+            default_mode=TrainingFeedbackMode.SIMULATION,
+        )
+        parts.append(counterpart_feedback_instruction(feedback.mode))
+        if language_instruction := reply_language_instruction(feedback.reply_language):
+            parts.append(language_instruction)
         persona_ids = metadata.get("personaIds") or metadata.get("persona_ids")
         if persona_ids:
             rendered = _compact_json(persona_ids)
@@ -4207,6 +4335,12 @@ def _start_metadata(
         "scenarioTemplateId": ("scenarioTemplateId", "scenario_template_id"),
         "category": ("category",),
         "liveGuidance": ("liveGuidance", "live_guidance"),
+        "feedbackMode": ("feedbackMode", "trainingFeedbackMode", "feedback_mode"),
+        "replyLanguage": (
+            "replyLanguage",
+            "trainingReplyLanguage",
+            "reply_language",
+        ),
     }.items():
         for input_key in input_keys:
             safe_value = _json_safe_metadata(metadata.get(input_key))
@@ -4749,6 +4883,53 @@ def _doubao_base_url(config: Mapping[str, Any]) -> str | None:
     return _metadata_text(config, "baseUrl", "base_url") or _settings_llm_value("base_url")
 
 
+def _doubao_stt_transport(config: Mapping[str, Any]) -> str:
+    selected = _metadata_text(config, "transport", "transportMode", "transport_mode")
+    normalized = str(selected or "batch_http").strip().lower().replace("-", "_")
+    if normalized in {"websocket", "websocket_streaming", "streaming", "ws"}:
+        return "websocket"
+    if normalized in {"batch", "batch_http", "http", "segmented"}:
+        return "batch_http"
+    raise ValueError(
+        f"Unsupported Doubao STT transport '{selected}'; expected websocket or batch_http"
+    )
+
+
+def _doubao_batch_fallback_enabled(config: Mapping[str, Any]) -> bool:
+    fallback = _metadata_text(
+        config,
+        "fallbackTransport",
+        "fallback_transport",
+    )
+    if fallback is None:
+        return False
+    normalized = fallback.strip().lower().replace("-", "_")
+    if normalized in {"batch", "batch_http", "http", "segmented"}:
+        return True
+    raise ValueError(
+        f"Unsupported Doubao STT fallback transport '{fallback}'; expected batch_http"
+    )
+
+
+def _doubao_streaming_stt_url(config: Mapping[str, Any]) -> str:
+    configured = _metadata_text(
+        config,
+        "websocketUrl",
+        "websocket_url",
+        "wsUrl",
+        "ws_url",
+    )
+    return configured or user_relay_realtime_url()
+
+
+def _create_doubao_batch_stt_service(**kwargs: Any) -> Any:
+    from infrastructure.external.pipecat.volcengine_doubao_services import (
+        create_volcengine_doubao_stt_service,
+    )
+
+    return create_volcengine_doubao_stt_service(**kwargs)
+
+
 def _settings_llm_value(attr: str) -> str | None:
     try:
         from core.config import settings as app_settings
@@ -5237,6 +5418,8 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
 
     if stt_provider == VOLCENGINE_DOUBAO_PROVIDER:
         stt_config = _feature_config(metadata, "stt")
+        stt_transport = _doubao_stt_transport(stt_config)
+        _doubao_batch_fallback_enabled(stt_config)
         if not (
             _metadata_text(stt_config, "model")
             or _metadata_text(metadata, "sttModel", "stt_model")
@@ -5249,6 +5432,10 @@ def validate_pipecat_voice_config(config: RealtimePipelineConfig) -> None:
         ) or _metadata_int(metadata, "inputSampleRate", "input_sample_rate")
         if stt_sample_rate not in {None, 16000}:
             raise ValueError("Doubao STT input sample rate must be 16000")
+        if stt_transport == "websocket":
+            websocket_url = _doubao_streaming_stt_url(stt_config)
+            if not websocket_url.startswith(("ws://", "wss://")):
+                raise ValueError("Doubao streaming STT requires a valid WebSocket URL")
 
     tts_provider = _feature_provider(metadata, "tts")
     if tts_provider == VOLCENGINE_DOUBAO_PROVIDER:

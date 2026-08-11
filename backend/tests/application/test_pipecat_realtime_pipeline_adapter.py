@@ -2089,6 +2089,8 @@ def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
             "dispatcher": {"selectedPersonaId": "buyer"},
             "liveGuidance": {"enabled": True},
             "growthReport": {"internal": "not prompt material"},
+            "feedbackMode": "drill",
+            "replyLanguage": "zh-CN",
         },
     )
     config = RealtimePipelineConfig(
@@ -2179,6 +2181,8 @@ def test_build_pipecat_voice_processors_adds_native_llm_context_chain():
     assert "Scenario template ID" in llm_settings["system_instruction"]
     assert "Scenario category" in llm_settings["system_instruction"]
     assert "Live guidance" in llm_settings["system_instruction"]
+    assert "separate structured" in llm_settings["system_instruction"]
+    assert "zh-CN" in llm_settings["system_instruction"]
     assert "not prompt material" not in llm_settings["system_instruction"]
 
 
