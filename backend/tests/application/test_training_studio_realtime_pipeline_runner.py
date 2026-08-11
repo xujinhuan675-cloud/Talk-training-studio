@@ -110,6 +110,7 @@ async def _started_runner(
     sink: FakeTrainingTranscriptSink | None = None,
     event_sink: FakeRealtimeEventSink | None = None,
     context_metadata: Mapping[str, Any] | None = None,
+    drill_semantic_settle_seconds: float = 0.01,
 ) -> tuple[RealtimePipelineSessionRunner, FakeRealtimePipelineAdapter, FakeTrainingTranscriptSink]:
     fake_adapter = adapter or FakeRealtimePipelineAdapter()
     fake_sink = sink or FakeTrainingTranscriptSink()
@@ -117,6 +118,7 @@ async def _started_runner(
         adapter=fake_adapter,
         transcript_sink=fake_sink,
         event_sink=event_sink,
+        drill_semantic_settle_seconds=drill_semantic_settle_seconds,
     )
     await runner.start(
         binding=_binding(),
@@ -343,6 +345,8 @@ async def test_runner_waits_for_semantic_turn_completion_before_emitting_drill_d
     assert sink.persisted == []
     assert event_sink.events == [
         vad_stop,
+        semantic_stop,
+        semantic_stop,
         {
             "type": "training.drill.draft",
             "schemaVersion": 1,
@@ -357,9 +361,67 @@ async def test_runner_waits_for_semantic_turn_completion_before_emitting_drill_d
             "persisted": False,
             "eventId": "evt-drill-2",
         },
-        semantic_stop,
-        semantic_stop,
     ]
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_cancels_pending_drill_draft_when_user_continues_speaking():
+    event_sink = FakeRealtimeEventSink()
+    runner, adapter, sink = await _started_runner(
+        event_sink=event_sink,
+        context_metadata={"scenario": "sales", "feedbackMode": "drill"},
+        drill_semantic_settle_seconds=0.05,
+    )
+
+    await adapter.emit(
+        {
+            "type": "transcript.done",
+            "event_id": "evt-drill-first",
+            "text": "The first sentence.",
+        }
+    )
+    await adapter.emit(
+        {
+            "type": "user_turn.stopped",
+            "signal": "user_turn",
+            "payload": {"signal": "user_turn"},
+        }
+    )
+    await asyncio.sleep(0.01)
+    await adapter.emit(
+        {
+            "type": "user_turn.started",
+            "signal": "user_turn",
+            "payload": {"signal": "user_turn"},
+        }
+    )
+    await adapter.emit(
+        {
+            "type": "transcript.done",
+            "event_id": "evt-drill-second",
+            "text": "Then I continue the same answer.",
+        }
+    )
+    await asyncio.sleep(0.06)
+
+    assert sink.persisted == []
+    assert all(event["type"] != "training.drill.draft" for event in event_sink.events)
+
+    await adapter.emit(
+        {
+            "type": "user_turn.stopped",
+            "signal": "user_turn",
+            "payload": {"signal": "user_turn"},
+        }
+    )
+    await event_sink.wait_for_events(len(event_sink.events) + 2)
+
+    draft = next(
+        event for event in event_sink.events if event["type"] == "training.drill.draft"
+    )
+    assert draft["text"] == "The first sentence. Then I continue the same answer."
 
     await runner.close()
 

@@ -31,6 +31,7 @@ from application.services.training_studio.feedback_policy import (
 from application.services.training_studio.realtime_pipeline import build_realtime_transcript
 
 _EVENT_PUMP_CLOSE_TIMEOUT_SECONDS = 1.0
+_DRILL_SEMANTIC_SETTLE_SECONDS = 1.2
 RealtimePipelineEventSink = Callable[[Mapping[str, Any]], Awaitable[None] | None]
 logger = logging.getLogger(__name__)
 
@@ -324,6 +325,7 @@ class RealtimePipelineSessionRunner:
         adapter: RealtimePipelineAdapter,
         transcript_sink: TrainingTranscriptSink,
         event_sink: RealtimePipelineEventSink | None = None,
+        drill_semantic_settle_seconds: float = _DRILL_SEMANTIC_SETTLE_SECONDS,
     ) -> None:
         self._adapter = adapter
         self._transcript_sink = transcript_sink
@@ -336,6 +338,10 @@ class RealtimePipelineSessionRunner:
         self._telemetry = _RealtimePipelineTelemetry()
         self._discard_cancelled_response = False
         self._drill_transcripts: list[RealtimeTranscript] = []
+        self._drill_flush_task: asyncio.Task[None] | None = None
+        self._drill_semantic_settle_seconds = max(
+            0.0, float(drill_semantic_settle_seconds)
+        )
         self._closed = True
 
     @property
@@ -425,6 +431,7 @@ class RealtimePipelineSessionRunner:
         self._events_error = None
         self._telemetry = _RealtimePipelineTelemetry()
         self._discard_cancelled_response = False
+        self._cancel_scheduled_drill_flush()
         self._drill_transcripts.clear()
         try:
             await self._adapter.start(context, config)
@@ -455,6 +462,7 @@ class RealtimePipelineSessionRunner:
 
     async def commit(self) -> None:
         self._require_open()
+        self._cancel_scheduled_drill_flush()
         await self._adapter.commit_audio()
         wait_for_commit_settled = getattr(self._adapter, "wait_for_commit_settled", None)
         if not callable(wait_for_commit_settled):
@@ -510,9 +518,17 @@ class RealtimePipelineSessionRunner:
         self._raise_events_error()
 
     async def close(self) -> None:
-        if self._closed and self._events_task is None:
+        if (
+            self._closed
+            and self._events_task is None
+            and self._drill_flush_task is None
+        ):
             return
         self._closed = True
+        drill_flush_task = self._cancel_scheduled_drill_flush()
+        if drill_flush_task is not None:
+            with suppress(asyncio.CancelledError):
+                await drill_flush_task
         try:
             await self._adapter.close()
         finally:
@@ -564,6 +580,8 @@ class RealtimePipelineSessionRunner:
                     self._discard_cancelled_response = True
                 if self._discard_cancelled_response and _is_assistant_response_event(payload):
                     continue
+                if _is_turn_started_event(payload):
+                    self._cancel_scheduled_drill_flush()
                 transcript = self._final_transcript(
                     payload,
                     context,
@@ -576,6 +594,7 @@ class RealtimePipelineSessionRunner:
                     and resolve_training_feedback_contract(context.metadata).mode
                     == TrainingFeedbackMode.DRILL
                 ):
+                    self._cancel_scheduled_drill_flush()
                     self._drill_transcripts.append(transcript)
                     continue
                 if transcript is not None:
@@ -594,7 +613,7 @@ class RealtimePipelineSessionRunner:
                     )
                     continue
                 if _is_semantic_user_turn_stopped_event(payload):
-                    await self._flush_drill_draft()
+                    self._schedule_drill_flush()
                 if not _is_transcript_event(payload):
                     await self._forward_event(payload)
         except asyncio.CancelledError:
@@ -675,6 +694,32 @@ class RealtimePipelineSessionRunner:
                 realtime_session_id=realtime_session_id,
             )
         )
+
+    def _cancel_scheduled_drill_flush(self) -> asyncio.Task[None] | None:
+        task = self._drill_flush_task
+        self._drill_flush_task = None
+        if task is not None and not task.done():
+            task.cancel()
+        return task
+
+    def _schedule_drill_flush(self) -> None:
+        if not self._drill_transcripts:
+            return
+        self._cancel_scheduled_drill_flush()
+        self._drill_flush_task = asyncio.create_task(
+            self._flush_drill_draft_after_settle(),
+            name=f"training-studio-drill-settle-{self._realtime_session_id}",
+        )
+
+    async def _flush_drill_draft_after_settle(self) -> None:
+        try:
+            await asyncio.sleep(self._drill_semantic_settle_seconds)
+            await self._flush_drill_draft()
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._drill_flush_task is asyncio.current_task():
+                self._drill_flush_task = None
 
     async def _stop_events_task(self) -> None:
         task = self._events_task
@@ -1041,7 +1086,7 @@ def _merge_drill_transcript_texts(
         separator = (
             " "
             if previous[-1:].isascii()
-            and previous[-1:].isalnum()
+            and (previous[-1:].isalnum() or previous[-1:] in ".,!?;:")
             and text[:1].isascii()
             and text[:1].isalnum()
             else ""
