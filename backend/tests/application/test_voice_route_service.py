@@ -197,13 +197,12 @@ def test_default_catalog_contains_integrated_routes_and_curated_demos() -> None:
         "pipecat-gemini-live",
     }
 
-    assert len(routes) == 13
+    assert len(routes) == 12
     assert {route.id for route in routes if route.adapter_status == "runtime_integrated"} == {
         "openai-cascade-standard",
         "openai-realtime-standard",
         "doubao-realtime-standard",
         "openai-llm-doubao-voice",
-        "openai-llm-doubao-voice-batch",
     }
     assert {
         route.id for route in routes if route.adapter_status == "inventory_only"
@@ -211,7 +210,7 @@ def test_default_catalog_contains_integrated_routes_and_curated_demos() -> None:
     assert {
         group: sum(route.resolved_preset_group() == group for route in routes)
         for group in ("cascade", "realtime")
-    } == {"cascade": 9, "realtime": 4}
+    } == {"cascade": 8, "realtime": 4}
     assert {
         route.id: route.name
         for route in routes
@@ -219,7 +218,6 @@ def test_default_catalog_contains_integrated_routes_and_curated_demos() -> None:
     } == {
         "openai-cascade-standard": "OpenAI + OpenAI + OpenAI",
         "openai-llm-doubao-voice": "Doubao + OpenAI + Doubao",
-        "openai-llm-doubao-voice-batch": "Doubao + OpenAI + Doubao (Batch fallback)",
     }
     assert {
         route.id

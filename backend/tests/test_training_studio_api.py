@@ -648,7 +648,8 @@ async def test_voice_routes_expose_published_platform_presets(client: AsyncClien
     assert response.status_code == 200
     routes = response.json()["data"]
     by_id = {route["id"]: route for route in routes}
-    assert len(routes) == 13
+    assert len(routes) == 12
+    assert "openai-llm-doubao-voice-batch" not in by_id
     assert by_id["openai-cascade-standard"]["readiness"]["ready"] is True
     assert by_id["openai-llm-doubao-voice"]["interactionModes"] == [
         "turn_based",

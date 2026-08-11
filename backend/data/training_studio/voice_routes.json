@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "routes": [
     {
       "id": "openai-cascade-standard",
@@ -114,41 +114,6 @@
         "protocol": "newapi.doubao_stt.stream.v1",
         "fallbackTransport": "batch_http",
         "fallbackProtocol": "newapi.audio_transcriptions.v1"
-      },
-      "llm": {
-        "provider": "openai",
-        "model": "gpt-5.5"
-      },
-      "tts": {
-        "provider": "volcengine.doubao",
-        "model": "seed-tts-2.0",
-        "voice": "zh_female_vv_uranus_bigtts"
-      },
-      "inputSampleRate": 16000,
-      "outputSampleRate": 24000,
-      "latencyProfile": "near_realtime",
-      "costProfile": "configured"
-    },
-    {
-      "id": "openai-llm-doubao-voice-batch",
-      "name": "Doubao + OpenAI + Doubao (Batch fallback)",
-      "description": "Batch transcription fallback through the authenticated NewAPI relay.",
-      "mode": "cascade",
-      "enabled": true,
-      "default": false,
-      "revision": 1,
-      "adapterStatus": "runtime_integrated",
-      "presetGroup": "cascade",
-      "interactionModes": [
-        "turn_based",
-        "realtime"
-      ],
-      "credentialEnv": [],
-      "stt": {
-        "provider": "volcengine.doubao",
-        "model": "volc.bigasr.sauc.duration",
-        "transport": "batch_http",
-        "protocol": "newapi.audio_transcriptions.v1"
       },
       "llm": {
         "provider": "openai",
@@ -433,5 +398,5 @@
       "costProfile": "requires_provider_keys"
     }
   ],
-  "updatedAt": "2026-08-10T14:45:00.000Z"
+  "updatedAt": "2026-08-11T17:45:00.000Z"
 }
