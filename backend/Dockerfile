@@ -4,7 +4,7 @@
 # ============================================================================
 # Stage 1: Builder - Install dependencies and compile
 # ============================================================================
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
 # ============================================================================
-FROM python:3.11-slim as runtime
+FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
@@ -73,7 +73,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", 
 # ============================================================================
 # Stage 3: Development - With dev tools
 # ============================================================================
-FROM runtime as development
+FROM runtime AS development
 
 USER root
 

@@ -159,6 +159,7 @@ AGENTS.md
 
 # Local workspace artifacts
 chat-session/
+.artifacts/
 # Keep external reference projects local, but version the NewAPI product host.
 outside-project/*
 !outside-project/new-api-main/

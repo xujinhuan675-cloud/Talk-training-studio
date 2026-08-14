@@ -1,6 +1,6 @@
 services:
   new-api:
-    image: ${NEWAPI_IMAGE:-ghcr.io/xujinhuan675-cloud/talkwise-newapi:talkwise-auth-handoff-210b1ad}
+    image: ${NEWAPI_IMAGE:-ghcr.io/xujinhuan675-cloud/talkwise-newapi:talkwise-auth-handoff-575c15a}
     container_name: talkwise_newapi_staging
     restart: unless-stopped
     command: --log-dir /app/logs

@@ -54,16 +54,46 @@ NewAPI Go
 - `talkwise-backend`：TalkWise FastAPI，端口 `127.0.0.1:8012->8000`，网络 `1panel-network` 和 `talkwise_talkwise-network`
 - `1Panel-postgresql-LWUC`：现有 PostgreSQL，端口 `127.0.0.1:5432->5432`，网络 `1panel-network`
 - `1Panel-redis-m6tI`：现有 Redis，网络 `1panel-network`
-- `talkwise-frontend`：旧 nginx 前端容器，当前只保留为回滚入口，不再作为正常入口
+- `talkwise-frontend`：旧 nginx 前端容器，仅作为历史证据暂存，不参与正常流量或正式回滚
 
 当前网络：
 
 - `1panel-network`：NewAPI、PostgreSQL、Redis、TalkWise backend 共用
 - `talkwise_talkwise-network`：TalkWise backend 与旧 frontend 保留网络
 
-## 3. 2026-08-04 部署基线
+## 3. 生产部署基线
+
+### 2026-08-11 当前基线
 
 当前已上线版本：
+
+- 根仓库 commit：`8ff03afb5aac1285e4d3c0c67706930aafdcd9d5`
+- NewAPI commit：`575c15af9e301719590af706358caf433ce5433f`
+- release id：`talkwise-prod-20260811-8ff03af-575c15a`
+- NewAPI 镜像：`talkwise-newapi:prod-20260811-8ff03af-575c15a`
+- NewAPI OCI digest：`sha256:390559c0ac2b989a85e5fd448cf50e8b7b898d14db6a2b6201d249017d279a2f`
+- backend 镜像：`talkwise-backend:prod-20260811-8ff03af`
+- backend image id：`sha256:787f6e19863e510d1e32189dd178f5a27e4dd3374ef36bc9d9ad643071812915`
+
+当前生产状态：
+
+- `talkwise.flowguide.cc` 和 `newapi.flowguide.cc` 均由 NewAPI host 提供，训练后端继续独立承载 TalkWise 业务语义。
+- NewAPI、backend、PostgreSQL、Redis 均通过健康检查；NewAPI/backend 容器未发生 restart 或 OOM。
+- PostgreSQL `5432`、Redis `6379`、NewAPI `3030`、backend `8012` 和历史 frontend `8081` 均只绑定 `127.0.0.1`，不直接暴露公网。
+- `/health/voice/ready` 已配置独立监控 token；有权限的探测返回 `200`，无 token 返回 `403`，响应不回显 token。
+- Caddy 配置已格式化、校验并 reload；Cloudflare tunnel 继续指向 `127.0.0.1:3030`。
+- 历史 frontend 容器只作取证保留，不承接流量，也不是正式回滚入口。
+
+本次备份和发布目录：
+
+- `/opt/talkwise-backups/deploy-20260811-135513`
+- `/opt/talkwise-releases/talkwise-prod-20260811-8ff03af-575c15a`
+
+备份包含 PostgreSQL 全量及业务库 dump、TalkWise/NewAPI/Redis 应用目录、compose/env、Caddy、cloudflared、openresty 配置和 SHA256 校验文件。发布目录包含 backend 源码包、部署结果和校验文件。
+
+### 2026-08-04 历史基线
+
+当时上线版本：
 
 - 根仓库 commit：`d5690072963f6c034324dd3c138cebe135a75edb`
 - NewAPI commit：`76d8def66c528a74cad1495ff1f78d3cff5e0f93`
@@ -71,7 +101,7 @@ NewAPI Go
 - NewAPI 镜像：`talkwise-newapi:prod-20260804-d569007-76d8def`
 - backend 镜像：`talkwise-backend:prod-20260804-d569007`
 
-本次生产切换结果：
+该次生产切换结果：
 
 - NewAPI 已从 SQLite 切换到现有 PostgreSQL。
 - NewAPI SQLite 数据已迁移到 PostgreSQL `newapi` 数据库。
@@ -80,7 +110,7 @@ NewAPI Go
 - `talkwise.flowguide.cc` 的 Cloudflare tunnel upstream 已从 `127.0.0.1:8081` 切到 `127.0.0.1:3030`。
 - 旧 frontend 容器和旧配置均保留，不删除。
 
-本次备份目录：
+该次备份目录：
 
 - `/opt/talkwise-backups/deploy-20260804-123208`
 
@@ -164,7 +194,11 @@ backend：
 ```powershell
 cd backend
 ..\.venv-backend\Scripts\python.exe -m pytest tests
+docker build -f Dockerfile.deploy -t <backend-image> .
+docker run --rm --entrypoint sh <backend-image> -lc "test -f /app/alembic.ini && test -f /app/alembic/env.py && python -m alembic -c /app/alembic.ini heads"
 ```
+
+生产 backend 使用版本化的 `backend/Dockerfile.deploy`，通过 `uv.lock` 和 `uv sync --frozen` 固定 Python 依赖。生产开启 `AUTO_RUN_MIGRATIONS=true`，镜像内必须包含 `/app/alembic.ini`、`/app/alembic/env.py` 和迁移版本；内容检查或 Alembic head 检查失败时禁止继续发布。
 
 NewAPI Go 必须使用 WSL Go：
 
@@ -180,7 +214,7 @@ wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training
 - release id
 - 构建产物路径
 
-如果本地 Docker 无法拉取基础镜像，不要降低生产要求。可在服务器复用已有基础镜像构建 rebase 镜像，但必须确认依赖未变化；如果 `backend/requirements.txt` 变化，必须重新构建依赖层或明确阻塞。
+如果本地 Docker 无法拉取基础镜像，不要降低生产要求。依赖未变化时可在服务器复用已验证的 backend 依赖层进行 rebase，但必须使用本次版本化 `Dockerfile.deploy` 或等价的可审计构建上下文，并通过镜像内容、导入和健康检查；如果 `backend/pyproject.toml` 或 `backend/uv.lock` 变化，必须重新构建依赖层或明确阻塞。
 
 ## 8. NewAPI 生产 env 要求
 
@@ -231,6 +265,7 @@ SECRET_KEY=<stable-random-secret>
 REDIS__URL=redis://:<password>@1Panel-redis-m6tI:6379/1
 REDIS__MAX_CONNECTIONS=<env-tunable>
 REDIS__NAMESPACE=talkwise
+HEALTH__ACCESS_TOKEN=<stable-random-monitoring-secret>
 
 NEWAPI_BASE_URL=http://1Panel-new-api-4jUC:3000
 NEWAPI_GATEWAY_BASE_URL=http://1Panel-new-api-4jUC:3000/v1
@@ -246,8 +281,11 @@ NEWAPI_TALKWISE_REDIRECT_URI=https://talkwise.flowguide.cc/login
 
 OPENAI_COMPATIBLE_BASE_URL=http://1Panel-new-api-4jUC:3000/pg
 LLM__BASE_URL=http://1Panel-new-api-4jUC:3000/pg
-REALTIME_BASE_URL=ws://1Panel-new-api-4jUC:3000/pg/realtime
 ```
+
+实时用户计费链路只使用上面的 `NEWAPI_USER_RELAY_REALTIME_URL`；不要再写入已废弃且代码不读取的 `REALTIME_BASE_URL`。
+
+`/health/voice/ready` 必须配置 `HEALTH__ACCESS_TOKEN` 才会执行非计费语音就绪检查。监控请求通过 `Authorization: Bearer <token>` 或 `X-Access-Token` 传入；报告和日志不得输出 token。
 
 当前文本默认模型基线：
 
@@ -310,7 +348,7 @@ hostname: talkwise.flowguide.cc
 service: http://127.0.0.1:3030
 ```
 
-不要把它切回 `8081`，除非执行回滚。
+不要把它切回 `8081`。旧 frontend 不是正式回滚路径；正式回滚继续指向 NewAPI host，只恢复上一版 NewAPI/backend 镜像与配置。
 
 ## 12. 反向代理要求
 
@@ -361,7 +399,15 @@ ssh lcayun-1panel "curl -s -o /tmp/backend.out -w '%{http_code} %{time_total}' h
 
 压测不要用模型接口刷并发，除非用户明确要求并接受可能计费。默认用 `/api/status` 验证网关、代理、PostgreSQL、Redis 和容器状态。
 
-2026-08-04 基线：
+2026-08-11 当前基线：
+
+- 20 路 `/api/status`：`20/20` 成功，p50 `198.3ms`，p95 `268.1ms`，最大 `284.7ms`
+- 100 路 `/api/status`：`100/100` 成功，p50 `301.5ms`，p95 `440.8ms`，最大 `488.2ms`
+- 没有观察到 429/502/504
+- PostgreSQL 未观察到错误或死锁
+- Redis `blocked_clients=0`、`rejected_connections=0`
+
+2026-08-04 历史基线：
 
 - 20 路 `/api/status`：`20/20` 成功，p50 约 `908ms`，p95 约 `950ms`
 - 100 路 `/api/status`：`100/100` 成功，p50 约 `1267ms`，p95 约 `1893ms`
@@ -370,7 +416,7 @@ ssh lcayun-1panel "curl -s -o /tmp/backend.out -w '%{http_code} %{time_total}' h
 - PostgreSQL 未观察到锁错误
 - Redis `blocked_clients=0`、`rejected_connections=0`
 
-结论：当前机器和默认限流下，100 路健康探测稳定；300 路会触发 NewAPI 限流。不要通过关闭限流来掩盖问题。服务器升级后可提高 env 连接池并重新压测，但仍以实际结果为准。
+结论：2026-08-11 当前版本的 100 路健康探测稳定；本次未重复执行 300 路探测。2026-08-04 的 300 路历史结果会触发 NewAPI 限流，后续不得通过关闭限流来掩盖问题。服务器升级后可提高 env 连接池并重新压测，但仍以实际结果为准。
 
 ## 15. 回滚方法
 
@@ -388,13 +434,7 @@ ssh lcayun-1panel "cd /opt/1panel/apps/new-api/new-api && cp docker-compose.yml.
 ssh lcayun-1panel "cd /opt/talkwise && cp docker-compose.yml.bak-deploy-<release-id> docker-compose.yml && cp backend.env.bak-deploy-<release-id> backend.env && docker compose up -d backend"
 ```
 
-如果要把 TalkWise 域名回滚到旧前端：
-
-```powershell
-ssh lcayun-1panel "cp /etc/cloudflared/talkwise.yml.bak-deploy-<release-id> /etc/cloudflared/talkwise.yml && systemctl restart cloudflared-talkwise"
-```
-
-旧 `talkwise-frontend` 容器保留在 `8081`，但它只是临时回滚入口，不是长期架构。
+旧 `talkwise-frontend` 容器可以暂存用于取证，但不应重新接入域名或作为正式回滚入口。
 
 数据库回滚只在迁移不兼容或数据损坏时执行。执行前必须再次备份当前状态，且不得删除旧备份。
 

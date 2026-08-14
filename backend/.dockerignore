@@ -70,7 +70,6 @@ conftest.py
 # Development
 requirements-dev.txt
 .pre-commit-config.yaml
-pyproject.toml
 setup.py
 setup.cfg
 
@@ -95,7 +94,6 @@ logs/
 *.sqlite3
 
 # Alembic
-alembic.ini
 alembic/README
 alembic/script.py.mako
 
