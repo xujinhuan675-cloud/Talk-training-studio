@@ -4,6 +4,7 @@ Structlog 日志配置模块
 
 import logging
 import json
+from pathlib import Path
 import structlog
 from logging.handlers import RotatingFileHandler
 from structlog.processors import TimeStamper, add_log_level, JSONRenderer
@@ -109,9 +110,19 @@ def configure_logging() -> None:
                 ],
             )
 
+        # 将相对 LOG_FILE 基于 backend/ 目录解析为绝对路径。
+        # dev 启动 cwd=backend/，pytest cwd=项目根，若不解析则相对路径会落到不同位置，
+        # 测试时日志会越界写到父目录。统一以 backend/ 为基准，保证落点稳定。
+        log_file_path = Path(settings.LOG_FILE)
+        if not log_file_path.is_absolute():
+            # logging_config.py 位于 backend/core/，上一级即 backend/
+            backend_root = Path(__file__).resolve().parent.parent
+            log_file_path = (backend_root / log_file_path).resolve()
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+
         # 使用 RotatingFileHandler 进行日志轮转
         file_handler = RotatingFileHandler(
-            filename=settings.LOG_FILE,
+            filename=str(log_file_path),
             maxBytes=settings.LOG_MAX_BYTES,
             backupCount=settings.LOG_BACKUP_COUNT,
             encoding="utf-8",
