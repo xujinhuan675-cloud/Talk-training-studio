@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+if command -v pre-commit >/dev/null 2>&1; then
+  exec pre-commit run --hook-stage pre-commit "$@"
+fi
+
+echo "Warning: Python pre-commit is not installed; existing pre-commit checks were skipped." >&2
+exit 0

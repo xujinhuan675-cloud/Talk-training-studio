@@ -1,0 +1,24 @@
+# TalkWise Git 提交规范模板
+
+## 格式要求
+
+```
+type(scope): 中文摘要
+
+功能分组
+  1. 具体改动点
+  2. 具体改动点
+
+测试
+  1. 验证内容
+```
+
+## 规则
+
+1. 标题使用小写英文 `type`、可选 `scope` 和中文摘要。
+2. `type` 使用 Conventional Commits 类型：`feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`、`i18n`。
+3. 正文必须包含至少一个有序编号项，例如 `1. 说明`。
+4. 编号前推荐保留两个空格，仅作为排版建议，不作为额外门禁条件。
+5. 编号项下可以使用 `-` 或 `*` 编写缩进子项。
+
+提交前会由 `.husky/commit-msg` 自动运行 commitlint。
