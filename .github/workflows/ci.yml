@@ -75,3 +75,34 @@ jobs:
         env:
           SECRET_KEY: test-secret-key
         run: uv run pytest
+
+  frontend:
+    name: Verify TalkWise frontend host
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.0'
+
+      - name: Install web dependencies
+        working-directory: outside-project/new-api-main/web
+        run: bun install --frozen-lockfile
+
+      - name: Run training tests
+        working-directory: outside-project/new-api-main/web
+        run: bun test src/features/training
+
+      - name: Typecheck web
+        working-directory: outside-project/new-api-main/web
+        run: bun run typecheck
+
+      - name: Build web
+        working-directory: outside-project/new-api-main/web
+        run: bun run build

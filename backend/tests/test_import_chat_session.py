@@ -26,6 +26,11 @@ from scripts.import_chat_session import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TRANSCRIPT_PATH = PROJECT_ROOT / "chat-session" / "codex-visible-transcript.md"
 
+pytestmark = pytest.mark.skipif(
+    not TRANSCRIPT_PATH.exists(),
+    reason="optional local transcript fixture is not checked in",
+)
+
 
 @pytest.fixture
 async def engine():

@@ -1,0 +1,142 @@
+name: Deploy TalkWise
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the verified images to production
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: talkwise-production-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAMESPACE: ghcr.io/xujinhuan675-cloud
+
+jobs:
+  build-push:
+    name: Build and push TalkWise images
+    runs-on: ubuntu-latest
+    outputs:
+      backend_image: ${{ steps.vars.outputs.backend_image }}
+      newapi_image: ${{ steps.vars.outputs.newapi_image }}
+      root_commit: ${{ steps.vars.outputs.root_commit }}
+      newapi_commit: ${{ steps.vars.outputs.newapi_commit }}
+    steps:
+      - name: Check out TalkWise
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve immutable image refs
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          root_commit="$(git rev-parse HEAD)"
+          newapi_commit="$(git -C outside-project/new-api-main rev-parse HEAD)"
+          backend_image="${IMAGE_NAMESPACE}/talkwise-backend:prod-${root_commit}"
+          newapi_image="${IMAGE_NAMESPACE}/talkwise-newapi:prod-${root_commit}-${newapi_commit}"
+          echo "root_commit=${root_commit}" >> "$GITHUB_OUTPUT"
+          echo "newapi_commit=${newapi_commit}" >> "$GITHUB_OUTPUT"
+          echo "backend_image=${backend_image}" >> "$GITHUB_OUTPUT"
+          echo "newapi_image=${newapi_image}" >> "$GITHUB_OUTPUT"
+          echo "Building backend ${backend_image}"
+          echo "Building frontend host ${newapi_image}"
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.deploy
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.vars.outputs.backend_image }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.vars.outputs.root_commit }}
+            org.opencontainers.image.title=TalkWise backend
+            org.opencontainers.image.version=${{ steps.vars.outputs.root_commit }}
+          cache-from: type=gha,scope=talkwise-backend
+          cache-to: type=gha,mode=max,scope=talkwise-backend
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and push TalkWise frontend host image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./outside-project/new-api-main
+          file: ./outside-project/new-api-main/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.vars.outputs.newapi_image }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.vars.outputs.root_commit }}
+            org.opencontainers.image.title=TalkWise frontend host
+            org.opencontainers.image.version=${{ steps.vars.outputs.newapi_commit }}
+          cache-from: type=gha,scope=talkwise-newapi
+          cache-to: type=gha,mode=max,scope=talkwise-newapi
+          provenance: mode=max
+          sbom: true
+
+  deploy:
+    name: Pull and switch production containers
+    needs: build-push
+    if: ${{ github.event_name == 'push' || inputs.deploy }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out deployment script
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Execute remote pull and blue-green switch
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          BACKEND_IMAGE_REF: ${{ needs.build-push.outputs.backend_image }}
+          NEWAPI_IMAGE_REF: ${{ needs.build-push.outputs.newapi_image }}
+          ROOT_COMMIT: ${{ needs.build-push.outputs.root_commit }}
+          NEWAPI_COMMIT: ${{ needs.build-push.outputs.newapi_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_HOST" || { echo "DEPLOY_SSH_HOST is not configured" >&2; exit 1; }
+          test -n "$DEPLOY_SSH_USER" || { echo "DEPLOY_SSH_USER is not configured" >&2; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo "DEPLOY_SSH_KEY is not configured" >&2; exit 1; }
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_talkwise_deploy"
+          chmod 600 "$HOME/.ssh/id_talkwise_deploy"
+          port="${DEPLOY_SSH_PORT:-22}"
+          short_commit="$(printf '%s' "$ROOT_COMMIT" | cut -c1-12)"
+          newapi_short="$(printf '%s' "$NEWAPI_COMMIT" | cut -c1-12)"
+          sed -i 's/\r$//' scripts/remote-deploy.sh
+          ssh -i "$HOME/.ssh/id_talkwise_deploy" -p "$port" \
+            -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" \
+            "BACKEND_IMAGE_REF='$BACKEND_IMAGE_REF' NEWAPI_IMAGE_REF='$NEWAPI_IMAGE_REF' ROOT_COMMIT='$ROOT_COMMIT' NEWAPI_COMMIT='$NEWAPI_COMMIT' SHORT_COMMIT='$short_commit' NEWAPI_SHORT_COMMIT='$newapi_short' bash -s" \
+            < scripts/remote-deploy.sh
