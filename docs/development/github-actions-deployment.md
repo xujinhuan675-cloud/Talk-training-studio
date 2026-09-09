@@ -4,8 +4,9 @@ This is the deployment path for the TalkWise project only. It covers two
 images:
 
 - `talkwise-backend`: the FastAPI training backend from `backend/`.
-- `talkwise-newapi`: the TalkWise-modified NewAPI web host from the tracked
-  `outside-project/new-api-main` submodule.
+- `talkwise-frontend-host`: the TalkWise-modified NewAPI web host from the
+  tracked `outside-project/new-api-main` submodule. The server uses the local
+  runtime tag `talkwise-newapi` for this image.
 
 The separate official NewAPI gateway is intentionally outside this workflow.
 It is not built, tagged, pulled, or restarted by TalkWise deployment.

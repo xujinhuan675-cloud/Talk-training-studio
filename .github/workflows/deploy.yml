@@ -57,7 +57,7 @@ jobs:
           root_commit="$(git rev-parse HEAD)"
           newapi_commit="$(git -C outside-project/new-api-main rev-parse HEAD)"
           backend_image="${IMAGE_NAMESPACE}/talkwise-backend:prod-${root_commit}"
-          newapi_image="${IMAGE_NAMESPACE}/talkwise-newapi:prod-${root_commit}-${newapi_commit}"
+          newapi_image="${IMAGE_NAMESPACE}/talkwise-frontend-host:prod-${root_commit}-${newapi_commit}"
           echo "root_commit=${root_commit}" >> "$GITHUB_OUTPUT"
           echo "newapi_commit=${newapi_commit}" >> "$GITHUB_OUTPUT"
           echo "backend_image=${backend_image}" >> "$GITHUB_OUTPUT"
