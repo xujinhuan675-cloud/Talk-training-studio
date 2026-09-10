@@ -5,6 +5,7 @@ Revises: 8d3e91f4a2b0
 Create Date: 2026-07-16 20:30:00.000000
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -60,7 +61,9 @@ def upgrade() -> None:
     )
     op.add_column(
         "messages",
-        sa.Column("finish_reason", sa.String(length=100), nullable=True, comment="LLM finish reason"),
+        sa.Column(
+            "finish_reason", sa.String(length=100), nullable=True, comment="LLM finish reason"
+        ),
     )
     op.add_column(
         "messages",
@@ -110,7 +113,9 @@ def upgrade() -> None:
     )
     op.add_column(
         "runs",
-        sa.Column("finish_reason", sa.String(length=100), nullable=True, comment="LLM finish reason"),
+        sa.Column(
+            "finish_reason", sa.String(length=100), nullable=True, comment="LLM finish reason"
+        ),
     )
     op.add_column(
         "runs",
