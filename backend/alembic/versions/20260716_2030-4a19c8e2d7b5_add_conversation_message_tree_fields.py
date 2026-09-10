@@ -84,7 +84,14 @@ def upgrade() -> None:
         "SET public_id = 'msg_legacy_' || CAST(id AS TEXT) "
         "WHERE public_id IS NULL"
     )
-    op.alter_column("messages", "public_id", existing_type=sa.String(length=64), nullable=False)
+    # Use Alembic's batch implementation so the migration also works on the
+    # SQLite database used by the test suite and local development.
+    with op.batch_alter_table("messages") as batch_op:
+        batch_op.alter_column(
+            "public_id",
+            existing_type=sa.String(length=64),
+            nullable=False,
+        )
     op.create_index("ix_messages_public_id", "messages", ["public_id"], unique=True)
     op.create_index("ix_messages_parent_message_id", "messages", ["parent_message_id"])
     op.create_index(
@@ -114,7 +121,12 @@ def upgrade() -> None:
         "SET public_id = 'run_legacy_' || CAST(id AS TEXT) "
         "WHERE public_id IS NULL"
     )
-    op.alter_column("runs", "public_id", existing_type=sa.String(length=64), nullable=False)
+    with op.batch_alter_table("runs") as batch_op:
+        batch_op.alter_column(
+            "public_id",
+            existing_type=sa.String(length=64),
+            nullable=False,
+        )
     op.create_index("ix_runs_public_id", "runs", ["public_id"], unique=True)
 
 

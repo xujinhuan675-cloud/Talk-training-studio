@@ -12,6 +12,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -74,6 +75,7 @@ jobs:
         working-directory: backend
         env:
           SECRET_KEY: test-secret-key
+          NEWAPI_BASE_URL: http://127.0.0.1:18080
         run: uv run pytest
 
   frontend:
