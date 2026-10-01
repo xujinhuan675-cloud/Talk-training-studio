@@ -25,6 +25,13 @@ NewAPI 是账号、控制面、平台体验和最终前端宿主的默认来源�
 
 TalkWise 前台产品界面不暴露 NewAPI 品牌名。NewAPI 可以作为源码、账号桥、计费、用量、公告和控制面能力来源，但可见导航、页面标题、tabs、菜单、badge、公告标题和用户菜单必须使用 TalkWise 自己的信息架构或中性功能名，例如“配置”“账号控制台”“用量”“公告”，不要显示“NewAPI”。
 
+生产部署必须区分两个独立实例，不能因为两者都基于 NewAPI 就再次合并：
+
+- `talkwise.flowguide.cc` 运行 TalkWise 深度改造版 NewAPI，作为 TalkWise 唯一前端宿主、账号桥和训练扩展宿主；它保留 TalkWise 专属路由、导航、`/pg` relay 和训练后端代理。
+- `newapi.flowguide.cc` 运行固定官方发布版本的原生 NewAPI 容器，作为 TalkWise 和其他服务共用的通用 OpenAI-compatible 网关；该容器不得混入 TalkWise 源码修改、训练路由或品牌配置。
+- 两个实例使用独立 PostgreSQL 数据库和独立 Redis DB。生产 TalkWise backend 的 `NEWAPI_BASE_URL` 继续指向 TalkWise 深改实例以使用 auth bridge，标准 `NEWAPI_GATEWAY_BASE_URL` 指向官方通用网关；TalkWise 专属 `/pg` relay 在完成官方能力替代前仍指向深改实例。
+- 旧 `talkwise-frontend` Nginx 容器已停用并禁止默认 Compose 启动；不得重新接入域名或作为正式回滚入口。
+
 ## 2. 成熟底座优先原则
 
 用户给出的实现方式只是候选路径，不自动等于最佳路径。每次设计或实现前，必须先判断是否已有成熟方案可复用。
@@ -100,7 +107,7 @@ NewAPI UI 复用遵循“原实现优先”，不是只做风格模仿：
 
 目标架构路线：
 
-- NewAPI web 是唯一长期前端宿主；TalkWise 以 `/training` 为根路径注册正式 sidebar/top-nav module，共享 NewAPI 的 authenticated layout、session、permissions、theme、notifications、billing/usage 和 admin console。
+- TalkWise 深改版 NewAPI web 是 TalkWise 唯一长期前端宿主；TalkWise 以 `/training` 为根路径注册正式 sidebar/top-nav module，共享该宿主的 authenticated layout、session、permissions、theme、notifications、billing/usage 和 admin console。这里的“唯一宿主”不包含 `newapi.flowguide.cc` 的官方通用网关实例。
 - 目标模块路径默认包括 `/training`、`/training/scenarios`、`/training/sessions`、`/training/growth`、`/training/settings`；实时训练可使用 `/training/live/:sessionId` 或等价沉浸式子路由。
 - TalkWise 后端继续拥有训练 session、scenario、persona、evaluation、growth、live guidance 和媒体语义；前端迁入 NewAPI 不等于把训练业务数据或 TrainingCore 塞进 NewAPI 网关核心。
 - 路由、API base/proxy、role mapping、gateway usage attribution、test matrix 和回滚计划以仓库工程事实文档为准；回滚单位是 NewAPI web/Go 与独立 TalkWise backend，不恢复旧 Vite shell。
@@ -128,7 +135,8 @@ NewAPI UI 复用遵循“原实现优先”，不是只做风格模仿：
 1. 成熟运行底座
    - 文本聊天底座：LibreChat-style conversation runtime。
    - 语音/多模态底座：低成本转写式 near-realtime voice pipeline + Pipecat true realtime voice/multimodal runtime。
-   - 平台控制面底座：NewAPI account/session/billing/gateway/admin console。
+   - TalkWise 平台宿主：深改版 NewAPI account/session/billing/admin console 和训练扩展。
+   - 通用模型网关：独立官方原生 NewAPI `/v1` gateway，不承载 TalkWise 训练源码。
 
 2. TalkWise 训练语义层
    - TrainingCore 或等价核心只负责训练语义、适配器契约、session 语义、复盘上下文和评估边界。
@@ -330,12 +338,13 @@ Start-Process -FilePath .\new-api-talkwise.exe -ArgumentList '--log-dir','.logs'
 
 ## 9. 当前阶段判断
 
-截至 2026-08-01，前端宿主迁移已经完成，项目进入训练运行底座和产品能力持续收口阶段：
+截至 2026-08-20，前端宿主迁移和生产网关拆分已经完成，项目进入训练运行底座和产品能力持续收口阶段：
 
 - 已有 TrainingCore / training session / branch metadata 的雏形。
 - 文本侧已开始接近 LibreChat-style message tree、edit/retry/fork。
 - 语音侧已开始形成转写式 near-realtime voice pipeline 与 Pipecat realtime pipeline 两种链路画像，并接近 audio output、readiness diagnostics 等能力。
 - 平台侧由 NewAPI web 作为唯一前端宿主，完整 `/training` 页面簇、受认证同源代理、身份桥、训练团队管理、成长积分和沟通名片均已进入原 TanStack Router、sidebar 与原生组件体系。
+- 生产侧 `talkwise.flowguide.cc` 由 TalkWise 深改 NewAPI 宿主提供，`newapi.flowguide.cc` 由独立官方原生 NewAPI 通用网关提供；两者数据库和 Redis 已隔离，旧 Nginx 前端已停用。
 - 结果页/历史页开始支持 branch-aware review。
 - API 已有小范围 conversation/chat/training 隔离测试。
 

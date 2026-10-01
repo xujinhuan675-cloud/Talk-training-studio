@@ -167,6 +167,7 @@ outside-project/*
 # Local dev runtime artifacts
 .codex-run/
 .codex-*.err
+/.paperclip-runtime/
 backend/data/default_config_seed.json
 backend/data/personas/bp-*.md
 backend/data/personas/ts-*.md
