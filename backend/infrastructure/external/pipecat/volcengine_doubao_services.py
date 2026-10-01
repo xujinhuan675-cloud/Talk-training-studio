@@ -12,9 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-
-from infrastructure.external.newapi_user_gateway import authorization_headers
-from infrastructure.external.voice.openai_compatible_stt import normalize_transcriptions_url
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -25,15 +22,19 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, STTSettings, TTSSettings
-from pipecat.utils.types import NotGiven, assert_given
-from pipecat.utils.errors import ErrorCategory
-from pipecat.services.stt_service import STTService, SegmentedSTTService
+from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.errors import ErrorCategory
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.types import NotGiven, assert_given
+
+from infrastructure.external.newapi_user_gateway import authorization_headers
+from infrastructure.external.voice.openai_compatible_stt import normalize_transcriptions_url
 
 logger = logging.getLogger(__name__)
 
@@ -493,10 +494,7 @@ class VolcengineDoubaoSTTService(SegmentedSTTService):
             return
         audio_size = len(self._pending_commit_audio)
         preview_task = self._latest_segment_preview_task
-        if (
-            preview_task is not None
-            and self._latest_segment_preview_audio_size == audio_size
-        ):
+        if preview_task is not None and self._latest_segment_preview_audio_size == audio_size:
             frame = await asyncio.shield(preview_task)
         else:
             audio = self._encode_audio_segment(bytes(self._pending_commit_audio))
@@ -756,7 +754,7 @@ class VolcengineDoubaoTTSService(TTSService):
     """Streaming PCM TTS through the existing authenticated NewAPI voice relay."""
 
     Settings = VolcengineDoubaoTTSSettings
-    _settings: Settings
+    _settings: VolcengineDoubaoTTSSettings
 
     def __init__(
         self,
