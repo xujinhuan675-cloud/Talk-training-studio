@@ -28,7 +28,9 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, TTSSettings
+from pipecat.utils.types import NotGiven, assert_given
+from pipecat.utils.errors import ErrorCategory
 from pipecat.services.stt_service import STTService, SegmentedSTTService
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.time import time_now_iso8601
@@ -91,6 +93,37 @@ class DoubaoVoiceServiceError(RuntimeError):
         if self.status_code is not None:
             payload["statusCode"] = self.status_code
         return payload
+
+
+def _pipecat_error_category(error: DoubaoVoiceServiceError) -> ErrorCategory:
+    """Map TalkWise provider categories to Pipecat's standard error taxonomy."""
+
+    return {
+        "authentication": ErrorCategory.AUTHENTICATION,
+        "authorization": ErrorCategory.AUTHORIZATION,
+        "bad_request": ErrorCategory.INVALID_REQUEST,
+        "configuration": ErrorCategory.INVALID_REQUEST,
+        "rate_limit": ErrorCategory.RATE_LIMIT,
+        "quota": ErrorCategory.QUOTA,
+        "network": ErrorCategory.CONNECTIVITY,
+        "provider_unavailable": ErrorCategory.SERVER,
+        "provider_error": ErrorCategory.SERVER,
+        "input_audio": ErrorCategory.APPLICATION,
+    }.get(error.category, ErrorCategory.UNKNOWN)
+
+
+def _doubao_error_frame(
+    error: DoubaoVoiceServiceError,
+    *,
+    include_exception: bool = True,
+) -> ErrorFrame:
+    """Build a Pipecat 1.12-compatible error frame without deprecated ``fatal``."""
+
+    return ErrorFrame(
+        error=str(error),
+        exception=error if include_exception else None,
+        category=_pipecat_error_category(error),
+    )
 
 
 def classify_doubao_voice_error(
@@ -642,7 +675,7 @@ class VolcengineDoubaoSTTService(SegmentedSTTService):
                 )
                 error_frame = ErrorFrame(
                     error=str(empty_transcript),
-                    fatal=empty_transcript.fatal,
+                    category=_pipecat_error_category(empty_transcript),
                 )
                 error_frame.metadata["providerError"] = empty_transcript.to_realtime_error()
                 return error_frame
@@ -656,17 +689,13 @@ class VolcengineDoubaoSTTService(SegmentedSTTService):
         except asyncio.CancelledError:
             raise
         except DoubaoVoiceServiceError as exc:
-            return ErrorFrame(error=str(exc), fatal=exc.fatal, exception=exc)
+            return _doubao_error_frame(exc)
         except Exception as exc:
             classified = classify_doubao_voice_error(
                 exc,
                 feature="stt:volcengine.doubao",
             )
-            return ErrorFrame(
-                error=str(classified),
-                fatal=classified.fatal,
-                exception=classified,
-            )
+            return _doubao_error_frame(classified)
 
     async def _request_transcription(self, audio: bytes, model: str, language: str) -> str:
         try:
@@ -720,7 +749,7 @@ class VolcengineDoubaoSTTService(SegmentedSTTService):
 class VolcengineDoubaoTTSSettings(TTSSettings):
     """Runtime-updatable settings for Doubao speech synthesis."""
 
-    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class VolcengineDoubaoTTSService(TTSService):
@@ -818,17 +847,28 @@ class VolcengineDoubaoTTSService(TTSService):
         except asyncio.CancelledError:
             raise
         except DoubaoVoiceServiceError as exc:
-            yield ErrorFrame(error=str(exc), fatal=exc.fatal, exception=exc)
+            yield _doubao_error_frame(exc)
         except Exception as exc:
             classified = classify_doubao_voice_error(
                 exc,
                 feature="tts:volcengine.doubao",
             )
-            yield ErrorFrame(
-                error=str(classified),
-                fatal=classified.fatal,
-                exception=classified,
-            )
+            yield _doubao_error_frame(classified)
+
+    async def push_error_frame(
+        self,
+        error: ErrorFrame,
+        force_treat_as_permanent: bool = False,
+    ) -> None:
+        """Use Pipecat's replacement for the deprecated TTS ``fatal`` flag."""
+
+        provider_error = error.exception
+        if isinstance(provider_error, DoubaoVoiceServiceError) and provider_error.fatal:
+            force_treat_as_permanent = True
+        await super().push_error_frame(
+            error,
+            force_treat_as_permanent=force_treat_as_permanent,
+        )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, InterruptionFrame):
