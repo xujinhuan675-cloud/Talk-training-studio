@@ -8,7 +8,7 @@
 
 本地仓库：
 
-- 根仓库：`F:\AnchorOS\6-项目仓库\Talk-training-studio`
+- 根仓库：`F:\AnchorOS\6-项目仓库\TalkWise`
 - NewAPI：`outside-project/new-api-main`
 - NewAPI web：`outside-project/new-api-main/web`
 - TalkWise backend：`backend`
@@ -19,6 +19,7 @@
 
 - SSH：优先使用本机 SSH alias `lcayun-1panel`；如果 alias 不存在，先读取本机 SSH config，不要在文档里补写密钥。
 - NewAPI 1Panel 应用目录：`/opt/1panel/apps/new-api/new-api`
+- 官方通用 NewAPI 目录：`/opt/newapi-official`
 - TalkWise 应用目录：`/opt/talkwise`
 - 发布暂存目录：`/opt/talkwise-releases/<release-id>`
 - 备份目录：`/opt/talkwise-backups/deploy-<timestamp>`
@@ -29,41 +30,63 @@
 
 - NewAPI 网关和控制面：`https://newapi.flowguide.cc`
 - TalkWise 前台入口：`https://talkwise.flowguide.cc`
-- 当前策略：两个域名都进入 NewAPI host；`newapi.flowguide.cc` 作为网关域名保持不动，`talkwise.flowguide.cc` 作为 TalkWise 前台域名。
+- 当前策略：两个域名进入不同容器；`talkwise.flowguide.cc` 进入 TalkWise 深改 NewAPI 宿主，`newapi.flowguide.cc` 进入官方原生 NewAPI 通用网关。
 
 ## 2. 当前生产拓扑
 
 ```text
 Browser
-  -> HTTPS / Cloudflare / Caddy
-  -> NewAPI Go + NewAPI web/dist（唯一前端宿主，:3030 -> :3000）
+  -> talkwise.flowguide.cc / Cloudflare tunnel
+  -> TalkWise 深改 NewAPI Go + web/dist（TalkWise 唯一前端宿主，:3030 -> :3000）
   -> /api/talkwise/* 同源受认证代理
   -> TalkWise FastAPI（127.0.0.1:8012 -> :8000）
   -> TalkWise backend PostgreSQL 数据库
 
-NewAPI Go
-  -> existing PostgreSQL container（NewAPI business data）
-  -> existing Redis container（cache / limit / session / shared state）
+Service / Admin
+  -> newapi.flowguide.cc / Caddy
+  -> 官方原生 NewAPI v1.0.0-rc.25（:3031 -> :3000）
+  -> PostgreSQL newapi_official
+  -> Redis DB 2
   -> /v1/* OpenAI-compatible relay
-  -> /pg/* user-billed relay
 ```
 
 生产容器：
 
-- `1Panel-new-api-4jUC`：NewAPI host，端口 `3030->3000`，网络 `1panel-network`
+- `1Panel-new-api-4jUC`：TalkWise 深改 NewAPI host，端口 `127.0.0.1:3030->3000`，数据库 `newapi`，Redis DB 0，网络 `1panel-network`
+- `newapi-official-gateway`：官方原生 NewAPI 通用网关，端口 `127.0.0.1:3031->3000`，数据库 `newapi_official`，Redis DB 2，网络 `1panel-network`
 - `talkwise-backend`：TalkWise FastAPI，端口 `127.0.0.1:8012->8000`，网络 `1panel-network` 和 `talkwise_talkwise-network`
 - `1Panel-postgresql-LWUC`：现有 PostgreSQL，端口 `127.0.0.1:5432->5432`，网络 `1panel-network`
 - `1Panel-redis-m6tI`：现有 Redis，网络 `1panel-network`
-- `talkwise-frontend`：旧 nginx 前端容器，仅作为历史证据暂存，不参与正常流量或正式回滚
+- `talkwise-frontend`：旧 nginx 前端容器，状态为 stopped、restart policy 为 `no`，Compose profile 为 `legacy-disabled`；仅保留历史证据，不参与正常流量或正式回滚
 
 当前网络：
 
-- `1panel-network`：NewAPI、PostgreSQL、Redis、TalkWise backend 共用
+- `1panel-network`：TalkWise 深改 NewAPI、官方 NewAPI、PostgreSQL、Redis、TalkWise backend 共用容器网络，但应用数据库和 Redis DB 保持隔离
 - `talkwise_talkwise-network`：TalkWise backend 与旧 frontend 保留网络
 
 ## 3. 生产部署基线
 
-### 2026-08-11 当前基线
+### 2026-08-20 当前基线
+
+当前生产拆分：
+
+- TalkWise 深改镜像：`talkwise-newapi:prod-20260811-8ff03af-575c15a`
+- 官方通用网关镜像：`calciumion/new-api:v1.0.0-rc.25`
+- 官方镜像 ID：`sha256:54a0b10924aa75fa5b5947208b820ced66b6ef4b445b35f122b31d80676aba2b`
+- TalkWise backend 镜像：`talkwise-backend:prod-20260811-8ff03af`
+- 备份目录：`/opt/talkwise-backups/deploy-20260820-044503`
+
+该次拆分结果：
+
+- `talkwise.flowguide.cc` 继续指向 `127.0.0.1:3030` 的 TalkWise 深改宿主。
+- `newapi.flowguide.cc` 已切到 `127.0.0.1:3031` 的官方原生 NewAPI。
+- 原 `newapi` 数据库继续供 TalkWise 深改宿主使用；一致性快照恢复到独立 `newapi_official` 数据库，迁移了 7 个用户、4 个渠道、4 个 token 和 111 条日志。
+- 官方实例保留账号、渠道、token、额度、价格和日志数据，但移除了复制库中的 TalkWise 品牌、首页和训练导航配置。
+- 现有 API token 通过官方实例的公网 `/v1/models` 返回 `200`，可见 34 个模型。
+- TalkWise backend 的标准 `NEWAPI_GATEWAY_BASE_URL` 已改为 `http://newapi-official-gateway:3000/v1`；auth bridge 和 TalkWise 专属 `/pg` relay 仍由深改宿主承载。
+- 旧 `talkwise-frontend` 已停止并禁用默认 Compose 启动，`8081` 无监听。
+
+### 2026-08-11 历史基线
 
 当前已上线版本：
 
@@ -178,7 +201,14 @@ ssh lcayun-1panel "docker exec 1Panel-redis-m6tI redis-cli --version"
 
 备份完成后记录 manifest 和 sha256。最终报告只写备份路径和文件类型，不输出 dump 内容。
 
-## 7. 本地验证与构建
+## 7. 本地验证与 GitHub Actions 构建
+
+生产发布的正式构建入口是 `.github/workflows/deploy.yml`：GitHub 托管 runner
+构建并推送 TalkWise backend 与 TalkWise 深改 NewAPI 前端宿主镜像，服务器只执行
+`docker pull`、Compose 切换和健康检查。生产发布不在本地或服务器执行 `docker build`。
+官方网关实例不属于此工作流，不会被构建、拉取或重启。
+
+下面的本地命令用于开发验证或排查，不是生产发布的构建步骤。
 
 NewAPI web：
 
@@ -203,7 +233,7 @@ docker run --rm --entrypoint sh <backend-image> -lc "test -f /app/alembic.ini &&
 NewAPI Go 必须使用 WSL Go：
 
 ```powershell
-wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training-studio/outside-project/new-api-main && go build -o /mnt/f/AnchorOS/6-项目仓库/Talk-training-studio/.artifacts/new-api-linux-amd64"
+wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/TalkWise/outside-project/new-api-main && go build -o /mnt/f/AnchorOS/6-项目仓库/TalkWise/.artifacts/new-api-linux-amd64"
 ```
 
 完成后记录：
@@ -220,7 +250,7 @@ wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/AnchorOS/6-项目仓库/Talk-training
 
 NewAPI 生产必须使用 PostgreSQL + Redis，不得使用 SQLite。
 
-`/opt/1panel/apps/new-api/new-api/.env` 必须包含以下类型配置：
+TalkWise 深改宿主的 `/opt/1panel/apps/new-api/new-api/.env` 必须包含以下类型配置：
 
 ```dotenv
 SQL_DSN=postgresql://<newapi-user>:<password>@1Panel-postgresql-LWUC:5432/newapi
@@ -251,6 +281,16 @@ TALKWISE_TRAINING_UPSTREAM_URL=http://talkwise-backend:8000
 
 并发参数必须作为 env 可调值维护。不要因为 `RELAY_MAX_CONNS_PER_HOST=0` 就声称系统支持无限并发；必须以压测结果为准。
 
+官方通用网关由 `/opt/newapi-official/docker-compose.yml` 管理，只使用固定官方镜像，不从 TalkWise fork 构建。其 `.env` 复用迁移数据所需的稳定 `SESSION_SECRET`、`CRYPTO_SECRET` 和数据库用户，但必须使用独立资源：
+
+```dotenv
+SQL_DSN=postgresql://<newapi-user>:<password>@1Panel-postgresql-LWUC:5432/newapi_official
+REDIS_CONN_STRING=redis://:<password>@1Panel-redis-m6tI:6379/2
+SESSION_COOKIE_TRUSTED_URL=https://newapi.flowguide.cc
+```
+
+官方实例不得配置 `TALKWISE_*` 环境变量，也不得加入 TalkWise 训练路由、品牌配置或前端源码。
+
 ## 9. backend 生产 env 要求
 
 `/opt/talkwise/backend.env` 至少应保证：
@@ -268,7 +308,7 @@ REDIS__NAMESPACE=talkwise
 HEALTH__ACCESS_TOKEN=<stable-random-monitoring-secret>
 
 NEWAPI_BASE_URL=http://1Panel-new-api-4jUC:3000
-NEWAPI_GATEWAY_BASE_URL=http://1Panel-new-api-4jUC:3000/v1
+NEWAPI_GATEWAY_BASE_URL=http://newapi-official-gateway:3000/v1
 NEWAPI_USER_BILLING_ENABLED=true
 NEWAPI_USER_RELAY_BASE_URL=http://1Panel-new-api-4jUC:3000/pg
 NEWAPI_USER_RELAY_REALTIME_URL=ws://1Panel-new-api-4jUC:3000/pg/realtime
@@ -285,6 +325,8 @@ LLM__BASE_URL=http://1Panel-new-api-4jUC:3000/pg
 
 实时用户计费链路只使用上面的 `NEWAPI_USER_RELAY_REALTIME_URL`；不要再写入已废弃且代码不读取的 `REALTIME_BASE_URL`。
 
+这里的地址分工不能合并：`NEWAPI_BASE_URL` 用于 TalkWise auth bridge 和控制面，必须指向深改宿主；标准 `NEWAPI_GATEWAY_BASE_URL` 用于通用 `/v1` 模型调用，必须指向官方原生实例；`/pg` 是 TalkWise 专属扩展，在官方实例没有等价契约前仍指向深改宿主。
+
 `/health/voice/ready` 必须配置 `HEALTH__ACCESS_TOKEN` 才会执行非计费语音就绪检查。监控请求通过 `Authorization: Bearer <token>` 或 `X-Access-Token` 传入；报告和日志不得输出 token。
 
 当前文本默认模型基线：
@@ -298,12 +340,13 @@ LLM__DEFAULT_MODEL=deepseek/deepseek-v4-flash
 
 ## 10. 数据迁移规则
 
-NewAPI 已在 2026-08-04 从 SQLite 迁移到 PostgreSQL。后续普通发布不要重复执行 SQLite -> PostgreSQL 初始迁移。
+NewAPI 已在 2026-08-04 从 SQLite 迁移到 PostgreSQL。2026-08-20 又从 `newapi` 创建一致性快照并恢复为 `newapi_official`，此后两个数据库独立演进；后续普通发布不要重复执行初始迁移或自动双向同步。
 
 只有在明确执行数据库迁移或灾备恢复时，才处理：
 
 - `/opt/1panel/apps/new-api/new-api/data/one-api.db`
 - PostgreSQL `newapi` 数据库
+- PostgreSQL `newapi_official` 数据库
 
 迁移原则：
 
@@ -318,27 +361,21 @@ TalkWise 训练业务数据继续由 backend 自己的 Alembic 管理；不要�
 
 标准顺序：
 
-1. 读取规则和本文档。
-2. 执行服务器只读检查。
-3. 创建时间戳备份。
-4. 本地运行 NewAPI web tests/typecheck/build。
-5. 本地运行 backend tests。
-6. 使用 WSL Go 构建 NewAPI Go。
-7. 上传构建产物或镜像到 `/opt/talkwise-releases/<release-id>`。
-8. 生成或加载 NewAPI 镜像。
-9. 生成或加载 backend 镜像。
-10. 写入生产 env，保持密钥稳定。
-11. 先启动或更新 `talkwise-backend`。
-12. 再启动或更新 `1Panel-new-api-4jUC`。
-13. 确认 backend、NewAPI、PostgreSQL、Redis 健康。
-14. 确认 `talkwise.flowguide.cc` 仍指向 NewAPI host。
-15. 执行验证和压测。
+1. 读取规则和本文档，确认工作区和子模块状态。
+2. 对本次代码运行本地 focused tests；不要在本地执行生产镜像构建。
+3. 确认 GitHub Actions secrets `DEPLOY_SSH_HOST`、`DEPLOY_SSH_PORT`、`DEPLOY_SSH_USER`、`DEPLOY_SSH_KEY` 已配置。
+4. 使用 `scripts/deploy-server.ps1 -Push` 推送干净的提交，或在 GitHub Actions 手动 dispatch。
+5. GitHub runner checkout 根仓库和 `outside-project/new-api-main` 子模块，构建两个 `linux/amd64` 镜像并推送 GHCR。
+6. Actions 通过 SSH 传输 `scripts/remote-deploy.sh`；服务器创建 Compose/env 备份，拉取两个镜像并更新 TalkWise backend 与深改 NewAPI 服务。
+7. 远端脚本对两个服务执行健康检查；任一失败都会恢复上一版镜像。
+8. 确认 `talkwise.flowguide.cc -> 3030`、TalkWise backend `127.0.0.1:8012` 以及 PostgreSQL/Redis 健康。
+9.官方网关 `newapi.flowguide.cc` 不在本流程内，除非单独进行官方网关维护。
 
-切换服务：
+紧急情况下的服务重启只允许使用已经写入服务器 Compose 的当前镜像：
 
 ```powershell
 ssh lcayun-1panel "cd /opt/talkwise && docker compose up -d backend"
-ssh lcayun-1panel "cd /opt/1panel/apps/new-api/new-api && docker compose up -d"
+ssh lcayun-1panel "cd /opt/1panel/apps/new-api/new-api && docker compose up -d new-api"
 ```
 
 `talkwise.flowguide.cc` 当前由 Cloudflare tunnel 管理：
@@ -348,7 +385,7 @@ hostname: talkwise.flowguide.cc
 service: http://127.0.0.1:3030
 ```
 
-不要把它切回 `8081`。旧 frontend 不是正式回滚路径；正式回滚继续指向 NewAPI host，只恢复上一版 NewAPI/backend 镜像与配置。
+不要把它切回 `8081`。旧 frontend 不是正式回滚路径；正式回滚继续让 TalkWise 域名指向深改宿主，只恢复上一版 TalkWise NewAPI/backend 镜像与配置。
 
 ## 12. 反向代理要求
 
@@ -363,7 +400,7 @@ service: http://127.0.0.1:3030
 - 长请求和流式响应
 - WebSocket upgrade，不得按普通 HTTP 请求代理
 
-`newapi.flowguide.cc` 当前由 Caddy 反代到 `127.0.0.1:3030`。
+`newapi.flowguide.cc` 当前由 Caddy 反代到 `127.0.0.1:3031` 的官方原生 NewAPI。
 
 `talkwise.flowguide.cc` 当前由 `cloudflared-talkwise.service` 反代到 `127.0.0.1:3030`。
 
@@ -382,9 +419,10 @@ ssh lcayun-1panel "curl -s -o /tmp/backend.out -w '%{http_code} %{time_total}' h
 
 基础设施验证：
 
-- PostgreSQL `newapi` 数据库可连接，关键表有行数。
+- PostgreSQL `newapi` 和 `newapi_official` 数据库均可连接，关键表有行数且拆分时迁移计数一致。
 - Redis `PING` 返回 `PONG`。
-- NewAPI 容器 env 存在 `SQL_DSN`、`REDIS_CONN_STRING`、`BATCH_UPDATE_ENABLED`、relay 连接池配置。
+- TalkWise 深改 NewAPI 使用 Redis DB 0，TalkWise backend 使用 DB 1，官方 NewAPI 使用 DB 2。
+- 两个 NewAPI 容器 env 均存在 `SQL_DSN`、`REDIS_CONN_STRING`、`BATCH_UPDATE_ENABLED` 和 relay 连接池配置，且数据库/Redis 目标不同。
 - backend 容器 env 存在 `NEWAPI_USER_RELAY_BASE_URL`、`NEWAPI_USER_RELAY_REALTIME_URL`、`REDIS__URL`。
 
 业务探测：
@@ -422,7 +460,8 @@ ssh lcayun-1panel "curl -s -o /tmp/backend.out -w '%{http_code} %{time_total}' h
 
 回滚单位：
 
-- NewAPI 镜像与 `/opt/1panel/apps/new-api/new-api` env/compose
+- TalkWise 深改 NewAPI 镜像与 `/opt/1panel/apps/new-api/new-api` env/compose
+- 官方 NewAPI 镜像与 `/opt/newapi-official` env/compose
 - TalkWise backend 镜像与 `/opt/talkwise` env/compose
 - 反向代理配置
 - 必要时数据库备份
@@ -435,6 +474,8 @@ ssh lcayun-1panel "cd /opt/talkwise && cp docker-compose.yml.bak-deploy-<release
 ```
 
 旧 `talkwise-frontend` 容器可以暂存用于取证，但不应重新接入域名或作为正式回滚入口。
+
+网关拆分回滚优先把 Caddy 的 `newapi.flowguide.cc` upstream 从 `127.0.0.1:3031` 恢复为备份中的 `127.0.0.1:3030`，再 reload Caddy。只有确认官方副本发生不可兼容迁移或数据损坏时才恢复 `newapi_official`；不得覆盖仍供 TalkWise 使用的原 `newapi` 数据库。
 
 数据库回滚只在迁移不兼容或数据损坏时执行。执行前必须再次备份当前状态，且不得删除旧备份。
 
