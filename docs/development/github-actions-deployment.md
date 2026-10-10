@@ -20,8 +20,11 @@ It is not built, tagged, pulled, or restarted by TalkWise deployment.
 3. `runner-release.sh prefetch` provisions a lightweight Distribution 3.1.2
    registry pinned by digest. It is bound only to `127.0.0.1:5000`, stores
    blobs in `/opt/talkwise-registry/data`, and has a 128 MiB memory limit.
-   The initial registry image is downloaded by the runner and transferred
-   over SSH with a SHA256 archive check; the server never pulls it publicly.
+   The initial registry image is downloaded by the runner and transferred as
+   a gzip-compressed named archive over SSH with a SHA256 check. After import,
+   platform/layer identity must match; the server-local image ID is used
+   because Docker classic and containerd stores may expose different IDs.
+   The server never pulls it publicly in this workflow.
 4. The runner opens an authenticated SSH tunnel, then `sync-registry.sh`
    copies both GHCR images by digest with Skopeo `--all --preserve-digests`.
    The complete index (including build attestations) is retained. A digest

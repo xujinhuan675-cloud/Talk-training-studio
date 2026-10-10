@@ -20,7 +20,7 @@ class DeploymentTests(unittest.TestCase):
         runtime = self.bin / "fake_runtime.py"
         runtime.write_bytes((SCRIPTS / "tests/fake_runtime.py").read_bytes())
         runtime.chmod(0o755)
-        for name in ("docker", "curl", "sleep", "timeout", "skopeo"):
+        for name in ("docker", "curl", "sleep", "timeout", "skopeo", "ssh", "scp"):
             (self.bin / name).symlink_to(runtime)
         for name, service in (("backend", "backend"), ("newapi", "new-api")):
             directory = self.root / name
@@ -201,6 +201,33 @@ class DeploymentTests(unittest.TestCase):
                 self.assertNotEqual(self.run_script("sync-registry.sh").returncode, 0)
                 self.flag(failure, False)
         self.assert_no_switch()
+
+    def runner_env(self):
+        self.sync_env()
+        self.env.update(DEPLOY_SSH_HOST="test.invalid", DEPLOY_SSH_USER="test",
+                        DEPLOY_SSH_KEY="test-only-key", DEPLOY_SSH_KNOWN_HOSTS="test-only-host-key",
+                        GHCR_USERNAME="test", GHCR_TOKEN="test-only-token")
+
+    def test_registry_import_uses_server_id_with_identical_layers(self):
+        self.runner_env()
+        result = subprocess.run(["bash", str(SCRIPTS / "runner-release.sh"), "prefetch"],
+                                env=self.env, capture_output=True, text=True, timeout=12)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        startups = [command[-1] for command in self.commands()
+                    if command[0] == "ssh" and "remote-registry.sh'" in command[-1]]
+        self.assertEqual(len(startups), 1)
+        self.assertIn("REGISTRY_IMAGE_ID='sha256:" + "9" * 64 + "'", startups[0])
+        exports = [command for command in self.commands() if command[:2] == ["docker", "save"]]
+        self.assertEqual(exports, [["docker", "save", "talkwise-registry-bootstrap:3.1.2"]])
+
+    def test_registry_import_rejects_changed_layer_identity(self):
+        self.runner_env()
+        self.flag("registry_layer_mismatch")
+        result = subprocess.run(["bash", str(SCRIPTS / "runner-release.sh"), "prefetch"],
+                                env=self.env, capture_output=True, text=True, timeout=12)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(command[0] == "ssh" and "remote-registry.sh'" in command[-1]
+                             for command in self.commands()))
 
 
 if __name__ == "__main__":
