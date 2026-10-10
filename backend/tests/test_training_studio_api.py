@@ -1410,6 +1410,73 @@ async def test_staff_create_session_uses_current_user_scope(client: AsyncClient)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("team_id", [None, "team-ops"])
+@pytest.mark.parametrize("requested_user_id", [None, "", " \t "])
+async def test_admin_without_requested_owner_can_start_own_training(
+    client: AsyncClient,
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    team_id: str | None,
+    requested_user_id: str | None,
+) -> None:
+    current_user = training_studio_routes.CurrentUser(
+        user_id="newapi:101",
+        system_role="admin",
+        team_id=team_id,
+    )
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        training_studio_routes.get_current_user,
+        lambda: current_user,
+    )
+    payload = session_payload("text", user_id=requested_user_id)
+    if requested_user_id is None:
+        payload.pop("user_id")
+    create_resp = await client.post(
+        "/api/v1/training-studio/sessions",
+        json=payload,
+    )
+    assert create_resp.status_code == 201
+    created = create_resp.json()["data"]
+    session_id = created["session_id"]
+    opening_request = {
+        "runtime": "conversation_message_tree",
+        "opening_message": {"content": "Please summarize the project results."},
+    }
+
+    start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json=opening_request,
+    )
+
+    assert start_resp.status_code == 200
+    assert created["user_id"] == "newapi:101"
+    assert created["team_id"] == team_id
+    started = start_resp.json()["data"]
+    assert started["status"] == "active"
+    assert started["conversation"]["metadata"]["ownerUserId"] == "newapi:101"
+    messages = app.state.training_runtime_state.conversation_messages
+    assert len(messages) == 1
+    assert messages[0].content == "Please summarize the project results."
+
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        training_studio_routes.get_current_user,
+        lambda: training_studio_routes.CurrentUser(
+            user_id="newapi:202", system_role="staff", team_id=team_id
+        ),
+    )
+    get_resp = await client.get(f"/api/v1/training-studio/sessions/{session_id}")
+    other_start_resp = await client.post(
+        f"/api/v1/training-studio/sessions/{session_id}/start",
+        json=opening_request,
+    )
+    assert get_resp.status_code == 403
+    assert other_start_resp.status_code == 403
+    assert len(messages) == 1
+
+
+@pytest.mark.asyncio
 async def test_staff_cannot_access_other_user_training_session(client: AsyncClient) -> None:
     create_resp = await client.post(
         "/api/v1/training-studio/sessions",

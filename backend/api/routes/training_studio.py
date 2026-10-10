@@ -142,6 +142,7 @@ from application.services.training_studio.scenario_config_service import (
     TrainingScenarioConfigService,
     default_scenario_voice_id,
 )
+from application.services.training_studio.scenario_localization import localize_scenario_template
 from application.services.training_studio.voice_route_service import (
     JsonFileVoiceRouteStore,
     TrainingVoiceRouteService,
@@ -642,8 +643,10 @@ def get_training_voice_route_service() -> TrainingVoiceRouteService:
 def _scenario_templates_from_config(
     config: ScenarioConfigStateDTO,
     persona_loader: PersonaLoader | None = None,
+    *,
+    locale: str | None = None,
 ) -> list[ScenarioTrainingTemplateDTO]:
-    return [
+    templates = [
         ScenarioTrainingTemplateDTO(
             id=draft.id,
             title=draft.title,
@@ -680,6 +683,7 @@ def _scenario_templates_from_config(
         for draft in config.scenarios
         if draft.enabled
     ]
+    return [localize_scenario_template(template, locale) for template in templates]
 
 
 def _resolved_scenario_voice_id(
@@ -4168,8 +4172,13 @@ async def create_training_session(
         requested_user_id=_coerce_optional_text(body.user_id) or _coerce_optional_text(x_user_id),
         requested_team_id=_coerce_optional_text(body.team_id) or _coerce_optional_text(x_team_id),
     )
-    if scope.user_id != body.user_id or scope.team_id != body.team_id:
-        body = body.model_copy(update={"user_id": scope.user_id, "team_id": scope.team_id})
+    # Admin list scopes may omit a user filter, but new sessions need an owner.
+    body = body.model_copy(
+        update={
+            "user_id": scope.user_id or current_user.user_id,
+            "team_id": scope.team_id,
+        }
+    )
     try:
         body = _voice_route_snapshot_for_task(body, voice_routes)
         session = await svc.create_session(body)
@@ -5346,6 +5355,7 @@ async def save_training_voice_route_config(
 
 @router.get("/scenario-templates", summary="Get scenario training templates")
 async def get_scenario_templates(
+    locale: str | None = Query(default=None, max_length=35),
     scenario_config_svc: TrainingScenarioConfigService = Depends(
         get_training_scenario_config_service
     ),
@@ -5353,7 +5363,7 @@ async def get_scenario_templates(
     _current_user: CurrentUser = Depends(require_system_roles("admin", "staff")),
 ):
     config = scenario_config_svc.get_config()
-    templates = _scenario_templates_from_config(config, persona_loader)
+    templates = _scenario_templates_from_config(config, persona_loader, locale=locale)
     return success_response(data=[template.model_dump(mode="json") for template in templates])
 
 
