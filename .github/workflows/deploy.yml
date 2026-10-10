@@ -28,8 +28,11 @@ jobs:
     name: Build and push TalkWise images
     runs-on: ubuntu-latest
     outputs:
+      prefetch_id: ${{ steps.vars.outputs.prefetch_id }}
       backend_image: ${{ steps.vars.outputs.backend_image }}
       newapi_image: ${{ steps.vars.outputs.newapi_image }}
+      backend_digest: ${{ steps.backend.outputs.digest }}
+      newapi_digest: ${{ steps.newapi.outputs.digest }}
       root_commit: ${{ steps.vars.outputs.root_commit }}
       newapi_commit: ${{ steps.vars.outputs.newapi_commit }}
     steps:
@@ -38,6 +41,13 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 1
+
+      - name: Verify deployment behavior
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-yaml shellcheck
+          python3 -m unittest discover -s scripts/tests -v
+          shellcheck -x -P scripts scripts/*.sh
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -58,6 +68,7 @@ jobs:
           newapi_commit="$(git -C outside-project/new-api-main rev-parse HEAD)"
           backend_image="${IMAGE_NAMESPACE}/talkwise-backend:prod-${root_commit}"
           newapi_image="${IMAGE_NAMESPACE}/talkwise-frontend-host:prod-${root_commit}-${newapi_commit}"
+          echo "prefetch_id=talkwise-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${root_commit:0:12}" >> "$GITHUB_OUTPUT"
           echo "root_commit=${root_commit}" >> "$GITHUB_OUTPUT"
           echo "newapi_commit=${newapi_commit}" >> "$GITHUB_OUTPUT"
           echo "backend_image=${backend_image}" >> "$GITHUB_OUTPUT"
@@ -66,6 +77,7 @@ jobs:
           echo "Building frontend host ${newapi_image}"
 
       - name: Build and push backend image
+        id: backend
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./backend
@@ -84,6 +96,7 @@ jobs:
           sbom: true
 
       - name: Build and push TalkWise frontend host image
+        id: newapi
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./outside-project/new-api-main
@@ -101,42 +114,65 @@ jobs:
           provenance: mode=max
           sbom: true
 
-  deploy:
-    name: Pull and switch production containers
+  prefetch:
+    name: Mirror and prefetch production images
     needs: build-push
     if: ${{ github.event_name == 'push' || inputs.deploy }}
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
-      - name: Check out deployment script
+      - name: Check out deployment scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
 
-      - name: Execute remote pull and blue-green switch
+      - name: Install OCI transport
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y skopeo
+
+      - name: Mirror identical digests through SSH and prefetch locally
         env:
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BACKEND_IMAGE_REF: ${{ needs.build-push.outputs.backend_image }}
           NEWAPI_IMAGE_REF: ${{ needs.build-push.outputs.newapi_image }}
+          BACKEND_DIGEST: ${{ needs.build-push.outputs.backend_digest }}
+          NEWAPI_DIGEST: ${{ needs.build-push.outputs.newapi_digest }}
           ROOT_COMMIT: ${{ needs.build-push.outputs.root_commit }}
           NEWAPI_COMMIT: ${{ needs.build-push.outputs.newapi_commit }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_SSH_HOST" || { echo "DEPLOY_SSH_HOST is not configured" >&2; exit 1; }
-          test -n "$DEPLOY_SSH_USER" || { echo "DEPLOY_SSH_USER is not configured" >&2; exit 1; }
-          test -n "$DEPLOY_SSH_KEY" || { echo "DEPLOY_SSH_KEY is not configured" >&2; exit 1; }
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_talkwise_deploy"
-          chmod 600 "$HOME/.ssh/id_talkwise_deploy"
-          port="${DEPLOY_SSH_PORT:-22}"
-          short_commit="$(printf '%s' "$ROOT_COMMIT" | cut -c1-12)"
-          newapi_short="$(printf '%s' "$NEWAPI_COMMIT" | cut -c1-12)"
-          sed -i 's/\r$//' scripts/remote-deploy.sh
-          ssh -i "$HOME/.ssh/id_talkwise_deploy" -p "$port" \
-            -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" \
-            "BACKEND_IMAGE_REF='$BACKEND_IMAGE_REF' NEWAPI_IMAGE_REF='$NEWAPI_IMAGE_REF' ROOT_COMMIT='$ROOT_COMMIT' NEWAPI_COMMIT='$NEWAPI_COMMIT' SHORT_COMMIT='$short_commit' NEWAPI_SHORT_COMMIT='$newapi_short' bash -s" \
-            < scripts/remote-deploy.sh
+          PREFETCH_ID: ${{ needs.build-push.outputs.prefetch_id }}
+        run: bash scripts/runner-release.sh prefetch
+
+  deploy:
+    name: Switch verified local production images
+    needs: [build-push, prefetch]
+    if: ${{ github.event_name == 'push' || inputs.deploy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out deployment scripts
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Switch without registry access and verify actual image IDs
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          BACKEND_IMAGE_REF: ${{ needs.build-push.outputs.backend_image }}
+          NEWAPI_IMAGE_REF: ${{ needs.build-push.outputs.newapi_image }}
+          BACKEND_DIGEST: ${{ needs.build-push.outputs.backend_digest }}
+          NEWAPI_DIGEST: ${{ needs.build-push.outputs.newapi_digest }}
+          ROOT_COMMIT: ${{ needs.build-push.outputs.root_commit }}
+          NEWAPI_COMMIT: ${{ needs.build-push.outputs.newapi_commit }}
+          PREFETCH_ID: ${{ needs.build-push.outputs.prefetch_id }}
+        run: bash scripts/runner-release.sh switch

@@ -17,11 +17,31 @@ It is not built, tagged, pulled, or restarted by TalkWise deployment.
    `.github/workflows/deploy.yml` on an Ubuntu-hosted GitHub runner.
 2. The runner checks out the tracked NewAPI submodule, builds both images for
    `linux/amd64`, and pushes commit-addressed tags to GHCR.
-3. The runner connects to the production server over SSH and streams
-   `scripts/remote-deploy.sh`.
-4. The server pulls the two GHCR images, backs up its current Compose/env
-   files, switches the existing Compose services, and checks both health URLs.
-5. If either service fails its health check, the previous image is restored.
+3. `runner-release.sh prefetch` provisions a lightweight Distribution 3.1.2
+   registry pinned by digest. It is bound only to `127.0.0.1:5000`, stores
+   blobs in `/opt/talkwise-registry/data`, and has a 128 MiB memory limit.
+   The initial registry image is downloaded by the runner and transferred
+   over SSH with a SHA256 archive check; the server never pulls it publicly.
+4. The runner opens an authenticated SSH tunnel, then `sync-registry.sh`
+   copies both GHCR images by digest with Skopeo `--all --preserve-digests`.
+   The complete index (including build attestations) is retained. A digest
+   file and a hash of the destination's raw manifest must match the build.
+   Subsequent copies reuse registry blobs; no full tar of application images
+   or local workstation relay is used.
+5. `remote-prefetch.sh` pulls from the server-local registry by digest,
+   verifies the exact repository digest, platform and image ID, and writes
+   an atomic release marker while the current containers keep serving.
+   Local runtime tags include both commit and digest prefixes, so rebuilding
+   the same commit cannot overwrite a tag used by the previous release.
+6. A separate dependent job runs `runner-release.sh switch`. It checks the
+   marker, commit identities, digests and local IDs before changing services.
+   A server-side lock rejects concurrent release phases. Compose uses
+   `--no-build --no-deps --pull never` and exact image IDs for the switch.
+   Both configurations are validated before either service is modified.
+7. If synchronization or prefetch fails, the current release stays running.
+   Partial Compose failures, unhealthy services, image ID mismatches and
+   persistence failures restore the previously running image IDs. A rollback
+   failure is reported explicitly, never as a successful release.
    Successful image tags are persisted in the server Compose files so an
    ordinary restart does not revert to an old release.
 
@@ -37,9 +57,44 @@ store and are never written to the repository:
 - `DEPLOY_SSH_PORT`
 - `DEPLOY_SSH_USER`
 - `DEPLOY_SSH_KEY`
+- `DEPLOY_SSH_KNOWN_HOSTS`: verified production SSH host keys. The runner
+  requires strict host-key verification; obtain this from the trusted local
+  `known_hosts` entry, not an unverified scan during deployment.
 
-The server's existing Docker credential for GHCR is used for `docker pull`.
-No GHCR token is passed through the GitHub Actions SSH command.
+Only the runner receives `GITHUB_TOKEN` for GHCR. Credentials are passed to
+Skopeo through stdin into a temporary auth file and cleaned on exit; no GHCR
+credential is transferred to the server. Registry HTTP is used only on
+loopback and within SSH. Do not publish port 5000 or configure public access
+without a separate TLS/authentication design.
+
+The server needs Docker Compose, Bash, GNU timeout, flock, Python 3 and
+python3-yaml. Distribution is intentionally smaller than Harbor for this
+single-server use case; no extra domain, database or account system is added.
+
+## Verification And Timings
+
+```powershell
+wsl -d Ubuntu-22.04 -- python3 -m unittest discover -s /mnt/f/AnchorOS/6-项目仓库/TalkWise/scripts/tests -v
+wsl -d Ubuntu-22.04 -- bash -lc 'cd /mnt/f/AnchorOS/6-项目仓库/TalkWise && shellcheck -x -P scripts scripts/*.sh'
+git diff --check
+```
+
+The build job runs the deployment behavior tests and ShellCheck before any
+build. Tests cover failed transfers, digest/marker/tag mismatches, concurrency,
+no-pull switching, partial updates and rollback. They fake only the external
+Docker/SSH-registry boundaries; they do not prove production connectivity.
+
+Actions records each job's duration; scripts emit `mirror_duration_seconds`,
+`prefetch_duration_seconds` and `switch_duration_seconds`. Each local pull
+has a 300-second timeout and one retry, with a 10-second forced-termination
+grace. Mirror/prefetch and switch jobs are bounded to 75 and 15 minutes.
+The short switch duration is not the total release time. First-time blob
+synchronization can still be bandwidth-limited, so measure an actual run.
+
+Retain the registry data for reuse and rollback. Monitor its disk usage;
+deletion is disabled and this workflow does not run garbage collection or
+prune previous production images automatically. Schedule retention/GC as
+separate maintenance before storage becomes scarce.
 
 ## Local trigger
 
