@@ -1,5 +1,5 @@
 # input: ChatApplicationService 依赖注入
-# output: SSE 流式聊天端点 + 同步聊天端点
+# output: 保留当前用户训练权限的 SSE 流式聊天端点 + 同步聊天端点
 # owner: unknown
 # pos: 表示层路由 - 聊天 API（SSE 流式 + 同步）；一旦我被更新，务必更新我的开头注释以及所属文件夹的md
 """Chat routes with SSE streaming support."""
@@ -17,7 +17,6 @@ from api.dependencies import (
     get_chat_service,
     get_conversation_service,
     require_system_roles,
-    training_scope_for,
 )
 from application.dto import ChatRequestDTO
 from application.services.chat_service import ChatApplicationService
@@ -44,10 +43,9 @@ def get_chat_training_session_service() -> TrainingSessionService:
 
 
 def _training_access_scope(current_user: CurrentUser) -> TrainingSessionAccessScope:
-    scope = training_scope_for(current_user)
     return TrainingSessionAccessScope(
-        user_id=scope.user_id,
-        team_id=scope.team_id,
+        user_id=current_user.user_id,
+        team_id=current_user.team_id,
         include_team_scope=current_user.can_manage_team,
     )
 
@@ -90,6 +88,8 @@ async def chat(
                 training_session_id,
                 access_scope=training_scope,
             )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

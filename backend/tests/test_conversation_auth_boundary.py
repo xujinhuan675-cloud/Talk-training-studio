@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -7,10 +8,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from api.dependencies import get_chat_service, get_conversation_service
+from api.dependencies import (
+    CurrentUser,
+    get_chat_service,
+    get_conversation_service,
+    get_current_user,
+)
 from api.routes.chat import get_chat_training_session_service, router as chat_router
 from api.routes.conversations import router as conversation_router
 from application.dto import AgentConfigDTO, ConversationDTO
+from application.services.training_studio.session_service import TrainingSessionService
+from domain.training_studio.session_repository import TrainingSessionAccessScope
 
 
 def _as_mapping(value: object | None) -> dict:
@@ -1116,6 +1124,69 @@ def test_training_chat_rejects_the_server_hard_cap_before_persisting() -> None:
 
     assert response.status_code == 422
     assert chat_service.sync_call is None
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("owner_id,expected_status", [("newapi:1", 200), ("newapi:2", 403)])
+def test_training_chat_preserves_admin_ownership_without_team(
+    stream: bool,
+    owner_id: str,
+    expected_status: int,
+) -> None:
+    training_service = TrainingSessionService(id_factory=lambda: "training-admin")
+
+    async def create_active_session():
+        session = await training_service.create_session(
+            {
+                "role": "Product Manager",
+                "level": "Senior",
+                "tech_stack": ["Roadmap"],
+                "question_type_ratios": {"behavioral": 1},
+                "question_count": 6,
+                "mode": "text",
+                "user_id": owner_id,
+            }
+        )
+        await training_service.start_session(
+            session.session_id,
+            room_id="talkwise-conversation:7",
+            access_scope=TrainingSessionAccessScope(user_id=owner_id),
+        )
+        return session
+
+    session = asyncio.run(create_active_session())
+    conversation_service = _FakeConversationService(
+        {
+            7: _conversation(
+                7,
+                metadata={
+                    "ownerUserId": "newapi:1",
+                    "trainingSessionId": session.session_id,
+                },
+            ),
+        }
+    )
+    chat_service = _FakeChatService()
+    app = _client(conversation_service, chat_service).app
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id="newapi:1", system_role="admin",
+    )
+    app.dependency_overrides[get_chat_training_session_service] = lambda: training_service
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/v1/conversations/7/chat",
+            json={"message": "hello", "stream": stream},
+        )
+
+    assert response.status_code == expected_status
+    if expected_status == 200:
+        assert session.message_count == 1
+        assert chat_service.sync_call is not None or chat_service.stream_call is not None
+    else:
+        assert response.json()["detail"] == "Training session is outside current user scope"
+        assert session.message_count == 0
+        assert chat_service.sync_call is None
+        assert chat_service.stream_call is None
 
 
 def test_agent_config_routes_reject_unsupported_system_roles_before_service_call() -> None:
