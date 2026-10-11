@@ -16,6 +16,8 @@ started_at="$(date +%s)"
 mirror_seconds=0
 prefetch_seconds=0
 mirror_attempts=0
+# ShellCheck 0.9 cannot follow this EXIT trap callback.
+# shellcheck disable=SC2317
 finish() {
   local status="$?" result=success
   [[ "$status" == 0 ]] || result=failure
