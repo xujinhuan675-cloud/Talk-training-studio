@@ -122,7 +122,7 @@ jobs:
     needs: build-push
     if: ${{ github.event_name == 'push' || inputs.deploy }}
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 150
     steps:
       - name: Check out deployment scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

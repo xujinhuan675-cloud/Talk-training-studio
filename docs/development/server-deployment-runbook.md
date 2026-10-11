@@ -381,9 +381,9 @@ TalkWise 训练业务数据继续由 backend 自己的 Alembic 管理；不要�
 Distribution 容器名为 `talkwise-registry`，数据目录 `/opt/talkwise-registry/data`，内存上限
 128 MiB，只有回环端口，无新增公网域名/账号。服务器需要 Python 3、python3-yaml、
 aria2、Skopeo 和 curl；缺少依赖时明确失败，不自动安装或回退到 SSH 镜像传输。
-发布脚本默认每次本机拉取限时 300 秒、重试一次；Actions 同步/预拉取 job 上限 75 分钟，
-切换 job 上限 15 分钟。aria2 默认同时下载 4 个 blob、每个最多 8 个连接，单镜像下载
-超时 1800 秒，每个下载最多重试 5 次；重跑时重新获取凭据并复用内容寻址缓存。
+发布脚本默认每次本机拉取限时 300 秒、重试一次；Actions 同步/预拉取 job 上限 150 分钟，
+切换 job 上限 15 分钟。aria2 默认同时下载 8 个 blob、每个最多 16 个连接，单镜像下载
+超时 3600 秒，每个下载最多重试 5 次；重跑时重新获取凭据并复用内容寻址缓存。
 下载缓存和镜像仓库均保留增量 blob，不自动删除旧镜像或执行 GC；需监控两者磁盘占用。
 详细参数、测试和 SSH secrets 见 `docs/development/github-actions-deployment.md`。
 

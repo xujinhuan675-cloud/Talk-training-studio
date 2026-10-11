@@ -116,6 +116,10 @@ class OCIDownloadTests(unittest.TestCase):
         command, kwargs = downloads[0]
         self.assertIn("--continue=true", command)
         self.assertIn("--check-integrity=true", command)
+        self.assertIn("--max-concurrent-downloads=8", command)
+        self.assertIn("--split=16", command)
+        self.assertIn("--max-connection-per-server=16", command)
+        self.assertGreater(kwargs["timeout"], 3500)
         self.assertNotIn(self.secret, " ".join(command))
         self.assertEqual(kwargs["input"].count("https://ghcr.io/v2/test/backend/blobs/"), 3)
         self.assertIn("checksum=sha-256=", kwargs["input"])

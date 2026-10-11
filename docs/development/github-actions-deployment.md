@@ -102,11 +102,11 @@ in these tests; they do not prove production connectivity or throughput.
 Actions records each job's duration; scripts emit `mirror_duration_seconds`,
 `prefetch_duration_seconds` and `switch_duration_seconds`. Each local pull
 has a 300-second timeout and one retry, with a 10-second forced-termination
-grace. Mirror/prefetch and switch jobs are bounded to 75 and 15 minutes.
+grace. Mirror/prefetch and switch jobs are bounded to 150 and 15 minutes.
 The short switch duration is not the total release time. Default download
-limits are 4 concurrent blobs with up to 8 connections each. Server environment
+limits are 8 concurrent blobs with up to 16 connections each. Server environment
 settings `DOWNLOAD_CONCURRENT_BLOBS` (1-8), `DOWNLOAD_CONNECTIONS_PER_BLOB`
-(1-16) and `DOWNLOAD_TIMEOUT_SECONDS` (1-3600, default 1800 per image) can
+(1-16) and `DOWNLOAD_TIMEOUT_SECONDS` (1-3600, default 3600 per image) can
 adjust those bounds. aria2 retries each download up to five times; rerunning
 prefetch obtains fresh auth and resumes the same content-addressed cache.
 Within the image deadline, a failed download can obtain a fresh pull token

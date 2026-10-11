@@ -162,9 +162,9 @@ def download_image(source, digest, cache, *, username="", password="", platform_
         "annotations": {"org.opencontainers.image.ref.name": "release"},
     }]}), encoding="utf-8")
     if jobs:
-        concurrent = setting("DOWNLOAD_CONCURRENT_BLOBS", 4, 8)
-        connections = setting("DOWNLOAD_CONNECTIONS_PER_BLOB", 8, 16)
-        timeout = setting("DOWNLOAD_TIMEOUT_SECONDS", 1800, 3600)
+        concurrent = setting("DOWNLOAD_CONCURRENT_BLOBS", 8, 8)
+        connections = setting("DOWNLOAD_CONNECTIONS_PER_BLOB", 16, 16)
+        timeout = setting("DOWNLOAD_TIMEOUT_SECONDS", 3600, 3600)
         command = ["aria2c", "--input-file=-", "--no-conf=true",
              "--max-concurrent-downloads=" + str(concurrent), "--split=" + str(connections),
              "--max-connection-per-server=" + str(connections), "--min-split-size=1M",
