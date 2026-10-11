@@ -115,7 +115,10 @@ jobs:
           sbom: true
 
   prefetch:
-    name: Mirror and prefetch production images
+    name: Download directly on server and prefetch images
+    permissions:
+      contents: read
+      packages: read
     needs: build-push
     if: ${{ github.event_name == 'push' || inputs.deploy }}
     runs-on: ubuntu-latest
@@ -126,12 +129,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install OCI transport
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y skopeo
-
-      - name: Mirror identical digests through SSH and prefetch locally
+      - name: Server-direct segmented OCI download and local prefetch
         env:
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}

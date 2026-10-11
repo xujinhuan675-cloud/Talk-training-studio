@@ -29,7 +29,7 @@ else
 fi
 for ((attempt=0; attempt<30; attempt++)); do
   if curl --fail --silent --max-time 2 http://127.0.0.1:5000/v2/ >/dev/null; then
-    echo 'registry ready: 127.0.0.1:5000 (SSH access only)'
+    echo 'registry ready: 127.0.0.1:5000 (server-local access only)'
     exit 0
   fi
   sleep 1

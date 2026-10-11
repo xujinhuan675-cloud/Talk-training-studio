@@ -205,9 +205,11 @@ ssh lcayun-1panel "docker exec 1Panel-redis-m6tI redis-cli --version"
 
 生产发布的正式构建入口是 `.github/workflows/deploy.yml`：GitHub 托管 runner
 构建并推送 TalkWise backend 与 TalkWise 深改 NewAPI 前端宿主镜像，服务器只执行
-近端 registry 预拉取、Compose 切换和健康检查。GitHub runner 通过 SSH 隧道将 GHCR
-镜像原样同步到服务器回环地址 `127.0.0.1:5000` 的 Distribution；生产服务器不再直接
-从 GHCR 拉取 TalkWise 发布镜像。生产发布不在本地或服务器执行 `docker build`。
+服务器直接下载、近端 registry 预拉取、Compose 切换和健康检查。GitHub runner 的 SSH
+仅传发布脚本、控制指令和标准输入中的短期只读凭据；服务器使用 aria2 并发分段、断点
+续传下载 GHCR 镜像，通过 SHA256 校验后用 Skopeo 原样导入回环地址 `127.0.0.1:5000`
+的 Distribution。旧 SSH 隧道和镜像归档传输路径已移除，失败时不回退到旧路径。
+生产发布不在本地或服务器执行 `docker build`。
 官方网关实例不属于此工作流，不会被构建、拉取或重启。
 
 下面的本地命令用于开发验证或排查，不是生产发布的构建步骤。
@@ -369,7 +371,7 @@ TalkWise 训练业务数据继续由 backend 自己的 Alembic 管理；不要�
 3. 确认 GitHub Actions secrets `DEPLOY_SSH_HOST`、`DEPLOY_SSH_PORT`、`DEPLOY_SSH_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_SSH_KNOWN_HOSTS` 已配置；主机密钥必须来自已验证的 SSH 信任记录。
 4. 使用 `scripts/deploy-server.ps1 -Push` 推送干净的提交，或在 GitHub Actions 手动 dispatch。
 5. GitHub runner checkout 根仓库和 `outside-project/new-api-main` 子模块，构建两个 `linux/amd64` 镜像并推送 GHCR。
-6. Actions 通过 `scripts/runner-release.sh prefetch` 建立只监听 `127.0.0.1:5000` 的 Distribution，使用 Skopeo `--all --preserve-digests` 经 SSH 隧道同步完整镜像索引，校验目的端 manifest hash 与构建 digest 一致。初次 registry 镜像也由 runner 经 SSH 传送，服务器不直接公网拉取。
+6. Actions 通过 `scripts/runner-release.sh prefetch` 上传少量脚本，并将仅有 packages:read 权限的短期凭据通过 SSH 标准输入传入服务器。`scripts/remote-mirror.sh` 在发布锁下调用 `scripts/download-oci.py`，用 aria2 从 GHCR 直接并发分段下载完整 OCI 索引及所有 blob，复用 `/opt/talkwise-registry/download-cache` 中校验通过的缓存，失败保留断点。初次 Distribution 也由服务器直接下载固定 Docker Hub digest 并验证平台/层身份，不经过 SSH 传镜像。Skopeo `--all --preserve-digests` 导入本机 registry，目的端 manifest hash 必须与构建 digest 一致。
 7. `scripts/remote-prefetch.sh` 在旧容器继续服务期间从本机按 digest 拉取，校验平台、RepoDigest 和 image ID，原子写入 `/opt/talkwise-backups/prefetch/<prefetch-id>`。同步或预拉取失败时不进入切换。
 8. 独立切换 job 调用 `scripts/remote-deploy.sh`，取得发布锁，核对预拉取凭证与镜像 ID，备份 Compose/env，先校验两份配置，再使用 `--no-build --no-deps --pull never` 切换。校验容器实际 image ID 和 HTTP 健康状态；部分切换、健康失败或配置持久化失败会按旧 image ID 回滚，回滚失败明确报告。
 9. 成功后记录 Actions 各阶段时间及 `mirror_duration_seconds`、`prefetch_duration_seconds`、`switch_duration_seconds`。不能把构建完成、tag 存在或健康页正常当作目标镜像已替换的证明。
@@ -377,9 +379,12 @@ TalkWise 训练业务数据继续由 backend 自己的 Alembic 管理；不要�
 11. 官方网关 `newapi.flowguide.cc` 不在本流程内，除非单独进行官方网关维护。
 
 Distribution 容器名为 `talkwise-registry`，数据目录 `/opt/talkwise-registry/data`，内存上限
-128 MiB，只有回环端口，无新增公网域名/账号。服务器需要 Python 3 和 python3-yaml。
+128 MiB，只有回环端口，无新增公网域名/账号。服务器需要 Python 3、python3-yaml、
+aria2、Skopeo 和 curl；缺少依赖时明确失败，不自动安装或回退到 SSH 镜像传输。
 发布脚本默认每次本机拉取限时 300 秒、重试一次；Actions 同步/预拉取 job 上限 75 分钟，
-切换 job 上限 15 分钟。镜像仓库保留增量 blob，不自动删除旧镜像或执行 GC；需监控磁盘。
+切换 job 上限 15 分钟。aria2 默认同时下载 4 个 blob、每个最多 8 个连接，单镜像下载
+超时 1800 秒，每个下载最多重试 5 次；重跑时重新获取凭据并复用内容寻址缓存。
+下载缓存和镜像仓库均保留增量 blob，不自动删除旧镜像或执行 GC；需监控两者磁盘占用。
 详细参数、测试和 SSH secrets 见 `docs/development/github-actions-deployment.md`。
 
 紧急情况下的服务重启只允许使用已经写入服务器 Compose 的当前镜像：

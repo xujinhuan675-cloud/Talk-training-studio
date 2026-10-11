@@ -1,5 +1,4 @@
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -175,59 +174,49 @@ class DeploymentTests(unittest.TestCase):
             self.assertNotEqual(self.run_script("remote-deploy.sh").returncode, 0)
         self.assert_no_switch()
 
-    def sync_env(self):
-        self.env["GHCR_AUTH_FILE"] = str(self.root / "auth.json")
-        self.env["BACKEND_DIGEST"] = "sha256:" + hashlib.sha256(b"backend-manifest").hexdigest()
-        self.env["NEWAPI_DIGEST"] = "sha256:" + hashlib.sha256(b"frontend-manifest").hexdigest()
-
-    def test_mirror_preserves_full_index_and_source_digests(self):
-        self.sync_env()
-        result = self.run_script("sync-registry.sh")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        copies = [command for command in self.commands() if command[:2] == ["skopeo", "copy"]]
-        self.assertEqual(len(copies), 2)
-        for command in copies:
-            self.assertIn("--all", command)
-            self.assertIn("--preserve-digests", command)
-            self.assertIn("@sha256:", command[-2])
-            self.assertTrue(command[-1].startswith("docker://127.0.0.1:15000/"))
-        self.assert_no_switch()
-
-    def test_mirror_rejects_failed_copy_or_wrong_digest(self):
-        self.sync_env()
-        for failure in ("sync_failure", "sync_digest_mismatch", "sync_manifest_mismatch"):
-            with self.subTest(failure=failure):
-                self.flag(failure)
-                self.assertNotEqual(self.run_script("sync-registry.sh").returncode, 0)
-                self.flag(failure, False)
-        self.assert_no_switch()
-
     def runner_env(self):
-        self.sync_env()
         self.env.update(DEPLOY_SSH_HOST="test.invalid", DEPLOY_SSH_USER="test",
                         DEPLOY_SSH_KEY="test-only-key", DEPLOY_SSH_KNOWN_HOSTS="test-only-host-key",
                         GHCR_USERNAME="test", GHCR_TOKEN="test-only-token")
 
-    def test_registry_import_uses_server_id_with_identical_layers(self):
-        self.runner_env()
-        result = subprocess.run(["bash", str(SCRIPTS / "runner-release.sh"), "prefetch"],
-                                env=self.env, capture_output=True, text=True, timeout=12)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        startups = [command[-1] for command in self.commands()
-                    if command[0] == "ssh" and "remote-registry.sh'" in command[-1]]
-        self.assertEqual(len(startups), 1)
-        self.assertIn("REGISTRY_IMAGE_ID='sha256:" + "9" * 64 + "'", startups[0])
-        exports = [command for command in self.commands() if command[:2] == ["docker", "save"]]
-        self.assertEqual(exports, [["docker", "save", "talkwise-registry-bootstrap:3.1.2"]])
+    def run_runner(self):
+        return subprocess.run(["bash", str(SCRIPTS / "runner-release.sh"), "prefetch"],
+                              env=self.env, capture_output=True, text=True, timeout=12)
 
-    def test_registry_import_rejects_changed_layer_identity(self):
+    def test_runner_only_sends_scripts_and_control_commands(self):
         self.runner_env()
-        self.flag("registry_layer_mismatch")
-        result = subprocess.run(["bash", str(SCRIPTS / "runner-release.sh"), "prefetch"],
-                                env=self.env, capture_output=True, text=True, timeout=12)
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        commands = self.commands()
+        self.assertFalse(any(command[0] in ("docker", "skopeo") for command in commands))
+        self.assertFalse(any(command[0] == "ssh" and ("-N" in command or "-L" in command)
+                             for command in commands))
+        uploads = [command for command in commands if command[0] == "scp"]
+        self.assertEqual(len(uploads), 1)
+        self.assertTrue(any(item.endswith("download-oci.py") for item in uploads[0]))
+        self.assertFalse(any(item.endswith((".tar", ".tar.gz")) for item in uploads[0]))
+        remote_calls = [command[-1] for command in commands if command[0] == "ssh"]
+        self.assertIn("remote-mirror.sh", remote_calls[-2])
+        self.assertIn("remote-prefetch.sh", remote_calls[-1])
+        self.assertNotIn(self.env["GHCR_TOKEN"], json.dumps(commands) + result.stdout + result.stderr)
+        self.assertTrue(self.state().get("credential_stdin_received"))
+        self.assert_no_switch()
+
+    def test_failed_direct_download_never_prefetches_or_falls_back(self):
+        self.runner_env()
+        self.flag("direct_download_failure")
+        result = self.run_runner()
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(any(command[0] == "ssh" and "remote-registry.sh'" in command[-1]
+        self.assertFalse(any(command[0] == "ssh" and "remote-prefetch.sh" in command[-1]
                              for command in self.commands()))
+        self.assertFalse(any("-L" in command or command[0] == "docker" for command in self.commands()))
+        self.assert_no_switch()
+
+    def test_bot_actor_can_start_server_direct_prefetch(self):
+        self.runner_env()
+        self.env["GHCR_USERNAME"] = "dependabot[bot]"
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

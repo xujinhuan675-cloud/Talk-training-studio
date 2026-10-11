@@ -327,6 +327,7 @@ Start-Process -FilePath .\new-api-talkwise.exe -ArgumentList '--log-dir','.logs'
 
 - 仓库工程事实源写在仓库内，例如本文件、README、API、测试、迁移说明。
 - 生产部署、服务器路径、PostgreSQL/Redis 接入、域名切换、验证和回滚流程以 `docs/development/server-deployment-runbook.md` 为快速入口；后续本地更新推送到服务器前先读该文档。
+- TalkWise 发布镜像由 GitHub Actions 构建推送，服务器使用 aria2 并发分段、断点续传直取完整 OCI 内容，经 SHA256 校验后用 Skopeo 保留 digest 导入本机 registry；SSH 仅传控制指令、少量脚本和标准输入中的短期只读凭据。不得恢复 SSH 隧道、镜像归档上传或本地中转作为传输兜底；下载失败保留旧生产，仍执行既有预取凭证、发布锁、备份和回滚校验。
 - 架构理解、阶段路线、跨会话推进和复盘可以沉淀到 AnchorOS，但仓库内规则仍以本 `AGENTS.md` 为开发入口。
 - 任何新增长期约束，都应更新本文件，避免后续反复口头对齐。
 - 最终回复必须包含：

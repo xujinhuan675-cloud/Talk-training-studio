@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """External process boundary for deployment tests; no real Docker or HTTP calls."""
 import json
-import hashlib
 import os
 import pathlib
 import subprocess
 import sys
-import time
 
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
@@ -44,40 +42,15 @@ if name == "sleep":
 if name == "scp":
     sys.exit(0)
 if name == "ssh":
-    if "-N" in args:
-        time.sleep(5)
-        sys.exit(0)
     command = args[-1]
-    if "docker image inspect --format '{{.Id}}'" in command:
-        print("sha256:" + "9" * 64)
-    elif "RootFS.Layers" in command:
-        payload = b"linux/amd64\n" if state.get("registry_imported") else b""
-        if state.get("registry_layer_mismatch"):
-            payload = b"wrong-layers\n"
-        print(hashlib.sha256(payload).hexdigest())
-    elif "docker load" in command:
-        state["registry_imported"] = True
+    if "remote-mirror.sh" in command:
+        state["credential_stdin_received"] = sys.stdin.read().strip() == os.environ["GHCR_TOKEN"]
         save()
+        sys.exit(1 if state.get("direct_download_failure") else 0)
     sys.exit(0)
 if name == "curl":
     sys.exit(1 if state.get("health_failure") and "8012" in args[-1]
              and state["containers"]["talkwise-backend"]["image"] != "old-backend" else 0)
-if name == "skopeo":
-    if args[0] == "login":
-        pathlib.Path(args[args.index("--authfile") + 1]).write_text("{}", encoding="utf-8")
-    elif args[0] == "copy":
-        if state.get("sync_failure"):
-            sys.exit(1)
-        digest = args[-2].split("@")[-1]
-        if state.get("sync_digest_mismatch"):
-            digest = "sha256:" + "0" * 64
-        pathlib.Path(args[args.index("--digestfile") + 1]).write_text(digest, encoding="utf-8")
-    elif args[0] == "inspect":
-        payload = "backend-manifest" if "backend" in args[-1] else "frontend-manifest"
-        sys.stdout.write("tampered" if state.get("sync_manifest_mismatch") else payload)
-    else:
-        sys.exit(2)
-    sys.exit(0)
 if name != "docker":
     sys.exit(2)
 if args[:2] == ["image", "inspect"]:
@@ -96,8 +69,6 @@ elif args[0] == "pull":
 elif args[0] == "tag":
     state["images"][args[2]] = state["images"][args[1]]
     save()
-elif args[0] == "save":
-    sys.stdout.write("named registry archive")
 elif args[0] == "inspect":
     item = state["containers"].get(args[-1])
     if item is None:
