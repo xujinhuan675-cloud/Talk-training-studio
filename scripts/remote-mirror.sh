@@ -15,6 +15,8 @@ credential="$(head -c 8192)"
 [[ -n "$credential" ]] || die 'missing registry pull credential'
 script="$(dirname "${BASH_SOURCE[0]}")/download-oci.py"
 started_at="$(date +%s)"
+record_duration() { log "mirror_duration_seconds=$(($(date +%s) - started_at))"; }
+trap record_duration EXIT
 python3 "$script" --bootstrap-registry
 printf '%s' "$credential" | python3 "$script" --credential-stdin --username "$GHCR_USERNAME" \
   --source "${BACKEND_IMAGE_REF%:*}" --digest "$BACKEND_DIGEST" \
@@ -23,4 +25,3 @@ printf '%s' "$credential" | python3 "$script" --credential-stdin --username "$GH
   --source "${NEWAPI_IMAGE_REF%:*}" --digest "$NEWAPI_DIGEST" \
   --target "127.0.0.1:5000/talkwise-frontend-host:prod-$ROOT_COMMIT-$NEWAPI_COMMIT"
 unset credential
-log "mirror_duration_seconds=$(($(date +%s) - started_at))"

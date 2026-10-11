@@ -88,6 +88,12 @@ class DeploymentTests(unittest.TestCase):
         self.assert_no_switch()
         self.assertFalse((self.root / "prefetch/test-release").exists())
 
+    def test_failed_prefetch_records_duration(self):
+        self.flag("pull_failure")
+        result = self.run_script("remote-prefetch.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("prefetch_duration_seconds=", result.stdout)
+
     def test_prefetch_pulls_local_registry_by_digest(self):
         self.prepare()
         pulls = [command[-1] for command in self.commands() if command[:2] == ["docker", "pull"]]
@@ -211,6 +217,66 @@ class DeploymentTests(unittest.TestCase):
                              for command in self.commands()))
         self.assertFalse(any("-L" in command or command[0] == "docker" for command in self.commands()))
         self.assert_no_switch()
+
+    def test_transient_download_retries_same_identity_once(self):
+        self.runner_env()
+        self.flag("transient_download_failures", 1)
+        self.env["GITHUB_STEP_SUMMARY"] = str(self.root / "summary")
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        mirrors = [c[-1] for c in self.commands() if c[0] == "ssh" and "remote-mirror.sh" in c[-1]]
+        self.assertEqual(len(mirrors), 2)
+        self.assertEqual(mirrors[0], mirrors[1])
+        self.assertEqual(sum(c[0] == "ssh" and "remote-prefetch.sh" in c[-1] for c in self.commands()), 1)
+        summary = Path(self.env["GITHUB_STEP_SUMMARY"]).read_text()
+        self.assertIn("success", summary)
+        self.assertIn("Mirror attempts | 2", summary)
+        self.assertNotIn(self.env["GHCR_TOKEN"], summary)
+        self.assert_no_switch()
+
+    def test_exhausted_download_retries_report_failure_without_prefetch(self):
+        self.runner_env()
+        self.flag("transient_download_failures", 3)
+        self.env["GITHUB_STEP_SUMMARY"] = str(self.root / "summary")
+        self.env["GITHUB_RUN_ID"] = "12345"
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 75)
+        calls = [c[-1] for c in self.commands() if c[0] == "ssh"]
+        self.assertEqual(sum("remote-mirror.sh" in c for c in calls), 2)
+        self.assertFalse(any("remote-prefetch.sh" in c for c in calls))
+        summary = Path(self.env["GITHUB_STEP_SUMMARY"]).read_text()
+        self.assertIn("failure", summary)
+        self.assertIn("gh run rerun 12345 --failed", summary)
+        self.assert_no_switch()
+
+    def test_nonretryable_download_failure_is_not_retried(self):
+        self.runner_env()
+        self.flag("direct_download_failure")
+        self.assertNotEqual(self.run_runner().returncode, 0)
+        self.assertEqual(sum(c[0] == "ssh" and "remote-mirror.sh" in c[-1] for c in self.commands()), 1)
+
+    def test_workflow_prefetch_only_dispatch_keeps_switch_gate(self):
+        import yaml
+        workflow = yaml.safe_load((SCRIPTS.parent / ".github/workflows/deploy.yml").read_text())
+        prefetch = workflow["jobs"]["prefetch"]
+        self.assertNotIn("if", prefetch)
+        self.assertIn("inputs.deploy", workflow["jobs"]["deploy"]["if"])
+        self.assertEqual(prefetch["timeout-minutes"], 300)
+
+    def test_switch_is_not_retried_and_summary_cannot_mask_result(self):
+        self.runner_env()
+        self.env["GITHUB_STEP_SUMMARY"] = str(self.root / "missing/summary")
+        for failure in (False, True):
+            self.flag("switch_failure", failure)
+            self.log_path.write_text("", encoding="utf-8")
+            result = subprocess.run(["bash", str(SCRIPTS / "runner-release.sh"), "switch"],
+                                    env=self.env, capture_output=True, text=True, timeout=12)
+            self.assertEqual(result.returncode, 75 if failure else 0, result.stdout + result.stderr)
+            self.assertEqual(len(self.commands()), 1)
+        calls = [c[-1] for c in self.commands() if c[0] == "ssh"]
+        self.assertEqual(len(calls), 1)
+        self.assertIn("remote-deploy.sh", calls[0])
+        self.assertFalse(any("remote-mirror.sh" in c for c in calls))
 
     def test_bot_actor_can_start_server_direct_prefetch(self):
         self.runner_env()

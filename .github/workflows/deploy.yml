@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy:
-        description: Deploy the verified images to production
+        description: Switch production after cache warmup (false only builds and prefetches)
         required: true
         type: boolean
         default: true
@@ -114,15 +114,26 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Record build result
+        if: ${{ always() }}
+        env:
+          BUILD_RESULT: ${{ job.status }}
+          ROOT_COMMIT: ${{ steps.vars.outputs.root_commit }}
+          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
+          NEWAPI_DIGEST: ${{ steps.newapi.outputs.digest }}
+        run: |
+          printf '### TalkWise build: %s\n\nCommit: `%s`\n\nBackend: `%s`\n\nHost: `%s`\n' \
+            "$BUILD_RESULT" "$ROOT_COMMIT" "$BACKEND_DIGEST" "$NEWAPI_DIGEST" >> "$GITHUB_STEP_SUMMARY" \
+            || echo 'Could not write Actions build summary'
+
   prefetch:
     name: Download directly on server and prefetch images
     permissions:
       contents: read
       packages: read
     needs: build-push
-    if: ${{ github.event_name == 'push' || inputs.deploy }}
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 300
     steps:
       - name: Check out deployment scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

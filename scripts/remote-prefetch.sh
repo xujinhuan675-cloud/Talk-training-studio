@@ -14,7 +14,12 @@ chmod 700 "$PREFETCH_ROOT"
 # Invalidate an earlier attempt before doing any transfer.
 rm -f "$PREFETCH_MARKER"
 tmp_marker="$(mktemp "$PREFETCH_ROOT/.prefetch.XXXXXX")"
-trap 'rm -f "$tmp_marker"' EXIT
+started_at="$(date +%s)"
+finish() {
+  rm -f "$tmp_marker"
+  log "prefetch_duration_seconds=$(($(date +%s) - started_at))"
+}
+trap finish EXIT
 
 pull_image() {
   local ref="$1" local_image="$2" attempt id
@@ -31,7 +36,6 @@ pull_image() {
   return 1
 }
 
-started_at="$(date +%s)"
 pull_image "$BACKEND_PULL_REF" "$BACKEND_LOCAL_IMAGE" || die 'backend prefetch failed; old release is unchanged'
 pull_image "$NEWAPI_PULL_REF" "$NEWAPI_LOCAL_IMAGE" || die 'frontend host prefetch failed; old release is unchanged'
 backend_id="$(verified_image_id "$BACKEND_PULL_REF")" || die 'backend digest unavailable'
@@ -39,5 +43,4 @@ newapi_id="$(verified_image_id "$NEWAPI_PULL_REF")" || die 'frontend digest unav
 release_manifest "$backend_id" "$newapi_id" > "$tmp_marker"
 chmod 600 "$tmp_marker"
 mv "$tmp_marker" "$PREFETCH_MARKER"
-log "prefetch_duration_seconds=$(($(date +%s) - started_at))"
 log "prefetch verified: $PREFETCH_ID"

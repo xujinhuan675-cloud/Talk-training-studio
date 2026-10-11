@@ -29,6 +29,10 @@ class DownloadError(RuntimeError):
     pass
 
 
+class RetryableDownloadError(DownloadError):
+    pass
+
+
 def setting(name, default, maximum):
     value = os.environ.get(name, str(default))
     if not value.isdigit() or not 1 <= int(value) <= maximum:
@@ -77,6 +81,9 @@ def run(command, **kwargs):
     try:
         return subprocess.run(command, check=True, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, **kwargs)
+    except subprocess.TimeoutExpired:
+        error = RetryableDownloadError if command[0] == "aria2c" else DownloadError
+        raise error(command[0] + " timed out; cache retained for resume") from None
     except (OSError, subprocess.SubprocessError):
         # Tool output may contain signed URLs or bearer credentials.
         raise DownloadError(command[0] + " failed; verified cache retained for retry") from None
@@ -120,8 +127,10 @@ def download_image(source, digest, cache, *, username="", password="", platform_
         (layout / "blobs/sha256").symlink_to(blobs.resolve(), target_is_directory=True)
     seen = set()
     jobs = []
+    cached_bytes = 0
 
     def manifest(item, depth=0):
+        nonlocal cached_bytes
         expected = identity(item["digest"])
         if expected in seen:
             return
@@ -153,6 +162,8 @@ def download_image(source, digest, cache, *, username="", password="", platform_
                 child_path = blobs / child_digest[7:]
                 if not verified(child_path, child_digest, size):
                     jobs.append((child_digest, size, child_path))
+                else:
+                    cached_bytes += size
         return data, len(raw)
 
     index, size = manifest({"digest": digest})
@@ -161,6 +172,8 @@ def download_image(source, digest, cache, *, username="", password="", platform_
         "mediaType": index["mediaType"], "digest": digest, "size": size,
         "annotations": {"org.opencontainers.image.ref.name": "release"},
     }]}), encoding="utf-8")
+    print("cache_verified_bytes=" + str(cached_bytes) + " download_required_bytes=" +
+          str(sum(size for _, size, _ in jobs)), flush=True)
     if jobs:
         concurrent = setting("DOWNLOAD_CONCURRENT_BLOBS", 8, 8)
         connections = setting("DOWNLOAD_CONNECTIONS_PER_BLOB", 16, 16)
@@ -189,7 +202,7 @@ def download_image(source, digest, cache, *, username="", password="", platform_
                                "  checksum=sha-256=" + blob_digest[7:]])
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise DownloadError("image download deadline exceeded")
+                raise RetryableDownloadError("image download deadline exceeded")
             try:
                 run(command, input="\n".join(inputs) + "\n", text=True, timeout=remaining)
                 break
@@ -286,6 +299,9 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except RetryableDownloadError as error:
+        print("OCI transfer failed: " + str(error) + "; application containers unchanged", file=sys.stderr)
+        sys.exit(75)
     except DownloadError as error:
         print("OCI transfer failed: " + str(error) + "; application containers unchanged", file=sys.stderr)
         sys.exit(1)

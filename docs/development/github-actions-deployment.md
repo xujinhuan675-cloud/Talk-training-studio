@@ -102,7 +102,7 @@ in these tests; they do not prove production connectivity or throughput.
 Actions records each job's duration; scripts emit `mirror_duration_seconds`,
 `prefetch_duration_seconds` and `switch_duration_seconds`. Each local pull
 has a 300-second timeout and one retry, with a 10-second forced-termination
-grace. Mirror/prefetch and switch jobs are bounded to 150 and 15 minutes.
+grace. Mirror/prefetch and switch jobs are bounded to 300 and 15 minutes.
 The short switch duration is not the total release time. Default download
 limits are 8 concurrent blobs with up to 16 connections each. Server environment
 settings `DOWNLOAD_CONCURRENT_BLOBS` (1-8), `DOWNLOAD_CONNECTIONS_PER_BLOB`
@@ -113,6 +113,32 @@ Within the image deadline, a failed download can obtain a fresh pull token
 and resume only missing blobs up to twice; retries never extend that deadline.
 GHCR/server connectivity can still be bandwidth-limited; a single recovery
 does not prove a permanent throughput guarantee.
+
+The runner automatically resumes once only when the downloader exits with
+status 75 (an aria2 or image-download deadline timeout). Both attempts reuse the
+same source commits, digests and server cache; digest/authentication/configuration
+errors fail without this retry. Switching is never retried automatically.
+The larger job bound includes two images, two mirror attempts, local imports
+and prefetch; each image attempt remains limited to 3600 seconds.
+
+The Actions summary records build status/digests, mirror/local-prefetch durations,
+mirror attempts and switch duration. Build job duration remains visible in the
+native Actions timeline. Server logs emit durations on success and failure;
+each image prints `cache_verified_bytes` and `download_required_bytes` before
+transfer. Pending bytes include entire partial blobs, because file size is not
+proof of completed ranges. Summary write failures never change release results.
+GitHub's native failed-run notifications follow the account's notification
+preferences; no extra alert service or outbound message is configured here.
+
+If the bounded resume still fails, rerun only the failed jobs:
+
+```powershell
+gh run rerun <run-id> --failed
+```
+
+Do not rerun successful builds or dispatch a new build merely to recover a
+download. A rerun gets a fresh job token and keeps the original build outputs.
+Review switch/rollback failures before manually rerunning a switch job.
 
 Retain registry data and the verified download cache for reuse and rollback.
 Both consume disk space; monitor their combined usage. Currently
@@ -136,6 +162,18 @@ To dispatch the workflow without pushing the current commit:
 ```powershell
 .\scripts\deploy-server.ps1
 ```
+
+To warm the shared server cache ahead of a release without changing containers:
+
+```powershell
+gh workflow run deploy.yml --ref <pushed-branch> -f deploy=false
+```
+
+This builds the chosen committed source and performs full verified mirror/prefetch.
+The production switch job is skipped. Shared blobs survive later source releases;
+a dependency/base-image change still needs new blobs. A subsequent push to `main`
+keeps the normal automatic release path. Prewarming and release share the same
+production concurrency group and release locks.
 
 Both commands require `gh auth status` to succeed. The `-Push` form requires a
 clean worktree, which prevents accidentally deploying uncommitted files.

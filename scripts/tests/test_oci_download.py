@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from contextlib import redirect_stdout
 
 SCRIPT = Path(__file__).resolve().parents[1] / "download-oci.py"
 OCI_INDEX = "application/vnd.oci.image.index.v1+json"
@@ -129,6 +130,34 @@ class OCIDownloadTests(unittest.TestCase):
         self.processes.clear()
         self.download()
         self.assertFalse(self.processes)
+
+    def test_cache_metrics_count_only_verified_blob_bytes(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.download()
+        total = sum(map(len, self.blobs.values()))
+        self.assertIn("cache_verified_bytes=0", output.getvalue())
+        self.assertIn(f"download_required_bytes={total}", output.getvalue())
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.download()
+        self.assertIn(f"cache_verified_bytes={total}", output.getvalue())
+        self.assertIn("download_required_bytes=0", output.getvalue())
+
+    def test_timeout_is_retryable_without_exposing_subprocess_output(self):
+        module = self.load_module()
+        with patch.object(module.subprocess, "run", side_effect=subprocess.TimeoutExpired(
+                "aria2c", 1, output=self.secret)), self.assertRaises(module.RetryableDownloadError) as caught:
+            module.run(["aria2c"])
+        self.assertNotIn(self.secret, str(caught.exception))
+        with patch.object(module.subprocess, "run", side_effect=subprocess.CalledProcessError(
+                1, "aria2c", stderr=self.secret)), self.assertRaises(module.DownloadError) as caught:
+            module.run(["aria2c"])
+        self.assertNotIsInstance(caught.exception, module.RetryableDownloadError)
+        with patch.object(module.subprocess, "run", side_effect=subprocess.TimeoutExpired(
+                "skopeo", 1)), self.assertRaises(module.DownloadError) as caught:
+            module.run(["skopeo"])
+        self.assertNotIsInstance(caught.exception, module.RetryableDownloadError)
 
     def test_corrupt_cache_is_downloaded_again(self):
         layout = self.download()

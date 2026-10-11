@@ -381,11 +381,20 @@ TalkWise 训练业务数据继续由 backend 自己的 Alembic 管理；不要�
 Distribution 容器名为 `talkwise-registry`，数据目录 `/opt/talkwise-registry/data`，内存上限
 128 MiB，只有回环端口，无新增公网域名/账号。服务器需要 Python 3、python3-yaml、
 aria2、Skopeo 和 curl；缺少依赖时明确失败，不自动安装或回退到 SSH 镜像传输。
-发布脚本默认每次本机拉取限时 300 秒、重试一次；Actions 同步/预拉取 job 上限 150 分钟，
+发布脚本默认每次本机拉取限时 300 秒、重试一次；Actions 同步/预拉取 job 上限 300 分钟，
 切换 job 上限 15 分钟。aria2 默认同时下载 8 个 blob、每个最多 16 个连接，单镜像下载
 超时 3600 秒，每个下载最多重试 5 次；重跑时重新获取凭据并复用内容寻址缓存。
 下载缓存和镜像仓库均保留增量 blob，不自动删除旧镜像或执行 GC；需监控两者磁盘占用。
 详细参数、测试和 SSH secrets 见 `docs/development/github-actions-deployment.md`。
+
+预热入口：`gh workflow run deploy.yml --ref <已推送分支> -f deploy=false`。它构建镜像并
+完成缓存预热、本机预取，但跳过生产切换；以后发布复用验证通过的公共 blob。
+下载器超时以状态 75 退出，runner 最多自动续传一次，仍使用相同 commit/digest；认证、
+配置和内容身份失败不自动重试。超出自动续传限额后使用 `gh run rerun <run-id> --failed`，
+复用本次已成功的构建，不重建镜像。切换/回滚失败先检查结果，不自动重试切换。
+Actions summary、阶段日志与原生时间线共同记录构建、镜像导入、预取、切换和重试；
+下载前输出验证缓存字节和待下载字节。GitHub 原生失败通知取决于账号通知设置，本流程
+没有新增外部告警服务或自动发送消息。
 
 紧急情况下的服务重启只允许使用已经写入服务器 Compose 的当前镜像：
 

@@ -45,8 +45,15 @@ if name == "ssh":
     command = args[-1]
     if "remote-mirror.sh" in command:
         state["credential_stdin_received"] = sys.stdin.read().strip() == os.environ["GHCR_TOKEN"]
+        remaining = state.get("transient_download_failures", 0)
+        if remaining:
+            state["transient_download_failures"] = remaining - 1
+            save()
+            sys.exit(75)
         save()
         sys.exit(1 if state.get("direct_download_failure") else 0)
+    if "remote-deploy.sh" in command:
+        sys.exit(75 if state.get("switch_failure") else 0)
     sys.exit(0)
 if name == "curl":
     sys.exit(1 if state.get("health_failure") and "8012" in args[-1]
